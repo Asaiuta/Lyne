@@ -1,0 +1,30 @@
+{
+  "name": "audio-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:tauri": "npm run build:sidecar && vite",
+    "build": "npm run build:web",
+    "build:web": "vite build",
+    "build:sidecar": "cargo build --release --manifest-path ../../Cargo.toml --bin audio_server",
+    "build:bundle": "npm run build:web && npm run build:sidecar",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@tauri-apps/cli": "^1.5.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.8"
+  }
+}

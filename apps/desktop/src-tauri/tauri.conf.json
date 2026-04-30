@@ -1,0 +1,36 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build:bundle",
+    "beforeDevCommand": "npm run dev:tauri",
+    "devPath": "http://localhost:5173",
+    "distDir": "../dist"
+  },
+  "package": {
+    "productName": "Audio Desktop",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "windows": [
+      {
+        "title": "Audio Desktop",
+        "width": 1220,
+        "height": 780,
+        "minWidth": 980,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ],
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "com.audio.desktop",
+      "icon": [
+        "icons/icon.ico"
+      ],
+      "resources": {
+        "../../../target/release/audio_server.exe": "audio_server.exe",
+        "../../../target/release/libsoxr.dll": "libsoxr.dll"
+      }
+    }
+  }
+}

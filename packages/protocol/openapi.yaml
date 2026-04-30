@@ -1,0 +1,393 @@
+openapi: 3.0.3
+info:
+  title: Audio Engine API
+  version: 1.0.0
+  description: Stable HTTP contract for the desktop client.
+servers:
+  - url: http://127.0.0.1:63789
+paths:
+  /state:
+    get:
+      summary: Get current playback state
+      responses:
+        "200":
+          description: Current player state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /queue_status:
+    get:
+      summary: Get current queue and preload state
+      responses:
+        "200":
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStatusResponse"
+  /load:
+    post:
+      summary: Load a track by path or URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoadRequest"
+      responses:
+        "200":
+          description: Load accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /play:
+    post:
+      summary: Start playback
+      responses:
+        "200":
+          description: Playback started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /pause:
+    post:
+      summary: Pause playback
+      responses:
+        "200":
+          description: Playback paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /stop:
+    post:
+      summary: Stop playback
+      responses:
+        "200":
+          description: Playback stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /seek:
+    post:
+      summary: Seek to position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SeekRequest"
+      responses:
+        "200":
+          description: Seek successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /volume:
+    post:
+      summary: Set volume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VolumeRequest"
+      responses:
+        "200":
+          description: Volume updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /devices:
+    get:
+      summary: List output devices
+      responses:
+        "200":
+          description: Device list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDevicesResponse"
+  /configure_output:
+    post:
+      summary: Select output device and exclusive mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigureOutputRequest"
+      responses:
+        "200":
+          description: Output configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiStateResponse"
+  /settings:
+    get:
+      summary: Get persistent settings
+      responses:
+        "200":
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+  /save_settings:
+    post:
+      summary: Save persistent settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveSettingsRequest"
+      responses:
+        "200":
+          description: Settings saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+  /queue_next:
+    post:
+      summary: Queue the next track for gapless preload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoadRequest"
+      responses:
+        "200":
+          description: Next track queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+  /cancel_preload:
+    post:
+      summary: Cancel pending gapless preload
+      responses:
+        "200":
+          description: Preload cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+  /ws:
+    get:
+      summary: WebSocket for realtime events
+      responses:
+        "101":
+          description: Switching protocols
+components:
+  schemas:
+    ApiStateResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+          nullable: true
+        state:
+          $ref: "#/components/schemas/PlayerState"
+    ApiDevicesResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        devices:
+          $ref: "#/components/schemas/DevicesResponse"
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+    QueueStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        queue:
+          $ref: "#/components/schemas/QueueStatus"
+    QueueStatus:
+      type: object
+      properties:
+        current_track_path: { type: string, nullable: true }
+        pending_track_path: { type: string, nullable: true }
+        needs_preload: { type: boolean }
+        pending_ready: { type: boolean }
+        is_preload_canceling: { type: boolean }
+    LoadRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+    SeekRequest:
+      type: object
+      required: [position]
+      properties:
+        position:
+          type: number
+          format: double
+    VolumeRequest:
+      type: object
+      required: [volume]
+      properties:
+        volume:
+          type: number
+          format: float
+    ConfigureOutputRequest:
+      type: object
+      properties:
+        device_id:
+          type: integer
+          nullable: true
+        exclusive:
+          type: boolean
+          nullable: true
+    PlayerState:
+      type: object
+      properties:
+        is_playing: { type: boolean }
+        is_paused: { type: boolean }
+        is_loading: { type: boolean }
+        duration: { type: number, format: double }
+        current_time: { type: number, format: double }
+        file_path: { type: string, nullable: true }
+        volume: { type: number, format: float }
+        device_id: { type: integer, nullable: true }
+        exclusive_mode: { type: boolean }
+        eq_type: { type: string }
+        dither_enabled: { type: boolean }
+        replaygain_enabled: { type: boolean }
+        loudness_enabled: { type: boolean }
+        loudness_mode: { type: string }
+        target_lufs: { type: number, format: double }
+        preamp_db: { type: number, format: double }
+        saturation_enabled: { type: boolean }
+        saturation_drive: { type: number, format: double }
+        saturation_mix: { type: number, format: double }
+        crossfeed_enabled: { type: boolean }
+        crossfeed_mix: { type: number, format: double }
+        dynamic_loudness_enabled: { type: boolean }
+        dynamic_loudness_strength: { type: number, format: double }
+        dynamic_loudness_factor: { type: number, format: double }
+        output_bits: { type: integer }
+        noise_shaper_curve: { type: string }
+        target_samplerate: { type: integer, nullable: true }
+        resample_quality: { type: string }
+        use_cache: { type: boolean }
+        preemptive_resample: { type: boolean }
+        title: { type: string, nullable: true }
+        artist: { type: string, nullable: true }
+        album: { type: string, nullable: true }
+        track_number: { type: integer, nullable: true }
+        disc_number: { type: integer, nullable: true }
+        genre: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        has_cover_art: { type: boolean }
+    DevicesResponse:
+      type: object
+      properties:
+        preferred:
+          type: array
+          items:
+            $ref: "#/components/schemas/AudioDeviceInfo"
+        other:
+          type: array
+          items:
+            $ref: "#/components/schemas/AudioDeviceInfo"
+        preferred_name:
+          type: string
+    AudioDeviceInfo:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        is_default: { type: boolean }
+        sample_rate: { type: integer, nullable: true }
+    SettingsResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        settings:
+          $ref: "#/components/schemas/PersistentSettings"
+    SaveSettingsRequest:
+      type: object
+      required: [settings]
+      properties:
+        settings:
+          $ref: "#/components/schemas/PersistentSettingsUpdate"
+    PersistentSettings:
+      type: object
+      properties:
+        volume: { type: number, format: float }
+        device_id: { type: integer, nullable: true }
+        exclusive_mode: { type: boolean }
+        eq_type: { type: string }
+        eq_bands:
+          type: object
+          additionalProperties: { type: number, format: double }
+          nullable: true
+        fir_taps: { type: integer, nullable: true }
+        dither_enabled: { type: boolean }
+        output_bits: { type: integer }
+        noise_shaper_curve: { type: string }
+        loudness_enabled: { type: boolean }
+        loudness_mode: { type: string }
+        target_lufs: { type: number, format: double }
+        preamp_db: { type: number, format: double }
+        saturation_enabled: { type: boolean }
+        saturation_drive: { type: number, format: double }
+        saturation_mix: { type: number, format: double }
+        crossfeed_enabled: { type: boolean }
+        crossfeed_mix: { type: number, format: double }
+        dynamic_loudness_enabled: { type: boolean }
+        dynamic_loudness_strength: { type: number, format: double }
+        target_samplerate: { type: integer, nullable: true }
+        resample_quality: { type: string }
+        use_cache: { type: boolean }
+        preemptive_resample: { type: boolean }
+    PersistentSettingsUpdate:
+      type: object
+      properties:
+        volume: { type: number, format: float }
+        device_id: { type: integer, nullable: true }
+        exclusive_mode: { type: boolean }
+        eq_type: { type: string }
+        eq_bands:
+          type: object
+          additionalProperties: { type: number, format: double }
+        fir_taps: { type: integer }
+        dither_enabled: { type: boolean }
+        output_bits: { type: integer }
+        noise_shaper_curve: { type: string }
+        loudness_enabled: { type: boolean }
+        loudness_mode: { type: string }
+        target_lufs: { type: number, format: double }
+        preamp_db: { type: number, format: double }
+        saturation_enabled: { type: boolean }
+        saturation_drive: { type: number, format: double }
+        saturation_mix: { type: number, format: double }
+        crossfeed_enabled: { type: boolean }
+        crossfeed_mix: { type: number, format: double }
+        dynamic_loudness_enabled: { type: boolean }
+        dynamic_loudness_strength: { type: number, format: double }
+        target_samplerate: { type: integer, nullable: true }
+        resample_quality: { type: string }
+        use_cache: { type: boolean }
+        preemptive_resample: { type: boolean }
