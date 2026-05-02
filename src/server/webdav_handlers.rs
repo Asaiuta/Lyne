@@ -10,11 +10,23 @@ struct WebDavSourcePath {
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/webdav/configure", web::post().to(webdav_configure))
         .route("/webdav/config", web::get().to(get_webdav_config))
-        .route("/domain/webdav/sources", web::post().to(upsert_webdav_source))
+        .route(
+            "/domain/webdav/sources",
+            web::post().to(upsert_webdav_source),
+        )
         .route("/domain/webdav/sources", web::get().to(list_webdav_sources))
-        .route("/domain/webdav/sources/default", web::post().to(set_default_webdav_source))
-        .route("/domain/webdav/sources/{source_key}", web::get().to(get_webdav_source))
-        .route("/domain/webdav/sources/{source_key}", web::delete().to(delete_webdav_source))
+        .route(
+            "/domain/webdav/sources/default",
+            web::post().to(set_default_webdav_source),
+        )
+        .route(
+            "/domain/webdav/sources/{source_key}",
+            web::get().to(get_webdav_source),
+        )
+        .route(
+            "/domain/webdav/sources/{source_key}",
+            web::delete().to(delete_webdav_source),
+        )
         .route("/webdav/browse", web::get().to(webdav_browse));
 }
 
@@ -114,9 +126,9 @@ async fn upsert_webdav_source(
     }
 
     let make_default = body.is_default.unwrap_or(false);
-    if let Err(e) = data
-        .app_db
-        .upsert_webdav_source(source_key, display_name, &config, make_default)
+    if let Err(e) =
+        data.app_db
+            .upsert_webdav_source(source_key, display_name, &config, make_default)
     {
         return HttpResponse::InternalServerError().json(ApiResponse::error(&e));
     }
@@ -130,8 +142,9 @@ async fn upsert_webdav_source(
             "status": "success",
             "source": source,
         })),
-        Ok(None) => HttpResponse::InternalServerError()
-            .json(ApiResponse::error("WebDAV source was saved but could not be reloaded")),
+        Ok(None) => HttpResponse::InternalServerError().json(ApiResponse::error(
+            "WebDAV source was saved but could not be reloaded",
+        )),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     }
 }
@@ -167,8 +180,9 @@ async fn set_default_webdav_source(
                     "status": "success",
                     "source": source,
                 })),
-                Ok(None) => HttpResponse::InternalServerError()
-                    .json(ApiResponse::error("Default WebDAV source was updated but could not be reloaded")),
+                Ok(None) => HttpResponse::InternalServerError().json(ApiResponse::error(
+                    "Default WebDAV source was updated but could not be reloaded",
+                )),
                 Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
             }
         }

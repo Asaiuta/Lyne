@@ -376,8 +376,8 @@ mod tests {
     #[test]
     fn test_chain_order() {
         let mut chain = DspChain::new(44100.0);
-        chain.add(DoublerProcessor::new());  // Doubles first
-        chain.add(AdderProcessor::new());    // Then adds 1
+        chain.add(DoublerProcessor::new()); // Doubles first
+        chain.add(AdderProcessor::new()); // Then adds 1
 
         // Start with 1.0 -> 2.0 (double) -> 3.0 (add 1)
         let mut buffer = vec![1.0];

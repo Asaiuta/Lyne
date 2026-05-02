@@ -3,9 +3,13 @@
 /// IIR Biquad filter section (SOS - Second Order Section)
 #[derive(Clone)]
 pub struct BiquadSection {
-    b0: f64, b1: f64, b2: f64,
-    a1: f64, a2: f64,
-    z1: f64, z2: f64,
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+    z1: f64,
+    z2: f64,
 }
 
 impl BiquadSection {
@@ -15,14 +19,14 @@ impl BiquadSection {
         let cos_w0 = w0.cos();
         let sin_w0 = w0.sin();
         let alpha = sin_w0 / (2.0 * q);
-        
+
         let b0 = 1.0 + alpha * a;
         let b1 = -2.0 * cos_w0;
         let b2 = 1.0 - alpha * a;
         let a0 = 1.0 + alpha / a;
         let a1 = -2.0 * cos_w0;
         let a2 = 1.0 - alpha / a;
-        
+
         Self {
             b0: b0 / a0,
             b1: b1 / a0,
@@ -33,7 +37,7 @@ impl BiquadSection {
             z2: 0.0,
         }
     }
-    
+
     #[inline]
     pub fn process(&mut self, x: f64) -> f64 {
         let y = self.b0 * x + self.z1;
@@ -41,12 +45,12 @@ impl BiquadSection {
         self.z2 = self.b2 * x - self.a2 * y;
         y
     }
-    
+
     pub fn reset(&mut self) {
         self.z1 = 0.0;
         self.z2 = 0.0;
     }
-    
+
     /// Copy coefficients from another section without copying state (z1, z2).
     /// This is used for smooth parameter transitions to avoid state discontinuities.
     pub fn copy_coefficients_from(&mut self, other: &Self) {
@@ -61,10 +65,10 @@ impl BiquadSection {
 
 /// 10-band Parametric EQ
 pub struct Equalizer {
-    bands: Vec<Vec<BiquadSection>>,     // current active filters [channel][band]
+    bands: Vec<Vec<BiquadSection>>, // current active filters [channel][band]
     target_bands: Vec<Vec<BiquadSection>>, // target filters (new params) [channel][band]
-    target_gains: Vec<f64>,              // target gain per band (dB)
-    smooth_counter: Vec<u32>,            // samples remaining in crossfade per band
+    target_gains: Vec<f64>,         // target gain per band (dB)
+    smooth_counter: Vec<u32>,       // samples remaining in crossfade per band
     channels: usize,
     enabled: bool,
 }
@@ -72,7 +76,9 @@ pub struct Equalizer {
 const EQ_SMOOTH_SAMPLES: u32 = 1024; // ~23ms @ 44100Hz
 
 impl Equalizer {
-    const FREQUENCIES: [f64; 10] = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+    const FREQUENCIES: [f64; 10] = [
+        31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+    ];
     const Q: f64 = 1.41;
 
     pub fn new(channels: usize, sample_rate: f64) -> Self {
@@ -97,12 +103,15 @@ impl Equalizer {
     }
 
     pub fn set_band_gain(&mut self, band_idx: usize, gain_db: f64, sample_rate: f64) {
-        if band_idx >= 10 { return; }
+        if band_idx >= 10 {
+            return;
+        }
         let gain_db = gain_db.clamp(-15.0, 15.0);
         let freq = Self::FREQUENCIES[band_idx];
         // Update target filters for all channels
         for ch in 0..self.channels {
-            self.target_bands[ch][band_idx] = BiquadSection::peaking_eq(freq, gain_db, Self::Q, sample_rate);
+            self.target_bands[ch][band_idx] =
+                BiquadSection::peaking_eq(freq, gain_db, Self::Q, sample_rate);
         }
         self.target_gains[band_idx] = gain_db;
         // Start crossfade for this band
@@ -124,16 +133,18 @@ impl Equalizer {
     }
 
     pub fn process(&mut self, buffer: &mut [f64]) {
-        if !self.enabled { return; }
+        if !self.enabled {
+            return;
+        }
         let frames = buffer.len() / self.channels;
-        
+
         for frame in 0..frames {
             // Process all channels for this frame
             for ch in 0..self.channels {
                 let idx = frame * self.channels + ch;
                 buffer[idx] = self.process_sample_no_counter_update(buffer[idx], ch);
             }
-            
+
             // Update smooth counters once per frame (after all channels processed)
             // This fixes the multi-channel sync issue (MINOR-04)
             for b in 0..self.bands[0].len() {
@@ -154,7 +165,9 @@ impl Equalizer {
     /// Counter updates are handled in process() for proper multi-channel sync
     #[inline]
     fn process_sample_no_counter_update(&mut self, mut sample: f64, ch: usize) -> f64 {
-        if ch >= self.channels { return sample; }
+        if ch >= self.channels {
+            return sample;
+        }
         for b in 0..self.bands[ch].len() {
             if self.smooth_counter[b] > 0 {
                 // Blend: run both filters on the same input

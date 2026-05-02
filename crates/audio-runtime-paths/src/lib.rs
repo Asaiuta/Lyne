@@ -1,0 +1,7 @@
+pub const ENV_AUDIO_APP_DATA_DIR: &str = "AUDIO_APP_DATA_DIR";
+pub const ENV_APP_DATA_LEGACY: &str = "APP_DATA";
+pub const ENV_AUDIO_CACHE_DIR: &str = "AUDIO_CACHE_DIR";
+pub const ENV_AUDIO_LOG_DIR: &str = "AUDIO_LOG_DIR";
+pub const ENV_AUDIO_SETTINGS_PATH: &str = "AUDIO_SETTINGS_PATH";
+pub const ENV_AUDIO_LOUDNESS_DB_PATH: &str = "LOUDNESS_DB_PATH";
+pub const ENV_AUDIO_APP_DB_PATH: &str = "AUDIO_APP_DB_PATH";

@@ -3,25 +3,27 @@
 //! REST API compatible with existing frontend, with WebSocket for spectrum data.
 
 use actix_cors::Cors;
-use actix_web::{dev::ServerHandle, web, App, HttpServer, HttpResponse, middleware, http::Method};
 use actix_web::http::header;
+use actix_web::{dev::ServerHandle, http::Method, middleware, web, App, HttpResponse, HttpServer};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::{Builder as TokioRuntimeBuilder, Runtime as TokioRuntime};
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
-use crate::player::{AudioPlayer, AudioDeviceInfo, PlayerState};
-use crate::webdav::WebDavConfig;
+use crate::app_database::{AppDatabase, PlaybackRuntimeSnapshot};
+use crate::config::{EngineSettings, ResolvedConfig};
+use crate::player::{AudioDeviceInfo, AudioPlayer, PlayerState};
 use crate::processor::LoudnessDatabase;
 use crate::runtime::RuntimePaths;
-use crate::settings::{SharedSettingsManager, PersistentSettings, PersistentSettingsUpdate};
-use crate::app_database::{AppDatabase, PlaybackRuntimeSnapshot};
+use crate::settings::PersistentSettingsUpdate;
+use crate::settings::SharedSettingsManager;
+use crate::webdav::WebDavConfig;
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -33,6 +35,8 @@ pub struct AppState {
     pub app_db: Arc<AppDatabase>,
     /// Persistent settings manager
     pub settings_manager: SharedSettingsManager,
+    /// Env-only server runtime settings
+    pub server_config: crate::config::RuntimeServerConfig,
     /// Dedicated runtime for CPU/IO-heavy analysis jobs
     pub analysis_runtime: Arc<TokioRuntime>,
     /// Concurrency guard for analysis jobs to avoid starving playback/control plane
@@ -91,20 +95,19 @@ where
         .await
         .map_err(|_| format!("Analysis task timed out after {}s", timeout_secs))?;
 
-    join_result
-        .map_err(|e| format!("Analysis worker join error: {}", e))?
+    join_result.map_err(|e| format!("Analysis worker join error: {}", e))?
 }
 
 // ============ Path Security (Defect 44 fix, SEC-01 fix) ============
 
 /// FIX for Defect 44: Validate file paths to prevent path traversal attacks.
 /// FIX for SEC-01: Reject paths that fail canonicalization (file doesn't exist).
-/// 
+///
 /// - HTTP(S) URLs are allowed (they have their own security model)
 /// - Local paths are validated to prevent directory traversal
 /// - Local paths MUST exist and be accessible (canonicalize must succeed)
 /// - Returns Ok(validated_path) or Err(error_message)
-fn validate_path(path: &str) -> Result<String, String> {
+pub(crate) fn validate_path(path: &str) -> Result<String, String> {
     // Allow HTTP(S) URLs - they have their own security (TLS, authentication)
     if path.starts_with("http://") || path.starts_with("https://") {
         // Basic URL validation - check for obvious injection attempts
@@ -114,21 +117,24 @@ fn validate_path(path: &str) -> Result<String, String> {
         // SSRF protection: reject private/link-local IP ranges
         if let Some(host) = extract_host(path) {
             if is_private_host(&host) {
-                return Err(format!("URL host '{}' is not allowed (private/internal address)", host));
+                return Err(format!(
+                    "URL host '{}' is not allowed (private/internal address)",
+                    host
+                ));
             }
         }
         return Ok(path.to_string());
     }
-    
+
     // Local file path validation
     let path = std::path::Path::new(path);
-    
+
     // Check for path traversal attempts
     let path_str = path.to_string_lossy();
     if path_str.contains("..") {
         return Err("Path traversal not allowed: '..' found in path".into());
     }
-    
+
     // On Windows, also check for drive letter injection
     #[cfg(windows)]
     {
@@ -137,18 +143,20 @@ fn validate_path(path: &str) -> Result<String, String> {
             return Err("UNC paths not allowed".into());
         }
         // Check for reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
-        let file_name = path.file_name()
+        let file_name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_uppercase();
-        let reserved = ["CON", "PRN", "AUX", "NUL", 
-                       "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-                       "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+        let reserved = [
+            "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+            "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        ];
         if reserved.contains(&file_name.as_str()) {
             return Err(format!("Reserved device name not allowed: {}", file_name));
         }
     }
-    
+
     // FIX for SEC-01: Require canonicalization to succeed for local paths
     // This prevents:
     // 1. Path probing attacks (determining if arbitrary paths exist)
@@ -163,7 +171,10 @@ fn validate_path(path: &str) -> Result<String, String> {
             // FIX for SEC-01: Reject paths that don't exist or aren't accessible
             // Previously this would return the original path, allowing path probing
             log::warn!("Path validation rejected: '{}' - {}", path.display(), e);
-            Err(format!("File not found or inaccessible: {}", path.display()))
+            Err(format!(
+                "File not found or inaccessible: {}",
+                path.display()
+            ))
         }
     }
 }
@@ -179,7 +190,9 @@ fn extract_host(url: &str) -> Option<String> {
 
 /// Check if a host is a private/internal address (SSRF protection)
 fn is_private_host(host: &str) -> bool {
-    if host == "localhost" { return true; }
+    if host == "localhost" {
+        return true;
+    }
     // Parse dotted-decimal IPv4
     let parts: Vec<u8> = host.split('.').filter_map(|p| p.parse().ok()).collect();
     if parts.len() == 4 {
@@ -187,7 +200,7 @@ fn is_private_host(host: &str) -> bool {
             10 | 127          // 10.x.x.x, loopback
         ) || (parts[0] == 172 && (16..=31).contains(&parts[1])) // 172.16-31.x.x
           || (parts[0] == 192 && parts[1] == 168)               // 192.168.x.x
-          || (parts[0] == 169 && parts[1] == 254);              // 169.254.x.x link-local
+          || (parts[0] == 169 && parts[1] == 254); // 169.254.x.x link-local
     }
     false
 }
@@ -272,7 +285,7 @@ pub struct ConfigureOptimizationsRequest {
 pub struct ConfigureNormalizationRequest {
     enabled: Option<bool>,
     target_lufs: Option<f64>,
-    mode: Option<String>,  // "track" / "album" / "streaming"
+    mode: Option<String>, // "track" / "album" / "streaming"
     album_gain_db: Option<f64>,
     preamp_db: Option<f64>,
 }
@@ -280,7 +293,7 @@ pub struct ConfigureNormalizationRequest {
 #[derive(Deserialize)]
 pub struct ScanBackgroundRequest {
     path: String,
-    store: Option<bool>,  // Whether to store in database (default: true)
+    store: Option<bool>, // Whether to store in database (default: true)
 }
 
 #[derive(Deserialize)]
@@ -317,17 +330,17 @@ pub struct SetSaturationRequest {
 #[derive(Deserialize)]
 pub struct SetDynamicLoudnessRequest {
     enabled: Option<bool>,
-    strength: Option<f64>,  // 0.0 - 1.0
+    strength: Option<f64>, // 0.0 - 1.0
 }
 
 #[derive(Deserialize)]
 pub struct SetNoiseShaperCurveRequest {
-    curve: String,  // "Lipshitz5", "FWeighted9", "ModifiedE9", "ImprovedE9", "TpdfOnly"
+    curve: String, // "Lipshitz5", "FWeighted9", "ModifiedE9", "ImprovedE9", "TpdfOnly"
 }
 
 #[derive(Deserialize)]
 pub struct SetOutputBitsRequest {
-    bits: u32,  // 16, 24, or 32
+    bits: u32, // 16, 24, or 32
 }
 
 #[derive(Serialize)]
@@ -350,6 +363,7 @@ pub struct StateResponse {
     duration: f64,
     current_time: f64,
     file_path: Option<String>,
+    media_id: Option<String>,
     volume: f32,
     device_id: Option<usize>,
     exclusive_mode: bool,
@@ -394,6 +408,8 @@ pub struct StateResponse {
     genre: Option<String>,
     year: Option<u32>,
     has_cover_art: bool,
+    repeat_mode: String,
+    shuffle_mode: String,
 }
 
 #[derive(Serialize)]
@@ -422,7 +438,7 @@ impl ApiResponse {
             devices: None,
         }
     }
-    
+
     fn success_with_state(msg: &str, state: StateResponse) -> Self {
         Self {
             status: "success".into(),
@@ -431,7 +447,7 @@ impl ApiResponse {
             devices: None,
         }
     }
-    
+
     fn error(msg: &str) -> Self {
         Self {
             status: "error".into(),
@@ -444,13 +460,13 @@ impl ApiResponse {
 
 // ============ Helper Functions ============
 
-/// Apply persisted settings to player on startup
-fn apply_settings_to_player(player: &mut AudioPlayer, settings: &PersistentSettings) {
+/// Apply persisted settings to player after runtime settings updates.
+fn apply_settings_to_player(player: &mut AudioPlayer, settings: &EngineSettings) {
     // Volume
     player.set_volume(settings.volume as f64);
-    
+
     // Device settings are applied separately via configure_output API
-    
+
     // EQ
     if settings.eq_type == "FIR" {
         let taps = settings.fir_taps.unwrap_or(1023);
@@ -458,14 +474,28 @@ fn apply_settings_to_player(player: &mut AudioPlayer, settings: &PersistentSetti
     } else {
         *player.shared_state().eq_type.write() = "IIR".to_string();
     }
-    
+
     if let Some(ref bands) = settings.eq_bands {
         // Build gains array from bands map
         let band_map: std::collections::HashMap<&str, usize> = [
-            ("31", 0), ("62", 1), ("125", 2), ("250", 3), ("500", 4),
-            ("1000", 5), ("2000", 6), ("4000", 7), ("8000", 8), ("16000", 9),
-            ("1k", 5), ("2k", 6), ("4k", 7), ("8k", 8), ("16k", 9),
-        ].into_iter().collect();
+            ("31", 0),
+            ("62", 1),
+            ("125", 2),
+            ("250", 3),
+            ("500", 4),
+            ("1000", 5),
+            ("2000", 6),
+            ("4000", 7),
+            ("8000", 8),
+            ("16000", 9),
+            ("1k", 5),
+            ("2k", 6),
+            ("4k", 7),
+            ("8k", 8),
+            ("16k", 9),
+        ]
+        .into_iter()
+        .collect();
 
         if player.is_fir_eq_enabled() {
             let mut gains = [0.0_f64; 10];
@@ -484,53 +514,34 @@ fn apply_settings_to_player(player: &mut AudioPlayer, settings: &PersistentSetti
             }
         }
     }
-    
+
     // Dither (state only; lock-free audio path currently does not host NoiseShaper stage)
-    player.dither_enabled = settings.dither_enabled;
+    player.dither_enabled = settings.dither.enabled;
     player.set_output_bits(settings.output_bits);
-    
+    let _ = player.set_noise_shaper_curve(settings.dither.noise_shaper_curve);
+
     // Loudness
-    player.set_loudness_enabled(settings.loudness_enabled);
-    player.set_target_lufs(settings.target_lufs);
-    player.set_preamp_gain(settings.preamp_db);
-    
-    // Set loudness mode
-    let mode = match settings.loudness_mode.as_str() {
-        "album" => crate::config::NormalizationMode::Album,
-        "streaming" => crate::config::NormalizationMode::Streaming,
-        "replaygain_track" | "rg_track" => crate::config::NormalizationMode::ReplayGainTrack,
-        "replaygain_album" | "rg_album" => crate::config::NormalizationMode::ReplayGainAlbum,
-        _ => crate::config::NormalizationMode::Track,
-    };
-    player.set_normalization_mode(mode);
-    
+    player.set_loudness_enabled(settings.loudness.enabled);
+    player.set_target_lufs(settings.loudness.target_lufs);
+    player.set_preamp_gain(settings.dynamic_loudness.pre_gain_db);
+    player.set_normalization_mode(settings.loudness.mode);
+
     // Saturation
-    player.set_saturation_enabled(settings.saturation_enabled);
-    player.set_saturation_drive(settings.saturation_drive);
-    player.set_saturation_mix(settings.saturation_mix);
-    
+    player.set_saturation_enabled(settings.saturation.enabled);
+    player.set_saturation_drive(settings.saturation.drive);
+    player.set_saturation_mix(settings.saturation.mix);
+
     // Crossfeed
-    player.set_crossfeed_enabled(settings.crossfeed_enabled);
-    player.set_crossfeed_mix(settings.crossfeed_mix);
-    
+    player.set_crossfeed_enabled(settings.crossfeed.enabled);
+    player.set_crossfeed_mix(settings.crossfeed.mix);
+
     // Dynamic Loudness
-    player.set_dynamic_loudness_enabled(settings.dynamic_loudness_enabled);
-    player.set_dynamic_loudness_strength(settings.dynamic_loudness_strength);
-    
+    player.set_dynamic_loudness_enabled(settings.dynamic_loudness.enabled);
+    player.set_dynamic_loudness_strength(settings.dynamic_loudness.strength);
+
     // Resampling
     player.target_sample_rate = settings.target_samplerate;
-    
-    // Set resample quality
-    {
-        use crate::config::ResampleQuality;
-        let quality = match settings.resample_quality.as_str() {
-            "low" => ResampleQuality::Low,
-            "std" => ResampleQuality::Standard,
-            "uhq" => ResampleQuality::UltraHigh,
-            _ => ResampleQuality::High,
-        };
-        player.set_resample_quality(quality);
-    }
+    player.set_resample_quality(settings.resample_quality);
     player.set_use_cache(settings.use_cache);
     player.set_preemptive_resample(settings.preemptive_resample);
 }
@@ -538,16 +549,19 @@ fn apply_settings_to_player(player: &mut AudioPlayer, settings: &PersistentSetti
 fn get_player_state(player: &AudioPlayer) -> StateResponse {
     let shared = player.shared_state();
     let state = player.get_state();
-    
+
     // Get real values from SharedState
     let volume = shared.volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1_000_000.0;
     let device_id = shared.device_id.load(std::sync::atomic::Ordering::Relaxed);
     let file_path = shared.file_path.read().clone();
+    let media_id = file_path
+        .as_deref()
+        .map(crate::app_database::media_id_for_path);
     let eq_type = shared.eq_type.read().clone();
-    
+
     // Get track metadata
     let metadata = shared.track_metadata.read();
-    
+
     // Get loudness normalization info
     let loudness_info = player.get_loudness_info();
     let loudness_mode = match player.get_normalization_mode() {
@@ -557,16 +571,16 @@ fn get_player_state(player: &AudioPlayer) -> StateResponse {
         crate::config::NormalizationMode::ReplayGainTrack => "replaygain_track".to_string(),
         crate::config::NormalizationMode::ReplayGainAlbum => "replaygain_album".to_string(),
     };
-    
+
     // Get saturation info
     let saturation_info = player.get_saturation_info();
-    
+
     // Get crossfeed info
     let crossfeed_info = player.get_crossfeed_info();
-    
+
     // Get noise shaper info
     let noise_shaper_curve = player.get_noise_shaper_curve();
-    
+
     StateResponse {
         is_playing: state == PlayerState::Playing,
         is_paused: state == PlayerState::Paused,
@@ -574,8 +588,13 @@ fn get_player_state(player: &AudioPlayer) -> StateResponse {
         duration: shared.duration_secs(),
         current_time: shared.current_time_secs(),
         file_path,
+        media_id,
         volume,
-        device_id: if device_id >= 0 { Some(device_id as usize) } else { None },
+        device_id: if device_id >= 0 {
+            Some(device_id as usize)
+        } else {
+            None
+        },
         exclusive_mode: player.exclusive_mode,
         eq_type,
         dither_enabled: player.dither_enabled,
@@ -618,6 +637,8 @@ fn get_player_state(player: &AudioPlayer) -> StateResponse {
         genre: metadata.genre.clone(),
         year: metadata.year,
         has_cover_art: metadata.cover_art.is_some(),
+        repeat_mode: shared.repeat_mode().as_str().to_string(),
+        shuffle_mode: shared.shuffle_mode().as_str().to_string(),
     }
 }
 
@@ -630,7 +651,11 @@ fn build_runtime_snapshot(player: &AudioPlayer) -> PlaybackRuntimeSnapshot {
         position_secs: Some(shared.current_time_secs()),
         duration_secs: Some(shared.duration_secs()),
         volume: Some(volume),
-        device_id: if device_id >= 0 { Some(device_id as usize) } else { None },
+        device_id: if device_id >= 0 {
+            Some(device_id as usize)
+        } else {
+            None
+        },
         exclusive_mode: player.exclusive_mode,
     }
 }
@@ -649,7 +674,10 @@ fn restore_domain_state(state: &Arc<AppState>) {
         Err(e) => log::warn!("Failed to restore active playback session: {}", e),
     }
 
-    match state.app_db.recent_analysis_tasks(state.scan_task_max_entries) {
+    match state
+        .app_db
+        .recent_analysis_tasks(state.scan_task_max_entries)
+    {
         Ok(tasks) => {
             let mut memory_tasks = state.scan_tasks.lock();
             for task in tasks {
@@ -665,7 +693,10 @@ fn restore_domain_state(state: &Arc<AppState>) {
                 );
             }
             if !memory_tasks.is_empty() {
-                log::info!("Recovered {} persisted analysis task records", memory_tasks.len());
+                log::info!(
+                    "Recovered {} persisted analysis task records",
+                    memory_tasks.len()
+                );
             }
         }
         Err(e) => log::warn!("Failed to restore persisted analysis tasks: {}", e),
@@ -688,52 +719,19 @@ async fn shutdown_server(data: web::Data<Arc<AppState>>) -> HttpResponse {
         });
         HttpResponse::Ok().json(serde_json::json!({ "status": "shutting_down" }))
     } else {
-        HttpResponse::ServiceUnavailable().json(serde_json::json!({ "status": "shutdown_handle_unavailable" }))
+        HttpResponse::ServiceUnavailable()
+            .json(serde_json::json!({ "status": "shutdown_handle_unavailable" }))
     }
 }
 
 // ============ Server Entry Point ============
 
-use crate::config::AppConfig;
-
-fn configured_allowed_origins() -> Vec<String> {
-    let configured = std::env::var("AUDIO_ALLOWED_ORIGINS")
-        .ok()
-        .map(|value| {
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|origin| !origin.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    if configured.is_empty() {
-        return vec![
-            "tauri://localhost".to_string(),
-            "http://localhost:5173".to_string(),
-            "http://127.0.0.1:5173".to_string(),
-            "https://tauri.localhost".to_string(),
-            "http://tauri.localhost".to_string(),
-            "file://".to_string(),
-            "null".to_string(),
-        ];
-    }
-
-    configured
-}
-
 pub async fn run_server(
     port: u16,
-    config: AppConfig,
+    config: ResolvedConfig,
     settings_manager: SharedSettingsManager,
     runtime_paths: RuntimePaths,
 ) -> std::io::Result<()> {
-    runtime_paths
-        .ensure()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
     let app_db = Arc::new(
         AppDatabase::open(&runtime_paths.app_db_path)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
@@ -742,47 +740,53 @@ pub async fn run_server(
     // Load WebDAV config from domain database first, then env fallback.
     let webdav_config = match app_db.load_primary_webdav_source() {
         Ok(Some(cfg)) if cfg.is_configured() => cfg,
-        Ok(_) | Err(_) => WebDavConfig {
-            base_url: std::env::var("WEBDAV_URL").unwrap_or_default(),
-            username: std::env::var("WEBDAV_USER").ok(),
-            password: std::env::var("WEBDAV_PASS").ok(),
-        },
+        Ok(_) | Err(_) => config
+            .server
+            .webdav_fallback
+            .as_ref()
+            .map(|fallback| WebDavConfig {
+                base_url: fallback.base_url.clone(),
+                username: fallback.username.clone(),
+                password: fallback.password.clone(),
+            })
+            .unwrap_or_default(),
     };
 
     // FIX for LoudnessDatabase integration: Initialize loudness database
-    let loudness_db_path = std::env::var("LOUDNESS_DB_PATH")
-        .unwrap_or_else(|_| runtime_paths.loudness_db_path.to_string_lossy().to_string());
-    let loudness_db = match LoudnessDatabase::open(&loudness_db_path) {
+    let loudness_db = match LoudnessDatabase::open(&runtime_paths.loudness_db_path) {
         Ok(db) => {
-            log::info!("Loudness database opened: {}", loudness_db_path);
+            log::info!(
+                "Loudness database opened: {}",
+                runtime_paths.loudness_db_path.display()
+            );
             Some(db)
         }
         Err(e) => {
-            log::warn!("Failed to open loudness database: {}. Loudness caching disabled.", e);
+            log::warn!(
+                "Failed to open loudness database: {}. Loudness caching disabled.",
+                e
+            );
             None
         }
     };
 
     // Create player with config
-    let mut player = AudioPlayer::new(config);
+    let player = AudioPlayer::new(config.settings.clone());
 
-    let analysis_parallelism = std::env::var("ANALYSIS_MAX_CONCURRENCY")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|&v| v > 0)
-        .unwrap_or(2);
-    let analysis_blocking_threads = std::env::var("ANALYSIS_MAX_BLOCKING_THREADS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|&v| v > 0)
-        .unwrap_or(analysis_parallelism.max(2));
+    let analysis_parallelism = config.server.analysis_max_concurrency;
+    let analysis_blocking_threads = config.server.analysis_max_blocking_threads;
     let analysis_runtime = TokioRuntimeBuilder::new_multi_thread()
         .worker_threads(1)
         .max_blocking_threads(analysis_blocking_threads)
         .thread_name("audio-analysis")
         .enable_time()
         .build()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to init analysis runtime: {}", e)))?;
+        .map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to init analysis runtime: {}", e),
+            )
+        })?;
 
     log::info!(
         "Analysis worker pool initialized: concurrency_limit={}, max_blocking_threads={}",
@@ -797,28 +801,10 @@ pub async fn run_server(
         runtime_paths.app_db_path.display()
     );
 
-    let scan_task_max_entries = std::env::var("SCAN_TASK_MAX_ENTRIES")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|&v| v > 0)
-        .unwrap_or(512);
-    let scan_task_ttl_secs = std::env::var("SCAN_TASK_TTL_SECS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|&v| v > 0)
-        .unwrap_or(600);
-    let analysis_task_timeout_secs = std::env::var("ANALYSIS_TASK_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|&v| v > 0)
-        .unwrap_or(180);
-    
-    // Apply persisted settings to player
-    {
-        let settings = settings_manager.lock().get_settings();
-        apply_settings_to_player(&mut player, &settings);
-        log::info!("Applied persisted settings to audio engine");
-    }
+    let scan_task_max_entries = config.server.scan_task_max_entries;
+    let scan_task_ttl_secs = config.server.scan_task_ttl_secs;
+    let analysis_task_timeout_secs = config.server.analysis_task_timeout_secs;
+    let allowed_origins = config.server.allowed_origins.clone();
 
     let state = Arc::new(AppState {
         player: Mutex::new(player),
@@ -826,6 +812,7 @@ pub async fn run_server(
         loudness_db: Mutex::new(loudness_db),
         app_db,
         settings_manager,
+        server_config: config.server,
         analysis_runtime: Arc::new(analysis_runtime),
         analysis_semaphore: Arc::new(Semaphore::new(analysis_parallelism)),
         scan_tasks: Mutex::new(HashMap::new()),
@@ -838,14 +825,14 @@ pub async fn run_server(
     });
 
     restore_domain_state(&state);
+    let playback_supervisor = playback::spawn_playback_supervisor(&state);
 
     log::info!("Starting Audio Engine on http://127.0.0.1:{}", port);
-    let allowed_origins = configured_allowed_origins();
     log::info!("Allowed UI origins: {}", allowed_origins.join(", "));
-    
+
     // Print ready signal for parent process
     println!("RUST_AUDIO_ENGINE_READY");
-    
+
     let server_state = Arc::clone(&state);
     let cors_allowed_origins = allowed_origins.clone();
     let server = HttpServer::new(move || {
@@ -859,24 +846,24 @@ pub async fn run_server(
                         origin
                             .to_str()
                             .map(|value| {
-                                allowed_origins
-                                    .iter()
-                                    .any(|allowed| allowed == "*" || allowed.eq_ignore_ascii_case(value))
+                                allowed_origins.iter().any(|allowed| {
+                                    allowed == "*" || allowed.eq_ignore_ascii_case(value)
+                                })
                             })
                             .unwrap_or(false)
                     })
                     .allowed_methods(vec!["GET", "POST", "OPTIONS"])
                     .allowed_headers(vec![header::CONTENT_TYPE])
-                    .max_age(3600)
+                    .max_age(3600),
             )
             // CORS preflight handler - catch all OPTIONS requests
             .default_service(web::route().method(Method::OPTIONS).to(cors_preflight))
-                .route("/shutdown", web::post().to(shutdown_server))
-                .configure(playback::configure_routes)
-                .configure(effects::configure_routes)
-                .configure(settings_handlers::configure_routes)
-                .configure(webdav_handlers::configure_routes)
-                .configure(ws_handlers::configure_routes)
+            .route("/shutdown", web::post().to(shutdown_server))
+            .configure(playback::configure_routes)
+            .configure(effects::configure_routes)
+            .configure(settings_handlers::configure_routes)
+            .configure(webdav_handlers::configure_routes)
+            .configure(ws_handlers::configure_routes)
     })
     .bind(("127.0.0.1", port))?
     .shutdown_timeout(5)
@@ -888,12 +875,14 @@ pub async fn run_server(
     }
 
     let server_result = server.await;
+    playback_supervisor.abort();
 
     if let Ok(app_state) = Arc::try_unwrap(state) {
         if let Ok(runtime) = Arc::try_unwrap(app_state.analysis_runtime) {
             let _ = actix_web::rt::task::spawn_blocking(move || {
                 runtime.shutdown_timeout(Duration::from_secs(2));
-            }).await;
+            })
+            .await;
         }
     }
 

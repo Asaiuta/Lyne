@@ -9,7 +9,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 }
 
 async fn get_settings(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let settings = data.settings_manager.lock().get_settings();
+    let settings = data.settings_manager.lock().get_persistent_settings();
 
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",

@@ -3,21 +3,23 @@ use std::fs::OpenOptions;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use audio_runtime_paths::{
+  ENV_APP_DATA_LEGACY,
+  ENV_AUDIO_APP_DATA_DIR,
+  ENV_AUDIO_APP_DB_PATH,
+  ENV_AUDIO_CACHE_DIR,
+  ENV_AUDIO_LOG_DIR,
+  ENV_AUDIO_LOUDNESS_DB_PATH,
+  ENV_AUDIO_SETTINGS_PATH,
+};
 use tauri::{Manager, RunEvent};
 
 struct SidecarState(Mutex<Option<Child>>);
 
-const ENV_AUDIO_APP_DATA_DIR: &str = "AUDIO_APP_DATA_DIR";
-const ENV_APP_DATA_LEGACY: &str = "APP_DATA";
-const ENV_AUDIO_CACHE_DIR: &str = "AUDIO_CACHE_DIR";
-const ENV_AUDIO_LOG_DIR: &str = "AUDIO_LOG_DIR";
-const ENV_AUDIO_SETTINGS_PATH: &str = "AUDIO_SETTINGS_PATH";
-const ENV_AUDIO_LOUDNESS_DB_PATH: &str = "LOUDNESS_DB_PATH";
-const ENV_AUDIO_APP_DB_PATH: &str = "AUDIO_APP_DB_PATH";
 const ENV_AUDIO_ALLOWED_ORIGINS: &str = "AUDIO_ALLOWED_ORIGINS";
 
 struct RuntimePaths {
-  data_dir: PathBuf,
+  app_data_dir: PathBuf,
   cache_dir: PathBuf,
   log_dir: PathBuf,
   settings_path: PathBuf,
@@ -29,7 +31,7 @@ fn server_port() -> u16 {
   std::env::var("AUDIO_SERVER_PORT")
     .ok()
     .and_then(|value| value.parse::<u16>().ok())
-    .unwrap_or(63789)
+    .unwrap_or(63790)
 }
 
 fn sidecar_dev_fallback_path() -> PathBuf {
@@ -81,15 +83,15 @@ fn app_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn runtime_paths(app: &tauri::AppHandle) -> Result<RuntimePaths, String> {
-  let data_dir = app_data_dir(app)?;
+  let app_data_dir = app_data_dir(app)?;
   let cache_dir = app_cache_dir(app)?;
-  let log_dir = data_dir.join("logs");
-  let settings_path = data_dir.join("audio_settings.json");
-  let loudness_db_path = data_dir.join("loudness_cache.db");
-  let app_db_path = data_dir.join("app_state.db");
+  let log_dir = app_data_dir.join("logs");
+  let settings_path = app_data_dir.join("audio_settings.json");
+  let loudness_db_path = app_data_dir.join("loudness_cache.db");
+  let app_db_path = app_data_dir.join("app_state.db");
 
   Ok(RuntimePaths {
-    data_dir,
+    app_data_dir,
     cache_dir,
     log_dir,
     settings_path,
@@ -104,7 +106,7 @@ fn ensure_dir(path: &PathBuf) -> Result<(), String> {
 }
 
 fn ensure_runtime_dirs(paths: &RuntimePaths) -> Result<(), String> {
-  ensure_dir(&paths.data_dir)?;
+  ensure_dir(&paths.app_data_dir)?;
   ensure_dir(&paths.cache_dir)?;
   ensure_dir(&paths.log_dir)?;
   Ok(())
@@ -185,8 +187,8 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<Child, String> {
   command
     .arg("--port")
     .arg(port.to_string())
-    .env(ENV_AUDIO_APP_DATA_DIR, &runtime.data_dir)
-    .env(ENV_APP_DATA_LEGACY, &runtime.data_dir)
+    .env(ENV_AUDIO_APP_DATA_DIR, &runtime.app_data_dir)
+    .env(ENV_APP_DATA_LEGACY, &runtime.app_data_dir)
     .env(ENV_AUDIO_CACHE_DIR, &runtime.cache_dir)
     .env(ENV_AUDIO_LOG_DIR, &runtime.log_dir)
     .env(ENV_AUDIO_SETTINGS_PATH, &runtime.settings_path)

@@ -10,14 +10,14 @@
 
 use std::sync::Arc;
 
-use super::traits::{AudioProcessor, ProcessResult, SampleRateAware, ChannelAware};
-use super::lockfree_params::*;
-use super::eq::Equalizer;
-use super::saturation::Saturation;
 use super::crossfeed::Crossfeed;
-use super::loudness::PeakLimiter;
 use super::dsp::NoiseShaper;
 use super::dynamic_loudness::DynamicLoudness;
+use super::eq::Equalizer;
+use super::lockfree_params::*;
+use super::loudness::PeakLimiter;
+use super::saturation::Saturation;
+use super::traits::{AudioProcessor, ChannelAware, ProcessResult, SampleRateAware};
 // ============================================================================
 // EQ Adapter
 // ============================================================================
@@ -141,11 +141,15 @@ impl SaturationProcessor {
             self.saturation.set_input_gain(self.cached.input_gain_db);
             self.saturation.set_output_gain(self.cached.output_gain_db);
             self.saturation.set_highpass_mode(self.cached.highpass_mode);
-            self.saturation.set_highpass_cutoff(self.cached.highpass_cutoff);
+            self.saturation
+                .set_highpass_cutoff(self.cached.highpass_cutoff);
             self.saturation.set_enabled(self.cached.enabled);
 
             // M-4 fix: use From trait for type-safe conversion
-            self.saturation.set_type(super::saturation::SaturationType::from(self.cached.sat_type));
+            self.saturation
+                .set_type(super::saturation::SaturationType::from(
+                    self.cached.sat_type,
+                ));
         }
     }
 }
@@ -223,7 +227,8 @@ impl CrossfeedProcessor {
             self.crossfeed.set_mix(self.cached.mix);
             self.crossfeed.set_enabled(self.cached.enabled);
             // Cutoff change requires sample rate update
-            self.crossfeed.set_sample_rate(self.sample_rate, self.cached.cutoff_hz);
+            self.crossfeed
+                .set_sample_rate(self.sample_rate, self.cached.cutoff_hz);
         }
     }
 }
@@ -286,11 +291,7 @@ pub struct PeakLimiterProcessor {
 }
 
 impl PeakLimiterProcessor {
-    pub fn new(
-        channels: usize,
-        sample_rate: u32,
-        params: Arc<AtomicPeakLimiterParams>,
-    ) -> Self {
+    pub fn new(channels: usize, sample_rate: u32, params: Arc<AtomicPeakLimiterParams>) -> Self {
         Self {
             limiter: PeakLimiter::new(channels, sample_rate, -1.0, 10.0, 150.0),
             params,
@@ -471,7 +472,7 @@ impl AudioProcessor for VolumeProcessor {
     }
 
     fn is_enabled(&self) -> bool {
-        true  // Volume is always active
+        true // Volume is always active
     }
 
     fn set_enabled(&mut self, _enabled: bool) {
@@ -500,11 +501,7 @@ pub struct NoiseShaperProcessor {
 }
 
 impl NoiseShaperProcessor {
-    pub fn new(
-        channels: usize,
-        sample_rate: u32,
-        params: Arc<AtomicNoiseShaperParams>,
-    ) -> Self {
+    pub fn new(channels: usize, sample_rate: u32, params: Arc<AtomicNoiseShaperParams>) -> Self {
         let cached = params.read();
         let mut noise_shaper = NoiseShaper::new(channels, sample_rate, cached.bits);
         noise_shaper.set_enabled(cached.enabled);

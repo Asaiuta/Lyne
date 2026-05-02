@@ -3,13 +3,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, LineWriter, Write};
 use std::path::{Path, PathBuf};
 
-pub const ENV_AUDIO_APP_DATA_DIR: &str = "AUDIO_APP_DATA_DIR";
-pub const ENV_APP_DATA_LEGACY: &str = "APP_DATA";
-pub const ENV_AUDIO_CACHE_DIR: &str = "AUDIO_CACHE_DIR";
-pub const ENV_AUDIO_LOG_DIR: &str = "AUDIO_LOG_DIR";
-pub const ENV_AUDIO_SETTINGS_PATH: &str = "AUDIO_SETTINGS_PATH";
-pub const ENV_AUDIO_LOUDNESS_DB_PATH: &str = "LOUDNESS_DB_PATH";
-pub const ENV_AUDIO_APP_DB_PATH: &str = "AUDIO_APP_DB_PATH";
+pub use audio_runtime_paths::{
+    ENV_APP_DATA_LEGACY, ENV_AUDIO_APP_DATA_DIR, ENV_AUDIO_APP_DB_PATH, ENV_AUDIO_CACHE_DIR,
+    ENV_AUDIO_LOG_DIR, ENV_AUDIO_LOUDNESS_DB_PATH, ENV_AUDIO_SETTINGS_PATH,
+};
 
 const DEFAULT_APP_DIR_NAME: &str = "AudioPlayer";
 
@@ -113,7 +110,10 @@ fn default_app_data_dir() -> PathBuf {
     }
 
     if let Some(home_dir) = read_path_env("HOME") {
-        return home_dir.join(".local").join("share").join(DEFAULT_APP_DIR_NAME);
+        return home_dir
+            .join(".local")
+            .join("share")
+            .join(DEFAULT_APP_DIR_NAME);
     }
 
     env::current_dir()
@@ -122,8 +122,13 @@ fn default_app_data_dir() -> PathBuf {
 }
 
 fn ensure_dir(path: &Path) -> Result<(), String> {
-    fs::create_dir_all(path)
-        .map_err(|e| format!("Failed to create runtime directory '{}': {}", path.display(), e))
+    fs::create_dir_all(path).map_err(|e| {
+        format!(
+            "Failed to create runtime directory '{}': {}",
+            path.display(),
+            e
+        )
+    })
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {

@@ -23,107 +23,54 @@
 //! - [`adapters`] - Processor adapters implementing AudioProcessor trait
 //! - [`dsp_chain`] - Composable DSP processing chain
 
-mod resampler;
-mod eq;
-mod dsp;
-mod spectrum;
 mod convolver;
+mod crossfeed;
+mod dsp;
+mod dynamic_loudness;
+mod eq;
+mod fir_eq;
 mod loudness;
 mod loudness_db;
-mod dynamic_loudness;
+mod resampler;
 mod saturation;
-mod crossfeed;
-mod fir_eq;
+mod spectrum;
 
 // New unified abstraction modules
-pub mod traits;
-pub mod lockfree_params;
 pub mod adapters;
 pub mod dsp_chain;
+pub mod lockfree_params;
+pub mod traits;
 
 // Re-export all public items for backward compatibility
-pub use resampler::{Resampler, StreamingResampler, ResamplerError};
-pub use eq::{BiquadSection, Equalizer};
-pub use dsp::{VolumeController, NoiseShaper, NoiseShaperCurve, db_to_linear, linear_to_db};
-pub use spectrum::SpectrumAnalyzer;
 pub use convolver::FFTConvolver;
+pub use crossfeed::{Crossfeed, CrossfeedSettings};
+pub use dsp::{db_to_linear, linear_to_db, NoiseShaper, NoiseShaperCurve, VolumeController};
+pub use dynamic_loudness::{AtomicDynamicLoudnessState, DynamicLoudness, LOUDNESS_BANDS};
+pub use eq::{BiquadSection, Equalizer};
+pub use fir_eq::{FirEq, FirPhaseMode, STANDARD_BANDS};
 pub use loudness::{
-    LoudnessMeter,
-    PeakLimiter,
-    AtomicLoudnessState,
-    LoudnessNormalizer,
-    LoudnessInfo,
-    GainRamp,
+    AtomicLoudnessState, GainRamp, LoudnessInfo, LoudnessMeter, LoudnessNormalizer, PeakLimiter,
     TruePeakDetector,
 };
 pub use loudness_db::{
-    LoudnessDatabase,
-    TrackLoudness,
-    DatabaseStats,
-    CURRENT_SCAN_VERSION,
-    DEFAULT_STREAMING_TARGET_LUFS,
-    DEFAULT_BROADCAST_TARGET_LUFS,
+    DatabaseStats, LoudnessDatabase, TrackLoudness, CURRENT_SCAN_VERSION,
+    DEFAULT_BROADCAST_TARGET_LUFS, DEFAULT_STREAMING_TARGET_LUFS,
 };
-pub use saturation::{
-    Saturation,
-    SaturationType,
-    SaturationSettings,
-};
-pub use crossfeed::{
-    Crossfeed,
-    CrossfeedSettings,
-};
-pub use fir_eq::{
-    FirEq,
-    FirPhaseMode,
-    STANDARD_BANDS,
-};
-pub use dynamic_loudness::{
-    DynamicLoudness,
-    AtomicDynamicLoudnessState,
-    LOUDNESS_BANDS,
-};
+pub use resampler::{Resampler, ResamplerError, StreamingResampler};
+pub use saturation::{Saturation, SaturationSettings, SaturationType};
+pub use spectrum::SpectrumAnalyzer;
 
 // Re-export unified abstraction types
-pub use traits::{
-    AudioProcessor,
-    ProcessResult,
-    LockfreeParams,
-    SampleRateAware,
-    ChannelAware,
-};
-pub use lockfree_params::{
-    EqParamsSnapshot,
-    AtomicEqParams,
-    SaturationParamsSnapshot,
-    AtomicSaturationParams,
-    SaturationTypeValue,
-    CrossfeedParamsSnapshot,
-    AtomicCrossfeedParams,
-    PeakLimiterParamsSnapshot,
-    AtomicPeakLimiterParams,
-    VolumeParamsSnapshot,
-    AtomicVolumeParams,
-    NoiseShaperParamsSnapshot,
-    AtomicNoiseShaperParams,
-    DynamicLoudnessParamsSnapshot,
-    AtomicDynamicLoudnessParams,
-    AtomicDynamicLoudnessTelemetry,
-    EQ_BANDS,
-};
 pub use adapters::{
-    EqProcessor,
-    SaturationProcessor,
-    CrossfeedProcessor,
-    PeakLimiterProcessor,
-    VolumeProcessor,
-    NoiseShaperProcessor,
-    DynamicLoudnessProcessor,
-    PassThroughProcessor,
+    CrossfeedProcessor, DynamicLoudnessProcessor, EqProcessor, NoiseShaperProcessor,
+    PassThroughProcessor, PeakLimiterProcessor, SaturationProcessor, VolumeProcessor,
 };
-pub use dsp_chain::{
-    DspChain,
-    DspChainBuilder,
-    ChainStats,
-    ProcessorStats,
+pub use dsp_chain::{ChainStats, DspChain, DspChainBuilder, ProcessorStats};
+pub use lockfree_params::{
+    AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
+    AtomicEqParams, AtomicNoiseShaperParams, AtomicPeakLimiterParams, AtomicSaturationParams,
+    AtomicVolumeParams, CrossfeedParamsSnapshot, DynamicLoudnessParamsSnapshot, EqParamsSnapshot,
+    NoiseShaperParamsSnapshot, PeakLimiterParamsSnapshot, SaturationParamsSnapshot,
+    SaturationTypeValue, VolumeParamsSnapshot, EQ_BANDS,
 };
+pub use traits::{AudioProcessor, ChannelAware, LockfreeParams, ProcessResult, SampleRateAware};

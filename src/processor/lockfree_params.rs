@@ -155,7 +155,10 @@ impl AtomicEqParams {
     fn read_raw_no_clear(&self) -> EqParamsSnapshot {
         loop {
             let v1 = self.version.load(Ordering::Acquire);
-            if v1 & 1 != 0 { std::hint::spin_loop(); continue; }
+            if v1 & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
             let gains = std::array::from_fn(|i| self.gains[i].load(Ordering::Relaxed));
             let enabled = self.enabled.load(Ordering::Relaxed);
             std::sync::atomic::fence(Ordering::Acquire);
@@ -324,7 +327,8 @@ impl AtomicSaturationParams {
     /// Set threshold (0.0 - 1.0)
     #[inline]
     pub fn set_threshold(&self, threshold: f64) {
-        self.threshold.store(threshold.clamp(0.0, 1.0), Ordering::Release);
+        self.threshold
+            .store(threshold.clamp(0.0, 1.0), Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -366,7 +370,8 @@ impl AtomicSaturationParams {
     /// Set highpass cutoff frequency
     #[inline]
     pub fn set_highpass_cutoff(&self, hz: f64) {
-        self.highpass_cutoff.store(hz.clamp(1000.0, 12000.0), Ordering::Release);
+        self.highpass_cutoff
+            .store(hz.clamp(1000.0, 12000.0), Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -500,7 +505,8 @@ impl AtomicCrossfeedParams {
 
     #[inline]
     pub fn set_cutoff(&self, hz: f64) {
-        self.cutoff_hz.store(hz.clamp(200.0, 2000.0), Ordering::Release);
+        self.cutoff_hz
+            .store(hz.clamp(200.0, 2000.0), Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -610,13 +616,15 @@ impl AtomicPeakLimiterParams {
 
     #[inline]
     pub fn set_threshold(&self, db: f64) {
-        self.threshold_db.store(db.clamp(-20.0, 0.0), Ordering::Release);
+        self.threshold_db
+            .store(db.clamp(-20.0, 0.0), Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
     #[inline]
     pub fn set_release(&self, ms: f64) {
-        self.release_ms.store(ms.clamp(10.0, 1000.0), Ordering::Release);
+        self.release_ms
+            .store(ms.clamp(10.0, 1000.0), Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -665,7 +673,7 @@ impl Default for AtomicPeakLimiterParams {
 /// Volume parameter snapshot
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeParamsSnapshot {
-    pub volume: f64,      // 0.0 - 1.0
+    pub volume: f64, // 0.0 - 1.0
     pub muted: bool,
 }
 
@@ -925,7 +933,8 @@ impl AtomicDynamicLoudnessParams {
     /// Set strength (0.0 - 1.0)
     #[inline]
     pub fn set_strength(&self, strength: f64) {
-        self.strength.store(strength.clamp(0.0, 1.0), Ordering::Release);
+        self.strength
+            .store(strength.clamp(0.0, 1.0), Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -1017,9 +1026,9 @@ mod tests {
     fn test_eq_params_write_read() {
         let params = AtomicEqParams::new();
         let gains = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        
+
         params.write(&gains, true);
-        
+
         let snapshot = params.read();
         for (i, &g) in gains.iter().enumerate() {
             assert!((snapshot.gains[i] - g).abs() < 1e-10);
@@ -1030,13 +1039,13 @@ mod tests {
     #[test]
     fn test_saturation_params() {
         let params = AtomicSaturationParams::new();
-        
+
         params.set_drive(1.5);
         params.set_mix(0.7);
         params.set_enabled(true);
-        
+
         assert!(params.has_update());
-        
+
         let snapshot = params.read();
         assert!((snapshot.drive - 1.5).abs() < 1e-10);
         assert!((snapshot.mix - 0.7).abs() < 1e-10);
@@ -1046,10 +1055,10 @@ mod tests {
     #[test]
     fn test_volume_params_muted() {
         let params = AtomicVolumeParams::new();
-        
+
         params.set_volume(0.5);
         assert!((params.effective_volume() - 0.5).abs() < 1e-10);
-        
+
         params.set_muted(true);
         assert!((params.effective_volume() - 0.0).abs() < 1e-10);
     }

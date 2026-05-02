@@ -90,7 +90,11 @@ impl WebDavConfig {
         }
 
         // Ensure path starts with /
-        let path = if path.starts_with('/') { path.to_string() } else { format!("/{}", path) };
+        let path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{}", path)
+        };
 
         // Extract origin and base_path from base_url
         // "http://ip.local:5244/dav" -> origin="http://ip.local:5244", base_path="/dav"
@@ -129,7 +133,12 @@ impl WebDavConfig {
 
         let normalized_base = self.normalized_base_url();
         let url = self.resolve_url(path);
-        log::info!("WebDAV PROPFIND: {} (base={}, path={})", url, normalized_base, path);
+        log::info!(
+            "WebDAV PROPFIND: {} (base={}, path={})",
+            url,
+            normalized_base,
+            path
+        );
 
         // FIX for Defect 28: Add timeout to prevent indefinite blocking
         let client = reqwest::blocking::Client::builder()
@@ -163,7 +172,9 @@ impl WebDavConfig {
             return Err(WebDavError::Http(format!("Server returned {}", status)));
         }
 
-        let body = response.text().map_err(|e| WebDavError::Http(e.to_string()))?;
+        let body = response
+            .text()
+            .map_err(|e| WebDavError::Http(e.to_string()))?;
         parse_propfind_response(&body, &normalized_base)
     }
 
@@ -271,7 +282,10 @@ fn parse_propfind_response(xml: &str, base_url: &str) -> Result<Vec<DavEntry>, W
 
                     log::debug!(
                         "WebDAV entry: server_href={}, base_path={}, relative_href={}, url={}",
-                        current_href, base_path, relative_href, url
+                        current_href,
+                        base_path,
+                        relative_href,
+                        url
                     );
 
                     entries.push(DavEntry {
@@ -376,11 +390,19 @@ fn build_full_url(base_url: &str, href: &str) -> String {
     // href is a root-relative path like "/music/jazz/track.flac"
     // Extract origin (scheme://host) from base_url
     if let Some(origin) = extract_origin(base_url) {
-        let href = if href.starts_with('/') { href.to_string() } else { format!("/{}", href) };
+        let href = if href.starts_with('/') {
+            href.to_string()
+        } else {
+            format!("/{}", href)
+        };
         return format!("{}{}", origin, href);
     }
     // Fallback: just append to base_url
     let base = base_url.trim_end_matches('/');
-    let href = if href.starts_with('/') { href.to_string() } else { format!("/{}", href) };
+    let href = if href.starts_with('/') {
+        href.to_string()
+    } else {
+        format!("/{}", href)
+    };
     format!("{}{}", base, href)
 }

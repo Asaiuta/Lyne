@@ -13,6 +13,7 @@ name = "audio_server"
 path = "src/main.rs"
 
 [dependencies]
+audio-runtime-paths = { path = "crates/audio-runtime-paths" }
 # --- Core Audio ---
 symphonia = { version = "0.5", features = ["all"] }
 cpal = "0.15"

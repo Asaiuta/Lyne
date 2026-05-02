@@ -27,16 +27,15 @@ fn main() {
             }
         }
         Err(error) => {
-            println!(
-                "cargo:warning=Both vcpkg and pkg-config failed to find soxr: {error}"
-            );
+            println!("cargo:warning=Both vcpkg and pkg-config failed to find soxr: {error}");
         }
     }
 }
 
 fn ensure_msvc_import_lib(library: &pkg_config::Library) -> Result<(), String> {
-    let dll_path = find_soxr_dll(library)
-        .ok_or_else(|| "unable to locate libsoxr.dll next to the pkg-config library path".to_string())?;
+    let dll_path = find_soxr_dll(library).ok_or_else(|| {
+        "unable to locate libsoxr.dll next to the pkg-config library path".to_string()
+    })?;
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").map_err(|error| error.to_string())?);
     let def_file_name = format!(
@@ -52,10 +51,16 @@ fn ensure_msvc_import_lib(library: &pkg_config::Library) -> Result<(), String> {
     if !import_lib_path.exists() {
         let gendef_path = find_gendef(&dll_path)
             .ok_or_else(|| "unable to find gendef.exe to generate soxr.def".to_string())?;
-        let lib_exe_path = find_lib_exe()
-            .ok_or_else(|| "unable to find Visual Studio lib.exe to generate soxr.lib".to_string())?;
+        let lib_exe_path = find_lib_exe().ok_or_else(|| {
+            "unable to find Visual Studio lib.exe to generate soxr.lib".to_string()
+        })?;
 
-        run(Command::new(gendef_path).arg(&dll_path).current_dir(&out_dir), "gendef")?;
+        run(
+            Command::new(gendef_path)
+                .arg(&dll_path)
+                .current_dir(&out_dir),
+            "gendef",
+        )?;
         run(
             Command::new(lib_exe_path)
                 .arg(format!("/DEF:{}", def_path.display()))
@@ -112,7 +117,10 @@ fn find_soxr_dll(library: &pkg_config::Library) -> Option<PathBuf> {
     }
 
     if let Some(user_profile) = env::var_os("USERPROFILE") {
-        let scoop_msys2 = PathBuf::from(user_profile).join("scoop").join("apps").join("msys2");
+        let scoop_msys2 = PathBuf::from(user_profile)
+            .join("scoop")
+            .join("apps")
+            .join("msys2");
         if let Ok(entries) = fs::read_dir(scoop_msys2) {
             for entry in entries.filter_map(Result::ok) {
                 let bin_dir = entry.path().join("mingw64").join("bin");
@@ -158,7 +166,10 @@ fn find_lib_exe() -> Option<PathBuf> {
         if output.status.success() {
             let install_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !install_path.is_empty() {
-                let tools_root = Path::new(&install_path).join("VC").join("Tools").join("MSVC");
+                let tools_root = Path::new(&install_path)
+                    .join("VC")
+                    .join("Tools")
+                    .join("MSVC");
                 if let Ok(entries) = fs::read_dir(tools_root) {
                     let mut versions = entries
                         .filter_map(Result::ok)
@@ -168,7 +179,13 @@ fn find_lib_exe() -> Option<PathBuf> {
                     versions.sort();
                     versions.reverse();
                     for version_dir in versions {
-                        candidates.push(version_dir.join("bin").join("HostX64").join("x64").join("lib.exe"));
+                        candidates.push(
+                            version_dir
+                                .join("bin")
+                                .join("HostX64")
+                                .join("x64")
+                                .join("lib.exe"),
+                        );
                     }
                 }
             }
@@ -179,11 +196,14 @@ fn find_lib_exe() -> Option<PathBuf> {
 }
 
 fn find_vswhere() -> Option<PathBuf> {
-    let explicit = PathBuf::from(r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe");
+    let explicit =
+        PathBuf::from(r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe");
     if explicit.exists() {
         return Some(explicit);
     }
-    path_candidates("vswhere.exe").into_iter().find(|path| path.exists())
+    path_candidates("vswhere.exe")
+        .into_iter()
+        .find(|path| path.exists())
 }
 
 fn path_candidates(name: &str) -> Vec<PathBuf> {
@@ -219,7 +239,9 @@ fn copy_runtime_dll(dll_path: &Path, out_dir: &Path) -> Result<(), String> {
 }
 
 fn run(command: &mut Command, name: &str) -> Result<(), String> {
-    let output = command.output().map_err(|error| format!("failed to run {name}: {error}"))?;
+    let output = command
+        .output()
+        .map_err(|error| format!("failed to run {name}: {error}"))?;
     if output.status.success() {
         return Ok(());
     }
@@ -228,8 +250,6 @@ fn run(command: &mut Command, name: &str) -> Result<(), String> {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Err(format!(
         "{name} exited with {}. stdout: {} stderr: {}",
-        output.status,
-        stdout,
-        stderr
+        output.status, stdout, stderr
     ))
 }

@@ -9,15 +9,15 @@ fn not_implemented_error(err: &str) -> bool {
 /// Map EQ band name to array index (avoids rebuilding HashMap per request)
 fn eq_band_name_to_index(name: &str) -> Option<usize> {
     match name {
-        "31"    => Some(0),
-        "62"    => Some(1),
-        "125"   => Some(2),
-        "250"   => Some(3),
-        "500"   => Some(4),
-        "1000" | "1k"  => Some(5),
-        "2000" | "2k"  => Some(6),
-        "4000" | "4k"  => Some(7),
-        "8000" | "8k"  => Some(8),
+        "31" => Some(0),
+        "62" => Some(1),
+        "125" => Some(2),
+        "250" => Some(3),
+        "500" => Some(4),
+        "1000" | "1k" => Some(5),
+        "2000" | "2k" => Some(6),
+        "4000" | "4k" => Some(7),
+        "8000" | "8k" => Some(8),
         "16000" | "16k" => Some(9),
         _ => None,
     }
@@ -26,16 +26,28 @@ fn eq_band_name_to_index(name: &str) -> Option<usize> {
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/set_eq", web::post().to(set_eq))
         .route("/set_eq_type", web::post().to(set_eq_type))
-        .route("/configure_optimizations", web::post().to(configure_optimizations))
+        .route(
+            "/configure_optimizations",
+            web::post().to(configure_optimizations),
+        )
         .route("/crossfeed", web::get().to(get_crossfeed))
         .route("/set_crossfeed", web::post().to(set_crossfeed))
         .route("/saturation", web::get().to(get_saturation))
         .route("/set_saturation", web::post().to(set_saturation))
         .route("/dynamic_loudness", web::get().to(get_dynamic_loudness))
-        .route("/set_dynamic_loudness", web::post().to(set_dynamic_loudness))
+        .route(
+            "/set_dynamic_loudness",
+            web::post().to(set_dynamic_loudness),
+        )
         .route("/noise_shaper_curve", web::get().to(get_noise_shaper_curve))
-        .route("/set_noise_shaper_curve", web::post().to(set_noise_shaper_curve))
-        .route("/configure_output_bits", web::post().to(configure_output_bits));
+        .route(
+            "/set_noise_shaper_curve",
+            web::post().to(set_noise_shaper_curve),
+        )
+        .route(
+            "/configure_output_bits",
+            web::post().to(configure_output_bits),
+        );
 }
 
 fn persist_eq_config(data: &web::Data<Arc<AppState>>, player: &AudioPlayer) {
@@ -93,10 +105,7 @@ fn persist_noise_shaper_config(data: &web::Data<Arc<AppState>>, player: &AudioPl
     }
 }
 
-async fn set_eq(
-    data: web::Data<Arc<AppState>>,
-    body: web::Json<SetEqRequest>,
-) -> HttpResponse {
+async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -> HttpResponse {
     let mut player = data.player.lock();
 
     let is_fir = player.is_fir_eq_enabled();
@@ -279,13 +288,19 @@ async fn set_saturation(
         player.set_saturation_mix(mix);
     }
     if let Some(input_gain_db) = body.input_gain_db {
-        player.lockfree_saturation_params.set_input_gain(input_gain_db);
+        player
+            .lockfree_saturation_params
+            .set_input_gain(input_gain_db);
     }
     if let Some(output_gain_db) = body.output_gain_db {
-        player.lockfree_saturation_params.set_output_gain(output_gain_db);
+        player
+            .lockfree_saturation_params
+            .set_output_gain(output_gain_db);
     }
     if let Some(highpass_mode) = body.highpass_mode {
-        player.lockfree_saturation_params.set_highpass_mode(highpass_mode);
+        player
+            .lockfree_saturation_params
+            .set_highpass_mode(highpass_mode);
     }
     if let Some(highpass_cutoff) = body.highpass_cutoff {
         player
@@ -410,8 +425,9 @@ async fn configure_output_bits(
     body: web::Json<SetOutputBitsRequest>,
 ) -> HttpResponse {
     if body.bits != 16 && body.bits != 24 && body.bits != 32 {
-        return HttpResponse::BadRequest()
-            .json(ApiResponse::error("Invalid bit depth. Supported: 16, 24, 32"));
+        return HttpResponse::BadRequest().json(ApiResponse::error(
+            "Invalid bit depth. Supported: 16, 24, 32",
+        ));
     }
 
     let player = data.player.lock();

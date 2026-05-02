@@ -7,7 +7,10 @@
 //! We do NOT replace the global allocator here as it would crash env_logger
 //! initialization during startup.
 
-use audio_engine::{config::AppConfig, runtime, server, settings};
+use audio_engine::{
+    config::{EngineSettings, ResolvedConfig, RuntimeServerConfig},
+    runtime, server, settings,
+};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -38,10 +41,13 @@ async fn main() -> std::io::Result<()> {
         .position(|a| a == "--port")
         .and_then(|i| args.get(i + 1))
         .and_then(|p| p.parse().ok())
-        .unwrap_or(63789);
-    
+        .unwrap_or(63790);
+
     // Load config
-    let config = AppConfig::load();
+    let engine_settings = EngineSettings::load_from_file(&runtime_paths.settings_path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let server_config = RuntimeServerConfig::from_env();
+    let config = ResolvedConfig::new(engine_settings, server_config);
 
     // Create settings manager
     let settings_manager = settings::create_settings_manager(&runtime_paths.settings_path);
