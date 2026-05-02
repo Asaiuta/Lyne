@@ -1,9 +1,12 @@
 use super::*;
+use crate::app_database::QueueEntryRecord;
+use crate::player::{RepeatMode, ShuffleMode};
+use crate::playlist;
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::Deserialize;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/load", web::post().to(load))
@@ -11,40 +14,91 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/pause", web::post().to(pause))
         .route("/stop", web::post().to(stop))
         .route("/seek", web::post().to(seek))
+        .route("/repeat", web::post().to(set_repeat_mode))
+        .route("/shuffle", web::post().to(set_shuffle_mode))
         .route("/state", web::get().to(get_state))
         .route("/queue_status", web::get().to(get_queue_status))
         .route("/volume", web::post().to(set_volume))
         .route("/devices", web::get().to(list_devices))
         .route("/configure_output", web::post().to(configure_output))
-        .route("/configure_upsampling", web::post().to(configure_upsampling))
-        .route("/configure_resampling", web::post().to(configure_resampling))
-        .route("/configure_normalization", web::post().to(configure_normalization))
+        .route(
+            "/configure_upsampling",
+            web::post().to(configure_upsampling),
+        )
+        .route(
+            "/configure_resampling",
+            web::post().to(configure_resampling),
+        )
+        .route(
+            "/configure_normalization",
+            web::post().to(configure_normalization),
+        )
         .route("/loudness_info", web::get().to(get_loudness_info))
         .route("/scan_loudness", web::post().to(scan_track_loudness))
-        .route("/scan_loudness_background", web::post().to(scan_loudness_background))
-        .route("/scan_loudness_task/{task_id}", web::get().to(get_scan_loudness_task))
-        .route("/scan_loudness_task/{task_id}/cancel", web::post().to(cancel_scan_loudness_task))
+        .route(
+            "/scan_loudness_background",
+            web::post().to(scan_loudness_background),
+        )
+        .route(
+            "/scan_loudness_task/{task_id}",
+            web::get().to(get_scan_loudness_task),
+        )
+        .route(
+            "/scan_loudness_task/{task_id}/cancel",
+            web::post().to(cancel_scan_loudness_task),
+        )
         .route("/queue_next", web::post().to(queue_next))
         .route("/cancel_preload", web::post().to(cancel_preload))
+        .route("/playlist/load", web::post().to(load_playlist))
         .route("/load_ir", web::post().to(load_ir))
         .route("/unload_ir", web::post().to(unload_ir))
         .route("/loading_status", web::get().to(get_loading_status))
         .route("/ir_status", web::get().to(get_ir_status))
-        .route("/domain/analysis_tasks", web::get().to(get_recent_analysis_tasks))
-        .route("/domain/playback_history", web::get().to(get_playback_history))
-        .route("/domain/playback_sessions", web::get().to(get_playback_sessions))
+        .route(
+            "/domain/analysis_tasks",
+            web::get().to(get_recent_analysis_tasks),
+        )
+        .route(
+            "/domain/playback_history",
+            web::get().to(get_playback_history),
+        )
+        .route(
+            "/domain/playback_sessions",
+            web::get().to(get_playback_sessions),
+        )
         .route("/domain/media_items", web::get().to(get_media_items))
-        .route("/domain/media_items/{media_id}/cover_art", web::get().to(get_media_cover_art))
+        .route(
+            "/domain/media_items/{media_id}/cover_art",
+            web::get().to(get_media_cover_art),
+        )
         .route("/domain/library/roots", web::get().to(get_library_roots))
         .route("/domain/library/scan", web::post().to(scan_library_root))
-        .route("/domain/queue_snapshot", web::get().to(get_queue_snapshot_domain))
+        .route(
+            "/domain/queue_snapshot",
+            web::get().to(get_queue_snapshot_domain),
+        )
         .route("/domain/queue", web::get().to(get_persistent_queue))
         .route("/domain/queue", web::post().to(replace_persistent_queue))
-        .route("/domain/queue/enqueue", web::post().to(enqueue_persistent_queue))
-        .route("/domain/queue/play", web::post().to(play_from_persistent_queue))
-        .route("/domain/queue/{entry_id}", web::delete().to(remove_persistent_queue_entry))
-        .route("/domain/queue/clear", web::post().to(clear_persistent_queue))
-        .route("/domain/device_config", web::get().to(get_device_config_domain))
+        .route(
+            "/domain/queue/enqueue",
+            web::post().to(enqueue_persistent_queue),
+        )
+        .route(
+            "/domain/queue/play",
+            web::post().to(play_from_persistent_queue),
+        )
+        .route(
+            "/domain/queue/{entry_id}",
+            web::delete().to(remove_persistent_queue_entry),
+        )
+        .route(
+            "/domain/queue/clear",
+            web::post().to(clear_persistent_queue),
+        )
+        .route(
+            "/domain/device_config",
+            web::get().to(get_device_config_domain),
+        )
         .route("/domain/dsp_configs", web::get().to(get_dsp_configs_domain));
 }
 
@@ -77,6 +131,20 @@ struct QueueReplaceRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PlaylistLoadMode {
+    ParseOnly,
+    Append,
+    Replace,
+}
+
+#[derive(Deserialize)]
+struct PlaylistLoadRequest {
+    path: String,
+    mode: PlaylistLoadMode,
+}
+
+#[derive(Deserialize)]
 struct QueueEntryPath {
     entry_id: i64,
 }
@@ -84,6 +152,11 @@ struct QueueEntryPath {
 #[derive(Deserialize)]
 struct PlayQueueRequest {
     entry_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct PlaybackModeRequest {
+    mode: String,
 }
 
 fn now_epoch_secs() -> u64 {
@@ -202,15 +275,205 @@ fn emit_queue_updated(data: &web::Data<Arc<AppState>>) {
         .fetch_or(crate::player::EVENT_QUEUE_UPDATED, Ordering::Release);
 }
 
+fn emit_playback_event(data: &web::Data<Arc<AppState>>, event: u32) {
+    let player = data.player.lock();
+    let shared = player.shared_state();
+    shared.event_flags.fetch_or(event, Ordering::Release);
+}
+
+pub(crate) fn spawn_playback_supervisor(state: &Arc<AppState>) -> actix_rt::task::JoinHandle<()> {
+    let weak_state = Arc::downgrade(state);
+    actix_rt::spawn(async move {
+        let mut last_end_count: Option<u64> = None;
+        let mut timer = tokio::time::interval(Duration::from_millis(100));
+
+        loop {
+            timer.tick().await;
+            let Some(state) = weak_state.upgrade() else {
+                break;
+            };
+            let data = web::Data::new(state);
+            let shared_state = {
+                let player = data.player.lock();
+                player.shared_state()
+            };
+            let last_count = last_end_count
+                .get_or_insert_with(|| shared_state.playback_end_count.load(Ordering::Acquire));
+
+            let needs_preload = shared_state.needs_preload.load(Ordering::Acquire);
+            let pending_ready = shared_state.pending_ready.load(Ordering::Acquire);
+            if needs_preload && !pending_ready {
+                match queue_next_from_persistent_queue(&data) {
+                    Ok(Some(path)) => log::info!("Supervisor preloaded next queue entry: {}", path),
+                    Ok(None) => {}
+                    Err(e) => log::warn!("Supervisor failed to preload next queue entry: {}", e),
+                }
+            }
+
+            let end_count = shared_state.playback_end_count.load(Ordering::Acquire);
+            while *last_count < end_count {
+                *last_count += 1;
+                handle_natural_playback_end(&data);
+            }
+        }
+    })
+}
+
 pub(super) fn mark_current_track_as_played(data: &web::Data<Arc<AppState>>, current_path: &str) {
     if let Err(e) = data
         .app_db
         .mark_queue_entry_played_by_path("active", current_path)
     {
-        log::warn!("Failed to mark queue entry as played for '{}': {}", current_path, e);
+        log::warn!(
+            "Failed to mark queue entry as played for '{}': {}",
+            current_path,
+            e
+        );
     } else {
         emit_queue_updated(data);
     }
+}
+
+fn load_queue_entry_for_playback(
+    data: &web::Data<Arc<AppState>>,
+    entry: QueueEntryRecord,
+    autoplay: bool,
+) -> Result<(), String> {
+    let credentials = {
+        let cfg = data.webdav_config.lock();
+        cfg.http_credentials()
+    };
+
+    let mut player = data.player.lock();
+    if autoplay {
+        player.load_with_credentials_and_autoplay(&entry.source_path, credentials.as_ref())?;
+    } else {
+        player.load_with_credentials(&entry.source_path, credentials.as_ref())?;
+    }
+
+    data.app_db
+        .mark_queue_entry_status("active", entry.entry_id, "playing")?;
+    sync_queue_snapshot(data);
+    emit_queue_updated(data);
+    Ok(())
+}
+
+fn finish_active_session_on_natural_end(data: &web::Data<Arc<AppState>>) {
+    let (snapshot, current_path) = {
+        let player = data.player.lock();
+        let shared = player.shared_state();
+        let snapshot = build_runtime_snapshot(&player);
+        let current_path = shared.current_track_path.read().clone();
+        let file_path = shared.file_path.read().clone();
+        (snapshot, current_path.or(file_path))
+    };
+
+    if let Some(ref path) = current_path {
+        mark_current_track_as_played(data, path);
+    }
+
+    if let Some(session_id) = data.active_session_id.lock().take() {
+        if let Err(e) = data
+            .app_db
+            .finish_playback_session(session_id, "ended", &snapshot)
+        {
+            log::warn!(
+                "Failed to finish playback session {} on natural end: {}",
+                session_id,
+                e
+            );
+        }
+        if let Some(ref path) = current_path {
+            let payload = serde_json::json!({ "reason": "natural_end" });
+            if let Err(e) = data.app_db.append_playback_history(
+                Some(session_id),
+                path,
+                "playback_ended",
+                snapshot.position_secs,
+                Some(&payload),
+            ) {
+                log::warn!("Failed to append playback_ended history: {}", e);
+            }
+        }
+    }
+
+    emit_playback_event(data, crate::player::EVENT_PLAYBACK_ENDED);
+}
+
+fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
+    let shared_state = {
+        let player = data.player.lock();
+        player.shared_state()
+    };
+    let repeat_mode = shared_state.repeat_mode();
+    let current_path = shared_state
+        .current_track_path
+        .read()
+        .clone()
+        .or_else(|| shared_state.file_path.read().clone());
+
+    if repeat_mode == RepeatMode::One {
+        if let Some(ref path) = current_path {
+            log::info!("Repeat one restarting '{}'", path);
+            let restart_result = {
+                let mut player = data.player.lock();
+                player.seek(0.0).and_then(|_| player.play())
+            };
+            if let Err(e) = restart_result {
+                log::warn!(
+                    "Failed to restart repeat-one playback for '{}': {}",
+                    path,
+                    e
+                );
+                finish_active_session_on_natural_end(data);
+            } else {
+                emit_playback_event(
+                    data,
+                    crate::player::EVENT_PLAYBACK_SEEKED | crate::player::EVENT_PLAYBACK_STARTED,
+                );
+            }
+            return;
+        }
+    }
+
+    if let Some(ref path) = current_path {
+        mark_current_track_as_played(data, path);
+    }
+
+    match data
+        .app_db
+        .peek_next_queue_entry("active", current_path.as_deref())
+    {
+        Ok(Some(entry)) => {
+            if let Err(e) = load_queue_entry_for_playback(data, entry, true) {
+                log::warn!("Failed to advance queue after natural end: {}", e);
+                finish_active_session_on_natural_end(data);
+            }
+            return;
+        }
+        Ok(None) => {}
+        Err(e) => log::warn!(
+            "Failed to inspect next queue entry after natural end: {}",
+            e
+        ),
+    }
+
+    if repeat_mode == RepeatMode::All {
+        match data.app_db.reset_queue_cycle_for_repeat_all("active") {
+            Ok(Some(entry)) => {
+                log::info!("Repeat all wrapping to '{}'", entry.source_path);
+                if let Err(e) = load_queue_entry_for_playback(data, entry, true) {
+                    log::warn!("Failed to wrap repeat-all queue: {}", e);
+                    finish_active_session_on_natural_end(data);
+                }
+                return;
+            }
+            Ok(None) => {}
+            Err(e) => log::warn!("Failed to reset queue cycle for repeat-all: {}", e),
+        }
+    }
+
+    finish_active_session_on_natural_end(data);
 }
 
 pub(super) fn queue_next_from_persistent_queue(
@@ -293,11 +556,7 @@ fn is_supported_media_href(path: &str) -> bool {
         "flac", "mp3", "wav", "m4a", "aac", "ogg", "opus", "aiff", "aif", "wma", "alac",
     ];
 
-    let trimmed = path
-        .split('?')
-        .next()
-        .unwrap_or(path)
-        .trim_end_matches('/');
+    let trimmed = path.split('?').next().unwrap_or(path).trim_end_matches('/');
     let ext = trimmed.rsplit('.').next().unwrap_or("");
     SUPPORTED_EXTENSIONS
         .iter()
@@ -493,7 +752,11 @@ fn try_store_loudness(data: &web::Data<Arc<AppState>>, track: &crate::processor:
     let db_guard = data.loudness_db.lock();
     if let Some(db) = db_guard.as_ref() {
         if let Err(e) = db.upsert(track) {
-            log::warn!("Failed to store loudness cache for '{}': {}", track.file_path, e);
+            log::warn!(
+                "Failed to store loudness cache for '{}': {}",
+                track.file_path,
+                e
+            );
         }
     }
 }
@@ -519,7 +782,11 @@ fn analyze_track_loudness(
     }
 
     let integrated_lufs = meter.integrated_loudness();
-    let integrated_lufs = if integrated_lufs.is_finite() { integrated_lufs } else { -70.0 };
+    let integrated_lufs = if integrated_lufs.is_finite() {
+        integrated_lufs
+    } else {
+        -70.0
+    };
     let loudness_range = meter.loudness_range();
     let true_peak_linear = meter.true_peak().max(1e-10); // guard against 0.0 and negative
     let true_peak_dbtp = 20.0 * true_peak_linear.log10();
@@ -547,10 +814,7 @@ fn analyze_track_loudness(
     Ok(track_loudness)
 }
 
-async fn load(
-    data: web::Data<Arc<AppState>>,
-    body: web::Json<LoadRequest>,
-) -> HttpResponse {
+async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> HttpResponse {
     let path = match validate_path(&body.path) {
         Ok(p) => p,
         Err(e) => return HttpResponse::BadRequest().json(ApiResponse::error(&e)),
@@ -575,7 +839,11 @@ async fn load(
                     .app_db
                     .finish_playback_session(session_id, "replaced", &snapshot)
                 {
-                    log::warn!("Failed to close replaced playback session {}: {}", session_id, e);
+                    log::warn!(
+                        "Failed to close replaced playback session {}: {}",
+                        session_id,
+                        e
+                    );
                 }
             }
 
@@ -619,7 +887,10 @@ async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
         Ok(()) => {
             let snapshot = build_runtime_snapshot(&player);
             if let Some(session_id) = *data.active_session_id.lock() {
-                if let Err(e) = data.app_db.update_playback_session(session_id, "playing", &snapshot) {
+                if let Err(e) = data
+                    .app_db
+                    .update_playback_session(session_id, "playing", &snapshot)
+                {
                     log::warn!("Failed to update playback session {}: {}", session_id, e);
                 }
                 if let Some(path) = player.shared_state().file_path.read().clone() {
@@ -632,6 +903,10 @@ async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
                     );
                 }
             }
+            player
+                .shared_state()
+                .event_flags
+                .fetch_or(crate::player::EVENT_PLAYBACK_STARTED, Ordering::Release);
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Playback started",
                 get_player_state(&player),
@@ -648,7 +923,10 @@ async fn pause(data: web::Data<Arc<AppState>>) -> HttpResponse {
         Ok(()) => {
             let snapshot = build_runtime_snapshot(&player);
             if let Some(session_id) = *data.active_session_id.lock() {
-                if let Err(e) = data.app_db.update_playback_session(session_id, "paused", &snapshot) {
+                if let Err(e) = data
+                    .app_db
+                    .update_playback_session(session_id, "paused", &snapshot)
+                {
                     log::warn!("Failed to update playback session {}: {}", session_id, e);
                 }
                 if let Some(path) = player.shared_state().file_path.read().clone() {
@@ -661,6 +939,10 @@ async fn pause(data: web::Data<Arc<AppState>>) -> HttpResponse {
                     );
                 }
             }
+            player
+                .shared_state()
+                .event_flags
+                .fetch_or(crate::player::EVENT_PLAYBACK_PAUSED, Ordering::Release);
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Playback paused",
                 get_player_state(&player),
@@ -677,9 +959,9 @@ async fn stop(data: web::Data<Arc<AppState>>) -> HttpResponse {
     let current_path = player.shared_state().file_path.read().clone();
     player.stop();
     if let Some(session_id) = data.active_session_id.lock().take() {
-        if let Err(e) = data
-            .app_db
-            .finish_playback_session(session_id, "stopped", &snapshot_before_stop)
+        if let Err(e) =
+            data.app_db
+                .finish_playback_session(session_id, "stopped", &snapshot_before_stop)
         {
             log::warn!("Failed to finish playback session {}: {}", session_id, e);
         }
@@ -694,22 +976,26 @@ async fn stop(data: web::Data<Arc<AppState>>) -> HttpResponse {
         }
     }
     sync_queue_snapshot(&data);
+    player
+        .shared_state()
+        .event_flags
+        .fetch_or(crate::player::EVENT_PLAYBACK_STOPPED, Ordering::Release);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Playback stopped",
         get_player_state(&player),
     ))
 }
 
-async fn seek(
-    data: web::Data<Arc<AppState>>,
-    body: web::Json<SeekRequest>,
-) -> HttpResponse {
+async fn seek(data: web::Data<Arc<AppState>>, body: web::Json<SeekRequest>) -> HttpResponse {
     let mut player = data.player.lock();
     match player.seek(body.position) {
         Ok(()) => {
             let snapshot = build_runtime_snapshot(&player);
             if let Some(session_id) = *data.active_session_id.lock() {
-                if let Err(e) = data.app_db.update_playback_session(session_id, "seeking", &snapshot) {
+                if let Err(e) = data
+                    .app_db
+                    .update_playback_session(session_id, "seeking", &snapshot)
+                {
                     log::warn!("Failed to update playback session {}: {}", session_id, e);
                 }
                 if let Some(path) = player.shared_state().file_path.read().clone() {
@@ -723,6 +1009,10 @@ async fn seek(
                     );
                 }
             }
+            player
+                .shared_state()
+                .event_flags
+                .fetch_or(crate::player::EVENT_PLAYBACK_SEEKED, Ordering::Release);
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Seek successful",
                 get_player_state(&player),
@@ -731,6 +1021,59 @@ async fn seek(
         Err(e) => HttpResponse::InternalServerError()
             .json(ApiResponse::error(&format!("Seek failed: {}", e))),
     }
+}
+
+async fn set_repeat_mode(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<PlaybackModeRequest>,
+) -> HttpResponse {
+    let mode = match RepeatMode::parse(&body.mode) {
+        Some(mode) => mode,
+        None => {
+            return HttpResponse::BadRequest().json(ApiResponse::error(
+                "Invalid repeat mode. Use: off, one, all",
+            ));
+        }
+    };
+
+    let player = data.player.lock();
+    player.set_repeat_mode(mode);
+    HttpResponse::Ok().json(ApiResponse::success_with_state(
+        "Repeat mode updated",
+        get_player_state(&player),
+    ))
+}
+
+async fn set_shuffle_mode(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<PlaybackModeRequest>,
+) -> HttpResponse {
+    let mode = match ShuffleMode::parse(&body.mode) {
+        Some(mode) => mode,
+        None => {
+            return HttpResponse::BadRequest()
+                .json(ApiResponse::error("Invalid shuffle mode. Use: off, on"));
+        }
+    };
+
+    let update_result = match mode {
+        ShuffleMode::Off => data.app_db.unshuffle_entries("active"),
+        ShuffleMode::On => data.app_db.shuffle_entries("active"),
+    };
+    if let Err(e) = update_result {
+        return HttpResponse::InternalServerError().json(ApiResponse::error(&e));
+    }
+
+    let player = data.player.lock();
+    player.set_shuffle_mode(mode);
+    drop(player);
+    emit_queue_updated(&data);
+
+    let player = data.player.lock();
+    HttpResponse::Ok().json(ApiResponse::success_with_state(
+        "Shuffle mode updated",
+        get_player_state(&player),
+    ))
 }
 
 async fn get_state(data: web::Data<Arc<AppState>>) -> HttpResponse {
@@ -777,8 +1120,15 @@ async fn set_volume(
     player.set_volume(body.volume as f64);
     let snapshot = build_runtime_snapshot(&player);
     if let Some(session_id) = *data.active_session_id.lock() {
-        if let Err(e) = data.app_db.update_playback_session(session_id, "active", &snapshot) {
-            log::warn!("Failed to persist volume update for session {}: {}", session_id, e);
+        if let Err(e) = data
+            .app_db
+            .update_playback_session(session_id, "active", &snapshot)
+        {
+            log::warn!(
+                "Failed to persist volume update for session {}: {}",
+                session_id,
+                e
+            );
         }
     }
     HttpResponse::Ok().json(ApiResponse::success_with_state(
@@ -787,10 +1137,7 @@ async fn set_volume(
     ))
 }
 
-async fn list_devices(
-    data: web::Data<Arc<AppState>>,
-    _req: HttpRequest,
-) -> HttpResponse {
+async fn list_devices(data: web::Data<Arc<AppState>>, _req: HttpRequest) -> HttpResponse {
     let player = data.player.lock();
     let devices = player.list_devices();
 
@@ -826,9 +1173,9 @@ async fn configure_output(
             .store(exclusive, std::sync::atomic::Ordering::Relaxed);
     }
 
-    if let Err(e) = data
-        .app_db
-        .upsert_device_config("active_output", body.device_id, player.exclusive_mode)
+    if let Err(e) =
+        data.app_db
+            .upsert_device_config("active_output", body.device_id, player.exclusive_mode)
     {
         log::warn!("Failed to persist output config: {}", e);
     }
@@ -848,8 +1195,9 @@ async fn configure_upsampling(
 
     if let Some(sr) = body.target_samplerate {
         if sr == 0 {
-            return HttpResponse::BadRequest()
-                .json(ApiResponse::error("Sample rate cannot be 0. Use null to disable upsampling."));
+            return HttpResponse::BadRequest().json(ApiResponse::error(
+                "Sample rate cannot be 0. Use null to disable upsampling.",
+            ));
         }
         if sr < MIN_SAMPLE_RATE {
             return HttpResponse::BadRequest().json(ApiResponse::error(&format!(
@@ -896,8 +1244,9 @@ async fn configure_resampling(
             "hq" | "high" => crate::config::ResampleQuality::High,
             "uhq" | "ultrahigh" => crate::config::ResampleQuality::UltraHigh,
             _ => {
-                return HttpResponse::BadRequest()
-                    .json(ApiResponse::error("Invalid quality. Use: low, std, hq, uhq"));
+                return HttpResponse::BadRequest().json(ApiResponse::error(
+                    "Invalid quality. Use: low, std, hq, uhq",
+                ));
             }
         };
         player.set_resample_quality(quality);
@@ -1029,10 +1378,10 @@ async fn scan_track_loudness(
         Ok(track_loudness) => {
             try_store_loudness(&data, &track_loudness);
             HttpResponse::Ok().json(serde_json::json!({
-            "status": "success",
-            "source": "fresh",
-            "track_loudness": track_loudness_to_json(&track_loudness)
-        }))
+                "status": "success",
+                "source": "fresh",
+                "track_loudness": track_loudness_to_json(&track_loudness)
+            }))
         }
         Err(e) => analysis_error_response(&e),
     }
@@ -1065,10 +1414,7 @@ async fn scan_loudness_background(
         result: None,
         error: None,
     };
-    data.scan_tasks.lock().insert(
-        task_id,
-        initial_task.clone(),
-    );
+    data.scan_tasks.lock().insert(task_id, initial_task.clone());
     upsert_scan_task_record(&data, task_id, &path, &initial_task, store);
 
     let data_for_task = data.clone();
@@ -1094,7 +1440,13 @@ async fn scan_loudness_background(
                     task.result = Some(track_loudness_to_json(&track_loudness));
                     task.updated_at_epoch_secs = now_epoch_secs();
                     let snapshot = task.clone();
-                    upsert_scan_task_record(&data_for_task, task_id, &path_for_task, &snapshot, store);
+                    upsert_scan_task_record(
+                        &data_for_task,
+                        task_id,
+                        &path_for_task,
+                        &snapshot,
+                        store,
+                    );
                 }
             }
             return;
@@ -1117,7 +1469,13 @@ async fn scan_loudness_background(
                         task.result = Some(track_loudness_to_json(&track_loudness));
                         task.updated_at_epoch_secs = now_epoch_secs();
                         let snapshot = task.clone();
-                        upsert_scan_task_record(&data_for_task, task_id, &path_for_task, &snapshot, store);
+                        upsert_scan_task_record(
+                            &data_for_task,
+                            task_id,
+                            &path_for_task,
+                            &snapshot,
+                            store,
+                        );
                     }
                 }
             }
@@ -1128,7 +1486,13 @@ async fn scan_loudness_background(
                         task.error = Some(e);
                         task.updated_at_epoch_secs = now_epoch_secs();
                         let snapshot = task.clone();
-                        upsert_scan_task_record(&data_for_task, task_id, &path_for_task, &snapshot, store);
+                        upsert_scan_task_record(
+                            &data_for_task,
+                            task_id,
+                            &path_for_task,
+                            &snapshot,
+                            store,
+                        );
                     }
                 }
             }
@@ -1225,9 +1589,12 @@ async fn queue_next(
     let player = data.player.lock();
     match player.queue_next_with_credentials(&path, credentials) {
         Ok(()) => {
-            let _ = data
-                .app_db
-                .mark_queue_entry_status_by_path("active", &path, &["queued"], "preloading");
+            let _ = data.app_db.mark_queue_entry_status_by_path(
+                "active",
+                &path,
+                &["queued"],
+                "preloading",
+            );
             let payload = serde_json::json!({
                 "queued_path": path,
                 "has_credentials_override": body.username.is_some() && body.password.is_some()
@@ -1260,7 +1627,9 @@ async fn play_from_persistent_queue(
             if let Some(entry_id) = body.entry_id {
                 entries.into_iter().find(|entry| entry.entry_id == entry_id)
             } else {
-                entries.into_iter().find(|entry| entry.status == "queued" || entry.status == "preloading")
+                entries
+                    .into_iter()
+                    .find(|entry| entry.status == "queued" || entry.status == "preloading")
             }
         }
         Err(e) => return HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
@@ -1270,25 +1639,18 @@ async fn play_from_persistent_queue(
         return HttpResponse::NotFound().json(ApiResponse::error("Queue entry not found"));
     };
 
-    let credentials = {
-        let cfg = data.webdav_config.lock();
-        cfg.http_credentials()
-    };
-
-    let mut player = data.player.lock();
-    match player.load_with_credentials(&entry.source_path, credentials.as_ref()) {
+    match load_queue_entry_for_playback(&data, entry, true) {
         Ok(()) => {
-            let _ = data
-                .app_db
-                .mark_queue_entry_status("active", entry.entry_id, "playing");
-            sync_queue_snapshot(&data);
-            emit_queue_updated(&data);
+            let player = data.player.lock();
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Queue playback started",
                 get_player_state(&player),
             ))
         }
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&format!("Failed to play queue entry: {}", e))),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&format!(
+            "Failed to play queue entry: {}",
+            e
+        ))),
     }
 }
 
@@ -1297,10 +1659,44 @@ async fn cancel_preload(data: web::Data<Arc<AppState>>) -> HttpResponse {
     HttpResponse::Ok().json(ApiResponse::success("Preload cancelled"))
 }
 
-async fn load_ir(
+async fn load_playlist(
     data: web::Data<Arc<AppState>>,
-    body: web::Json<LoadIrRequest>,
+    body: web::Json<PlaylistLoadRequest>,
 ) -> HttpResponse {
+    let result = match playlist::load_playlist(&body.path, validate_path) {
+        Ok(result) => result,
+        Err(e) => return HttpResponse::BadRequest().json(ApiResponse::error(&e)),
+    };
+
+    let paths: Vec<String> = result
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect();
+
+    let update_result = match body.mode {
+        PlaylistLoadMode::ParseOnly => Ok(()),
+        PlaylistLoadMode::Append => data.app_db.append_queue_entries("active", &paths),
+        PlaylistLoadMode::Replace => data.app_db.replace_queue_entries("active", &paths),
+    };
+
+    match update_result {
+        Ok(()) => {
+            if !matches!(body.mode, PlaylistLoadMode::ParseOnly) {
+                emit_queue_updated(&data);
+            }
+            HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "tracks": result.entries,
+                "count": paths.len(),
+                "rejected": result.rejected
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
+    }
+}
+
+async fn load_ir(data: web::Data<Arc<AppState>>, body: web::Json<LoadIrRequest>) -> HttpResponse {
     let path = match validate_path(&body.path) {
         Ok(p) => p,
         Err(e) => return HttpResponse::BadRequest().json(ApiResponse::error(&e)),
@@ -1469,17 +1865,20 @@ async fn scan_library_root(
             .map(|value| value.to_string())
             .unwrap_or_else(|| path.clone())
     });
-    let source_kind = if is_remote {
-        "webdav"
-    } else {
-        "local"
-    };
-    let source_key = body.source_key.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let source_kind = if is_remote { "webdav" } else { "local" };
+    let source_key = body
+        .source_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
-    let root_id = match data
-        .app_db
-        .upsert_library_root(source_key, &path, source_kind, &display_name, "scanning")
-    {
+    let root_id = match data.app_db.upsert_library_root(
+        source_key,
+        &path,
+        source_kind,
+        &display_name,
+        "scanning",
+    ) {
         Ok(value) => value,
         Err(e) => return HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     };

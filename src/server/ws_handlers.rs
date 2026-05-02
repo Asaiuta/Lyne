@@ -7,12 +7,20 @@ use tokio::sync::oneshot;
 use tokio::time::interval;
 
 use crate::player::{
-    EVENT_LOAD_COMPLETE, EVENT_QUEUE_UPDATED, EVENT_TRACK_CHANGED,
-    EVENT_PLAYBACK_ENDED, EVENT_NEEDS_PRELOAD_RESET,
+    EVENT_LOAD_COMPLETE, EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_ENDED, EVENT_PLAYBACK_PAUSED,
+    EVENT_PLAYBACK_SEEKED, EVENT_PLAYBACK_STARTED, EVENT_PLAYBACK_STOPPED, EVENT_QUEUE_UPDATED,
+    EVENT_TRACK_CHANGED,
 };
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/ws", web::get().to(websocket));
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 async fn websocket(
@@ -53,6 +61,7 @@ async fn websocket(
         let mut idle_ticks: u32 = 0;
         let mut last_load_progress: u64 = 0;
         let mut last_preload_sent = false;
+        let mut position_ticks: u32 = 0;
 
         loop {
             tokio::select! {
@@ -148,10 +157,18 @@ async fn websocket(
                             }
                         }
                         let file_path = shared_state.current_track_path.read().clone();
+                        let metadata = shared_state.track_metadata.read().clone();
+                        let media_id = file_path
+                            .as_deref()
+                            .map(crate::app_database::media_id_for_path);
                         let msg = serde_json::json!({
                             "type": "track_changed",
                             "file_path": file_path,
                             "duration": shared_state.duration_secs(),
+                            "media_id": media_id,
+                            "title": metadata.title,
+                            "artist": metadata.artist,
+                            "album": metadata.album,
                         });
                         if session.text(msg.to_string()).await.is_err() {
                             break;
@@ -176,8 +193,54 @@ async fn websocket(
                     }
 
                     if events & EVENT_PLAYBACK_ENDED != 0 {
+                        let position = shared_state.current_time_secs();
                         let msg = serde_json::json!({
                             "type": "playback_ended",
+                            "position": position,
+                        });
+                        if session.text(msg.to_string()).await.is_err() {
+                            break;
+                        }
+                    }
+
+                    if events & EVENT_PLAYBACK_STARTED != 0 {
+                        let msg = serde_json::json!({
+                            "type": "play",
+                            "position": shared_state.current_time_secs(),
+                            "timestamp": now_millis(),
+                        });
+                        if session.text(msg.to_string()).await.is_err() {
+                            break;
+                        }
+                    }
+
+                    if events & EVENT_PLAYBACK_PAUSED != 0 {
+                        let msg = serde_json::json!({
+                            "type": "pause",
+                            "position": shared_state.current_time_secs(),
+                            "timestamp": now_millis(),
+                        });
+                        if session.text(msg.to_string()).await.is_err() {
+                            break;
+                        }
+                    }
+
+                    if events & EVENT_PLAYBACK_STOPPED != 0 {
+                        let msg = serde_json::json!({
+                            "type": "stop",
+                            "position": shared_state.current_time_secs(),
+                            "timestamp": now_millis(),
+                        });
+                        if session.text(msg.to_string()).await.is_err() {
+                            break;
+                        }
+                    }
+
+                    if events & EVENT_PLAYBACK_SEEKED != 0 {
+                        let msg = serde_json::json!({
+                            "type": "seek",
+                            "position": shared_state.current_time_secs(),
+                            "timestamp": now_millis(),
                         });
                         if session.text(msg.to_string()).await.is_err() {
                             break;
@@ -231,6 +294,23 @@ async fn websocket(
                     }
                     if !needs_preload_now && last_preload_sent {
                         last_preload_sent = false;
+                    }
+
+                    if is_playing {
+                        position_ticks = position_ticks.saturating_add(1);
+                        if position_ticks >= 20 {
+                            position_ticks = 0;
+                            let msg = serde_json::json!({
+                                "type": "position",
+                                "position": shared_state.current_time_secs(),
+                                "timestamp": now_millis(),
+                            });
+                            if session.text(msg.to_string()).await.is_err() {
+                                break;
+                            }
+                        }
+                    } else {
+                        position_ticks = 0;
                     }
 
                     let spectrum = shared_state.spectrum_data.lock().clone();

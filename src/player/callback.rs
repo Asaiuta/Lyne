@@ -4,21 +4,20 @@
 //! All parameter updates use atomic operations, eliminating lock contention
 //! between the audio thread and main thread.
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use crossbeam::channel::Sender;
 use arc_swap::ArcSwapOption;
+use crossbeam::channel::Sender;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
-use super::state::{SharedState, PlayerState,
-    EVENT_TRACK_CHANGED, EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_ENDED};
+use super::state::{
+    PlayerState, SharedState, EVENT_NEEDS_PRELOAD_RESET, EVENT_TRACK_CHANGED, EVENT_TRACK_EOF,
+};
 use crate::processor::{
-    DspChain, StreamingResampler, AtomicLoudnessState,
-    AtomicEqParams, AtomicSaturationParams, AtomicCrossfeedParams,
-    AtomicPeakLimiterParams, AtomicVolumeParams, AtomicNoiseShaperParams,
-    AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
-    FFTConvolver,
-    EqProcessor, SaturationProcessor, CrossfeedProcessor,
-    PeakLimiterProcessor, VolumeProcessor, NoiseShaperProcessor, DynamicLoudnessProcessor,
+    AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
+    AtomicEqParams, AtomicLoudnessState, AtomicNoiseShaperParams, AtomicPeakLimiterParams,
+    AtomicSaturationParams, AtomicVolumeParams, CrossfeedProcessor, DspChain,
+    DynamicLoudnessProcessor, EqProcessor, FFTConvolver, NoiseShaperProcessor,
+    PeakLimiterProcessor, SaturationProcessor, StreamingResampler, VolumeProcessor,
 };
 
 // ============================================================================
@@ -53,7 +52,11 @@ pub fn normalize_channels(samples: Vec<f64>, from: usize, to: usize) -> Vec<f64>
         let mut out = Vec::with_capacity(frames * to);
         for i in 0..frames {
             for ch in 0..to {
-                out.push(if ch < from { samples[i * from + ch] } else { 0.0 });
+                out.push(if ch < from {
+                    samples[i * from + ch]
+                } else {
+                    0.0
+                });
             }
         }
         out
@@ -127,7 +130,11 @@ impl LockfreeDspContext {
         chain.add(EqProcessor::new(channels, sample_rate, eq_params));
         chain.add(SaturationProcessor::new(saturation_params));
         chain.add(CrossfeedProcessor::new(sample_rate, crossfeed_params));
-        chain.add(PeakLimiterProcessor::new(channels, sample_rate as u32, limiter_params));
+        chain.add(PeakLimiterProcessor::new(
+            channels,
+            sample_rate as u32,
+            limiter_params,
+        ));
         chain.add(VolumeProcessor::new(volume_params));
         chain.add(DynamicLoudnessProcessor::new(
             channels,
@@ -222,7 +229,11 @@ impl LockfreeDspContext {
     }
 
     /// Load/update external IR convolver (non-realtime path)
-    pub fn set_external_ir_convolver(&self, ir_data: &[f64], channels: usize) -> Result<(), String> {
+    pub fn set_external_ir_convolver(
+        &self,
+        ir_data: &[f64],
+        channels: usize,
+    ) -> Result<(), String> {
         if ir_data.is_empty() {
             return Err("IR data is empty".to_string());
         }
@@ -370,9 +381,11 @@ pub fn audio_callback_lockfree(
     // H-channel fix: Rebuild DspChain when channel count changes (or sample rate).
     // The LoadComplete handler sets dsp_needs_rebuild=true; we rebuild here
     // because dsp_chain is exclusively owned by this callback closure.
-    if shared.dsp_needs_rebuild.compare_exchange(
-        true, false, Ordering::AcqRel, Ordering::Acquire
-    ).is_ok() {
+    if shared
+        .dsp_needs_rebuild
+        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
         if let Some(new_chain) = shared.pending_dsp_chain.pop() {
             *dsp_chain = new_chain;
         } else {
@@ -461,12 +474,15 @@ pub fn audio_callback_lockfree(
         }
 
         data.fill(0.0);
-        // P0 fix: use atomic store instead of try_write() to guarantee state update
-        // and event delivery. Previously try_write() could fail if the RwLock was held,
-        // silently dropping EVENT_PLAYBACK_ENDED.
+        // P0 fix: use atomic store instead of try_write() to guarantee state update.
+        // EOF is signaled through a dedicated counter so WebSocket event consumers
+        // cannot steal the backend supervisor's notification.
         if shared.state.load() == PlayerState::Playing {
             shared.state.store(PlayerState::Stopped);
-            shared.event_flags.fetch_or(EVENT_PLAYBACK_ENDED, Ordering::Release);
+            shared.playback_end_count.fetch_add(1, Ordering::AcqRel);
+            shared
+                .event_flags
+                .fetch_or(EVENT_TRACK_EOF, Ordering::Release);
         }
         return;
     }
@@ -480,7 +496,10 @@ pub fn audio_callback_lockfree(
         let take = available.min(output_len);
         let start = *resample_leftover_pos;
         let end = start + take;
-        for (dst, src) in data[..take].iter_mut().zip(resample_leftover[start..end].iter()) {
+        for (dst, src) in data[..take]
+            .iter_mut()
+            .zip(resample_leftover[start..end].iter())
+        {
             *dst = *src as f32;
         }
         *resample_leftover_pos += take;
@@ -494,7 +513,9 @@ pub fn audio_callback_lockfree(
     // Generate new samples
     while samples_written < output_len {
         let frames_needed_out = (output_len - samples_written) / channels;
-        if frames_needed_out == 0 { break; }
+        if frames_needed_out == 0 {
+            break;
+        }
 
         let mut source_frames_needed = frames_needed_out;
         if resampler.is_some() {
@@ -502,12 +523,17 @@ pub fn audio_callback_lockfree(
         }
 
         let available_source = total.saturating_sub(current_pos);
-        if available_source == 0 { break; }
+        if available_source == 0 {
+            break;
+        }
 
         // Clamp frames_to_read to pre-allocated buffer capacity to prevent
         // heap allocation inside the audio callback (P0-3 fix)
         let max_frames_from_capacity = process_buf.capacity() / channels;
-        let frames_to_read = source_frames_needed.min(available_source).min(4096).min(max_frames_from_capacity);
+        let frames_to_read = source_frames_needed
+            .min(available_source)
+            .min(4096)
+            .min(max_frames_from_capacity);
         let start_sample = current_pos * channels;
         let end_sample = start_sample + frames_to_read * channels;
 
@@ -518,13 +544,15 @@ pub fn audio_callback_lockfree(
                 process_buf.extend_from_slice(&buf[start_sample..end_sample]);
             }
         }
-        
+
         if process_buf.is_empty() {
             continue;
         }
 
         current_pos += frames_to_read;
-        shared.position_frames.store(current_pos as u64, Ordering::Relaxed);
+        shared
+            .position_frames
+            .store(current_pos as u64, Ordering::Relaxed);
 
         // ===== DSP Chain Processing (LOCK-FREE) =====
         // Apply loudness normalization (atomic, no lock)
@@ -558,7 +586,7 @@ pub fn audio_callback_lockfree(
             }
             let frames_written = rs.process_chunk_into(process_buf, resample_output);
             let samples_resampled = frames_written * channels;
-            
+
             let mut chunk_idx = 0;
             while samples_written < output_len && chunk_idx < samples_resampled {
                 data[samples_written] = resample_output[chunk_idx] as f32;

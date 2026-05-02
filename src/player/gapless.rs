@@ -3,13 +3,13 @@
 //! Provides seamless track transitions by preloading the next track
 //! and swapping buffers at the sample boundary.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 
-use super::state::SharedState;
 use super::callback::normalize_channels;
-use crate::config::AppConfig;
+use super::state::SharedState;
+use crate::config::EngineSettings;
 use crate::config::NormalizationMode;
 use crate::decoder::StreamingDecoder;
 use crate::processor::StreamingResampler;
@@ -26,7 +26,7 @@ impl GaplessManager {
     pub fn queue_next(
         shared: &Arc<SharedState>,
         loudness_normalizer: &Arc<parking_lot::Mutex<crate::processor::LoudnessNormalizer>>,
-        config: &AppConfig,
+        config: &EngineSettings,
         path: &str,
         credentials: Option<crate::decoder::HttpCredentials>,
         loudness_enabled: bool,
@@ -49,14 +49,14 @@ impl GaplessManager {
         let target_channels = shared.channels.load(Ordering::Relaxed) as usize;
         let target_channels = target_channels.max(1);
 
-            // Clear needs_preload flag BEFORE spawning thread to prevent repeated WebSocket events
+        // Clear needs_preload flag BEFORE spawning thread to prevent repeated WebSocket events
         shared.needs_preload.store(false, Ordering::Release);
-        
+
         // Reset cancel signal before starting new preload (Defect 31 fix)
         shared.cancel_preload_signal.store(false, Ordering::Release);
 
         let shared_for_error = Arc::clone(shared);
-        
+
         // Spawn background thread for decoding
         thread::spawn(move || {
             log::info!("Gapless preload started: {}", path);
@@ -78,27 +78,41 @@ impl GaplessManager {
                 Ok((samples, sr, channels, metadata)) => {
                     // Check for cancellation after decode (Defect 31 fix)
                     if shared_clone.cancel_preload_signal.load(Ordering::Acquire) {
-                        log::info!("Gapless preload cancelled after decode, discarding: {}", path);
+                        log::info!(
+                            "Gapless preload cancelled after decode, discarding: {}",
+                            path
+                        );
                         return;
                     }
-                    
+
                     let total_frames = samples.len() / channels;
 
                     // Analyze loudness (before move) - FIX for Defect 22 and Bug-4:
                     // Use calculate_gain_with_mode() to respect ReplayGain mode.
                     // Store in pending_target_gain_db for application after buffer swap.
                     if loudness_enabled {
-                        let pending_gain_db = loudness_normalizer_clone.lock()
+                        let pending_gain_db = loudness_normalizer_clone
+                            .lock()
                             .calculate_gain_with_mode(&samples, mode_for_thread, &metadata);
-                        shared_clone.pending_target_gain_db.store(pending_gain_db.to_bits(), Ordering::Relaxed);
+                        shared_clone
+                            .pending_target_gain_db
+                            .store(pending_gain_db.to_bits(), Ordering::Relaxed);
                     } else {
-                        shared_clone.pending_target_gain_db.store(0.0_f64.to_bits(), Ordering::Relaxed);
+                        shared_clone
+                            .pending_target_gain_db
+                            .store(0.0_f64.to_bits(), Ordering::Relaxed);
                     }
 
                     // Store pending metadata
-                    shared_clone.pending_total_frames.store(total_frames as u64, Ordering::Relaxed);
-                    shared_clone.pending_sample_rate.store(sr as u64, Ordering::Relaxed);
-                    shared_clone.pending_channels.store(channels as u64, Ordering::Relaxed);
+                    shared_clone
+                        .pending_total_frames
+                        .store(total_frames as u64, Ordering::Relaxed);
+                    shared_clone
+                        .pending_sample_rate
+                        .store(sr as u64, Ordering::Relaxed);
+                    shared_clone
+                        .pending_channels
+                        .store(channels as u64, Ordering::Relaxed);
                     *shared_clone.pending_file_path.write() = Some(path.clone());
                     *shared_clone.pending_metadata.write() = Some(metadata);
 
@@ -107,14 +121,20 @@ impl GaplessManager {
 
                     // Signal ready (Release ordering ensures buffer is visible)
                     shared_clone.pending_ready.store(true, Ordering::Release);
-                    log::info!("Gapless preload complete: {} frames @ {} Hz", total_frames, sr);
+                    log::info!(
+                        "Gapless preload complete: {} frames @ {} Hz",
+                        total_frames,
+                        sr
+                    );
                 }
                 Err(e) => {
                     // Don't restore needs_preload if we were cancelled
                     if !shared_clone.cancel_preload_signal.load(Ordering::Acquire) {
                         log::error!("Gapless preload failed: {}", e);
                         // Restore needs_preload so frontend can retry
-                        shared_for_error.needs_preload.store(true, Ordering::Release);
+                        shared_for_error
+                            .needs_preload
+                            .store(true, Ordering::Release);
                     } else {
                         log::info!("Gapless preload cancelled with error: {}", e);
                     }
@@ -148,16 +168,16 @@ fn decode_to_buffer_with_cancel(
     target_sr: u32,
     target_channels: usize,
     credentials: Option<&crate::decoder::HttpCredentials>,
-    config: &AppConfig,
+    config: &EngineSettings,
     cancel_signal: &std::sync::atomic::AtomicBool,
 ) -> Result<(Vec<f64>, u32, usize, crate::decoder::TrackMetadata), String> {
-    let mut decoder = StreamingDecoder::open_with_credentials(path, credentials)
-        .map_err(|e| e.to_string())?;
+    let mut decoder =
+        StreamingDecoder::open_with_credentials(path, credentials).map_err(|e| e.to_string())?;
 
     let original_sr = decoder.info.sample_rate;
     let decoded_channels = decoder.info.channels;
     let need_resample = target_sr != original_sr;
-    
+
     // Extract metadata before decoding
     let metadata = decoder.info.metadata.clone();
 
@@ -170,8 +190,15 @@ fn decode_to_buffer_with_cancel(
 
     let mut samples: Vec<f64> = Vec::with_capacity(estimated_output_frames * decoded_channels);
     let mut resampler = if need_resample {
-        Some(StreamingResampler::with_phase(decoded_channels, original_sr, target_sr, config.phase_response)
-            .map_err(|e| format!("Failed to create gapless resampler: {}", e))?)
+        Some(
+            StreamingResampler::with_phase(
+                decoded_channels,
+                original_sr,
+                target_sr,
+                config.phase_response,
+            )
+            .map_err(|e| format!("Failed to create gapless resampler: {}", e))?,
+        )
     } else {
         None
     };
@@ -181,7 +208,7 @@ fn decode_to_buffer_with_cancel(
         if cancel_signal.load(Ordering::Acquire) {
             return Err("Preload cancelled".to_string());
         }
-        
+
         if let Some(ref mut rs) = resampler {
             samples.extend(rs.process_chunk(&chunk));
         } else {
@@ -195,7 +222,11 @@ fn decode_to_buffer_with_cancel(
 
     // Channel normalization
     let samples = if decoded_channels != target_channels {
-        log::info!("Gapless: Channel normalize {} -> {}", decoded_channels, target_channels);
+        log::info!(
+            "Gapless: Channel normalize {} -> {}",
+            decoded_channels,
+            target_channels
+        );
         normalize_channels(samples, decoded_channels, target_channels)
     } else {
         samples

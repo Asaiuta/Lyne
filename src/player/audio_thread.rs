@@ -2,12 +2,12 @@
 //!
 //! Contains the main audio thread that handles commands and manages playback.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
-use crossbeam::channel::{Receiver, Sender};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Stream, StreamConfig};
+use crossbeam::channel::{Receiver, Sender};
 
 #[cfg(debug_assertions)]
 use assert_no_alloc::assert_no_alloc;
@@ -17,8 +17,8 @@ use super::state::{AudioCommand, PlayerState, SharedState};
 use crate::config::PhaseResponse;
 use crate::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
-    AtomicEqParams, AtomicLoudnessState, AtomicPeakLimiterParams, AtomicSaturationParams,
-    AtomicVolumeParams, AtomicNoiseShaperParams, StreamingResampler,
+    AtomicEqParams, AtomicLoudnessState, AtomicNoiseShaperParams, AtomicPeakLimiterParams,
+    AtomicSaturationParams, AtomicVolumeParams, StreamingResampler,
 };
 
 #[cfg(windows)]
@@ -162,7 +162,12 @@ pub fn audio_thread_main(
                         for config in &configs {
                             let min_rate = config.min_sample_rate().0;
                             let max_rate = config.max_sample_rate().0;
-                            log::debug!("  Config: {} ch, {}-{} Hz", config.channels(), min_rate, max_rate);
+                            log::debug!(
+                                "  Config: {} ch, {}-{} Hz",
+                                config.channels(),
+                                min_rate,
+                                max_rate
+                            );
 
                             if config.channels() == channels {
                                 if max_rate > max_supported_rate {
@@ -178,7 +183,9 @@ pub fn audio_thread_main(
 
                                 if best_rate.is_none() {
                                     for multiplier in [2u32, 4u32] {
-                                        if let Some(candidate) = requested_sample_rate.checked_mul(multiplier) {
+                                        if let Some(candidate) =
+                                            requested_sample_rate.checked_mul(multiplier)
+                                        {
                                             if candidate >= min_rate
                                                 && candidate <= max_rate
                                                 && candidate <= MAX_DAC_RATE
@@ -355,7 +362,9 @@ pub fn audio_thread_main(
                             Err(_) => noise_shaper_bits.max(16),
                         };
 
-                        shared_state.output_bits.store(detected_bits, Ordering::Relaxed);
+                        shared_state
+                            .output_bits
+                            .store(detected_bits, Ordering::Relaxed);
                         log::info!(
                             "Stream started successfully at {} Hz, {}-bit output",
                             actual_sample_rate,
@@ -363,7 +372,10 @@ pub fn audio_thread_main(
                         );
                     }
                     Err(e) => {
-                        log::error!("Failed to build stream: {}. Trying device default config...", e);
+                        log::error!(
+                            "Failed to build stream: {}. Trying device default config...",
+                            e
+                        );
 
                         if let Ok(default_config) = device.default_output_config() {
                             let fallback_config: StreamConfig = default_config.clone().into();
@@ -407,12 +419,16 @@ pub fn audio_thread_main(
                             let mut fb_dsp_chain = fallback_chain;
                             let mut process_buffer = Vec::with_capacity(8192 * fallback_channels);
                             process_buffer.resize(8192 * fallback_channels, 0.0);
-                            let mut fallback_resample_leftover = Vec::with_capacity(16384 * fallback_channels);
+                            let mut fallback_resample_leftover =
+                                Vec::with_capacity(16384 * fallback_channels);
                             let mut fallback_resample_leftover_pos = 0usize;
                             let mut fallback_resample_output =
                                 Vec::with_capacity(16384 * fallback_channels);
-                            let mut fallback_owned_convolver: Option<crate::processor::FFTConvolver> = None;
-                            let mut fallback_convolver_output = Vec::with_capacity(8192 * fallback_channels);
+                            let mut fallback_owned_convolver: Option<
+                                crate::processor::FFTConvolver,
+                            > = None;
+                            let mut fallback_convolver_output =
+                                Vec::with_capacity(8192 * fallback_channels);
 
                             match device.build_output_stream(
                                 &fallback_config,
@@ -472,7 +488,9 @@ pub fn audio_thread_main(
                                         },
                                         Err(_) => noise_shaper_bits.max(16),
                                     };
-                                    shared_state.output_bits.store(detected_bits, Ordering::Relaxed);
+                                    shared_state
+                                        .output_bits
+                                        .store(detected_bits, Ordering::Relaxed);
 
                                     log::info!(
                                         "Stream started with device default config, {}-bit output",
@@ -504,7 +522,9 @@ pub fn audio_thread_main(
                 let sr = shared_state.sample_rate.load(Ordering::Relaxed) as f64;
                 let total = shared_state.total_frames.load(Ordering::Relaxed);
                 let new_pos = ((time * sr) as u64).min(total);
-                shared_state.position_frames.store(new_pos, Ordering::Relaxed);
+                shared_state
+                    .position_frames
+                    .store(new_pos, Ordering::Relaxed);
             }
             Ok(AudioCommand::Stop) => {
                 stream = None;
@@ -586,7 +606,9 @@ pub fn audio_thread_main(
                 // H-channel fix: Signal the callback to rebuild DspChain if channels changed.
                 // The dsp_needs_rebuild flag tells the callback to create a fresh chain
                 // with the correct channel count on its next invocation.
-                shared_state.dsp_needs_rebuild.store(true, Ordering::Release);
+                shared_state
+                    .dsp_needs_rebuild
+                    .store(true, Ordering::Release);
 
                 loudness_state.set_smoothing(200.0, sr_u32);
 
@@ -635,7 +657,9 @@ pub fn audio_thread_main(
                                 peak
                             );
                         } else {
-                            log::warn!("No ReplayGain track gain found, falling back to EBU R128 analysis");
+                            log::warn!(
+                                "No ReplayGain track gain found, falling back to EBU R128 analysis"
+                            );
                             let mut meter = crate::processor::LoudnessMeter::new(channels, sr_u32);
                             meter.process(&samples_arc);
                             let loudness = meter.integrated_loudness();
@@ -671,7 +695,9 @@ pub fn audio_thread_main(
                                 peak
                             );
                         } else {
-                            log::warn!("No ReplayGain gain found, falling back to EBU R128 analysis");
+                            log::warn!(
+                                "No ReplayGain gain found, falling back to EBU R128 analysis"
+                            );
                             let mut meter = crate::processor::LoudnessMeter::new(channels, sr_u32);
                             meter.process(&samples_arc);
                             let loudness = meter.integrated_loudness();
@@ -820,12 +846,17 @@ fn handle_wasapi_exclusive(
                             let sr = shared_state.sample_rate.load(Ordering::Relaxed) as f64;
                             let frame = (time * sr) as u64;
                             let total = shared_state.total_frames.load(Ordering::Relaxed);
-                            shared_state.position_frames.store(frame.min(total), Ordering::Relaxed);
+                            shared_state
+                                .position_frames
+                                .store(frame.min(total), Ordering::Relaxed);
                             let _ = wasapi_player.seek(frame);
                         }
                         AudioCommand::SetExternalIrConvolver { ir_data, channels } => {
                             if let Err(e) = dsp_ctx.set_external_ir_convolver(&ir_data, channels) {
-                                log::error!("Failed to set external IR convolver in WASAPI path: {}", e);
+                                log::error!(
+                                    "Failed to set external IR convolver in WASAPI path: {}",
+                                    e
+                                );
                             }
                         }
                         AudioCommand::ClearExternalIrConvolver => {
@@ -869,7 +900,10 @@ fn handle_wasapi_exclusive(
             true
         }
         Err(e) => {
-            log::error!("Failed to create WASAPI player: {}. Falling back to cpal.", e);
+            log::error!(
+                "Failed to create WASAPI player: {}. Falling back to cpal.",
+                e
+            );
             false
         }
     }

@@ -3,44 +3,54 @@
 //! Native audio playback using cpal with lock-free DSP processing.
 //! Uses f64 full-stack path for maximum transparency.
 
-mod state;
-mod gapless;
-mod callback;
 mod audio_thread;
+mod callback;
+mod gapless;
 mod spectrum;
+mod state;
 
 // Re-exports
-pub use state::{AudioCommand, PlayerState, AtomicPlayerState, SharedState, AudioDeviceInfo,
-    EVENT_LOAD_COMPLETE, EVENT_LOAD_ERROR, EVENT_TRACK_CHANGED,
-    EVENT_PLAYBACK_ENDED, EVENT_NEEDS_PRELOAD, EVENT_NEEDS_PRELOAD_RESET, EVENT_QUEUE_UPDATED};
+pub use callback::{audio_callback_lockfree, normalize_channels, LockfreeDspContext};
 pub use gapless::GaplessManager;
-pub use callback::{LockfreeDspContext, audio_callback_lockfree, normalize_channels};
+pub use state::{
+    AtomicPlayerState, AudioCommand, AudioDeviceInfo, PlayerState, RepeatMode, SharedState,
+    ShuffleMode, EVENT_LOAD_COMPLETE, EVENT_LOAD_ERROR, EVENT_NEEDS_PRELOAD,
+    EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_ENDED, EVENT_PLAYBACK_PAUSED, EVENT_PLAYBACK_SEEKED,
+    EVENT_PLAYBACK_STARTED, EVENT_PLAYBACK_STOPPED, EVENT_QUEUE_UPDATED, EVENT_TRACK_CHANGED,
+    EVENT_TRACK_EOF,
+};
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::path::PathBuf;
 
+use cpal::traits::{DeviceTrait, HostTrait};
+use crossbeam::channel::{unbounded, Sender};
 use parking_lot::Mutex;
-use crossbeam::channel::{Sender, unbounded};
-use cpal::traits::{HostTrait, DeviceTrait};
 
-use crate::config::{AppConfig, ResampleQuality};
+use crate::config::{EngineSettings, ResampleQuality};
 use crate::processor::{
-    SpectrumAnalyzer,
-    LoudnessNormalizer, LoudnessInfo,
+    AtomicCrossfeedParams,
+    AtomicDynamicLoudnessParams,
+    AtomicDynamicLoudnessTelemetry,
     // Lock-free parameters
-    AtomicEqParams, AtomicSaturationParams, AtomicCrossfeedParams,
-    AtomicPeakLimiterParams, AtomicVolumeParams, AtomicNoiseShaperParams,
-    AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
+    AtomicEqParams,
+    AtomicNoiseShaperParams,
+    AtomicPeakLimiterParams,
+    AtomicSaturationParams,
+    AtomicVolumeParams,
+    FirPhaseMode,
+    LoudnessInfo,
+    LoudnessNormalizer,
     NoiseShaperCurve,
-    FirPhaseMode, STANDARD_BANDS,
+    SpectrumAnalyzer,
+    STANDARD_BANDS,
 };
 
 // Import internal modules
-use state::{save_cache_with_header, load_cache_with_header};
 use audio_thread::audio_thread_main;
 use spectrum::spectrum_thread_main;
+use state::{load_cache_with_header, save_cache_with_header};
 
 /// The main audio player - thread-safe wrapper
 pub struct AudioPlayer {
@@ -55,7 +65,6 @@ pub struct AudioPlayer {
     // Lock-free Parameter Structures
     // These allow main thread to set parameters without blocking audio thread
     // ═══════════════════════════════════════════════════════════════
-    
     /// Lock-free EQ parameters - use this for real-time EQ updates
     pub lockfree_eq_params: Arc<AtomicEqParams>,
     /// Lock-free saturation parameters
@@ -88,12 +97,12 @@ pub struct AudioPlayer {
     ir_loaded: bool,
     ir_path: Option<String>,
 
-    config: AppConfig,
+    config: EngineSettings,
     device_id: Option<usize>,
 }
 
 impl AudioPlayer {
-    pub fn new(config: AppConfig) -> Self {
+    pub fn new(config: EngineSettings) -> Self {
         log::info!("Initializing AudioPlayer (lock-free mode)...");
         let shared_state = Arc::new(SharedState::new());
         let (cmd_tx, cmd_rx) = unbounded::<AudioCommand>();
@@ -139,17 +148,23 @@ impl AudioPlayer {
             lockfree_saturation_params.set_enabled(config.saturation.enabled);
         }
 
+        {
+            lockfree_crossfeed_params.set_enabled(config.crossfeed.enabled);
+            lockfree_crossfeed_params.set_mix(config.crossfeed.mix);
+        }
+
         // Sync initial dynamic loudness config to lockfree params
         {
             lockfree_dynamic_loudness_params.set_enabled(config.dynamic_loudness.enabled);
             lockfree_dynamic_loudness_params.set_strength(config.dynamic_loudness.strength);
-            lockfree_dynamic_loudness_params.set_ref_volume_db(config.dynamic_loudness.ref_volume_db);
+            lockfree_dynamic_loudness_params
+                .set_ref_volume_db(config.dynamic_loudness.ref_volume_db);
         }
 
         {
-            lockfree_noise_shaper_params.set_enabled(true);
-            lockfree_noise_shaper_params.set_bits(24);
-            lockfree_noise_shaper_params.set_curve(NoiseShaperCurve::Lipshitz5);
+            lockfree_noise_shaper_params.set_enabled(config.dither.enabled);
+            lockfree_noise_shaper_params.set_bits(config.output_bits);
+            lockfree_noise_shaper_params.set_curve(config.dither.noise_shaper_curve);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -180,12 +195,35 @@ impl AudioPlayer {
                 lf_dl,
                 lf_dl_telemetry,
                 lf_loudness_state,
-                config.output_bits.unwrap_or(24),  // M-1 fix: read from config instead of hardcoded 24
+                config.output_bits, // M-1 fix: read from config instead of hardcoded 24
                 spectrum_tx,
                 phase_response,
                 target_lufs,
             );
         });
+
+        shared_state.volume.store(
+            (config.volume.clamp(0.0, 1.0) * 1_000_000.0) as u64,
+            Ordering::Relaxed,
+        );
+        shared_state
+            .exclusive_mode
+            .store(config.exclusive_mode, Ordering::Relaxed);
+        shared_state.device_id.store(
+            config.device_id.map(|i| i as i64).unwrap_or(-1),
+            Ordering::Relaxed,
+        );
+        let eq_type = config.eq_type.clone();
+        let exclusive_mode = config.exclusive_mode;
+        let target_sample_rate = config.target_samplerate;
+        let dither_enabled = config.dither.enabled;
+        let fir_taps = config.fir_taps.unwrap_or(1023);
+        let device_id = config.device_id;
+        shared_state
+            .output_bits
+            .store(config.output_bits, Ordering::Relaxed);
+        *shared_state.noise_shaper_curve.write() = config.dither.noise_shaper_curve;
+        *shared_state.eq_type.write() = eq_type;
 
         Self {
             shared_state,
@@ -201,19 +239,19 @@ impl AudioPlayer {
             lockfree_noise_shaper_params,
             lockfree_dynamic_loudness_params,
             dynamic_loudness_telemetry,
-            exclusive_mode: false,
-            target_sample_rate: config.target_samplerate,
-            dither_enabled: true,
+            exclusive_mode,
+            target_sample_rate,
+            dither_enabled,
             replaygain_enabled: true,
             loudness_enabled,
             fir_eq_enabled: false,
-            fir_taps: 1023,
+            fir_taps,
             fir_bands: STANDARD_BANDS,
             fir_phase_mode: FirPhaseMode::Linear,
             ir_loaded: false,
             ir_path: None,
             config,
-            device_id: None,
+            device_id,
         }
     }
 
@@ -251,7 +289,9 @@ impl AudioPlayer {
     pub fn select_device(&mut self, device_id: Option<usize>) -> Result<(), String> {
         self.device_id = device_id;
         let id_value = device_id.map(|i| i as i64).unwrap_or(-1);
-        self.shared_state.device_id.store(id_value, Ordering::Relaxed);
+        self.shared_state
+            .device_id
+            .store(id_value, Ordering::Relaxed);
         log::info!("Device selected: {:?}", device_id);
         Ok(())
     }
@@ -268,7 +308,28 @@ impl AudioPlayer {
         path: &str,
         credentials: Option<&crate::decoder::HttpCredentials>,
     ) -> Result<(), String> {
-        log::info!("Loading track async (credentials={}): {}", credentials.is_some(), path);
+        self.load_with_credentials_inner(path, credentials, false)
+    }
+
+    pub fn load_with_credentials_and_autoplay(
+        &mut self,
+        path: &str,
+        credentials: Option<&crate::decoder::HttpCredentials>,
+    ) -> Result<(), String> {
+        self.load_with_credentials_inner(path, credentials, true)
+    }
+
+    fn load_with_credentials_inner(
+        &mut self,
+        path: &str,
+        credentials: Option<&crate::decoder::HttpCredentials>,
+        autoplay: bool,
+    ) -> Result<(), String> {
+        log::info!(
+            "Loading track async (credentials={}): {}",
+            credentials.is_some(),
+            path
+        );
         self.stop();
         GaplessManager::cancel_preload(&self.shared_state);
 
@@ -301,6 +362,9 @@ impl AudioPlayer {
             match result {
                 Ok(load_result) => {
                     let _ = cmd_tx.send(AudioCommand::LoadComplete(load_result));
+                    if autoplay {
+                        let _ = cmd_tx.send(AudioCommand::Play);
+                    }
                 }
                 Err(e) => {
                     log::error!("Async load failed: {}", e);
@@ -317,7 +381,7 @@ impl AudioPlayer {
     fn decode_file_internal(
         path: &str,
         credentials: Option<&crate::decoder::HttpCredentials>,
-        config: &AppConfig,
+        config: &EngineSettings,
         device_id: Option<usize>,
         shared_state: &Arc<SharedState>,
         _loudness_enabled: bool,
@@ -325,8 +389,8 @@ impl AudioPlayer {
         use crate::decoder::StreamingDecoder;
         use crate::processor::StreamingResampler;
 
-        let mut decoder = StreamingDecoder::open_with_credentials(path, credentials)
-            .map_err(|e| {
+        let mut decoder =
+            StreamingDecoder::open_with_credentials(path, credentials).map_err(|e| {
                 log::error!("Failed to open decoder for {}: {}", path, e);
                 e.to_string()
             })?;
@@ -335,25 +399,28 @@ impl AudioPlayer {
         let original_sr = info.sample_rate;
         let channels = info.channels;
 
-        let target_sr = config.target_samplerate
-            .unwrap_or_else(|| {
-                let host = cpal::default_host();
-                let device = match device_id {
-                    Some(id) => host.output_devices().ok().and_then(|mut d| d.nth(id)),
-                    None => host.default_output_device(),
-                };
-                device
-                    .and_then(|d| d.default_output_config().ok())
-                    .map(|c| c.sample_rate().0)
-                    .unwrap_or(original_sr)
-            });
+        let target_sr = config.target_samplerate.unwrap_or_else(|| {
+            let host = cpal::default_host();
+            let device = match device_id {
+                Some(id) => host.output_devices().ok().and_then(|mut d| d.nth(id)),
+                None => host.default_output_device(),
+            };
+            device
+                .and_then(|d| d.default_output_config().ok())
+                .map(|c| c.sample_rate().0)
+                .unwrap_or(original_sr)
+        });
 
         let need_resample = target_sr != original_sr;
         let estimated_input_frames = info.total_frames.unwrap_or(0) as usize;
-        
+
         // If preemptive_resample is false, skip pre-resampling and keep original sample rate
-        let (final_target_sr, final_need_resample) = if need_resample && !config.preemptive_resample {
-            log::info!("preemptive_resample=false: keeping original {} Hz (will resample at playback)", original_sr);
+        let (final_target_sr, final_need_resample) = if need_resample && !config.preemptive_resample
+        {
+            log::info!(
+                "preemptive_resample=false: keeping original {} Hz (will resample at playback)",
+                original_sr
+            );
             (original_sr, false)
         } else {
             (target_sr, need_resample)
@@ -361,8 +428,8 @@ impl AudioPlayer {
 
         // Calculate cache path
         let cache_path = if config.use_cache && final_need_resample {
-            let cache_dir = config.cache_dir.clone().unwrap_or_else(|| PathBuf::from("resample_cache"));
-            use sha2::{Sha256, Digest};
+            let cache_dir = crate::runtime::RuntimePaths::resolve().cache_dir;
+            use sha2::{Digest, Sha256};
             let mut hasher = Sha256::new();
             hasher.update(path.as_bytes());
             hasher.update(final_target_sr.to_le_bytes());
@@ -396,11 +463,13 @@ impl AudioPlayer {
         // Try cache first
         if let Some(ref cp) = cache_path {
             if cp.exists() {
-                if let Some(cached_samples) = load_cache_with_header(cp, final_target_sr, channels as u32) {
+                if let Some(cached_samples) =
+                    load_cache_with_header(cp, final_target_sr, channels as u32)
+                {
                     let total_frames = cached_samples.len() / channels;
                     log::info!("Loaded from cache: {} frames", total_frames);
                     return Ok(state::LoadResult {
-                        samples: cached_samples,  // Move instead of clone — avoids copying hundreds of MB
+                        samples: cached_samples, // Move instead of clone — avoids copying hundreds of MB
                         sample_rate: final_target_sr,
                         channels,
                         total_frames: total_frames as u64,
@@ -415,21 +484,34 @@ impl AudioPlayer {
         }
 
         if final_need_resample {
-            log::info!("Streaming SoX VHQ Resampling {} -> {} Hz", original_sr, final_target_sr);
+            log::info!(
+                "Streaming SoX VHQ Resampling {} -> {} Hz",
+                original_sr,
+                final_target_sr
+            );
         }
 
         let estimated_output_frames = if final_need_resample {
-            (estimated_input_frames as f64 * final_target_sr as f64 / original_sr as f64).ceil() as usize
+            (estimated_input_frames as f64 * final_target_sr as f64 / original_sr as f64).ceil()
+                as usize
         } else {
             estimated_input_frames
         };
         let mut samples = Vec::with_capacity(estimated_output_frames * channels);
 
         let mut resampler = if final_need_resample {
-            match StreamingResampler::with_phase(channels, original_sr, final_target_sr, config.phase_response) {
+            match StreamingResampler::with_phase(
+                channels,
+                original_sr,
+                final_target_sr,
+                config.phase_response,
+            ) {
                 Ok(rs) => Some(rs),
                 Err(e) => {
-                    return Err(format!("Failed to create resampler: {} -> {}: {}", original_sr, final_target_sr, e));
+                    return Err(format!(
+                        "Failed to create resampler: {} -> {}: {}",
+                        original_sr, final_target_sr, e
+                    ));
                 }
             }
         } else {
@@ -451,12 +533,19 @@ impl AudioPlayer {
             chunk_count += 1;
 
             // Update progress
-            let progress = ((decoded_frames as f64 / total_estimated as f64) * 100.0).min(99.0) as u64;
-            shared_state.load_progress.store(progress, Ordering::Relaxed);
+            let progress =
+                ((decoded_frames as f64 / total_estimated as f64) * 100.0).min(99.0) as u64;
+            shared_state
+                .load_progress
+                .store(progress, Ordering::Relaxed);
 
             if chunk_count % 100 == 0 {
-                log::debug!("Streaming progress: {} chunks, {} decoded frames, {}%",
-                    chunk_count, decoded_frames, progress);
+                log::debug!(
+                    "Streaming progress: {} chunks, {} decoded frames, {}%",
+                    chunk_count,
+                    decoded_frames,
+                    progress
+                );
             }
         }
 
@@ -468,13 +557,18 @@ impl AudioPlayer {
 
         log::info!(
             "Streaming decode complete: {} chunks, {} output samples ({}→{} Hz)",
-            chunk_count, samples.len(), original_sr, final_target_sr
+            chunk_count,
+            samples.len(),
+            original_sr,
+            final_target_sr
         );
 
         // Save to cache
         if final_need_resample {
             if let Some(ref cp) = cache_path {
-                if let Err(e) = save_cache_with_header(cp, &samples, final_target_sr, channels as u32) {
+                if let Err(e) =
+                    save_cache_with_header(cp, &samples, final_target_sr, channels as u32)
+                {
                     log::warn!("Failed to save cache: {}", e);
                 }
             }
@@ -523,17 +617,21 @@ impl AudioPlayer {
     }
 
     pub fn seek(&mut self, time_secs: f64) -> Result<(), String> {
-        self.cmd_tx.send(AudioCommand::Seek(time_secs))
+        self.cmd_tx
+            .send(AudioCommand::Seek(time_secs))
             .map_err(|e| format!("Failed to send seek command: {}", e))
     }
 
     pub fn set_volume(&mut self, vol: f64) {
         let clamped_vol = vol.clamp(0.0, 1.0);
-        self.shared_state.volume.store((clamped_vol * 1_000_000.0) as u64, Ordering::Relaxed);
-        
+        self.shared_state
+            .volume
+            .store((clamped_vol * 1_000_000.0) as u64, Ordering::Relaxed);
+
         // Update lock-free volume params
         self.lockfree_volume_params.set_volume(clamped_vol);
-        self.lockfree_dynamic_loudness_params.set_volume(clamped_vol);
+        self.lockfree_dynamic_loudness_params
+            .set_volume(clamped_vol);
     }
 
     pub fn get_volume(&self) -> f64 {
@@ -542,6 +640,14 @@ impl AudioPlayer {
 
     pub fn get_state(&self) -> PlayerState {
         self.shared_state.state.load()
+    }
+
+    pub fn set_repeat_mode(&self, mode: RepeatMode) {
+        self.shared_state.set_repeat_mode(mode);
+    }
+
+    pub fn set_shuffle_mode(&self, mode: ShuffleMode) {
+        self.shared_state.set_shuffle_mode(mode);
     }
 
     pub fn shared_state(&self) -> Arc<SharedState> {
@@ -589,7 +695,10 @@ impl AudioPlayer {
     /// Set saturation enabled
     pub fn set_saturation_enabled(&self, enabled: bool) {
         self.lockfree_saturation_params.set_enabled(enabled);
-        log::info!("Saturation {}", if enabled { "enabled" } else { "disabled" });
+        log::info!(
+            "Saturation {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
     }
 
     /// Set saturation drive (0.0 - 2.0)
@@ -631,7 +740,10 @@ impl AudioPlayer {
     /// Set Dynamic Loudness enabled
     pub fn set_dynamic_loudness_enabled(&self, enabled: bool) {
         self.lockfree_dynamic_loudness_params.set_enabled(enabled);
-        log::info!("Dynamic Loudness {}", if enabled { "enabled" } else { "disabled" });
+        log::info!(
+            "Dynamic Loudness {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
     }
 
     /// Get Dynamic Loudness strength (0.0 - 1.0)
@@ -739,12 +851,7 @@ impl AudioPlayer {
 
     /// Get resample quality as string
     pub fn get_resample_quality(&self) -> String {
-        match self.config.resample_quality {
-            crate::config::ResampleQuality::Low => "low".to_string(),
-            crate::config::ResampleQuality::Standard => "std".to_string(),
-            crate::config::ResampleQuality::High => "hq".to_string(),
-            crate::config::ResampleQuality::UltraHigh => "uhq".to_string(),
-        }
+        crate::config::resample_quality_to_string(self.config.resample_quality)
     }
 
     /// Get use_cache setting
@@ -766,13 +873,19 @@ impl AudioPlayer {
     /// Set use_cache setting
     pub fn set_use_cache(&mut self, enabled: bool) {
         self.config.use_cache = enabled;
-        log::info!("Resample cache {}", if enabled { "enabled" } else { "disabled" });
+        log::info!(
+            "Resample cache {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
     }
 
     /// Set preemptive_resample setting
     pub fn set_preemptive_resample(&mut self, enabled: bool) {
         self.config.preemptive_resample = enabled;
-        log::info!("Preemptive resample {}", if enabled { "enabled" } else { "disabled" });
+        log::info!(
+            "Preemptive resample {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
     }
 
     pub fn load_ir(&mut self, path: &str) -> Result<(), String> {
@@ -850,19 +963,19 @@ impl AudioPlayer {
     pub fn cancel_preload(&self) {
         GaplessManager::cancel_preload(&self.shared_state);
     }
-    
+
     /// Set output bit depth for NoiseShaper
     pub fn set_output_bits(&self, bits: u32) {
         self.lockfree_noise_shaper_params.set_bits(bits);
         self.shared_state.output_bits.store(bits, Ordering::Relaxed);
         log::info!("Output bit depth set to {} bits", bits);
     }
-    
+
     /// Get output bit depth
     pub fn get_output_bits(&self) -> u32 {
         self.shared_state.output_bits.load(Ordering::Relaxed)
     }
-    
+
     /// Get normalization mode
     pub fn get_normalization_mode(&self) -> crate::config::NormalizationMode {
         self.config.loudness.mode
@@ -872,9 +985,9 @@ impl AudioPlayer {
     pub fn get_target_lufs(&self) -> f64 {
         self.config.loudness.target_lufs
     }
-    
+
     // ============ FIR EQ Methods ============
-    
+
     /// Enable FIR EQ (real convolution backend)
     pub fn enable_fir_eq(&mut self, num_taps: usize) -> Result<(), String> {
         let normalized_taps = if num_taps == 0 {
@@ -894,7 +1007,7 @@ impl AudioPlayer {
         log::info!("FIR EQ enabled (real convolution, taps={})", self.fir_taps);
         Ok(())
     }
-    
+
     /// Disable FIR EQ
     pub fn disable_fir_eq(&mut self) {
         self.fir_eq_enabled = false;
@@ -904,12 +1017,12 @@ impl AudioPlayer {
         *self.shared_state.eq_type.write() = "IIR".to_string();
         log::info!("FIR EQ disabled");
     }
-    
+
     /// Check if FIR EQ is enabled
     pub fn is_fir_eq_enabled(&self) -> bool {
         self.fir_eq_enabled
     }
-    
+
     /// Set FIR EQ band gain
     pub fn set_fir_band_gain(&mut self, band_idx: usize, gain_db: f64) -> Result<(), String> {
         if band_idx >= self.fir_bands.len() {
@@ -923,7 +1036,7 @@ impl AudioPlayer {
         }
         Ok(())
     }
-    
+
     /// Set all FIR EQ band gains at once
     pub fn set_fir_bands(&mut self, gains_db: &[f64; 10]) -> Result<(), String> {
         for (idx, gain) in gains_db.iter().enumerate() {
@@ -935,14 +1048,17 @@ impl AudioPlayer {
         }
         Ok(())
     }
-    
+
     /// Get current FIR EQ band gains
     pub fn get_fir_bands(&self) -> Option<[(f64, f64); 10]> {
         Some(self.fir_bands)
     }
-    
+
     /// Set FIR EQ phase mode
-    pub fn set_fir_phase_mode(&mut self, mode: crate::processor::FirPhaseMode) -> Result<(), String> {
+    pub fn set_fir_phase_mode(
+        &mut self,
+        mode: crate::processor::FirPhaseMode,
+    ) -> Result<(), String> {
         self.fir_phase_mode = mode;
         if self.fir_eq_enabled {
             self.apply_fir_convolver()?;
@@ -950,7 +1066,7 @@ impl AudioPlayer {
         log::info!("FIR phase mode set to {:?}", self.fir_phase_mode);
         Ok(())
     }
-    
+
     /// Reset FIR convolver state
     pub fn reset_fir_convolver(&self) {
         if self.fir_eq_enabled {

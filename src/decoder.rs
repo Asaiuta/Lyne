@@ -7,6 +7,7 @@
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::time::Duration;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::formats::FormatOptions;
@@ -15,12 +16,141 @@ use symphonia::core::meta::{MetadataOptions, StandardTagKey, Value};
 use symphonia::core::probe::{Hint, ProbeResult};
 use thiserror::Error;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkError {
+    HttpTimeout,
+    ConnectionReset,
+    HttpStatus(u16),
+    DnsFailure(String),
+    TlsError(String),
+    Other(String),
+}
+
+impl NetworkError {
+    pub fn is_retriable(&self) -> bool {
+        match self {
+            NetworkError::HttpTimeout | NetworkError::ConnectionReset => true,
+            NetworkError::HttpStatus(status) => matches!(status, 408 | 429 | 500..=504),
+            NetworkError::DnsFailure(_) | NetworkError::TlsError(_) | NetworkError::Other(_) => {
+                false
+            }
+        }
+    }
+
+    fn from_io(e: std::io::Error) -> Self {
+        match e.kind() {
+            std::io::ErrorKind::TimedOut => NetworkError::HttpTimeout,
+            std::io::ErrorKind::ConnectionReset => NetworkError::ConnectionReset,
+            _ => NetworkError::Other(e.to_string()),
+        }
+    }
+}
+
+impl From<reqwest::Error> for NetworkError {
+    fn from(e: reqwest::Error) -> Self {
+        if e.is_timeout() {
+            NetworkError::HttpTimeout
+        } else if let Some(status) = e.status() {
+            NetworkError::HttpStatus(status.as_u16())
+        } else {
+            let text = e.to_string();
+            let lower = text.to_ascii_lowercase();
+            if lower.contains("connection reset") {
+                NetworkError::ConnectionReset
+            } else if e.is_connect() && (lower.contains("dns") || lower.contains("resolve")) {
+                NetworkError::DnsFailure(text)
+            } else if lower.contains("tls") || lower.contains("certificate") {
+                NetworkError::TlsError(text)
+            } else {
+                NetworkError::Other(text)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for NetworkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NetworkError::HttpTimeout => write!(f, "HTTP timeout"),
+            NetworkError::ConnectionReset => write!(f, "connection reset"),
+            NetworkError::HttpStatus(status) => write!(f, "HTTP status {}", status),
+            NetworkError::DnsFailure(e) => write!(f, "DNS failure: {}", e),
+            NetworkError::TlsError(e) => write!(f, "TLS error: {}", e),
+            NetworkError::Other(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+const NETWORK_MAX_ATTEMPTS: usize = 3;
+const NETWORK_BACKOFF_DELAYS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
+
+fn with_network_retry<T, F>(operation_name: &str, mut op: F) -> Result<T, NetworkError>
+where
+    F: FnMut() -> Result<T, NetworkError>,
+{
+    for attempt in 0..NETWORK_MAX_ATTEMPTS {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(e) if e.is_retriable() && attempt < NETWORK_BACKOFF_DELAYS.len() => {
+                let delay = NETWORK_BACKOFF_DELAYS[attempt];
+                log::warn!(
+                    "{} attempt {} failed ({}), retrying in {:?}",
+                    operation_name,
+                    attempt + 1,
+                    e,
+                    delay
+                );
+                std::thread::sleep(delay);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    unreachable!("network retry loop returns on success or final error")
+}
+
+fn response_network_error(response: &reqwest::blocking::Response) -> Option<NetworkError> {
+    let status = response.status();
+    (!status.is_success() && status.as_u16() != 206)
+        .then_some(NetworkError::HttpStatus(status.as_u16()))
+}
+
+fn fetch_range_once(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    credentials: Option<&HttpCredentials>,
+    start: u64,
+    len: usize,
+) -> Result<Vec<u8>, NetworkError> {
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let end = start
+        .checked_add(len as u64 - 1)
+        .ok_or_else(|| NetworkError::Other("Range end overflow".into()))?;
+
+    let mut req = client
+        .get(url)
+        .header("Range", format!("bytes={}-{}", start, end));
+    if let Some(creds) = credentials {
+        req = req.basic_auth(&creds.username, Some(&creds.password));
+    }
+
+    let response = req.send().map_err(NetworkError::from)?;
+    if let Some(e) = response_network_error(&response) {
+        return Err(e);
+    }
+
+    Ok(response.bytes().map_err(NetworkError::from)?.to_vec())
+}
+
 #[derive(Error, Debug)]
 pub enum DecoderError {
     #[error("Failed to open file: {0}")]
     FileOpen(#[from] std::io::Error),
-    #[error("HTTP error: {0}")]
-    Http(String),
+    #[error("Network error: {0}")]
+    Network(NetworkError),
     #[error("Unsupported format")]
     UnsupportedFormat,
     #[error("No audio track found")]
@@ -80,7 +210,7 @@ pub struct AudioInfo {
 /// Extract track metadata from Symphonia probe result
 fn extract_metadata(probed: &mut ProbeResult) -> TrackMetadata {
     let mut metadata = TrackMetadata::default();
-    
+
     // Get metadata from the probed result
     // ProbedMetadata::get() returns Option<Metadata>
     if let Some(meta) = probed.metadata.get() {
@@ -132,7 +262,7 @@ fn extract_metadata(probed: &mut ProbeResult) -> TrackMetadata {
                     }
                 }
             }
-            
+
             // Extract cover art from visual metadata
             for visual in revision.visuals() {
                 // Take first visual as cover art
@@ -142,15 +272,17 @@ fn extract_metadata(probed: &mut ProbeResult) -> TrackMetadata {
             }
         }
     }
-    
+
     // Log extracted metadata
     if metadata.title.is_some() || metadata.artist.is_some() {
         log::debug!(
             "Extracted metadata: {:?} by {:?} from {:?}",
-            metadata.title, metadata.artist, metadata.album
+            metadata.title,
+            metadata.artist,
+            metadata.album
         );
     }
-    
+
     metadata
 }
 
@@ -218,9 +350,9 @@ struct RangeStream {
     url: String,
     credentials: Option<HttpCredentials>,
     client: reqwest::blocking::Client,
-    buf: Vec<u8>,       // read-ahead buffer
-    buf_start: u64,     // file offset of buf[0]
-    pos: u64,           // current logical read position
+    buf: Vec<u8>,   // read-ahead buffer
+    buf_start: u64, // file offset of buf[0]
+    pos: u64,       // current logical read position
     content_length: Option<u64>,
     supports_range: bool, // whether server supports Range requests
 }
@@ -231,65 +363,98 @@ impl RangeStream {
     fn new(url: String, credentials: Option<HttpCredentials>) -> Result<Self, DecoderError> {
         // FIX for Defect 28: Add timeout to prevent indefinite blocking
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
             .build()
-            .map_err(|e| DecoderError::Http(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                DecoderError::Network(NetworkError::Other(format!(
+                    "Failed to create HTTP client: {}",
+                    e
+                )))
+            })?;
 
-        // Use HEAD request to probe server capabilities without downloading body
-        // This is much more efficient than GET for large files
-        let mut head_req = client.head(&url);
-        if let Some(ref creds) = credentials {
-            head_req = head_req.basic_auth(&creds.username, Some(&creds.password));
-        }
+        let (content_length, supports_range) =
+            with_network_retry("HTTP stream initialization", || {
+                // Use HEAD request to probe server capabilities without downloading body.
+                let mut head_req = client.head(&url);
+                if let Some(ref creds) = credentials {
+                    head_req = head_req.basic_auth(&creds.username, Some(&creds.password));
+                }
 
-        let (content_length, supports_range) = head_req.send()
-            .ok()
-            .and_then(|r| {
-                // Check if server supports Range requests
-                let supports_range = r.headers()
-                    .get("accept-ranges")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s == "bytes")
+                let head_response = match head_req.send() {
+                    Ok(response) => {
+                        if let Some(e) = response_network_error(&response) {
+                            return Err(e);
+                        }
+                        Some(response)
+                    }
+                    Err(e) => return Err(NetworkError::from(e)),
+                };
+
+                let mut content_length = head_response.as_ref().and_then(|r| {
+                    r.headers()
+                        .get("content-length")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse().ok())
+                });
+                let supports_range = head_response
+                    .as_ref()
+                    .map(|r| {
+                        r.headers()
+                            .get("accept-ranges")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s == "bytes")
+                            .unwrap_or(false)
+                    })
                     .unwrap_or(false);
 
-                // Get content length if available
-                let cl = r.headers()
-                    .get("content-length")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse().ok());
-
-                Some((cl, supports_range))
-            })
-            .unwrap_or((None, false));
-
-        // If HEAD didn't give us content-length, try Range: bytes=0-0 as fallback
-        // This gets minimal data (1 byte) while still getting headers
-        let content_length = if content_length.is_none() {
-            let mut range_req = client.get(&url).header("Range", "bytes=0-0");
-            if let Some(ref creds) = credentials {
-                range_req = range_req.basic_auth(&creds.username, Some(&creds.password));
-            }
-            range_req.send()
-                .ok()
-                .and_then(|r| {
-                    r.headers()
+                if content_length.is_none() {
+                    let mut range_req = client.get(&url).header("Range", "bytes=0-0");
+                    if let Some(ref creds) = credentials {
+                        range_req = range_req.basic_auth(&creds.username, Some(&creds.password));
+                    }
+                    let range_response = range_req.send().map_err(NetworkError::from)?;
+                    if let Some(e) = response_network_error(&range_response) {
+                        return Err(e);
+                    }
+                    content_length = range_response
+                        .headers()
                         .get("content-range")
                         .and_then(|v| v.to_str().ok())
                         .and_then(|s| {
                             // Parse "bytes 0-0/12345" -> 12345
                             s.split('/').last().and_then(|s| s.parse().ok())
                         })
-                })
+                        .or_else(|| {
+                            range_response
+                                .headers()
+                                .get("content-length")
+                                .and_then(|v| v.to_str().ok())
+                                .and_then(|s| s.parse().ok())
+                        });
+                }
+
+                Ok((content_length, supports_range))
+            })
+            .map_err(DecoderError::Network)?;
+
+        let initial_fetch_len = content_length
+            .map(|len| RANGE_PREFETCH.min(len as usize))
+            .unwrap_or(RANGE_PREFETCH);
+        let initial_buf = if initial_fetch_len > 0 {
+            with_network_retry("HTTP stream initial range GET", || {
+                fetch_range_once(&client, &url, credentials.as_ref(), 0, initial_fetch_len)
+            })
+            .map_err(DecoderError::Network)?
         } else {
-            content_length
+            Vec::new()
         };
 
         Ok(Self {
             url,
             credentials,
             client,
-            buf: Vec::new(),
+            buf: initial_buf,
             buf_start: 0,
             pos: 0,
             content_length,
@@ -298,37 +463,14 @@ impl RangeStream {
     }
 
     fn fetch_range(&mut self, start: u64, len: usize) -> Result<Vec<u8>, DecoderError> {
-        // Handle zero-length request to prevent underflow
-        if len == 0 {
-            return Ok(Vec::new());
-        }
-
-        // Calculate end position safely using checked arithmetic
-        let end = start.checked_add(len as u64 - 1)
-            .ok_or_else(|| DecoderError::Http("Range end overflow".into()))?;
-
-        let mut req = self.client.get(&self.url)
-            .header("Range", format!("bytes={}-{}", start, end));
-        if let Some(ref creds) = self.credentials {
-            req = req.basic_auth(&creds.username, Some(&creds.password));
-        }
-
-        let response = req.send()
-            .map_err(|e| DecoderError::Http(e.to_string()))?;
-
-        // Check if server returned partial content (Range was honored)
-        let status = response.status();
-        if !status.is_success() && status.as_u16() != 206 {
-            // Server doesn't support Range requests or returned error
-            return Err(DecoderError::Http(
-                format!("Server returned {} (expected 206 Partial Content)", status)
-            ));
-        }
-
-        Ok(response
-            .bytes()
-            .map_err(|e| DecoderError::Http(e.to_string()))?
-            .to_vec())
+        fetch_range_once(
+            &self.client,
+            &self.url,
+            self.credentials.as_ref(),
+            start,
+            len,
+        )
+        .map_err(DecoderError::Network)
     }
 
     /// Ensure buf covers [pos, pos+need)
@@ -348,7 +490,8 @@ impl RangeStream {
         if fetch_len == 0 {
             return Ok(());
         }
-        let data = self.fetch_range(self.pos, fetch_len)
+        let data = self
+            .fetch_range(self.pos, fetch_len)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         self.buf_start = self.pos;
         self.buf = data;
@@ -358,11 +501,15 @@ impl RangeStream {
 
 impl Read for RangeStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if buf.is_empty() { return Ok(0); }
+        if buf.is_empty() {
+            return Ok(0);
+        }
         self.ensure_buffered(buf.len())?;
         let offset = (self.pos - self.buf_start) as usize;
         let available = self.buf.len().saturating_sub(offset);
-        if available == 0 { return Ok(0); } // EOF
+        if available == 0 {
+            return Ok(0);
+        } // EOF
         let n = available.min(buf.len());
         buf[..n].copy_from_slice(&self.buf[offset..offset + n]);
         self.pos += n as u64;
@@ -387,7 +534,10 @@ impl Seek for RangeStream {
             }
         };
         if new_pos < 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "negative seek"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "negative seek",
+            ));
         }
         self.pos = new_pos as u64;
         Ok(self.pos)
@@ -395,8 +545,12 @@ impl Seek for RangeStream {
 }
 
 impl symphonia::core::io::MediaSource for RangeStream {
-    fn is_seekable(&self) -> bool { self.supports_range && self.content_length.is_some() }
-    fn byte_len(&self) -> Option<u64> { self.content_length }
+    fn is_seekable(&self) -> bool {
+        self.supports_range && self.content_length.is_some()
+    }
+    fn byte_len(&self) -> Option<u64> {
+        self.content_length
+    }
 }
 
 /// Streaming audio decoder using Symphonia
@@ -410,6 +564,32 @@ pub struct StreamingDecoder {
     samples_output: u64,
     /// Flag indicating if we've finished outputting (for padding trim)
     finished: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_error_classifies_retriable_errors() {
+        assert!(NetworkError::HttpTimeout.is_retriable());
+        assert!(NetworkError::ConnectionReset.is_retriable());
+        assert!(NetworkError::HttpStatus(408).is_retriable());
+        assert!(NetworkError::HttpStatus(429).is_retriable());
+        assert!(NetworkError::HttpStatus(500).is_retriable());
+        assert!(NetworkError::HttpStatus(503).is_retriable());
+        assert!(NetworkError::HttpStatus(504).is_retriable());
+    }
+
+    #[test]
+    fn network_error_classifies_non_retriable_errors() {
+        assert!(!NetworkError::HttpStatus(401).is_retriable());
+        assert!(!NetworkError::HttpStatus(403).is_retriable());
+        assert!(!NetworkError::HttpStatus(404).is_retriable());
+        assert!(!NetworkError::DnsFailure("no such host".into()).is_retriable());
+        assert!(!NetworkError::TlsError("bad cert".into()).is_retriable());
+        assert!(!NetworkError::Other("invalid response".into()).is_retriable());
+    }
 }
 
 impl StreamingDecoder {
@@ -446,8 +626,11 @@ impl StreamingDecoder {
                     (mss, hint)
                 }
                 _ => {
-                    log::info!("HTTP URL does not support Range, falling back to full download: {}", path_str);
-                    
+                    log::info!(
+                        "HTTP URL does not support Range, falling back to full download: {}",
+                        path_str
+                    );
+
                     // FIX for Defect 49: Check memory limit before downloading full file.
                     // Peak memory = raw bytes + decoded f64 samples (~8x expansion).
                     // Use the same limit as decode_all (2GB default).
@@ -459,104 +642,128 @@ impl StreamingDecoder {
                     // Conservative estimate: decoded samples are ~8x raw bytes for typical formats
                     // So limit raw download to 1/8 of max memory
                     let max_download_bytes = max_memory_bytes / 8;
-                    
+
                     // FIX for Defect 28: Add timeout to prevent indefinite blocking
                     let client = reqwest::blocking::Client::builder()
-                        .timeout(std::time::Duration::from_secs(120))  // Longer for full downloads
-                        .connect_timeout(std::time::Duration::from_secs(10))
+                        .timeout(Duration::from_secs(120)) // Longer for full downloads
+                        .connect_timeout(Duration::from_secs(10))
                         .build()
-                        .map_err(|e| DecoderError::Http(format!("Failed to create HTTP client: {}", e)))?;
-                    
-                    // Try to get Content-Length first via HEAD request
-                    let mut head_req = client.head(path_str.as_ref());
-                    if let Some(creds) = credentials {
-                        head_req = head_req.basic_auth(&creds.username, Some(&creds.password));
-                    }
-                    
-                    let content_length: Option<u64> = head_req.send().ok().and_then(|r| {
-                        r.headers()
+                        .map_err(|e| {
+                            DecoderError::Network(NetworkError::Other(format!(
+                                "Failed to create HTTP client: {}",
+                                e
+                            )))
+                        })?;
+
+                    let content_length = with_network_retry("HTTP full-download HEAD", || {
+                        let mut head_req = client.head(path_str.as_ref());
+                        if let Some(creds) = credentials {
+                            head_req = head_req.basic_auth(&creds.username, Some(&creds.password));
+                        }
+                        let response = head_req.send().map_err(NetworkError::from)?;
+                        if let Some(e) = response_network_error(&response) {
+                            return Err(e);
+                        }
+                        Ok(response
+                            .headers()
                             .get("content-length")
                             .and_then(|v| v.to_str().ok())
-                            .and_then(|s| s.parse().ok())
-                    });
-                    
+                            .and_then(|s| s.parse().ok()))
+                    })
+                    .map_err(DecoderError::Network)?;
+
                     // Check if file is too large
                     if let Some(len) = content_length {
                         if len as usize > max_download_bytes {
                             let len_mb = len / (1024 * 1024);
-                            return Err(DecoderError::Http(format!(
+                            return Err(DecoderError::Network(NetworkError::Other(format!(
                                 "File too large for non-Range download: {} MB (limit: {} MB). \
                                  Server must support Range requests for files this size. \
                                  Increase DECODE_MAX_MEMORY_MB env var if needed.",
-                                len_mb, max_download_bytes / (1024 * 1024)
-                            )));
+                                len_mb,
+                                max_download_bytes / (1024 * 1024)
+                            ))));
                         }
-                        log::info!("Downloading {} MB file (server does not support Range)", len / (1024 * 1024));
+                        log::info!(
+                            "Downloading {} MB file (server does not support Range)",
+                            len / (1024 * 1024)
+                        );
                     } else {
                         log::warn!("Content-Length unknown, downloading without size check (may cause OOM)");
                     }
-                    
-                    let mut req = client.get(path_str.as_ref());
-                    if let Some(creds) = credentials {
-                        req = req.basic_auth(&creds.username, Some(&creds.password));
-                    }
-                    let response = req
-                        .send()
-                        .map_err(|e| DecoderError::Http(e.to_string()))?;
-                    
+
+                    let response = with_network_retry("HTTP full-download GET", || {
+                        let mut req = client.get(path_str.as_ref());
+                        if let Some(creds) = credentials {
+                            req = req.basic_auth(&creds.username, Some(&creds.password));
+                        }
+                        let response = req.send().map_err(NetworkError::from)?;
+                        if let Some(e) = response_network_error(&response) {
+                            return Err(e);
+                        }
+                        Ok(response)
+                    })
+                    .map_err(DecoderError::Network)?;
+
                     // FIX for Defect-49: Avoid double memory allocation
                     // Previously: bytes.to_vec() created a copy, causing 2x memory spike
                     // Now: Pre-allocate Vec with known size and use copy_from_slice()
                     let download_size = content_length.unwrap_or(0) as usize;
-                    
+
                     let cursor = if download_size > 0 {
                         // Known size: pre-allocate exact buffer and copy directly
                         let mut buffer = vec![0u8; download_size];
                         let mut pos = 0;
                         let mut stream = response;
-                        
+
                         while pos < download_size {
                             let remaining = &mut buffer[pos..];
-                            let n = stream.read(remaining)
-                                .map_err(|e| DecoderError::Http(e.to_string()))?;
+                            let n = stream
+                                .read(remaining)
+                                .map_err(|e| DecoderError::Network(NetworkError::from_io(e)))?;
                             if n == 0 {
                                 // Early EOF - truncate buffer
                                 buffer.truncate(pos);
                                 break;
                             }
                             pos += n;
-                            
+
                             // Check size limit during streaming download
                             if pos > max_download_bytes {
                                 let actual_mb = pos / (1024 * 1024);
-                                return Err(DecoderError::Http(format!(
+                                return Err(DecoderError::Network(NetworkError::Other(format!(
                                     "Downloaded file exceeds memory limit: {} MB (limit: {} MB)",
-                                    actual_mb, max_download_bytes / (1024 * 1024)
-                                )));
+                                    actual_mb,
+                                    max_download_bytes / (1024 * 1024)
+                                ))));
                             }
                         }
-                        
-                        log::debug!("Downloaded {} bytes directly into pre-allocated buffer", pos);
+
+                        log::debug!(
+                            "Downloaded {} bytes directly into pre-allocated buffer",
+                            pos
+                        );
                         Cursor::new(buffer)
                     } else {
                         // Unknown size: use bytes() and convert efficiently
                         let bytes = response
                             .bytes()
-                            .map_err(|e| DecoderError::Http(e.to_string()))?;
-                        
+                            .map_err(|e| DecoderError::Network(NetworkError::from(e)))?;
+
                         // Check actual download size
                         if bytes.len() > max_download_bytes {
                             let actual_mb = bytes.len() / (1024 * 1024);
-                            return Err(DecoderError::Http(format!(
+                            return Err(DecoderError::Network(NetworkError::Other(format!(
                                 "Downloaded file exceeds memory limit: {} MB (limit: {} MB)",
-                                actual_mb, max_download_bytes / (1024 * 1024)
-                            )));
+                                actual_mb,
+                                max_download_bytes / (1024 * 1024)
+                            ))));
                         }
-                        
+
                         // FIX: Use .to_vec() instead of .into_iter().collect() — avoids per-byte iteration overhead
                         Cursor::new(bytes.to_vec())
                     };
-                    
+
                     let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
                     let mut hint = Hint::new();
                     if let Some(ext) = path_str
@@ -614,7 +821,8 @@ impl StreamingDecoder {
         if encoder_delay > 0 || end_padding > 0 {
             log::debug!(
                 "Codec delay compensation: delay={}, padding={} samples",
-                encoder_delay, end_padding
+                encoder_delay,
+                end_padding
             );
         }
 
@@ -635,7 +843,9 @@ impl StreamingDecoder {
 
         log::info!(
             "Opened audio source: {} Hz, {} ch, {:?}s",
-            sample_rate, channels, duration_secs
+            sample_rate,
+            channels,
+            duration_secs
         );
 
         Ok(Self {
@@ -684,8 +894,7 @@ impl StreamingDecoder {
             let spec = *decoded.spec();
             let duration = decoded.capacity();
 
-            if self.sample_buf.is_none()
-                || self.sample_buf.as_ref().unwrap().capacity() < duration
+            if self.sample_buf.is_none() || self.sample_buf.as_ref().unwrap().capacity() < duration
             {
                 self.sample_buf = Some(SampleBuffer::new(duration as u64, spec));
             }
@@ -700,7 +909,7 @@ impl StreamingDecoder {
             // FIX for Defect 26: encoder_delay is in FRAMES (per channel), not interleaved samples.
             // Must multiply by channels to get correct number of interleaved samples to skip.
             let delay_frames = self.info.encoder_delay as u64;
-            let delay_samples = delay_frames * channels as u64;  // Convert frames to interleaved samples
+            let delay_samples = delay_frames * channels as u64; // Convert frames to interleaved samples
             if self.samples_output < delay_samples {
                 let skip = (delay_samples - self.samples_output).min(samples.len() as u64) as usize;
                 samples.drain(0..skip);
@@ -714,11 +923,11 @@ impl StreamingDecoder {
             let total_frames = self.info.total_frames.unwrap_or(u64::MAX);
             let padding_frames = self.info.end_padding as u64;
             let effective_total = total_frames.saturating_sub(padding_frames);
-            
+
             // Check if we would exceed effective total
             let current_frame = self.samples_output / channels as u64;
             let frames_in_chunk = samples.len() / channels;
-            
+
             if current_frame + frames_in_chunk as u64 > effective_total {
                 let frames_to_keep = effective_total.saturating_sub(current_frame) as usize;
                 if frames_to_keep == 0 {
@@ -736,7 +945,7 @@ impl StreamingDecoder {
     /// Decode entire file into a single f64 buffer
     ///
     /// Automatically trims encoder delay and end padding for gapless playback.
-    /// 
+    ///
     /// FIX for Defect 42: Check estimated memory size before decoding to prevent OOM.
     /// Maximum allowed: 2 GB of decoded audio data (configurable via DECODE_MAX_MEMORY_MB env var).
     pub fn decode_all(&mut self) -> Result<Vec<f64>, DecoderError> {
@@ -746,9 +955,9 @@ impl StreamingDecoder {
         let max_memory_mb: usize = std::env::var("DECODE_MAX_MEMORY_MB")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(2048);  // Default: 2 GB limit
+            .unwrap_or(2048); // Default: 2 GB limit
         let max_memory_bytes = max_memory_mb * 1024 * 1024;
-        
+
         if let Some(total_frames) = self.info.total_frames {
             let estimated_bytes = total_frames as usize * self.info.channels * 8;
             if estimated_bytes > max_memory_bytes {
@@ -759,7 +968,7 @@ impl StreamingDecoder {
                     estimated_mb, max_memory_mb
                 )));
             }
-            
+
             // Pre-allocate with known size for efficiency
             let total_samples = total_frames as usize * self.info.channels;
             log::info!(
@@ -768,11 +977,11 @@ impl StreamingDecoder {
                 total_samples * 8 / (1024 * 1024)
             );
         }
-        
+
         let mut all_samples = Vec::new();
         while let Some(samples) = self.decode_next()? {
             all_samples.extend(samples);
-            
+
             // FIX for Defect 42: Also check during streaming (for unknown duration files)
             let current_bytes = all_samples.len() * 8;
             if current_bytes > max_memory_bytes {
@@ -787,16 +996,18 @@ impl StreamingDecoder {
 
         let delay_trimmed = self.info.encoder_delay;
         let padding_trimmed = self.info.end_padding;
-        
+
         if delay_trimmed > 0 || padding_trimmed > 0 {
             log::info!(
                 "Decoded {} samples (trimmed {} delay + {} padding for gapless)",
-                all_samples.len(), delay_trimmed, padding_trimmed
+                all_samples.len(),
+                delay_trimmed,
+                padding_trimmed
             );
         } else {
             log::info!("Decoded {} total samples (f64)", all_samples.len());
         }
-        
+
         Ok(all_samples)
     }
 
@@ -814,13 +1025,13 @@ impl StreamingDecoder {
             .map_err(|e| DecoderError::Decoder(e.to_string()))?;
 
         self.decoder.reset();
-        
+
         // FIX for Defect 48: Reset finished flag and samples counter when seeking.
         // Without this, decode_next() would immediately return None after a seek
         // because the finished flag was still true from previous EOF.
         self.finished = false;
         self.samples_output = 0;
-        
+
         Ok(())
     }
 }

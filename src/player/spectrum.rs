@@ -3,8 +3,8 @@
 //! Receives audio samples via channel and performs FFT analysis
 //! for visualization purposes.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use crossbeam::channel::Receiver;
 

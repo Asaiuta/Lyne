@@ -2,16 +2,16 @@
 //!
 //! Contains shared state, commands, device info, and cache utilities.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::Arc;
+use crate::processor::{DspChain, NoiseShaperCurve};
+use arc_swap::{ArcSwap, ArcSwapOption};
 use crossbeam::queue::ArrayQueue;
 use parking_lot::{Mutex, RwLock};
-use arc_swap::{ArcSwap, ArcSwapOption};
-use serde::Serialize;
-use std::path::Path;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
-use crate::processor::{DspChain, NoiseShaperCurve};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::Arc;
 
 // ============ Cache System ============
 
@@ -29,11 +29,11 @@ fn calculate_checksum(data: &[f64]) -> u32 {
 }
 
 fn read_u32_from_bytes(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(bytes[offset..offset+4].try_into().unwrap())
+    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
 
 fn read_u64_from_bytes(bytes: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(bytes[offset..offset+8].try_into().unwrap())
+    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
 /// Save samples to cache with header validation
@@ -67,7 +67,10 @@ pub fn save_cache_with_header(
         file.write_all(&sample.to_le_bytes())?;
     }
 
-    log::info!("Saved {} samples to cache with header validation", samples.len());
+    log::info!(
+        "Saved {} samples to cache with header validation",
+        samples.len()
+    );
     Ok(())
 }
 
@@ -78,11 +81,7 @@ pub fn save_cache_with_header(
 /// avoiding a separate full pass over potentially huge buffers (e.g., 1.8 GB for
 /// 10 min 192kHz stereo). This eliminates the startup lag from the previous
 /// two-pass approach (read all → checksum all).
-pub fn load_cache_with_header(
-    path: &Path,
-    expected_sr: u32,
-    expected_ch: u32,
-) -> Option<Vec<f64>> {
+pub fn load_cache_with_header(path: &Path, expected_sr: u32, expected_ch: u32) -> Option<Vec<f64>> {
     let mut file = fs::File::open(path).ok()?;
     let metadata = file.metadata().ok()?;
     let file_size = metadata.len() as usize;
@@ -113,19 +112,30 @@ pub fn load_cache_with_header(
     }
 
     if sample_rate != expected_sr {
-        log::warn!("Cache sample rate mismatch: {} != {}", sample_rate, expected_sr);
+        log::warn!(
+            "Cache sample rate mismatch: {} != {}",
+            sample_rate,
+            expected_sr
+        );
         return None;
     }
 
     if channels != expected_ch {
-        log::warn!("Cache channel count mismatch: {} != {}", channels, expected_ch);
+        log::warn!(
+            "Cache channel count mismatch: {} != {}",
+            channels,
+            expected_ch
+        );
         return None;
     }
 
     let expected_data_size = frame_count as usize * channels as usize * 8;
     if file_size != CACHE_HEADER_SIZE + expected_data_size {
-        log::warn!("Cache file size mismatch: expected {}, got {}",
-            CACHE_HEADER_SIZE + expected_data_size, file_size);
+        log::warn!(
+            "Cache file size mismatch: expected {}, got {}",
+            CACHE_HEADER_SIZE + expected_data_size,
+            file_size
+        );
         return None;
     }
 
@@ -150,24 +160,33 @@ pub fn load_cache_with_header(
     if computed_checksum != stored_checksum {
         log::warn!(
             "Cache checksum mismatch: stored={}, computed={}. File may be corrupted.",
-            stored_checksum, computed_checksum
+            stored_checksum,
+            computed_checksum
         );
         return None;
     }
 
-    log::info!("Loaded {} samples from validated cache (streaming checksum verified)", samples.len());
+    log::info!(
+        "Loaded {} samples from validated cache (streaming checksum verified)",
+        samples.len()
+    );
     Some(samples)
 }
 
 // ============ Event Flag Constants (Task E) ============
 
-pub const EVENT_LOAD_COMPLETE:       u32 = 1 << 0;
-pub const EVENT_LOAD_ERROR:          u32 = 1 << 1;
-pub const EVENT_TRACK_CHANGED:       u32 = 1 << 2;
-pub const EVENT_PLAYBACK_ENDED:      u32 = 1 << 3;
-pub const EVENT_NEEDS_PRELOAD:       u32 = 1 << 4;
+pub const EVENT_LOAD_COMPLETE: u32 = 1 << 0;
+pub const EVENT_LOAD_ERROR: u32 = 1 << 1;
+pub const EVENT_TRACK_CHANGED: u32 = 1 << 2;
+pub const EVENT_PLAYBACK_ENDED: u32 = 1 << 3;
+pub const EVENT_NEEDS_PRELOAD: u32 = 1 << 4;
 pub const EVENT_NEEDS_PRELOAD_RESET: u32 = 1 << 5;
-pub const EVENT_QUEUE_UPDATED:       u32 = 1 << 6;
+pub const EVENT_QUEUE_UPDATED: u32 = 1 << 6;
+pub const EVENT_TRACK_EOF: u32 = 1 << 7;
+pub const EVENT_PLAYBACK_STARTED: u32 = 1 << 8;
+pub const EVENT_PLAYBACK_PAUSED: u32 = 1 << 9;
+pub const EVENT_PLAYBACK_STOPPED: u32 = 1 << 10;
+pub const EVENT_PLAYBACK_SEEKED: u32 = 1 << 11;
 
 // ============ Commands & State ============
 
@@ -199,6 +218,76 @@ pub enum AudioCommand {
     SetNoiseShaperCurve { curve: NoiseShaperCurve },
     LoadComplete(LoadResult),
     LoadError(String),
+}
+
+/// Repeat behavior at the end of a track or queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum RepeatMode {
+    Off = 0,
+    One = 1,
+    All = 2,
+}
+
+impl RepeatMode {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            1 => RepeatMode::One,
+            2 => RepeatMode::All,
+            _ => RepeatMode::Off,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RepeatMode::Off => "off",
+            RepeatMode::One => "one",
+            RepeatMode::All => "all",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "off" => Some(RepeatMode::Off),
+            "one" | "repeat_one" => Some(RepeatMode::One),
+            "all" | "repeat_all" => Some(RepeatMode::All),
+            _ => None,
+        }
+    }
+}
+
+/// Shuffle behavior for persistent queue ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum ShuffleMode {
+    Off = 0,
+    On = 1,
+}
+
+impl ShuffleMode {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            1 => ShuffleMode::On,
+            _ => ShuffleMode::Off,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShuffleMode::Off => "off",
+            ShuffleMode::On => "on",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "off" => Some(ShuffleMode::Off),
+            "on" => Some(ShuffleMode::On),
+            _ => None,
+        }
+    }
 }
 
 /// State of the audio player
@@ -297,7 +386,7 @@ pub struct SharedState {
     pub cancel_preload_signal: AtomicBool,
     /// Pending target gain for next track (set during gapless preload, applied after buffer swap)
     /// Fixes Defect 22: Prevents premature gain update during gapless preload
-    pub pending_target_gain_db: std::sync::atomic::AtomicU64,  // Stored as bits of f64
+    pub pending_target_gain_db: std::sync::atomic::AtomicU64, // Stored as bits of f64
 
     // Gapless: deferred metadata for main-thread pickup after track switch.
     // Audio callback sets gapless_swap_pending=true; main thread (WS pusher) reads these
@@ -306,19 +395,24 @@ pub struct SharedState {
 
     // Async loading state
     pub is_loading: AtomicBool,
-    pub load_progress: AtomicU64,  // Percentage (0-100)
+    pub load_progress: AtomicU64, // Percentage (0-100)
     pub load_error: RwLock<Option<String>>,
 
     // WebSocket event flags — unified bitmask (Task E)
     // Writers: audio thread or async tasks use fetch_or(EVENT_*, Release)
     // Reader: WebSocket pusher uses swap(0, AcqRel) to atomically take all events
     pub event_flags: std::sync::atomic::AtomicU32,
-    pub current_track_path: RwLock<Option<String>>,  // Current track for notifications
+    /// Monotonic EOF signal for backend supervisors. This is separate from
+    /// event_flags because WebSocket handlers consume event_flags with swap().
+    pub playback_end_count: AtomicU64,
+    pub current_track_path: RwLock<Option<String>>, // Current track for notifications
+    pub repeat_mode: AtomicU8,
+    pub shuffle_mode: AtomicU8,
 
     // Track metadata
     pub track_metadata: RwLock<crate::decoder::TrackMetadata>,
     pub pending_metadata: RwLock<Option<crate::decoder::TrackMetadata>>,
-    
+
     // Output format info (Defect 37 fix: for NoiseShaper bit depth)
     pub output_bits: std::sync::atomic::AtomicU32,
 
@@ -362,11 +456,14 @@ impl SharedState {
             load_error: RwLock::new(None),
 
             event_flags: std::sync::atomic::AtomicU32::new(0),
+            playback_end_count: AtomicU64::new(0),
             current_track_path: RwLock::new(None),
+            repeat_mode: AtomicU8::new(RepeatMode::Off as u8),
+            shuffle_mode: AtomicU8::new(ShuffleMode::Off as u8),
 
             track_metadata: RwLock::new(crate::decoder::TrackMetadata::default()),
             pending_metadata: RwLock::new(None),
-            output_bits: std::sync::atomic::AtomicU32::new(24),  // Default 24-bit
+            output_bits: std::sync::atomic::AtomicU32::new(24), // Default 24-bit
             dsp_needs_rebuild: AtomicBool::new(false),
             pending_dsp_chain: ArrayQueue::new(1),
         }
@@ -383,11 +480,59 @@ impl SharedState {
         let sr = self.sample_rate.load(Ordering::Relaxed).max(1);
         total as f64 / sr as f64
     }
+
+    pub fn repeat_mode(&self) -> RepeatMode {
+        RepeatMode::from_u8(self.repeat_mode.load(Ordering::Acquire))
+    }
+
+    pub fn set_repeat_mode(&self, mode: RepeatMode) {
+        self.repeat_mode.store(mode as u8, Ordering::Release);
+    }
+
+    pub fn shuffle_mode(&self) -> ShuffleMode {
+        ShuffleMode::from_u8(self.shuffle_mode.load(Ordering::Acquire))
+    }
+
+    pub fn set_shuffle_mode(&self, mode: ShuffleMode) {
+        self.shuffle_mode.store(mode as u8, Ordering::Release);
+    }
 }
 
 impl Default for SharedState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeat_mode_parses_and_round_trips_atomic_value() {
+        assert_eq!(RepeatMode::parse("off"), Some(RepeatMode::Off));
+        assert_eq!(RepeatMode::parse("one"), Some(RepeatMode::One));
+        assert_eq!(RepeatMode::parse("all"), Some(RepeatMode::All));
+        assert_eq!(RepeatMode::parse("bogus"), None);
+        assert_eq!(RepeatMode::from_u8(99), RepeatMode::Off);
+        assert_eq!(RepeatMode::All.as_str(), "all");
+
+        let shared = SharedState::new();
+        shared.set_repeat_mode(RepeatMode::One);
+        assert_eq!(shared.repeat_mode(), RepeatMode::One);
+    }
+
+    #[test]
+    fn shuffle_mode_parses_and_round_trips_atomic_value() {
+        assert_eq!(ShuffleMode::parse("off"), Some(ShuffleMode::Off));
+        assert_eq!(ShuffleMode::parse("on"), Some(ShuffleMode::On));
+        assert_eq!(ShuffleMode::parse("bogus"), None);
+        assert_eq!(ShuffleMode::from_u8(99), ShuffleMode::Off);
+        assert_eq!(ShuffleMode::On.as_str(), "on");
+
+        let shared = SharedState::new();
+        shared.set_shuffle_mode(ShuffleMode::On);
+        assert_eq!(shared.shuffle_mode(), ShuffleMode::On);
     }
 }
 

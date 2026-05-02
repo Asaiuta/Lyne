@@ -4,13 +4,15 @@
 //! process restarts: WebDAV sources, media metadata, playback sessions/history,
 //! active device/DSP snapshots, queue snapshot, and analysis task records.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rand::seq::SliceRandom;
+use rusqlite::{params, Connection, OptionalExtension, ToSql};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::decoder::TrackMetadata;
+use crate::migration;
 use crate::webdav::WebDavConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +136,7 @@ pub struct QueueEntryRecord {
     pub queue_id: String,
     pub entry_id: i64,
     pub position_index: i64,
+    pub shuffle_index: Option<i64>,
     pub source_path: String,
     pub media_id: Option<String>,
     pub status: String,
@@ -177,12 +180,14 @@ impl AppDatabase {
 
         let conn = Connection::open(&db_path)
             .map_err(|e| format!("Failed to open app database: {}", e))?;
+        let mut conn = prepare_connection(conn, true)?;
+        migration::run_migrations(&mut conn)?;
 
         let db = Self {
             conn: Mutex::new(conn),
             db_path,
         };
-        db.init_schema()?;
+        db.gc_on_startup()?;
         Ok(db)
     }
 
@@ -190,11 +195,12 @@ impl AppDatabase {
     pub fn in_memory() -> Result<Self, String> {
         let conn = Connection::open_in_memory()
             .map_err(|e| format!("Failed to create in-memory app database: {}", e))?;
+        let mut conn = prepare_connection(conn, false)?;
+        migration::run_migrations(&mut conn)?;
         let db = Self {
             conn: Mutex::new(conn),
             db_path: PathBuf::from(":memory:"),
         };
-        db.init_schema()?;
         Ok(db)
     }
 
@@ -202,178 +208,94 @@ impl AppDatabase {
         &self.db_path
     }
 
-    fn init_schema(&self) -> Result<(), String> {
+    pub fn gc_on_startup(&self) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute_batch(
-            r#"
-            PRAGMA foreign_keys = ON;
+        let now = now_epoch_secs_i64();
+        let history_cutoff = now - 30 * 24 * 3600;
+        let task_cutoff = now - 30 * 24 * 3600;
+        let stale_session_cutoff = now - 24 * 3600;
 
-            CREATE TABLE IF NOT EXISTS webdav_sources (
-                source_key   TEXT PRIMARY KEY,
-                display_name TEXT NOT NULL,
-                base_url     TEXT NOT NULL,
-                username     TEXT,
-                password     TEXT,
-                is_default   INTEGER NOT NULL DEFAULT 0,
-                created_at   INTEGER NOT NULL,
-                updated_at   INTEGER NOT NULL
+        let removed_history = conn
+            .execute(
+                "DELETE FROM playback_history WHERE event_at < ?1",
+                params![history_cutoff],
+            )
+            .map_err(|e| format!("Failed to GC old playback history: {}", e))?;
+        if removed_history > 0 {
+            log::info!(
+                "GC removed {} old playback history entries",
+                removed_history
             );
+        }
 
-            CREATE TABLE IF NOT EXISTS analysis_tasks (
-                task_id       INTEGER PRIMARY KEY,
-                task_type     TEXT NOT NULL,
-                source_path   TEXT NOT NULL,
-                status        TEXT NOT NULL,
-                store_result  INTEGER NOT NULL DEFAULT 1,
-                created_at    INTEGER NOT NULL,
-                updated_at    INTEGER NOT NULL,
-                result_json   TEXT,
-                error_text    TEXT
+        let removed_tasks = conn
+            .execute(
+                r#"
+                DELETE FROM analysis_tasks
+                WHERE updated_at < ?1
+                  AND status IN ('success', 'error', 'canceled')
+                "#,
+                params![task_cutoff],
+            )
+            .map_err(|e| format!("Failed to GC terminal analysis tasks: {}", e))?;
+        if removed_tasks > 0 {
+            log::info!("GC removed {} terminal analysis tasks", removed_tasks);
+        }
+
+        let abandoned_sessions = conn
+            .execute(
+                r#"
+                UPDATE playback_sessions
+                SET status = 'abandoned',
+                    ended_at = COALESCE(ended_at, updated_at),
+                    updated_at = ?2
+                WHERE ended_at IS NULL
+                  AND started_at < ?1
+                "#,
+                params![stale_session_cutoff, now],
+            )
+            .map_err(|e| format!("Failed to mark stale playback sessions abandoned: {}", e))?;
+        if abandoned_sessions > 0 {
+            log::info!(
+                "GC marked {} stale playback sessions abandoned",
+                abandoned_sessions
             );
+        }
 
-            CREATE TABLE IF NOT EXISTS media_items (
-                media_id       TEXT PRIMARY KEY,
-                source_path    TEXT NOT NULL UNIQUE,
-                source_kind    TEXT NOT NULL,
-                title          TEXT,
-                artist         TEXT,
-                album          TEXT,
-                track_number   INTEGER,
-                disc_number    INTEGER,
-                genre          TEXT,
-                year           INTEGER,
-                duration_secs  REAL,
-                sample_rate    INTEGER,
-                channels       INTEGER,
-                added_at       INTEGER NOT NULL,
-                updated_at     INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS cover_art_cache (
-                cover_art_id  TEXT PRIMARY KEY,
-                media_id       TEXT NOT NULL,
-                mime_type      TEXT,
-                image_bytes    BLOB,
-                byte_len       INTEGER NOT NULL,
-                created_at     INTEGER NOT NULL,
-                FOREIGN KEY(media_id) REFERENCES media_items(media_id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS playback_sessions (
-                session_id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                media_id         TEXT,
-                source_path      TEXT NOT NULL,
-                status           TEXT NOT NULL,
-                started_at       INTEGER NOT NULL,
-                updated_at       INTEGER NOT NULL,
-                ended_at         INTEGER,
-                position_secs    REAL,
-                duration_secs    REAL,
-                volume           REAL,
-                device_id        INTEGER,
-                exclusive_mode   INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY(media_id) REFERENCES media_items(media_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS playback_history (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id     INTEGER,
-                media_id       TEXT,
-                source_path    TEXT NOT NULL,
-                event_type     TEXT NOT NULL,
-                event_at       INTEGER NOT NULL,
-                position_secs  REAL,
-                payload_json   TEXT,
-                FOREIGN KEY(session_id) REFERENCES playback_sessions(session_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS device_configs (
-                profile_key     TEXT PRIMARY KEY,
-                device_id        INTEGER,
-                exclusive_mode   INTEGER NOT NULL DEFAULT 0,
-                updated_at       INTEGER NOT NULL,
-                last_seen_at     INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS dsp_configs (
-                config_key    TEXT PRIMARY KEY,
-                payload_json  TEXT NOT NULL,
-                updated_at    INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS playback_queue_state (
-                queue_key            TEXT PRIMARY KEY,
-                current_track_path   TEXT,
-                pending_track_path   TEXT,
-                needs_preload        INTEGER NOT NULL DEFAULT 0,
-                pending_ready        INTEGER NOT NULL DEFAULT 0,
-                updated_at           INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS library_roots (
-                root_id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_key              TEXT,
-                source_path             TEXT NOT NULL UNIQUE,
-                source_kind             TEXT NOT NULL,
-                display_name            TEXT NOT NULL,
-                scan_status             TEXT NOT NULL DEFAULT 'idle',
-                track_count             INTEGER NOT NULL DEFAULT 0,
-                last_scan_started_at    INTEGER,
-                last_scan_finished_at   INTEGER,
-                updated_at              INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS playback_queue_entries (
-                entry_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                queue_id         TEXT NOT NULL,
-                position_index   INTEGER NOT NULL,
-                source_path      TEXT NOT NULL,
-                media_id         TEXT,
-                status           TEXT NOT NULL DEFAULT 'queued',
-                added_at         INTEGER NOT NULL,
-                updated_at       INTEGER NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_analysis_tasks_updated_at
-                ON analysis_tasks(updated_at);
-            CREATE INDEX IF NOT EXISTS idx_media_items_source_path
-                ON media_items(source_path);
-            CREATE INDEX IF NOT EXISTS idx_playback_history_event_at
-                ON playback_history(event_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_playback_sessions_updated_at
-                ON playback_sessions(updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_library_roots_updated_at
-                ON library_roots(updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_playback_queue_entries_queue_position
-                ON playback_queue_entries(queue_id, position_index ASC);
-            "#,
-        )
-        .map_err(|e| format!("Failed to initialize app database schema: {}", e))?;
-        drop(conn);
-        self.ensure_library_root_source_key_column()?;
-        Ok(())
-    }
-
-    fn ensure_library_root_source_key_column(&self) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(library_roots)")
-            .map_err(|e| format!("Failed to inspect library_roots schema: {}", e))?;
-        let columns = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .map_err(|e| format!("Failed to read library_roots schema columns: {}", e))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to decode library_roots schema columns: {}", e))?;
-
-        if !columns.iter().any(|column| column == "source_key") {
-            conn.execute(
-                "ALTER TABLE library_roots ADD COLUMN source_key TEXT",
+        let removed_cover_art = conn
+            .execute(
+                r#"
+                DELETE FROM cover_art_cache
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM media_items
+                    WHERE media_items.media_id = cover_art_cache.media_id
+                )
+                "#,
                 [],
             )
-            .map_err(|e| format!("Failed to add source_key column to library_roots: {}", e))?;
+            .map_err(|e| format!("Failed to GC orphaned cover art: {}", e))?;
+        if removed_cover_art > 0 {
+            log::info!(
+                "GC removed {} orphaned cover art entries",
+                removed_cover_art
+            );
         }
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn has_column(&self, table: &str, column: &str) -> Result<bool, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({})", table))
+            .map_err(|e| format!("Failed to inspect {} schema: {}", table, e))?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| format!("Failed to read {} schema columns: {}", table, e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to decode {} schema columns: {}", table, e))?;
+        Ok(columns.iter().any(|name| name == column))
     }
 
     pub fn load_primary_webdav_source(&self) -> Result<Option<WebDavConfig>, String> {
@@ -433,7 +355,10 @@ impl AppDatabase {
             .map_err(|e| format!("Failed to decode WebDAV sources: {}", e))
     }
 
-    pub fn get_webdav_source(&self, source_key: &str) -> Result<Option<WebDavSourceRecord>, String> {
+    pub fn get_webdav_source(
+        &self,
+        source_key: &str,
+    ) -> Result<Option<WebDavSourceRecord>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
             r#"
@@ -503,8 +428,11 @@ impl AppDatabase {
         let now = now_epoch_secs_i64();
 
         if make_default {
-            tx.execute("UPDATE webdav_sources SET is_default = 0 WHERE is_default = 1", [])
-                .map_err(|e| format!("Failed to clear default WebDAV source: {}", e))?;
+            tx.execute(
+                "UPDATE webdav_sources SET is_default = 0 WHERE is_default = 1",
+                [],
+            )
+            .map_err(|e| format!("Failed to clear default WebDAV source: {}", e))?;
         }
 
         tx.execute(
@@ -538,7 +466,10 @@ impl AppDatabase {
         Ok(())
     }
 
-    pub fn set_default_webdav_source(&self, source_key: &str) -> Result<Option<WebDavConfig>, String> {
+    pub fn set_default_webdav_source(
+        &self,
+        source_key: &str,
+    ) -> Result<Option<WebDavConfig>, String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn
             .transaction()
@@ -567,8 +498,11 @@ impl AppDatabase {
             return Ok(None);
         };
 
-        tx.execute("UPDATE webdav_sources SET is_default = 0 WHERE is_default = 1", [])
-            .map_err(|e| format!("Failed to clear existing default WebDAV source: {}", e))?;
+        tx.execute(
+            "UPDATE webdav_sources SET is_default = 0 WHERE is_default = 1",
+            [],
+        )
+        .map_err(|e| format!("Failed to clear existing default WebDAV source: {}", e))?;
         tx.execute(
             "UPDATE webdav_sources SET is_default = 1, updated_at = ?2 WHERE source_key = ?1",
             params![source_key, now_epoch_secs_i64()],
@@ -747,21 +681,21 @@ impl AppDatabase {
                 "#;
 
         let mapper = |row: &rusqlite::Row<'_>| -> rusqlite::Result<StoredAnalysisTask> {
-                let result_json: Option<String> = row.get(7)?;
-                Ok(StoredAnalysisTask {
-                    task_id: row.get::<_, i64>(0)? as u64,
-                    task_type: row.get(1)?,
-                    source_path: row.get(2)?,
-                    status: row.get(3)?,
-                    store_result: row.get::<_, i64>(4)? != 0,
-                    created_at_epoch_secs: row.get::<_, i64>(5)? as u64,
-                    updated_at_epoch_secs: row.get::<_, i64>(6)? as u64,
-                    result: result_json
-                        .as_deref()
-                        .and_then(|value| serde_json::from_str(value).ok()),
-                    error: row.get(8)?,
-                })
-            };
+            let result_json: Option<String> = row.get(7)?;
+            Ok(StoredAnalysisTask {
+                task_id: row.get::<_, i64>(0)? as u64,
+                task_type: row.get(1)?,
+                source_path: row.get(2)?,
+                status: row.get(3)?,
+                store_result: row.get::<_, i64>(4)? != 0,
+                created_at_epoch_secs: row.get::<_, i64>(5)? as u64,
+                updated_at_epoch_secs: row.get::<_, i64>(6)? as u64,
+                result: result_json
+                    .as_deref()
+                    .and_then(|value| serde_json::from_str(value).ok()),
+                error: row.get(8)?,
+            })
+        };
 
         let rows = if let Some(task_type) = task_type {
             let mut stmt = conn
@@ -783,18 +717,17 @@ impl AppDatabase {
             rows
         };
 
-        rows
-            .map_err(|e| format!("Failed to decode recent analysis tasks: {}", e))
+        rows.map_err(|e| format!("Failed to decode recent analysis tasks: {}", e))
     }
 
     pub fn record_media_stub(&self, source_path: &str) -> Result<String, String> {
         let media_id = media_id_for_path(source_path);
-        let source_kind = if source_path.starts_with("http://") || source_path.starts_with("https://")
-        {
-            "remote"
-        } else {
-            "local"
-        };
+        let source_kind =
+            if source_path.starts_with("http://") || source_path.starts_with("https://") {
+                "remote"
+            } else {
+                "local"
+            };
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = now_epoch_secs_i64();
         conn.execute(
@@ -1048,7 +981,10 @@ impl AppDatabase {
         Ok(())
     }
 
-    pub fn recent_playback_history(&self, limit: usize) -> Result<Vec<PlaybackHistoryEntry>, String> {
+    pub fn recent_playback_history(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<PlaybackHistoryEntry>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
@@ -1122,7 +1058,10 @@ impl AppDatabase {
             .map_err(|e| format!("Failed to decode media items: {}", e))
     }
 
-    pub fn recent_playback_sessions(&self, limit: usize) -> Result<Vec<PlaybackSessionRecord>, String> {
+    pub fn recent_playback_sessions(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<PlaybackSessionRecord>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
@@ -1221,7 +1160,10 @@ impl AppDatabase {
         Ok(())
     }
 
-    pub fn get_device_config(&self, profile_key: &str) -> Result<Option<DeviceConfigRecord>, String> {
+    pub fn get_device_config(
+        &self,
+        profile_key: &str,
+    ) -> Result<Option<DeviceConfigRecord>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
             r#"
@@ -1366,7 +1308,14 @@ impl AppDatabase {
                 scan_status = excluded.scan_status,
                 updated_at = excluded.updated_at
             "#,
-            params![source_key, source_path, source_kind, display_name, scan_status, now],
+            params![
+                source_key,
+                source_path,
+                source_kind,
+                display_name,
+                scan_status,
+                now
+            ],
         )
         .map_err(|e| format!("Failed to upsert library root: {}", e))?;
 
@@ -1434,8 +1383,12 @@ impl AppDatabase {
                     display_name: row.get(4)?,
                     scan_status: row.get(5)?,
                     track_count: row.get::<_, i64>(6)? as u64,
-                    last_scan_started_at_epoch_secs: row.get::<_, Option<i64>>(7)?.map(|v| v as u64),
-                    last_scan_finished_at_epoch_secs: row.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                    last_scan_started_at_epoch_secs: row
+                        .get::<_, Option<i64>>(7)?
+                        .map(|v| v as u64),
+                    last_scan_finished_at_epoch_secs: row
+                        .get::<_, Option<i64>>(8)?
+                        .map(|v| v as u64),
                     updated_at_epoch_secs: row.get::<_, i64>(9)? as u64,
                 })
             })
@@ -1445,11 +1398,7 @@ impl AppDatabase {
             .map_err(|e| format!("Failed to decode library roots: {}", e))
     }
 
-    pub fn replace_queue_entries(
-        &self,
-        queue_id: &str,
-        entries: &[String],
-    ) -> Result<(), String> {
+    pub fn replace_queue_entries(&self, queue_id: &str, entries: &[String]) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn
             .transaction()
@@ -1500,9 +1449,52 @@ impl AppDatabase {
                 (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
             VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?5)
             "#,
-            params![queue_id, next_position, source_path, media_id_for_path(source_path), now],
+            params![
+                queue_id,
+                next_position,
+                source_path,
+                media_id_for_path(source_path),
+                now
+            ],
         )
         .map_err(|e| format!("Failed to append queue entry: {}", e))?;
+        Ok(())
+    }
+
+    pub fn append_queue_entries(&self, queue_id: &str, entries: &[String]) -> Result<(), String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Failed to start queue append transaction: {}", e))?;
+        let now = now_epoch_secs_i64();
+        let next_position: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position_index) + 1, 0) FROM playback_queue_entries WHERE queue_id = ?1",
+                params![queue_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Failed to compute next queue position: {}", e))?;
+
+        for (offset, source_path) in entries.iter().enumerate() {
+            tx.execute(
+                r#"
+                INSERT INTO playback_queue_entries
+                    (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?5)
+                "#,
+                params![
+                    queue_id,
+                    next_position + offset as i64,
+                    source_path,
+                    media_id_for_path(source_path),
+                    now,
+                ],
+            )
+            .map_err(|e| format!("Failed to append queue entry: {}", e))?;
+        }
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit queue append transaction: {}", e))?;
         Ok(())
     }
 
@@ -1550,10 +1542,10 @@ impl AppDatabase {
         let mut stmt = conn
             .prepare(
                 r#"
-                SELECT queue_id, entry_id, position_index, source_path, media_id, status, added_at, updated_at
+                SELECT queue_id, entry_id, position_index, shuffle_index, source_path, media_id, status, added_at, updated_at
                 FROM playback_queue_entries
                 WHERE queue_id = ?1
-                ORDER BY position_index ASC, entry_id ASC
+                ORDER BY COALESCE(shuffle_index, position_index) ASC, entry_id ASC
                 "#,
             )
             .map_err(|e| format!("Failed to prepare queue entries query: {}", e))?;
@@ -1564,11 +1556,12 @@ impl AppDatabase {
                     queue_id: row.get(0)?,
                     entry_id: row.get(1)?,
                     position_index: row.get(2)?,
-                    source_path: row.get(3)?,
-                    media_id: row.get(4)?,
-                    status: row.get(5)?,
-                    added_at_epoch_secs: row.get::<_, i64>(6)? as u64,
-                    updated_at_epoch_secs: row.get::<_, i64>(7)? as u64,
+                    shuffle_index: row.get(3)?,
+                    source_path: row.get(4)?,
+                    media_id: row.get(5)?,
+                    status: row.get(6)?,
+                    added_at_epoch_secs: row.get::<_, i64>(7)? as u64,
+                    updated_at_epoch_secs: row.get::<_, i64>(8)? as u64,
                 })
             })
             .map_err(|e| format!("Failed to query queue entries: {}", e))?;
@@ -1585,24 +1578,30 @@ impl AppDatabase {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         let query_with_cursor = r#"
-            SELECT queue_id, entry_id, position_index, source_path, media_id, status, added_at, updated_at
+            SELECT queue_id, entry_id, position_index, shuffle_index, source_path, media_id, status, added_at, updated_at
             FROM playback_queue_entries
             WHERE queue_id = ?1
               AND status = 'queued'
-              AND position_index > COALESCE(
-                  (SELECT position_index FROM playback_queue_entries WHERE queue_id = ?1 AND source_path = ?2 ORDER BY position_index ASC LIMIT 1),
+              AND COALESCE(shuffle_index, position_index) > COALESCE(
+                  (
+                      SELECT COALESCE(q2.shuffle_index, q2.position_index)
+                      FROM playback_queue_entries q2
+                      WHERE q2.queue_id = ?1 AND q2.source_path = ?2
+                      ORDER BY COALESCE(q2.shuffle_index, q2.position_index) ASC, q2.entry_id ASC
+                      LIMIT 1
+                  ),
                   -1
               )
-            ORDER BY position_index ASC, entry_id ASC
+            ORDER BY COALESCE(shuffle_index, position_index) ASC, entry_id ASC
             LIMIT 1
         "#;
 
         let query_without_cursor = r#"
-            SELECT queue_id, entry_id, position_index, source_path, media_id, status, added_at, updated_at
+            SELECT queue_id, entry_id, position_index, shuffle_index, source_path, media_id, status, added_at, updated_at
             FROM playback_queue_entries
             WHERE queue_id = ?1
               AND status = 'queued'
-            ORDER BY position_index ASC, entry_id ASC
+            ORDER BY COALESCE(shuffle_index, position_index) ASC, entry_id ASC
             LIMIT 1
         "#;
 
@@ -1611,11 +1610,12 @@ impl AppDatabase {
                 queue_id: row.get(0)?,
                 entry_id: row.get(1)?,
                 position_index: row.get(2)?,
-                source_path: row.get(3)?,
-                media_id: row.get(4)?,
-                status: row.get(5)?,
-                added_at_epoch_secs: row.get::<_, i64>(6)? as u64,
-                updated_at_epoch_secs: row.get::<_, i64>(7)? as u64,
+                shuffle_index: row.get(3)?,
+                source_path: row.get(4)?,
+                media_id: row.get(5)?,
+                status: row.get(6)?,
+                added_at_epoch_secs: row.get::<_, i64>(7)? as u64,
+                updated_at_epoch_secs: row.get::<_, i64>(8)? as u64,
             })
         };
 
@@ -1628,6 +1628,92 @@ impl AppDatabase {
         result
             .optional()
             .map_err(|e| format!("Failed to peek next queue entry: {}", e))
+    }
+
+    pub fn shuffle_entries(&self, queue_id: &str) -> Result<(), String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Failed to start shuffle transaction: {}", e))?;
+
+        let mut entries = {
+            let mut stmt = tx
+                .prepare(
+                    r#"
+                    SELECT entry_id
+                    FROM playback_queue_entries
+                    WHERE queue_id = ?1
+                    ORDER BY position_index ASC, entry_id ASC
+                    "#,
+                )
+                .map_err(|e| format!("Failed to prepare shuffle query: {}", e))?;
+            let rows = stmt
+                .query_map(params![queue_id], |row| row.get::<_, i64>(0))
+                .map_err(|e| format!("Failed to query shuffle entries: {}", e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to decode shuffle entries: {}", e))?;
+            rows
+        };
+
+        let original = entries.clone();
+        entries.shuffle(&mut rand::thread_rng());
+        if entries.len() > 1 && entries == original {
+            entries.swap(0, 1);
+        }
+
+        let now = now_epoch_secs_i64();
+        for (index, entry_id) in entries.iter().enumerate() {
+            tx.execute(
+                r#"
+                UPDATE playback_queue_entries
+                SET shuffle_index = ?3,
+                    updated_at = ?4
+                WHERE queue_id = ?1 AND entry_id = ?2
+                "#,
+                params![queue_id, entry_id, index as i64, now],
+            )
+            .map_err(|e| format!("Failed to update shuffle index: {}", e))?;
+        }
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit shuffle transaction: {}", e))?;
+        Ok(())
+    }
+
+    pub fn unshuffle_entries(&self, queue_id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            r#"
+            UPDATE playback_queue_entries
+            SET shuffle_index = NULL,
+                updated_at = ?2
+            WHERE queue_id = ?1
+            "#,
+            params![queue_id, now_epoch_secs_i64()],
+        )
+        .map_err(|e| format!("Failed to clear shuffle indexes: {}", e))?;
+        Ok(())
+    }
+
+    pub fn reset_queue_cycle_for_repeat_all(
+        &self,
+        queue_id: &str,
+    ) -> Result<Option<QueueEntryRecord>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            r#"
+            UPDATE playback_queue_entries
+            SET status = 'queued',
+                updated_at = ?2
+            WHERE queue_id = ?1
+              AND status IN ('played', 'playing', 'preloading')
+            "#,
+            params![queue_id, now_epoch_secs_i64()],
+        )
+        .map_err(|e| format!("Failed to reset queue cycle: {}", e))?;
+        drop(conn);
+
+        self.peek_next_queue_entry(queue_id, None)
     }
 
     pub fn mark_queue_entry_status(
@@ -1685,8 +1771,8 @@ impl AppDatabase {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let updated_at = now_epoch_secs_i64();
 
-        let changed = match current_statuses.len() {
-            0 => conn.execute(
+        let changed = if current_statuses.is_empty() {
+            conn.execute(
                 r#"
                 UPDATE playback_queue_entries
                 SET status = ?3,
@@ -1700,57 +1786,35 @@ impl AppDatabase {
                 )
                 "#,
                 params![queue_id, source_path, next_status, updated_at],
-            ),
-            1 => conn.execute(
+            )
+        } else {
+            let placeholders = std::iter::repeat("?")
+                .take(current_statuses.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
                 r#"
                 UPDATE playback_queue_entries
-                SET status = ?4,
-                    updated_at = ?5
+                SET status = ?,
+                    updated_at = ?
                 WHERE entry_id = (
                     SELECT entry_id
                     FROM playback_queue_entries
-                    WHERE queue_id = ?1
-                      AND source_path = ?2
-                      AND status = ?3
+                    WHERE queue_id = ?
+                      AND source_path = ?
+                      AND status IN ({})
                     ORDER BY position_index ASC, entry_id ASC
                     LIMIT 1
                 )
                 "#,
-                params![
-                    queue_id,
-                    source_path,
-                    current_statuses[0],
-                    next_status,
-                    updated_at
-                ],
-            ),
-            2 => conn.execute(
-                r#"
-                UPDATE playback_queue_entries
-                SET status = ?5,
-                    updated_at = ?6
-                WHERE entry_id = (
-                    SELECT entry_id
-                    FROM playback_queue_entries
-                    WHERE queue_id = ?1
-                      AND source_path = ?2
-                      AND status IN (?3, ?4)
-                    ORDER BY position_index ASC, entry_id ASC
-                    LIMIT 1
-                )
-                "#,
-                params![
-                    queue_id,
-                    source_path,
-                    current_statuses[0],
-                    current_statuses[1],
-                    next_status,
-                    updated_at
-                ],
-            ),
-            _ => {
-                return Err("mark_queue_entry_status_by_path supports up to two current statuses".to_string())
+                placeholders
+            );
+            let mut query_params: Vec<&dyn ToSql> =
+                vec![&next_status, &updated_at, &queue_id, &source_path];
+            for status in current_statuses {
+                query_params.push(status);
             }
+            conn.execute(&sql, rusqlite::params_from_iter(query_params))
         }
         .map_err(|e| format!("Failed to update queue entry status by path: {}", e))?;
 
@@ -1762,8 +1826,18 @@ impl AppDatabase {
     }
 }
 
-fn media_id_for_path(path: &str) -> String {
+pub(crate) fn media_id_for_path(path: &str) -> String {
     path.replace('\\', "/").to_lowercase()
+}
+
+fn prepare_connection(conn: Connection, enable_wal: bool) -> Result<Connection, String> {
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| format!("Failed to enable app database foreign keys: {}", e))?;
+    if enable_wal {
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| format!("Failed to enable app database WAL mode: {}", e))?;
+    }
+    Ok(conn)
 }
 
 fn now_epoch_secs_i64() -> i64 {
@@ -1774,12 +1848,17 @@ fn now_epoch_secs_i64() -> i64 {
 }
 
 fn bool_to_sqlite(value: bool) -> i64 {
-    if value { 1 } else { 0 }
+    if value {
+        1
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn persists_webdav_and_history() {
@@ -1943,11 +2022,17 @@ mod tests {
 
         let roots = db.list_library_roots().unwrap();
         assert_eq!(roots.len(), 2);
-        let local_root = roots.iter().find(|root| root.source_kind == "local").unwrap();
+        let local_root = roots
+            .iter()
+            .find(|root| root.source_kind == "local")
+            .unwrap();
         assert_eq!(local_root.track_count, 12);
         assert_eq!(local_root.scan_status, "completed");
         assert!(local_root.source_key.is_none());
-        let remote_root = roots.iter().find(|root| root.source_kind == "webdav").unwrap();
+        let remote_root = roots
+            .iter()
+            .find(|root| root.source_kind == "webdav")
+            .unwrap();
         assert_eq!(remote_root.source_key.as_deref(), Some("archive"));
         assert_eq!(remote_root.source_path, "/library");
         assert_eq!(remote_root.scan_status, "scanning");
@@ -1959,7 +2044,13 @@ mod tests {
             ..TrackMetadata::default()
         };
         let media_id = db
-            .record_media_metadata("D:/music/a.flac", &metadata, Some(180.0), Some(44100), Some(2))
+            .record_media_metadata(
+                "D:/music/a.flac",
+                &metadata,
+                Some(180.0),
+                Some(44100),
+                Some(2),
+            )
             .unwrap();
         let cover = db
             .get_cover_art_for_media(&media_id)
@@ -1971,17 +2062,353 @@ mod tests {
 
         db.append_queue_entry("active", "D:/music/a.flac").unwrap();
         db.append_queue_entry("active", "D:/music/b.flac").unwrap();
+        db.append_queue_entries(
+            "active",
+            &["D:/music/c.flac".to_string(), "D:/music/d.flac".to_string()],
+        )
+        .unwrap();
         let queue = db.list_queue_entries("active").unwrap();
-        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.len(), 4);
         assert_eq!(queue[0].position_index, 0);
         assert_eq!(queue[1].position_index, 1);
+        assert_eq!(queue[2].position_index, 2);
+        assert_eq!(queue[3].position_index, 3);
 
         db.remove_queue_entry("active", queue[0].entry_id).unwrap();
         let queue = db.list_queue_entries("active").unwrap();
-        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.len(), 3);
         assert_eq!(queue[0].position_index, 0);
+        assert_eq!(queue[1].position_index, 1);
+        assert_eq!(queue[2].position_index, 2);
 
         db.clear_queue("active").unwrap();
         assert!(db.list_queue_entries("active").unwrap().is_empty());
+    }
+
+    #[test]
+    fn migrations_create_schema_version_and_expected_columns() {
+        let db = AppDatabase::in_memory().unwrap();
+
+        assert!(db.has_column("library_roots", "source_key").unwrap());
+        assert!(db
+            .has_column("playback_queue_entries", "shuffle_index")
+            .unwrap());
+
+        let conn = db.conn.lock().unwrap();
+        let versions = conn
+            .prepare("SELECT version FROM schema_version ORDER BY version ASC")
+            .unwrap()
+            .query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(versions, vec![1, 2, 3, 4]);
+
+        let index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_playback_queue_entries_status_position'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index_count, 1);
+    }
+
+    #[test]
+    fn shuffle_order_changes_and_unshuffle_restores_natural_order() {
+        let db = AppDatabase::in_memory().unwrap();
+        db.append_queue_entries(
+            "active",
+            &[
+                "D:/music/a.flac".to_string(),
+                "D:/music/b.flac".to_string(),
+                "D:/music/c.flac".to_string(),
+            ],
+        )
+        .unwrap();
+
+        let natural = db.list_queue_entries("active").unwrap();
+        assert!(natural.iter().all(|entry| entry.shuffle_index.is_none()));
+
+        db.shuffle_entries("active").unwrap();
+        let shuffled = db.list_queue_entries("active").unwrap();
+        assert!(shuffled.iter().all(|entry| entry.shuffle_index.is_some()));
+        assert_ne!(
+            shuffled
+                .iter()
+                .map(|entry| entry.source_path.as_str())
+                .collect::<Vec<_>>(),
+            natural
+                .iter()
+                .map(|entry| entry.source_path.as_str())
+                .collect::<Vec<_>>(),
+        );
+
+        db.unshuffle_entries("active").unwrap();
+        let restored = db.list_queue_entries("active").unwrap();
+        assert!(restored.iter().all(|entry| entry.shuffle_index.is_none()));
+        assert_eq!(
+            restored
+                .iter()
+                .map(|entry| entry.source_path.as_str())
+                .collect::<Vec<_>>(),
+            natural
+                .iter()
+                .map(|entry| entry.source_path.as_str())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn peek_next_queue_entry_uses_effective_shuffle_order() {
+        let db = AppDatabase::in_memory().unwrap();
+        db.append_queue_entries(
+            "active",
+            &[
+                "D:/music/a.flac".to_string(),
+                "D:/music/b.flac".to_string(),
+                "D:/music/c.flac".to_string(),
+            ],
+        )
+        .unwrap();
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE playback_queue_entries SET shuffle_index = 2 WHERE source_path = 'D:/music/a.flac'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE playback_queue_entries SET shuffle_index = 0 WHERE source_path = 'D:/music/b.flac'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE playback_queue_entries SET shuffle_index = 1 WHERE source_path = 'D:/music/c.flac'",
+                [],
+            )
+            .unwrap();
+        }
+
+        let first = db.peek_next_queue_entry("active", None).unwrap().unwrap();
+        assert_eq!(first.source_path, "D:/music/b.flac");
+
+        let next = db
+            .peek_next_queue_entry("active", Some("D:/music/b.flac"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.source_path, "D:/music/c.flac");
+    }
+
+    #[test]
+    fn repeat_all_reset_requeues_played_entries() {
+        let db = AppDatabase::in_memory().unwrap();
+        db.append_queue_entries(
+            "active",
+            &["D:/music/a.flac".to_string(), "D:/music/b.flac".to_string()],
+        )
+        .unwrap();
+        db.mark_queue_entry_status_by_path("active", "D:/music/a.flac", &["queued"], "played")
+            .unwrap();
+        db.mark_queue_entry_status_by_path("active", "D:/music/b.flac", &["queued"], "playing")
+            .unwrap();
+
+        let first = db
+            .reset_queue_cycle_for_repeat_all("active")
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.source_path, "D:/music/a.flac");
+        let queue = db.list_queue_entries("active").unwrap();
+        assert!(queue.iter().all(|entry| entry.status == "queued"));
+    }
+
+    #[test]
+    fn media_id_normalizes_paths_for_state_exposure() {
+        assert_eq!(
+            media_id_for_path("D:\\Music\\Artist\\Track.FLAC"),
+            "d:/music/artist/track.flac"
+        );
+    }
+
+    #[test]
+    fn startup_gc_removes_old_rows_and_marks_stale_sessions() {
+        let db = AppDatabase::in_memory().unwrap();
+        let now = now_epoch_secs_i64();
+        let old = now - 31 * 24 * 3600;
+        let recent = now - 60;
+        let stale_started = now - 25 * 3600;
+
+        let snapshot = PlaybackRuntimeSnapshot {
+            position_secs: Some(0.0),
+            duration_secs: Some(180.0),
+            volume: Some(0.5),
+            device_id: None,
+            exclusive_mode: false,
+        };
+        let stale_session_id = db
+            .start_playback_session("D:/music/stale.flac", "playing", &snapshot)
+            .unwrap();
+        db.append_playback_history(
+            Some(stale_session_id),
+            "D:/music/stale.flac",
+            "play",
+            Some(1.0),
+            None,
+        )
+        .unwrap();
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE playback_sessions SET started_at = ?1, updated_at = ?1 WHERE session_id = ?2",
+                params![stale_started, stale_session_id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE playback_history SET event_at = ?1 WHERE session_id = ?2",
+                params![recent, stale_session_id],
+            )
+            .unwrap();
+            conn.execute(
+                r#"
+                INSERT INTO playback_history (session_id, media_id, source_path, event_type, event_at, position_secs, payload_json)
+                VALUES (NULL, NULL, 'D:/music/old.flac', 'old', ?1, NULL, NULL)
+                "#,
+                params![old],
+            )
+            .unwrap();
+            conn.execute(
+                r#"
+                INSERT INTO analysis_tasks
+                    (task_id, task_type, source_path, status, store_result, created_at, updated_at, result_json, error_text)
+                VALUES
+                    (1, 'scan_loudness', 'old-success.flac', 'success', 1, ?1, ?1, NULL, NULL),
+                    (2, 'scan_loudness', 'old-running.flac', 'running', 1, ?1, ?1, NULL, NULL),
+                    (3, 'scan_loudness', 'recent-error.flac', 'error', 1, ?2, ?2, NULL, NULL)
+                "#,
+                params![old, recent],
+            )
+            .unwrap();
+            conn.execute(
+                r#"
+                INSERT INTO cover_art_cache (cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at)
+                VALUES ('orphan', 'missing-media', 'image/png', x'0102', 2, ?1)
+                "#,
+                params![old],
+            )
+            .unwrap_or_else(|_| {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+                conn.execute(
+                    r#"
+                    INSERT INTO cover_art_cache (cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at)
+                    VALUES ('orphan', 'missing-media', 'image/png', x'0102', 2, ?1)
+                    "#,
+                    params![old],
+                )
+                .unwrap();
+                conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+                1
+            });
+        }
+
+        db.gc_on_startup().unwrap();
+
+        let conn = db.conn.lock().unwrap();
+        let old_history_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playback_history WHERE source_path = 'D:/music/old.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_history_count, 0);
+
+        let referenced_history_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playback_history WHERE session_id = ?1",
+                params![stale_session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(referenced_history_count, 1);
+
+        let (status, ended_at): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT status, ended_at FROM playback_sessions WHERE session_id = ?1",
+                params![stale_session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "abandoned");
+        assert!(ended_at.is_some());
+
+        let old_terminal_tasks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM analysis_tasks WHERE task_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_terminal_tasks, 0);
+        let kept_tasks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM analysis_tasks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(kept_tasks, 2);
+
+        let orphan_cover_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM cover_art_cache WHERE cover_art_id = 'orphan'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphan_cover_count, 0);
+    }
+
+    #[test]
+    fn file_backed_database_enables_wal() {
+        let db_path = std::env::temp_dir().join(format!(
+            "audio_engine_app_db_wal_{}_{}.db",
+            std::process::id(),
+            now_epoch_secs_i64()
+        ));
+        let db = AppDatabase::open(&db_path).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+        drop(conn);
+        drop(db);
+        let _ = fs::remove_file(&db_path);
+        let _ = fs::remove_file(db_path.with_extension("db-wal"));
+        let _ = fs::remove_file(db_path.with_extension("db-shm"));
+    }
+
+    #[test]
+    fn mark_queue_entry_status_by_path_supports_dynamic_status_filters() {
+        let db = AppDatabase::in_memory().unwrap();
+
+        db.append_queue_entry("active", "D:/music/a.flac").unwrap();
+        db.mark_queue_entry_status_by_path("active", "D:/music/a.flac", &[], "playing")
+            .unwrap();
+        let queue = db.list_queue_entries("active").unwrap();
+        assert_eq!(queue[0].status, "playing");
+
+        db.mark_queue_entry_status_by_path("active", "D:/music/a.flac", &["queued"], "skipped")
+            .unwrap();
+        let queue = db.list_queue_entries("active").unwrap();
+        assert_eq!(queue[0].status, "playing");
+
+        db.mark_queue_entry_status_by_path(
+            "active",
+            "D:/music/a.flac",
+            &["queued", "playing", "preloading"],
+            "played",
+        )
+        .unwrap();
+        let queue = db.list_queue_entries("active").unwrap();
+        assert_eq!(queue[0].status, "played");
     }
 }
