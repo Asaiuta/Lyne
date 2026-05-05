@@ -30,6 +30,7 @@ import type {
 } from "../shared/api/types";
 import { useEngineSocket } from "../shared/api/useEngineSocket";
 import { useTranslation } from "../shared/i18n";
+import { NcmAccountProvider } from "../shared/state/NcmAccountContext";
 import { UISearchProvider } from "../shared/state/UISearchContext";
 import { useUISettings } from "../shared/state/useUISettings";
 
@@ -330,137 +331,139 @@ export function App() {
   });
 
   return (
-    <UISearchProvider activePage={activePage}>
-      <AppShell
-        sidebar={
-          <Sidebar
-            activePage={activePage()}
-            onChange={setActivePage}
-            onRefresh={() => void refreshState()}
-          />
-        }
-        topNav={
-          <TopNav
-            activePage={activePage()}
-            onOpenSettings={() => setActivePage("settings")}
-            windowControls={<WindowControls visible={uiSettings.customChrome} />}
-          />
-        }
-        backgroundLayer={
-          <BackgroundLayer
-            coverUrl={resolvedCoverUrl()}
-            enabled={uiSettings.bgEnabled}
-            blur={uiSettings.bgBlur}
-            maskOpacity={uiSettings.bgMask / 100}
-          />
-        }
-        playerBar={
-          <PlayerBar
-            request={state()}
-            loadingProgress={loadingProgress()}
-            wsStatus={wsStatus()}
-            commandError={commandError()}
-            coverUrl={resolvedCoverUrl()}
-            canSkipPrev={prevEntryId() !== null}
-            canSkipNext={nextEntryId() !== null}
-            livePosition={livePosition()}
-            repeatMode={repeatMode()}
-            shuffleMode={shuffleMode()}
-            onPlay={handlePlay}
-            onPause={handlePause}
-            onStop={handleStop}
-            onSeek={handleSeek}
-            onVolumeChange={handleVolumeChange}
-            onSkipPrev={handleSkipPrev}
-            onSkipNext={handleSkipNext}
-            onCycleRepeat={handleCycleRepeat}
-            onToggleShuffle={handleToggleShuffle}
-            onCoverClick={() => setFullPlayerOpen(true)}
-          />
-        }
-      >
-        <Switch>
-          <Match when={activePage() === "queue"}>
-            <QueuePage
-              currentTrackPath={currentTrackPath()}
-              preloadRequested={preloadRequested()}
-              onPreloadCleared={() => setPreloadRequested(false)}
-              onStateRefresh={refreshState}
+    <NcmAccountProvider>
+      <UISearchProvider activePage={activePage}>
+        <AppShell
+          sidebar={
+            <Sidebar
+              activePage={activePage()}
+              onChange={setActivePage}
+              onRefresh={() => void refreshState()}
             />
-          </Match>
-          <Match when={activePage() === "library"}>
-            <LibraryPage
-              onStateRefresh={refreshState}
-              currentTrackPath={currentTrackPath()}
-              isPlaying={Boolean(player()?.is_playing)}
+          }
+          topNav={
+            <TopNav
+              activePage={activePage()}
+              onOpenSettings={() => setActivePage("settings")}
+              windowControls={<WindowControls visible={uiSettings.customChrome} />}
             />
-          </Match>
-          <Match
-            when={
-              activePage() === "recommend" ||
-              activePage() === "discover" ||
-              activePage() === "created-playlists" ||
-              activePage() === "collected-playlists"
-            }
-          >
-            <NeteasePage
-              mode={
-                activePage() as "recommend" | "discover" | "created-playlists" | "collected-playlists"
+          }
+          backgroundLayer={
+            <BackgroundLayer
+              coverUrl={resolvedCoverUrl()}
+              enabled={uiSettings.bgEnabled}
+              blur={uiSettings.bgBlur}
+              maskOpacity={uiSettings.bgMask / 100}
+            />
+          }
+          playerBar={
+            <PlayerBar
+              request={state()}
+              loadingProgress={loadingProgress()}
+              wsStatus={wsStatus()}
+              commandError={commandError()}
+              coverUrl={resolvedCoverUrl()}
+              canSkipPrev={prevEntryId() !== null}
+              canSkipNext={nextEntryId() !== null}
+              livePosition={livePosition()}
+              repeatMode={repeatMode()}
+              shuffleMode={shuffleMode()}
+              onPlay={handlePlay}
+              onPause={handlePause}
+              onStop={handleStop}
+              onSeek={handleSeek}
+              onVolumeChange={handleVolumeChange}
+              onSkipPrev={handleSkipPrev}
+              onSkipNext={handleSkipNext}
+              onCycleRepeat={handleCycleRepeat}
+              onToggleShuffle={handleToggleShuffle}
+              onCoverClick={() => setFullPlayerOpen(true)}
+            />
+          }
+        >
+          <Switch>
+            <Match when={activePage() === "queue"}>
+              <QueuePage
+                currentTrackPath={currentTrackPath()}
+                preloadRequested={preloadRequested()}
+                onPreloadCleared={() => setPreloadRequested(false)}
+                onStateRefresh={refreshState}
+              />
+            </Match>
+            <Match when={activePage() === "library"}>
+              <LibraryPage
+                onStateRefresh={refreshState}
+                currentTrackPath={currentTrackPath()}
+                isPlaying={Boolean(player()?.is_playing)}
+              />
+            </Match>
+            <Match
+              when={
+                activePage() === "recommend" ||
+                activePage() === "discover" ||
+                activePage() === "created-playlists" ||
+                activePage() === "collected-playlists"
               }
-              onStateRefresh={refreshState}
-              currentTrackPath={currentTrackPath()}
-              currentSongId={currentNcmSongId()}
-              isPlaying={Boolean(player()?.is_playing)}
-              onRegisterPlayback={registerNcmPlayback}
-            />
-          </Match>
-          <Match when={activePage() === "recent"}>
-            <HistoryPage onStateRefresh={refreshState} />
-          </Match>
-          <Match when={activePage() === "settings"}>
-            <SettingsPage onStateRefresh={refreshState} />
-          </Match>
-          <Match when={activePage() === "liked" || activePage() === "cloud"}>
-            <div class="panel panel-placeholder">
-              <div class="panel-header">
-                <h2>{td(`sidebar.nav.${activePage()}.label`)}</h2>
+            >
+              <NeteasePage
+                mode={
+                  activePage() as "recommend" | "discover" | "created-playlists" | "collected-playlists"
+                }
+                onStateRefresh={refreshState}
+                currentTrackPath={currentTrackPath()}
+                currentSongId={currentNcmSongId()}
+                isPlaying={Boolean(player()?.is_playing)}
+                onRegisterPlayback={registerNcmPlayback}
+              />
+            </Match>
+            <Match when={activePage() === "recent"}>
+              <HistoryPage onStateRefresh={refreshState} />
+            </Match>
+            <Match when={activePage() === "settings"}>
+              <SettingsPage onStateRefresh={refreshState} />
+            </Match>
+            <Match when={activePage() === "liked" || activePage() === "cloud"}>
+              <div class="panel panel-placeholder">
+                <div class="panel-header">
+                  <h2>{td(`sidebar.nav.${activePage()}.label`)}</h2>
+                </div>
+                <p class="panel-note">
+                  {activePage() === "liked" && "喜欢的音乐 — 收藏同步功能开发中"}
+                  {activePage() === "cloud" && "我的云盘 — 云盘功能开发中"}
+                </p>
               </div>
-              <p class="panel-note">
-                {activePage() === "liked" && "喜欢的音乐 — 收藏同步功能开发中"}
-                {activePage() === "cloud" && "我的云盘 — 云盘功能开发中"}
-              </p>
-            </div>
-          </Match>
-        </Switch>
-      </AppShell>
+            </Match>
+          </Switch>
+        </AppShell>
 
-      <FullPlayer
-        isOpen={fullPlayerOpen()}
-        onClose={() => setFullPlayerOpen(false)}
-        coverUrl={resolvedCoverUrl()}
-        title={fullPlayerTitle()}
-        subtitle={fullPlayerSubtitle()}
-        detail={fullPlayerDetail()}
-        duration={player()?.duration ?? 0}
-        currentTime={livePosition() ?? player()?.current_time ?? 0}
-        isPlaying={Boolean(player()?.is_playing)}
-        spectrum={spectrum()}
-        lyrics={currentLyricLine()}
-        lyricStatus={lyricStatus()}
-        lyricError={currentNcmSupplement()?.error ?? null}
-        repeatMode={repeatMode()}
-        shuffleMode={shuffleMode()}
-        canSkipPrev={prevEntryId() !== null}
-        canSkipNext={nextEntryId() !== null}
-        onPlay={handlePlay}
-        onPause={handlePause}
-        onSeek={handleSeek}
-        onSkipPrev={handleSkipPrev}
-        onSkipNext={handleSkipNext}
-        onCycleRepeat={handleCycleRepeat}
-        onToggleShuffle={handleToggleShuffle}
-      />
-    </UISearchProvider>
+        <FullPlayer
+          isOpen={fullPlayerOpen()}
+          onClose={() => setFullPlayerOpen(false)}
+          coverUrl={resolvedCoverUrl()}
+          title={fullPlayerTitle()}
+          subtitle={fullPlayerSubtitle()}
+          detail={fullPlayerDetail()}
+          duration={player()?.duration ?? 0}
+          currentTime={livePosition() ?? player()?.current_time ?? 0}
+          isPlaying={Boolean(player()?.is_playing)}
+          spectrum={spectrum()}
+          lyrics={currentLyricLine()}
+          lyricStatus={lyricStatus()}
+          lyricError={currentNcmSupplement()?.error ?? null}
+          repeatMode={repeatMode()}
+          shuffleMode={shuffleMode()}
+          canSkipPrev={prevEntryId() !== null}
+          canSkipNext={nextEntryId() !== null}
+          onPlay={handlePlay}
+          onPause={handlePause}
+          onSeek={handleSeek}
+          onSkipPrev={handleSkipPrev}
+          onSkipNext={handleSkipNext}
+          onCycleRepeat={handleCycleRepeat}
+          onToggleShuffle={handleToggleShuffle}
+        />
+      </UISearchProvider>
+    </NcmAccountProvider>
   );
 }
 
