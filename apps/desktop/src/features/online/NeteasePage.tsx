@@ -1,13 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { createApiClient } from "../../shared/api/client";
 import {
-  checkLoginQr,
-  createLoginQr,
-  getLoginQrKey,
-  getLoginStatus,
-  logout,
   playlistTrackAll,
-  refreshLogin,
   search,
   songDetail,
   songUrlV1,
@@ -15,9 +9,11 @@ import {
 } from "../../shared/api/ncm";
 import { useTranslation } from "../../shared/i18n";
 import { IconPlayCircle, IconRefresh } from "../../components/icons";
+import { LoginModal } from "../../components/LoginModal";
 import { MediaList, type MediaListItem } from "../../components/media/MediaList";
 import { PageHeader } from "../../components/page/PageHeader";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
+import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { readSongDetailSupplement, type NcmTrackReference } from "./ncmPlayback";
 
 const api = createApiClient();
@@ -35,13 +31,6 @@ interface NcmProfile {
 interface Feedback {
   tone: "neutral" | "success" | "error";
   message: string;
-}
-
-interface QrSession {
-  key: string;
-  imageUrl: string | null;
-  statusMessage: string;
-  phase: "waiting" | "scanned" | "confirmed";
 }
 
 interface OnlineTrackItem extends MediaListItem {
@@ -128,19 +117,6 @@ const adaptPlaylist = (value: unknown): OnlinePlaylistSummary | null => {
   };
 };
 
-const readLoginProfile = (payload: unknown): NcmProfile | null => {
-  const root = asRecord(payload);
-  const data = asRecord(root?.data) ?? root;
-  const profile = asRecord(data?.profile);
-  const account = asRecord(data?.account);
-  const userId = readNumber(profile?.userId) ?? readNumber(account?.id);
-  if (userId === null) return null;
-  return {
-    userId,
-    nickname: readString(profile?.nickname) ?? readString(account?.userName)
-  };
-};
-
 const readSearchTracks = (payload: unknown): OnlineTrackItem[] => {
   const result = asRecord(asRecord(payload)?.result);
   return asArray(result?.songs).map(adaptTrack).filter((item): item is OnlineTrackItem => item !== null);
@@ -168,17 +144,12 @@ const readSongUrl = (payload: unknown): string | null => {
   return readString(first?.url);
 };
 
-const readCode = (payload: unknown): number | null => readNumber(asRecord(payload)?.code);
-
-const readMessage = (payload: unknown, fallback: string): string =>
-  readString(asRecord(payload)?.msg) ?? fallback;
-
 export function NeteasePage(props: NeteasePageProps) {
   const { t } = useTranslation();
-  const [loginProfile, setLoginProfile] = createSignal<NcmProfile | null>(null);
+  const accountStore = useNcmAccount();
   const [isCheckingLogin, setIsCheckingLogin] = createSignal(false);
   const [isLoginBusy, setIsLoginBusy] = createSignal(false);
-  const [qrSession, setQrSession] = createSignal<QrSession | null>(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = createSignal(false);
   const [feedback, setFeedback] = createSignal<Feedback>({ tone: "neutral", message: t("ncm.feedback.initial") });
   const [searchTab, setSearchTab] = createSignal<SearchTab>("songs");
   const [searchQuery, setSearchQuery] = createSignal("");
@@ -190,6 +161,12 @@ export function NeteasePage(props: NeteasePageProps) {
   const [selectedPlaylist, setSelectedPlaylist] = createSignal<OnlinePlaylistSummary | null>(null);
   const [playlistTracksState, setPlaylistTracksState] = createSignal<OnlineTrackItem[]>([]);
   const [isLoadingPlaylistTracks, setIsLoadingPlaylistTracks] = createSignal(false);
+
+  const loginProfile = createMemo<NcmProfile | null>(() => {
+    const acct = accountStore.activeAccount();
+    if (!acct) return null;
+    return { userId: acct.userId, nickname: acct.nickname };
+  });
 
   const readErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.error.requestFailed");
@@ -213,14 +190,13 @@ export function NeteasePage(props: NeteasePageProps) {
   const refreshLoginStatus = async () => {
     setIsCheckingLogin(true);
     try {
-      const response = await getLoginStatus();
-      const nextProfile = readLoginProfile(response);
-      setLoginProfile(nextProfile);
-      if (nextProfile) {
-        setRawFeedback("success", t("ncm.feedback.loggedIn", { name: nextProfile.nickname ?? nextProfile.userId }));
+      const profile = loginProfile();
+      if (profile) {
+        setRawFeedback(
+          "success",
+          t("ncm.feedback.loggedIn", { name: profile.nickname ?? profile.userId })
+        );
       }
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
     } finally {
       setIsCheckingLogin(false);
     }
@@ -230,71 +206,17 @@ export function NeteasePage(props: NeteasePageProps) {
     void refreshLoginStatus();
   });
 
-  createEffect(() => {
-    const session = qrSession();
-    if (!session) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await checkLoginQr(session.key);
-        const code = readCode(response);
-        if (code === 800) {
-          setQrSession(null);
-          setRawFeedback("error", t("ncm.login.qr.expired"));
-          return;
-        }
-        if (code === 801 || code === 802) {
-          setQrSession((current) =>
-            current
-              ? {
-                  ...current,
-                  phase: code === 802 ? "scanned" : "waiting",
-                  statusMessage: code === 802 ? t("ncm.login.qr.scanned") : t("ncm.login.qr.waiting")
-                }
-              : current
-          );
-          return;
-        }
-        if (code === 803) {
-          setQrSession(null);
-          await refreshLoginStatus();
-          setRawFeedback("success", t("ncm.login.qr.confirmed"));
-          return;
-        }
-        setQrSession((current) =>
-          current ? { ...current, statusMessage: readMessage(response, t("ncm.login.qr.waiting")) } : current
-        );
-      } catch (error) {
-        setQrSession(null);
-        setRawFeedback("error", readErrorMessage(error));
-      }
-    }, 2000);
-    onCleanup(() => window.clearTimeout(timer));
-  });
-
-  const beginQrLogin = async () => {
-    setIsLoginBusy(true);
-    try {
-      const keyResponse = await getLoginQrKey();
-      const key = readString(asRecord(asRecord(keyResponse)?.data)?.unikey) ?? readString(asRecord(keyResponse)?.unikey);
-      if (!key) throw new Error(t("ncm.error.qrKeyMissing"));
-      const qrResponse = await createLoginQr(key, true);
-      const qrData = asRecord(asRecord(qrResponse)?.data);
-      const imageUrl = readString(qrData?.qrimg) ?? readString(qrData?.qrurl);
-      setQrSession({ key, imageUrl, phase: "waiting", statusMessage: t("ncm.login.qr.waiting") });
-      setRawFeedback("neutral", t("ncm.feedback.qrReady"));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-    } finally {
-      setIsLoginBusy(false);
-    }
+  const beginLogin = () => {
+    setIsLoginModalOpen(true);
   };
 
   const handleRefreshLogin = async () => {
     setIsLoginBusy(true);
     try {
-      if (loginProfile()) await refreshLogin();
-      await refreshLoginStatus();
-      if (loginProfile()) setRawFeedback("success", t("ncm.feedback.loginRefreshed"));
+      if (loginProfile()) {
+        await accountStore.refreshActive();
+        setRawFeedback("success", t("ncm.feedback.loginRefreshed"));
+      }
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
     } finally {
@@ -305,9 +227,7 @@ export function NeteasePage(props: NeteasePageProps) {
   const handleLogout = async () => {
     setIsLoginBusy(true);
     try {
-      await logout();
-      setLoginProfile(null);
-      setQrSession(null);
+      await accountStore.logoutActive();
       setUserPlaylistsState([]);
       setSelectedPlaylist(null);
       setPlaylistTracksState([]);
@@ -514,7 +434,7 @@ export function NeteasePage(props: NeteasePageProps) {
         }
         actions={
           <>
-            <button type="button" class="primary-button page-action" onClick={() => void beginQrLogin()} disabled={isLoginBusy()}>
+            <button type="button" class="primary-button page-action" onClick={beginLogin} disabled={isLoginBusy()}>
               <IconPlayCircle />
               {t("ncm.login.action.qr")}
             </button>
@@ -547,15 +467,9 @@ export function NeteasePage(props: NeteasePageProps) {
             <span class={feedback().tone === "error" ? "status-error" : "status-line"}>{feedback().message}</span>
           </Show>
         </div>
-        <Show when={qrSession()?.imageUrl}>
-          {(imageUrl) => (
-            <div class="online-qr-card">
-              <img class="online-qr-image" src={imageUrl()} alt={t("ncm.login.qr.alt")} />
-              <div class="status-line">{qrSession()?.statusMessage}</div>
-            </div>
-          )}
-        </Show>
       </section>
+
+      <LoginModal open={isLoginModalOpen()} onClose={() => setIsLoginModalOpen(false)} />
 
       <Show when={props.mode === "recommend" || props.mode === "discover"}>
         <form

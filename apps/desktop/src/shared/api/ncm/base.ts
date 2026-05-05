@@ -5,6 +5,13 @@ export interface NcmRequestOptions {
   params?: Record<string, string | number | boolean | null | undefined>;
   data?: object | undefined;
   noCache?: boolean;
+  /**
+   * Per-request cookie override. Takes precedence over the global
+   * `activeNcmCookie` slot. Pass an explicit empty string to suppress
+   * the cookie for this request only (rare — useful for login probes).
+   * `undefined` falls back to the global slot.
+   */
+  cookieOverride?: string;
 }
 
 export interface NcmResponseEnvelope<T = unknown> {
@@ -95,7 +102,13 @@ export const requestNcm = async <T = unknown>(
     // Snapshot the active cookie at request time. Concurrent calls during a
     // switch get whatever value is set when they hit this line — acceptable
     // because the provider's `switchActive` awaits a refresh before resolving.
-    const cookieToInject = activeNcmCookie;
+    const cookieToInject = (() => {
+      if (typeof options.cookieOverride === "string") {
+        const trimmed = options.cookieOverride.trim();
+        return trimmed.length > 0 ? trimmed : null;
+      }
+      return activeNcmCookie;
+    })();
 
     let body: string | undefined;
     if (method === "POST") {

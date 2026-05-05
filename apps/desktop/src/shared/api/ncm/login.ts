@@ -78,6 +78,21 @@ export const getLoginStatus = () =>
     noCache: true
   });
 
+/**
+ * Probe `/login/status` with a specific cookie string, bypassing the global
+ * `activeNcmCookie` slot. Used by the cookie-paste login flow to validate a
+ * cookie before writing it into the account list.
+ *
+ * Pass an empty string to probe an anonymous (no-cookie) session — useful
+ * for "is the proxy reachable at all" health checks.
+ */
+export const getLoginStatusWithCookie = (cookie: string) =>
+  requestNcm<NcmLoginStatusData>("login/status", {
+    method: "POST",
+    cookieOverride: cookie,
+    noCache: true
+  });
+
 export const refreshLogin = () =>
   requestNcm("login/refresh", {
     method: "POST",

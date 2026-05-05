@@ -530,7 +530,40 @@ fn build_success_response(api_resp: ApiResponse) -> HttpResponse {
         }
     }
 
-    builder.json(api_resp.body)
+    // Mirror the joined cookie string into the JSON body so JS callers can
+    // capture sessions even when the upstream sets HttpOnly cookies (which
+    // `document.cookie` can't read). This is required for multi-account flows
+    // — see `apps/desktop/src/shared/state/NcmAccountContext.tsx`.
+    //
+    // We never overwrite a `cookie` field already present in the body — some
+    // upstream endpoints (e.g. `/login/qr/check`) populate it themselves.
+    let mut body = api_resp.body;
+    if !api_resp.cookie.is_empty() {
+        if let Value::Object(map) = &mut body {
+            if !map.contains_key("cookie") {
+                let joined = join_cookie_pairs(&api_resp.cookie);
+                if !joined.is_empty() {
+                    map.insert("cookie".to_string(), Value::String(joined));
+                }
+            }
+        }
+    }
+
+    builder.json(body)
+}
+
+/// Convert a list of raw `Set-Cookie` header values into the compact
+/// `NAME1=VALUE1; NAME2=VALUE2` form expected by an outbound `Cookie` header.
+///
+/// We discard everything after the first `;` of each entry (Path/HttpOnly/etc)
+/// and join the surviving `name=value` pairs with `"; "`.
+fn join_cookie_pairs(set_cookies: &[String]) -> String {
+    set_cookies
+        .iter()
+        .filter_map(|c| c.split(';').next().map(str::trim))
+        .filter(|s| !s.is_empty() && s.contains('='))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn build_error_response(err: NcmError) -> HttpResponse {
@@ -679,6 +712,62 @@ mod tests {
         let cookies: Vec<_> = response.headers().get_all(header::SET_COOKIE).collect();
         assert_eq!(cookies.len(), 1);
         assert_eq!(cookies[0].to_str().ok(), Some("foo=bar; Path=/; HttpOnly"));
+    }
+
+    #[actix_web::test]
+    async fn success_response_injects_joined_cookie_into_body() {
+        let response = build_success_response(ApiResponse {
+            status: 200,
+            body: json!({ "code": 200 }),
+            cookie: vec![
+                "MUSIC_U=abc123; Path=/; HttpOnly".to_string(),
+                "MUSIC_A_T=def456; Path=/; HttpOnly".to_string(),
+            ],
+        });
+
+        let bytes = actix_web::body::to_bytes(response.into_body())
+            .await
+            .expect("body should serialize");
+        let parsed: Value = serde_json::from_slice(&bytes).expect("body is JSON");
+        assert_eq!(
+            parsed.get("cookie").and_then(Value::as_str),
+            Some("MUSIC_U=abc123; MUSIC_A_T=def456"),
+            "joined cookie pairs (without attributes) should appear in body"
+        );
+    }
+
+    #[actix_web::test]
+    async fn success_response_preserves_upstream_cookie_field() {
+        // /login/qr/check populates `cookie` itself; we must not clobber it.
+        let response = build_success_response(ApiResponse {
+            status: 200,
+            body: json!({ "code": 803, "cookie": "from_upstream=1" }),
+            cookie: vec!["from_set_cookie=2; Path=/".to_string()],
+        });
+
+        let bytes = actix_web::body::to_bytes(response.into_body())
+            .await
+            .expect("body should serialize");
+        let parsed: Value = serde_json::from_slice(&bytes).expect("body is JSON");
+        assert_eq!(
+            parsed.get("cookie").and_then(Value::as_str),
+            Some("from_upstream=1"),
+            "upstream-provided cookie field must take precedence"
+        );
+    }
+
+    #[test]
+    fn join_cookie_pairs_strips_attributes() {
+        let cookies = vec![
+            "MUSIC_U=abc; Path=/; HttpOnly; SameSite=Lax".to_string(),
+            "MUSIC_A_T=def; Domain=.music.163.com; Secure".to_string(),
+            "  ".to_string(),                       // whitespace -> dropped
+            "garbage_no_equals; Path=/".to_string(), // no `=` -> dropped
+        ];
+        assert_eq!(
+            join_cookie_pairs(&cookies),
+            "MUSIC_U=abc; MUSIC_A_T=def"
+        );
     }
 
     #[actix_web::test]
