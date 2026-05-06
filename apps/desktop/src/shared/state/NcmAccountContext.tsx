@@ -8,6 +8,7 @@ import {
 } from "solid-js";
 import type { Accessor, JSX } from "solid-js";
 import {
+  dailySignin,
   getLoginStatus,
   logout as logoutApi,
   refreshLogin,
@@ -149,6 +150,19 @@ const isPersistedState = (value: unknown): value is PersistedState => {
   return true;
 };
 
+/**
+ * Local-time start-of-day in unix ms. Auto-signin uses local rather than UTC
+ * because NCM's server-side daily reset is geared to Beijing time, and most
+ * users running this client are already configured close enough to that
+ * timezone — using local time avoids a "double sign-in" the morning after
+ * a late-night session in any TZ that's positive-offset from UTC.
+ */
+const startOfLocalDayMs = (nowMs: number): number => {
+  const d = new Date(nowMs);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
 const readPersistedState = (): PersistedState | null => {
   if (typeof window === "undefined") return null;
   const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -207,6 +221,46 @@ export function NcmAccountProvider(props: { children: JSX.Element }) {
   createEffect(() => {
     const acct = activeAccount();
     setActiveNcmCookie(acct?.cookie ?? null);
+  });
+
+  // Auto-daily-signin: the moment a write-capable account becomes active and
+  // hasn't signed in today, fire `/daily_signin` (mobile=0) once. NCM returns
+  // code -2 ("重复签到") for accounts that already signed in today through
+  // another client — we still patch `signinAt` in that case so we don't
+  // re-fire on every app launch. Read-only UID accounts (cookie === "")
+  // are skipped because they have no session to award points to.
+  //
+  // Per-userId in-flight guard prevents duplicate calls if `userList` re-emits
+  // (e.g. from another field's patch) before the signin response lands.
+  const inFlightSignins = new Set<number>();
+  createEffect(() => {
+    if (!hydrated()) return;
+    const acct = activeAccount();
+    if (!acct || acct.cookie.length === 0) return;
+    if (inFlightSignins.has(acct.userId)) return;
+
+    const todayStart = startOfLocalDayMs(Date.now());
+    if (acct.signinAt !== null && acct.signinAt >= todayStart) return;
+
+    inFlightSignins.add(acct.userId);
+    const targetId = acct.userId;
+    void (async () => {
+      try {
+        await dailySignin(0);
+      } catch {
+        // Best-effort: any thrown error (including code≥400) means we couldn't
+        // confirm sign-in. Skip the patch and let the effect retry on next
+        // launch / next active-account change.
+        return;
+      } finally {
+        inFlightSignins.delete(targetId);
+      }
+      // Patch only if this account is still in the list (user may have logged
+      // out between request start and response arrival).
+      setUserList((prev) =>
+        prev.map((u) => (u.userId === targetId ? { ...u, signinAt: Date.now() } : u))
+      );
+    })();
   });
 
   const upsertAccount = (account: NcmAccount): void => {

@@ -1,4 +1,5 @@
 import { Match, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import type { Accessor } from "solid-js";
 import { AppShell } from "../components/AppShell";
 import { BackgroundLayer } from "../components/BackgroundLayer";
 import { FullPlayer } from "../components/FullPlayer";
@@ -17,6 +18,7 @@ import {
   type NcmTrackReference,
   type NcmTrackSupplement
 } from "../features/online/ncmPlayback";
+import { useNcmScrobbleEffect } from "../features/online/useNcmScrobbleEffect";
 import { QueuePage } from "../features/queue/QueuePage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { createApiClient } from "../shared/api/client";
@@ -47,6 +49,23 @@ const nextRepeatMode = (current: RepeatMode): RepeatMode => {
   const index = REPEAT_CYCLE.indexOf(current);
   return REPEAT_CYCLE[(index + 1) % REPEAT_CYCLE.length] ?? "off";
 };
+
+/**
+ * Bridge component that lives inside `<NcmAccountProvider>` so it can read
+ * `useNcmAccount()` for the login-status check while still receiving the
+ * playback accessors from the App-level state. Renders nothing — pure
+ * side-effect carrier for the scrobble accumulator.
+ */
+function NcmScrobbleBridge(props: {
+  currentTrackRef: Accessor<NcmTrackReference | undefined>;
+  isPlaying: Accessor<boolean>;
+}) {
+  useNcmScrobbleEffect({
+    currentTrackRef: props.currentTrackRef,
+    isPlaying: props.isPlaying
+  });
+  return null;
+}
 
 export function App() {
   const [state, setState] = createSignal<RequestState<PlayerState>>({ status: "idle" });
@@ -332,6 +351,10 @@ export function App() {
 
   return (
     <NcmAccountProvider>
+      <NcmScrobbleBridge
+        currentTrackRef={currentTrackRef}
+        isPlaying={() => Boolean(player()?.is_playing)}
+      />
       <UISearchProvider activePage={activePage}>
         <AppShell
           sidebar={
