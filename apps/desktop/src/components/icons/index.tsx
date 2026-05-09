@@ -44,6 +44,40 @@ export function IconLibrary(props: IconProps) {
   );
 }
 
+export function IconMusic(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M13.5 3.5v9.4" />
+      <path d="M13.5 3.5l-6.8 1.4v9.5" />
+      <path d="M6.7 14.4a2.4 1.7 0 1 1-1.4-1.5" />
+      <path d="M13.5 12.9a2.4 1.7 0 1 1-1.4-1.5" />
+    </svg>
+  );
+}
+
+export function IconStorage(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <ellipse cx="10" cy="5" rx="6.2" ry="2.4" />
+      <path d="M3.8 5v5c0 1.3 2.8 2.4 6.2 2.4s6.2-1.1 6.2-2.4V5" />
+      <path d="M3.8 10v5c0 1.3 2.8 2.4 6.2 2.4s6.2-1.1 6.2-2.4v-5" />
+    </svg>
+  );
+}
+
+export function IconList(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M6.5 5.5h10" />
+      <path d="M6.5 10h10" />
+      <path d="M6.5 14.5h10" />
+      <path d="M3.5 5.5h0.1" />
+      <path d="M3.5 10h0.1" />
+      <path d="M3.5 14.5h0.1" />
+    </svg>
+  );
+}
+
 export function IconHistory(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
@@ -214,6 +248,18 @@ export function IconClose(props: IconProps) {
   );
 }
 
+export function IconDelete(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M4.5 6h11" />
+      <path d="M8 6V4.5h4V6" />
+      <path d="M6.5 8l0.7 8h5.6l0.7-8" />
+      <path d="M9 9.5v4.5" />
+      <path d="M11 9.5v4.5" />
+    </svg>
+  );
+}
+
 export function IconRefresh(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
@@ -349,6 +395,19 @@ export function IconCloud(props: IconProps) {
   );
 }
 
+export function IconControls(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M4 5.5h12" />
+      <path d="M4 10h12" />
+      <path d="M4 14.5h12" />
+      <circle cx="8" cy="5.5" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="10" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="7" cy="14.5" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function IconPlaylist(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
@@ -373,6 +432,16 @@ export function IconChevronDown(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
       <path d="M6 8l4 4 4-4" />
+    </svg>
+  );
+}
+
+export function IconDots(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="5" cy="10" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="10" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   );
 }

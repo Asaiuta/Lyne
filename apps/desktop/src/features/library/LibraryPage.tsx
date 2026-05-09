@@ -4,9 +4,18 @@ import type { LibraryRoot, MediaItem } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
 import type { TranslationKey } from "../../shared/i18n";
 import { useUISearch } from "../../shared/state/UISearchContext";
-import { IconAlbum, IconArtist, IconFolder, IconPlayCircle, IconRefresh } from "../../components/icons";
+import {
+  IconAlbum,
+  IconArtist,
+  IconFolder,
+  IconList,
+  IconMusic,
+  IconPlayCircle,
+  IconRefresh,
+  IconSearch,
+  IconStorage
+} from "../../components/icons";
 import { MediaList, type MediaContextAction, type MediaListItem } from "../../components/media/MediaList";
-import { PageHeader } from "../../components/page/PageHeader";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
 import { ManageRootsModal } from "./ManageRootsModal";
 
@@ -28,7 +37,11 @@ interface Feedback {
 
 type LibraryListItem = MediaItem & MediaListItem;
 
-const adaptItem = (item: MediaItem): LibraryListItem => ({ ...item, id: item.media_id });
+const adaptItem = (item: MediaItem): LibraryListItem => ({
+  ...item,
+  id: item.media_id,
+  artworkUrl: item.has_cover_art ? api.getCoverArtUrl(item.media_id) : null
+});
 
 const matchesSearch = (item: MediaItem, query: string) => {
   if (!query) return true;
@@ -44,6 +57,7 @@ export function LibraryPage(props: LibraryPageProps) {
   const [limit, setLimit] = createSignal(PAGE_SIZE);
   const [reachedEnd, setReachedEnd] = createSignal(false);
   const [activeTab, setActiveTab] = createSignal<LibraryTab>("songs");
+  const [localQuery, setLocalQuery] = createSignal<string>("");
   const [manageOpen, setManageOpen] = createSignal(false);
   const [isFetching, setIsFetching] = createSignal(false);
   const [isScanning, setIsScanning] = createSignal(false);
@@ -113,10 +127,15 @@ export function LibraryPage(props: LibraryPageProps) {
   });
 
   const adaptedItems = createMemo(() => items().map(adaptItem));
+  const activeQueries = createMemo<string[]>(() =>
+    [globalQuery(), localQuery()]
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => value.length > 0)
+  );
   const filteredItems = createMemo(() => {
-    const query = globalQuery().trim().toLowerCase();
-    if (!query) return adaptedItems();
-    return adaptedItems().filter((item) => matchesSearch(item, query));
+    const queries = activeQueries();
+    if (queries.length === 0) return adaptedItems();
+    return adaptedItems().filter((item) => queries.every((query) => matchesSearch(item, query)));
   });
 
   const handleScan = async (path: string, display: string) => {
@@ -164,9 +183,9 @@ export function LibraryPage(props: LibraryPageProps) {
 
   const handlePlay = async (item: LibraryListItem) => {
     try {
-      await api.load(item.source_path);
+      await api.load(item.source_path, { autoplay: true });
       await props.onStateRefresh();
-      setRawFeedback("success", t("library.feedback.loaded", { title: item.title ?? item.source_path }));
+      setRawFeedback("success", t("library.feedback.playing", { title: item.title ?? item.source_path }));
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
     }
@@ -200,6 +219,11 @@ export function LibraryPage(props: LibraryPageProps) {
   const subtitleKey = (): TranslationKey =>
     reachedEnd() ? "library.subtitle.complete" : "library.subtitle.more";
 
+  const visibleSizeGb = createMemo<number>(() => {
+    const totalBytes = filteredItems().reduce((total, item) => total + (item.size_bytes ?? 0), 0);
+    return Number((totalBytes / (1024 * 1024 * 1024)).toFixed(2));
+  });
+
   const tabItems = () => [
     { value: "songs", label: t("library.tabs.songs") },
     { value: "artists", label: t("library.tabs.artists") },
@@ -209,85 +233,100 @@ export function LibraryPage(props: LibraryPageProps) {
 
   return (
     <section class="panel panel-library panel-page">
-      <PageHeader
-        title={t("library.title")}
-        meta={
-          <>
-            <span class="page-header-meta-line">{t(subtitleKey(), { count: items().length })}</span>
-            <span class="page-header-meta-line">{t("library.tracks.match", { filtered: filteredItems().length, total: items().length })}</span>
-          </>
-        }
-        actions={
-          <>
-            <button type="button" class="primary-button page-action" onClick={handlePlayAll} disabled={filteredItems().length === 0 || isFetching()}>
+      <header class="local-library-head">
+        <div class="local-library-title">
+          <h1>{t("library.title")}</h1>
+          <div class="local-library-status" aria-label={t(subtitleKey(), { count: filteredItems().length })}>
+            <span class="local-library-status-item">
+              <IconMusic />
+              <span>{t("library.status.songCount", { count: filteredItems().length })}</span>
+            </span>
+            <span class="local-library-status-item">
+              <IconStorage />
+              <span>{visibleSizeGb().toFixed(2)} GB</span>
+            </span>
+          </div>
+        </div>
+        <div class="local-library-menu">
+          <div class="local-library-menu-left">
+            <button type="button" class="primary-button page-action local-library-play" onClick={handlePlayAll} disabled={filteredItems().length === 0 || isFetching()}>
               <IconPlayCircle />
               <span>{t("library.action.playAll")}</span>
             </button>
-            <button type="button" class="ghost-button page-action" onClick={handleRefresh} disabled={isFetching() || isScanning()}>
+            <button type="button" class="ghost-button page-action local-library-circle" onClick={handleRefresh} disabled={isFetching() || isScanning()} aria-label={t("library.action.refresh")} title={t("library.action.refresh")}>
               <IconRefresh />
-              <span>{t("library.action.refresh")}</span>
             </button>
-            <button type="button" class="ghost-button page-action" onClick={() => setManageOpen(true)}>
-              <IconFolder />
-              <span>{t("library.action.manageRoots")}</span>
-            </button>
-          </>
-        }
-        tabs={
-          <SegmentedTabs
-            value={activeTab()}
-            onChange={(next) => setActiveTab(next as LibraryTab)}
-            items={tabItems()}
-            ariaLabel={t("library.title")}
-          />
-        }
-      />
-
-      <Show when={activeTab() === "songs"}>
-        <Show
-          when={filteredItems().length > 0}
-          fallback={<div class="status-line">{items().length === 0 ? t("library.tracks.emptyAll") : t("library.tracks.emptyFilter")}</div>}
-        >
-          <MediaList
-            items={filteredItems()}
-            currentSourcePath={props.currentTrackPath}
-            isPlayingNow={props.isPlaying}
-            onPlay={(item) => void handlePlay(item)}
-            onEnqueue={(item) => void handleEnqueue(item)}
-            onContextAction={handleContextAction}
-            isLoading={isFetching()}
-            emptyState={t("library.tracks.emptyAll")}
-          />
-        </Show>
-        <Show when={!reachedEnd()}>
-          <div class="button-row">
-            <button type="button" class="ghost-button" onClick={handleLoadMore} disabled={isFetching()}>
-              {isFetching() ? t("library.tracks.loading") : t("library.tracks.loadMore")}
+            <button type="button" class="ghost-button page-action local-library-circle" onClick={() => setManageOpen(true)} aria-label={t("library.action.manageRoots")} title={t("library.action.manageRoots")}>
+              <IconList />
             </button>
           </div>
+          <div class="local-library-menu-right">
+            <label class="local-library-search">
+              <IconSearch />
+              <input
+                value={localQuery()}
+                placeholder={t("library.tracks.fuzzySearch")}
+                autocomplete="off"
+                onInput={(event) => setLocalQuery(event.currentTarget.value)}
+              />
+            </label>
+            <SegmentedTabs
+              value={activeTab()}
+              onChange={(next) => setActiveTab(next as LibraryTab)}
+              items={tabItems()}
+              ariaLabel={t("library.title")}
+            />
+          </div>
+        </div>
+      </header>
+
+      <div class="local-library-router">
+        <Show when={activeTab() === "songs"}>
+          <Show
+            when={filteredItems().length > 0}
+            fallback={<div class="status-line">{items().length === 0 ? t("library.tracks.emptyAll") : t("library.tracks.emptyFilter")}</div>}
+          >
+            <MediaList
+              items={filteredItems()}
+              currentSourcePath={props.currentTrackPath}
+              isPlayingNow={props.isPlaying}
+              onPlay={(item) => void handlePlay(item)}
+              onEnqueue={(item) => void handleEnqueue(item)}
+              onContextAction={handleContextAction}
+              isLoading={isFetching()}
+              emptyState={t("library.tracks.emptyAll")}
+            />
+          </Show>
+          <Show when={!reachedEnd()}>
+            <div class="button-row">
+              <button type="button" class="ghost-button" onClick={handleLoadMore} disabled={isFetching()}>
+                {isFetching() ? t("library.tracks.loading") : t("library.tracks.loadMore")}
+              </button>
+            </div>
+          </Show>
         </Show>
-      </Show>
 
-      <Show when={activeTab() === "artists"}>
-        <div class="empty-tab" role="status">
-          <span class="empty-tab-icon" aria-hidden="true"><IconArtist /></span>
-          <span>{t("library.tabs.placeholder.artists")}</span>
-        </div>
-      </Show>
-      <Show when={activeTab() === "albums"}>
-        <div class="empty-tab" role="status">
-          <span class="empty-tab-icon" aria-hidden="true"><IconAlbum /></span>
-          <span>{t("library.tabs.placeholder.albums")}</span>
-        </div>
-      </Show>
-      <Show when={activeTab() === "folders"}>
-        <div class="empty-tab" role="status">
-          <span class="empty-tab-icon" aria-hidden="true"><IconFolder /></span>
-          <span>{t("library.tabs.placeholder.folders")}</span>
-        </div>
-      </Show>
+        <Show when={activeTab() === "artists"}>
+          <div class="empty-tab" role="status">
+            <span class="empty-tab-icon" aria-hidden="true"><IconArtist /></span>
+            <span>{t("library.tabs.placeholder.artists")}</span>
+          </div>
+        </Show>
+        <Show when={activeTab() === "albums"}>
+          <div class="empty-tab" role="status">
+            <span class="empty-tab-icon" aria-hidden="true"><IconAlbum /></span>
+            <span>{t("library.tabs.placeholder.albums")}</span>
+          </div>
+        </Show>
+        <Show when={activeTab() === "folders"}>
+          <div class="empty-tab" role="status">
+            <span class="empty-tab-icon" aria-hidden="true"><IconFolder /></span>
+            <span>{t("library.tabs.placeholder.folders")}</span>
+          </div>
+        </Show>
+      </div>
 
-      <div class={feedback().tone === "error" ? "status-error" : "status-line"}>{feedback().message}</div>
+      <div class={feedback().tone === "error" ? "local-library-feedback status-error" : "local-library-feedback status-line"}>{feedback().message}</div>
 
       <ManageRootsModal
         open={manageOpen()}

@@ -24,7 +24,7 @@ export interface ApiClient {
   play: () => Promise<void>;
   pause: () => Promise<void>;
   stop: () => Promise<void>;
-  load: (path: string) => Promise<PlayerState>;
+  load: (path: string, options?: LoadOptions) => Promise<PlayerState>;
   seek: (position: number) => Promise<PlayerState>;
   setVolume: (volume: number) => Promise<PlayerState>;
   setRepeatMode: (mode: RepeatMode) => Promise<PlayerState>;
@@ -57,6 +57,10 @@ export interface ApiClient {
   getPlaybackHistory: (limit?: number) => Promise<PlaybackHistoryEntry[]>;
   // Cover Art
   getCoverArtUrl: (mediaId: string) => string;
+}
+
+interface LoadOptions {
+  autoplay?: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -490,10 +494,13 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
       throw new Error(envelope.message ?? "Failed to stop");
     }
   },
-  load: async (path: string) => {
+  load: async (path: string, options?: LoadOptions) => {
     const envelope = await requestEnvelope(baseUrl, "/load", {
       method: "POST",
-      body: JSON.stringify({ path })
+      body: JSON.stringify({
+        path,
+        ...(options?.autoplay ? { autoplay: true } : {})
+      })
     });
     if (envelope.status === "error") {
       throw new Error(envelope.message ?? "Failed to load");
@@ -759,7 +766,7 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
   getCoverArtUrl: (mediaId: string) => {
     const token = peekApiToken();
     const suffix = token ? `?token=${encodeURIComponent(token)}` : "";
-    return `${baseUrl}/cover_art/${encodeURIComponent(mediaId)}${suffix}`;
+    return `${baseUrl}/domain/media_items/${encodeURIComponent(mediaId)}/cover_art${suffix}`;
   }
   };
 };

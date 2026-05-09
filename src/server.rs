@@ -255,6 +255,7 @@ fn is_private_host(host: &str) -> bool {
 #[derive(Deserialize)]
 pub struct LoadRequest {
     path: String,
+    autoplay: Option<bool>,
 }
 
 #[derive(Deserialize)]

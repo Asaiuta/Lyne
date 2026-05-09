@@ -235,6 +235,9 @@ components:
       properties:
         path:
           type: string
+        autoplay:
+          type: boolean
+          default: false
     SeekRequest:
       type: object
       required: [position]

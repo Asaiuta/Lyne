@@ -17,14 +17,18 @@ export function AppShell(props: AppShellProps) {
   return (
     <div class="app-shell">
       {props.backgroundLayer}
-      <div class="app-body">
-        {props.sidebar}
-        <div class="app-main">
-          {props.topNav}
-          <ContentArea>{props.children}</ContentArea>
+      <div class="app-frame">
+        <div class="app-body">
+          {props.sidebar}
+          <div class="app-main">
+            <div class="app-main-layout">
+              {props.topNav}
+              <ContentArea>{props.children}</ContentArea>
+            </div>
+          </div>
         </div>
+        {props.playerBar}
       </div>
-      {props.playerBar}
     </div>
   );
 }

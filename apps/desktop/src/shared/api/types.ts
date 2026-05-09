@@ -159,6 +159,8 @@ export interface MediaItem {
   duration_secs: number | null;
   sample_rate: number | null;
   channels: number | null;
+  has_cover_art: boolean;
+  size_bytes: number | null;
   updated_at_epoch_secs: number;
 }
 

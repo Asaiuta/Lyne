@@ -1,7 +1,7 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { useTranslation } from "../../shared/i18n";
-import { IconCopy, IconPlay, IconQueueAdd } from "../icons";
+import { IconCopy, IconPause, IconPlay, IconQueueAdd } from "../icons";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 export type MediaContextAction = "play" | "enqueue" | "copy-path";
@@ -15,6 +15,7 @@ export interface MediaListItem {
   duration_secs: number | null;
   songId?: number;
   size_bytes?: number | null;
+  artworkUrl?: string | null;
 }
 
 interface MediaListProps<T extends MediaListItem> {
@@ -24,9 +25,11 @@ interface MediaListProps<T extends MediaListItem> {
   isPlayingNow?: boolean;
   onPlay: (item: T) => void;
   onEnqueue: (item: T) => void;
+  onScroll?: (event: Event) => void;
   onContextAction?: (action: MediaContextAction, item: T) => void;
   isLoading?: boolean;
   emptyState?: JSX.Element;
+  hideSize?: boolean;
 }
 
 const formatDuration = (secs: number | null): string => {
@@ -48,8 +51,18 @@ const formatSize = (bytes: number | null | undefined): string => {
   return `${bytes} B`;
 };
 
-// TODO(virtualization): rendering >~500 rows here will hurt scroll perf.
-const ROW_RENDER_THRESHOLD = 500;
+const displayNameFromSourcePath = (sourcePath: string): string => {
+  const normalized = sourcePath
+    .replace(/^\\\\\?\\UNC\\/i, "\\\\")
+    .replace(/^\\\\\?\\/i, "")
+    .replace(/\\/g, "/");
+  const trimmed = normalized.replace(/\/+$/, "");
+  return trimmed.split("/").filter(Boolean).pop() ?? sourcePath;
+};
+
+const VIRTUALIZE_THRESHOLD = 120;
+const VIRTUAL_ROW_HEIGHT = 90;
+const VIRTUAL_OVERSCAN = 5;
 
 interface MenuState {
   open: boolean;
@@ -69,6 +82,9 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [menu, setMenu] = createSignal<MenuState>(closedMenu);
+  const [scrollTop, setScrollTop] = createSignal<number>(0);
+  const [viewportHeight, setViewportHeight] = createSignal<number>(0);
+  let viewportRef: HTMLDivElement | undefined;
 
   const closeMenu = () => {
     setMenu((current) => ({ ...current, open: false, itemId: null }));
@@ -105,10 +121,33 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     }
   };
 
-  const renderedItems = () =>
-    props.items.length > ROW_RENDER_THRESHOLD
-      ? props.items.slice(0, ROW_RENDER_THRESHOLD)
-      : props.items;
+  onMount(() => {
+    if (!viewportRef) return;
+    const updateViewportHeight = () => setViewportHeight(viewportRef?.clientHeight ?? 0);
+    updateViewportHeight();
+    const observer = new ResizeObserver(updateViewportHeight);
+    observer.observe(viewportRef);
+    onCleanup(() => observer.disconnect());
+  });
+
+  const useVirtualRows = createMemo<boolean>(() => props.items.length > VIRTUALIZE_THRESHOLD);
+  const visibleRange = createMemo<{ start: number; end: number }>(() => {
+    if (!useVirtualRows()) return { start: 0, end: props.items.length };
+    const measuredHeight = viewportHeight() || VIRTUAL_ROW_HEIGHT * 8;
+    const start = Math.max(0, Math.floor(scrollTop() / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
+    const count = Math.ceil(measuredHeight / VIRTUAL_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
+    return { start, end: Math.min(props.items.length, start + count) };
+  });
+  const renderedItems = createMemo<T[]>(() => {
+    const range = visibleRange();
+    return props.items.slice(range.start, range.end);
+  });
+  const virtualHeight = createMemo<number>(() =>
+    useVirtualRows() ? props.items.length * VIRTUAL_ROW_HEIGHT : 0
+  );
+  const virtualOffset = createMemo<number>(() =>
+    useVirtualRows() ? visibleRange().start * VIRTUAL_ROW_HEIGHT : 0
+  );
 
   const menuItems = (): ContextMenuItem[] => [
     { key: "play", label: t("media.context.play"), icon: <IconPlay /> },
@@ -142,13 +181,33 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
           <span class="media-cell media-cell-duration" role="columnheader">
             {t("media.column.duration")}
           </span>
-          <span class="media-cell media-cell-size" role="columnheader">
-            {t("media.column.size")}
-          </span>
+          <Show when={!props.hideSize}>
+            <span class="media-cell media-cell-size" role="columnheader">
+              {t("media.column.size")}
+            </span>
+          </Show>
         </div>
-        <ul class="media-list-rows" role="rowgroup">
+        <div
+          ref={viewportRef}
+          class="media-list-viewport"
+          data-virtualized={useVirtualRows() ? "true" : undefined}
+          onScroll={(event) => {
+            setScrollTop(event.currentTarget.scrollTop);
+            props.onScroll?.(event);
+          }}
+        >
+          <div
+            class="media-list-spacer"
+            style={useVirtualRows() ? { height: `${virtualHeight()}px` } : undefined}
+          >
+        <ul
+          class="media-list-rows"
+          role="rowgroup"
+          style={useVirtualRows() ? { transform: `translateY(${virtualOffset()}px)` } : undefined}
+        >
           <For each={renderedItems()}>
             {(item, index) => {
+              const absoluteIndex = () => visibleRange().start + index();
               const isCurrent = () =>
                 (props.currentSongId !== null &&
                   props.currentSongId !== undefined &&
@@ -157,8 +216,9 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                   props.currentSourcePath !== undefined &&
                   item.source_path === props.currentSourcePath);
               const isSelected = () => selectedId() === item.id;
-              const title = () => item.title ?? item.source_path;
-              const credits = () => [item.artist, item.album].filter(Boolean).join(" · ");
+              const title = () => item.title ?? displayNameFromSourcePath(item.source_path);
+              const credits = () => item.artist ?? t("library.item.creditsEmpty");
+              const artworkInitial = () => (title().trim().slice(0, 1) || "#").toUpperCase();
               const className = () =>
                 [
                   "media-row",
@@ -179,34 +239,13 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                   <span class="media-cell media-cell-index" role="cell">
                     <Show
                       when={isCurrent()}
-                      fallback={<span class="media-row-index">{index() + 1}</span>}
+                      fallback={<span class="media-row-index">{absoluteIndex() + 1}</span>}
                     >
-                      <span
-                        class={`eq-indicator${props.isPlayingNow ? "" : " is-paused"}`}
-                        aria-label={t("media.eq.aria")}
-                        role="img"
-                      >
-                        <span class="eq-indicator-bar" />
-                        <span class="eq-indicator-bar" />
-                        <span class="eq-indicator-bar" />
-                      </span>
+                      <span class="media-current-mark" aria-label={t("media.eq.aria")} role="img">♪</span>
                     </Show>
-                  </span>
-                  <span class="media-cell media-cell-title" role="cell">
-                    <span class="media-row-title" title={item.source_path}>
-                      {title()}
-                    </span>
-                    <span class="media-row-credits">
-                      {credits() || t("library.item.creditsEmpty")}
-                    </span>
-                  </span>
-                  <span class="media-cell media-cell-album" role="cell">
-                    {item.album ?? "—"}
-                  </span>
-                  <span class="media-cell media-cell-actions" role="cell">
                     <button
                       type="button"
-                      class="row-action"
+                      class="media-index-action media-index-action-play"
                       aria-label={t("library.item.play")}
                       title={t("library.item.play")}
                       onClick={(event) => {
@@ -216,6 +255,47 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                     >
                       <IconPlay />
                     </button>
+                    <button
+                      type="button"
+                      class="media-index-action media-index-action-status"
+                      aria-label={t("library.item.play")}
+                      title={t("library.item.play")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        props.onPlay(item);
+                      }}
+                    >
+                      <Show when={props.isPlayingNow} fallback={<IconPlay />}>
+                        <IconPause />
+                      </Show>
+                    </button>
+                  </span>
+                  <span class="media-cell media-cell-title" role="cell">
+                    <span class="media-row-title-wrap">
+                      <Show when={item.artworkUrl}>
+                        <span class="media-row-artwork" aria-hidden="true">
+                          <img src={item.artworkUrl ?? ""} alt="" />
+                        </span>
+                      </Show>
+                      <Show when={!item.artworkUrl}>
+                        <span class="media-row-artwork media-row-artwork-fallback" aria-hidden="true">
+                          {artworkInitial()}
+                        </span>
+                      </Show>
+                      <span class="media-row-copy">
+                        <span class="media-row-title" title={item.source_path}>
+                          {title()}
+                        </span>
+                        <span class="media-row-credits">
+                          {credits() || t("library.item.creditsEmpty")}
+                        </span>
+                      </span>
+                    </span>
+                  </span>
+                  <span class="media-cell media-cell-album" role="cell">
+                    {item.album ?? "—"}
+                  </span>
+                  <span class="media-cell media-cell-actions" role="cell">
                     <button
                       type="button"
                       class="row-action"
@@ -232,22 +312,18 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                   <span class="media-cell media-cell-duration" role="cell">
                     {formatDuration(item.duration_secs)}
                   </span>
-                  <span class="media-cell media-cell-size" role="cell">
-                    {formatSize(item.size_bytes ?? null)}
-                  </span>
+                  <Show when={!props.hideSize}>
+                    <span class="media-cell media-cell-size" role="cell">
+                      {formatSize(item.size_bytes ?? null)}
+                    </span>
+                  </Show>
                 </li>
               );
             }}
           </For>
         </ul>
-        <Show when={props.items.length > ROW_RENDER_THRESHOLD}>
-          <div class="media-list-truncated">
-            {t("library.tracks.match", {
-              filtered: ROW_RENDER_THRESHOLD,
-              total: props.items.length
-            })}
           </div>
-        </Show>
+        </div>
         <ContextMenu
           open={menu().open}
           x={menu().x}

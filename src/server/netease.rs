@@ -299,6 +299,34 @@ async fn dispatch(
             .playlist_mylike(query)
             .await
             .map_err(DispatchError::Ncm),
+        "toplist" => client
+            .toplist(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "toplist_detail" => client
+            .toplist_detail(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "toplist_detail_v2" => client
+            .toplist_detail_v2(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "toplist_artist" => client
+            .toplist_artist(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "top_playlist" => client
+            .top_playlist(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "top_playlist_highquality" => client
+            .top_playlist_highquality(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "top_list" => client
+            .top_list(query)
+            .await
+            .map_err(DispatchError::Ncm),
         "user_playlist" => client
             .user_playlist(query)
             .await
@@ -340,6 +368,66 @@ async fn dispatch(
             .map_err(DispatchError::Ncm),
         "scrobble" => client
             .scrobble(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "personalized" => client
+            .personalized(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "personalized_newsong" => client
+            .personalized_newsong(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "personalized_mv" => client
+            .personalized_mv(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "personalized_djprogram" => client
+            .personalized_djprogram(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "recommend_resource" => client
+            .recommend_resource(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "recommend_songs" => client
+            .recommend_songs(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "personal_fm" => client
+            .personal_fm(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "top_artists" => client
+            .top_artists(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "album_newest" => client
+            .album_newest(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "album_new" => client
+            .album_new(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "top_song" => client
+            .top_song(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "artist_list" => client
+            .artist_list(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "dj_personalize_recommend" => client
+            .dj_personalize_recommend(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "dj_recommend" => client
+            .dj_recommend(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "mv_first" => client
+            .mv_first(query)
             .await
             .map_err(DispatchError::Ncm),
         _ => Err(DispatchError::UnsupportedRoute),
@@ -642,6 +730,58 @@ mod tests {
             ("/likelist", "likelist"),
             ("/daily_signin", "daily_signin"),
             ("/scrobble", "scrobble"),
+        ];
+        for (path, expected) in cases {
+            let normalized = normalize_route(path);
+            let method = route_to_method(&normalized);
+            assert_eq!(
+                method, expected,
+                "route {} should resolve to method {}",
+                path, expected
+            );
+        }
+    }
+
+    #[test]
+    fn home_feed_routes_resolve_to_dispatch_keys() {
+        // Routes that power the Apple-Music-style recommend home feed. Each
+        // pair must land on a dispatch arm in `dispatch()`.
+        let cases = [
+            ("/personalized", "personalized"),
+            ("/personalized/newsong", "personalized_newsong"),
+            ("/personalized/mv", "personalized_mv"),
+            ("/personalized/djprogram", "personalized_djprogram"),
+            ("/recommend/resource", "recommend_resource"),
+            ("/recommend/songs", "recommend_songs"),
+            ("/personal_fm", "personal_fm"),
+            ("/top/artists", "top_artists"),
+            ("/album/newest", "album_newest"),
+            ("/dj/personalize/recommend", "dj_personalize_recommend"),
+            ("/dj/recommend", "dj_recommend"),
+            ("/mv/first", "mv_first"),
+        ];
+        for (path, expected) in cases {
+            let normalized = normalize_route(path);
+            let method = route_to_method(&normalized);
+            assert_eq!(
+                method, expected,
+                "route {} should resolve to method {}",
+                path, expected
+            );
+        }
+    }
+
+    #[test]
+    fn splayer_discover_routes_resolve_to_dispatch_keys() {
+        // SPlayer Discover tabs call these NCM endpoints:
+        // playlists, toplists, artists, and newest music.
+        let cases = [
+            ("/top/playlist", "top_playlist"),
+            ("/top/playlist/highquality", "top_playlist_highquality"),
+            ("/toplist/detail", "toplist_detail"),
+            ("/artist/list", "artist_list"),
+            ("/album/new", "album_new"),
+            ("/top/song", "top_song"),
         ];
         for (path, expected) in cases {
             let normalized = normalize_route(path);

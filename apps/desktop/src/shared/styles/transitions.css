@@ -1,0 +1,129 @@
+/* ── Page transition presets (ported from SPlayer animate.scss) ────── */
+/* 离场动画尽量短，减少 out-in 等待时间 */
+
+/* ── slide (default) ─────────────────────────────────────────────── */
+.page-slide-enter-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.page-slide-leave-active {
+  transition:
+    opacity 0.1s ease,
+    transform 0.1s ease;
+}
+.page-slide-enter-from,
+.page-slide-leave-to {
+  opacity: 0;
+  transform: translate3d(10px, 0, 0);
+}
+
+/* ── fade ────────────────────────────────────────────────────────── */
+.page-fade-enter-active {
+  transition: opacity 0.2s ease;
+}
+.page-fade-leave-active {
+  transition: opacity 0.1s ease;
+}
+.page-fade-enter-from,
+.page-fade-leave-to {
+  opacity: 0;
+}
+
+/* ── zoom ────────────────────────────────────────────────────────── */
+.page-zoom-enter-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.page-zoom-leave-active {
+  transition:
+    opacity 0.1s ease,
+    transform 0.1s ease;
+}
+.page-zoom-enter-from,
+.page-zoom-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+/* ── up ──────────────────────────────────────────────────────────── */
+.page-up-enter-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.page-up-leave-active {
+  transition: opacity 0.1s ease;
+}
+.page-up-enter-from {
+  opacity: 0;
+  transform: translate3d(0, 20px, 0);
+}
+.page-up-enter-to {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+.page-up-leave-to {
+  opacity: 0;
+}
+
+/* ── flow ────────────────────────────────────────────────────────── */
+.page-flow-enter-active {
+  transition:
+    opacity 0.35s cubic-bezier(0.2, 0, 0.2, 1),
+    transform 0.35s cubic-bezier(0.2, 0, 0.2, 1);
+}
+.page-flow-leave-active {
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+.page-flow-enter-from {
+  opacity: 0;
+  transform: translateY(10px) scale(0.99);
+}
+.page-flow-leave-to {
+  opacity: 0;
+  transform: translateY(-5px) scale(0.99);
+}
+
+/* ── mask-left ───────────────────────────────────────────────────── */
+.page-mask-left-enter-active {
+  transition: clip-path 0.5s cubic-bezier(0, 0, 0.2, 1);
+}
+.page-mask-left-leave-active {
+  transition: clip-path 0.15s ease-in;
+}
+.page-mask-left-enter-from {
+  clip-path: inset(0 100% 0 0);
+}
+.page-mask-left-enter-to {
+  clip-path: inset(0 0 0 0);
+}
+.page-mask-left-leave-from {
+  clip-path: inset(0 0 0 0);
+}
+.page-mask-left-leave-to {
+  clip-path: inset(0 0 0 100%);
+}
+
+/* ── mask-top ────────────────────────────────────────────────────── */
+.page-mask-top-enter-active {
+  transition: clip-path 0.5s cubic-bezier(0, 0, 0.2, 1);
+}
+.page-mask-top-leave-active {
+  transition: clip-path 0.15s ease-in;
+}
+.page-mask-top-enter-from {
+  clip-path: inset(0 0 100% 0);
+}
+.page-mask-top-enter-to {
+  clip-path: inset(0 0 0 0);
+}
+.page-mask-top-leave-from {
+  clip-path: inset(0 0 0 0);
+}
+.page-mask-top-leave-to {
+  clip-path: inset(100% 0 0 0);
+}

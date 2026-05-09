@@ -427,6 +427,14 @@ fn main() {
         return Err("Failed to access sidecar application state during setup.".to_string().into());
       }
 
+      // Open devtools in debug builds to diagnose console errors
+      #[cfg(debug_assertions)]
+      {
+        if let Some(window) = app.get_webview_window("main") {
+          window.open_devtools();
+        }
+      }
+
       Ok(())
     })
     .build(tauri::generate_context!())

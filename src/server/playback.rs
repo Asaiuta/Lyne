@@ -824,8 +824,15 @@ async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> H
         let cfg = data.webdav_config.lock();
         cfg.http_credentials()
     };
+    let autoplay = body.autoplay.unwrap_or(false);
     let mut player = data.player.lock();
-    match player.load_with_credentials(&path, credentials.as_ref()) {
+    let load_result = if autoplay {
+        player.load_with_credentials_and_autoplay(&path, credentials.as_ref())
+    } else {
+        player.load_with_credentials(&path, credentials.as_ref())
+    };
+
+    match load_result {
         Ok(()) => {
             let snapshot = build_runtime_snapshot(&player);
             let media_id = data.app_db.record_media_stub(&path);
@@ -849,13 +856,17 @@ async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> H
 
             match data
                 .app_db
-                .start_playback_session(&path, "loaded", &snapshot)
+                .start_playback_session(
+                    &path,
+                    if autoplay { "playing" } else { "loaded" },
+                    &snapshot,
+                )
             {
                 Ok(session_id) => {
                     *data.active_session_id.lock() = Some(session_id);
                     let payload = serde_json::json!({
                         "media_id": media_id.ok(),
-                        "kind": "load"
+                        "kind": if autoplay { "autoplay" } else { "load" }
                     });
                     if let Err(e) = data.app_db.append_playback_history(
                         Some(session_id),
@@ -872,7 +883,11 @@ async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> H
 
             sync_queue_snapshot(&data);
             HttpResponse::Ok().json(ApiResponse::success_with_state(
-                "Track loaded",
+                if autoplay {
+                    "Track playback requested"
+                } else {
+                    "Track loaded"
+                },
                 get_player_state(&player),
             ))
         }
@@ -903,10 +918,6 @@ async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
                     );
                 }
             }
-            player
-                .shared_state()
-                .event_flags
-                .fetch_or(crate::player::EVENT_PLAYBACK_STARTED, Ordering::Release);
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Playback started",
                 get_player_state(&player),

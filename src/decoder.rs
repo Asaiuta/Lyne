@@ -12,7 +12,7 @@ use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::{MetadataOptions, StandardTagKey, Value};
+use symphonia::core::meta::{MetadataOptions, MetadataRevision, StandardTagKey, Value};
 use symphonia::core::probe::{Hint, ProbeResult};
 use thiserror::Error;
 
@@ -211,65 +211,11 @@ pub struct AudioInfo {
 fn extract_metadata(probed: &mut ProbeResult) -> TrackMetadata {
     let mut metadata = TrackMetadata::default();
 
-    // Get metadata from the probed result
-    // ProbedMetadata::get() returns Option<Metadata>
+    // Get metadata from the probed result. Container readers can expose
+    // additional metadata later, so callers may merge from the format reader too.
     if let Some(meta) = probed.metadata.get() {
-        // Get current revision
         if let Some(revision) = meta.current() {
-            // Iterate through tags
-            for tag in revision.tags() {
-                match tag.std_key {
-                    Some(StandardTagKey::TrackTitle) => {
-                        metadata.title = tag_value_to_string(&tag.value);
-                    }
-                    Some(StandardTagKey::Artist) => {
-                        metadata.artist = tag_value_to_string(&tag.value);
-                    }
-                    Some(StandardTagKey::Album) => {
-                        metadata.album = tag_value_to_string(&tag.value);
-                    }
-                    Some(StandardTagKey::TrackNumber) => {
-                        metadata.track_number = tag_value_to_u32(&tag.value);
-                    }
-                    Some(StandardTagKey::DiscNumber) => {
-                        metadata.disc_number = tag_value_to_u32(&tag.value);
-                    }
-                    Some(StandardTagKey::Genre) => {
-                        metadata.genre = tag_value_to_string(&tag.value);
-                    }
-                    Some(StandardTagKey::Date) => {
-                        metadata.year = tag_value_to_u32(&tag.value);
-                    }
-                    // ReplayGain tags (Symphonia may not have StandardTagKey for these)
-                    _ => {
-                        // Fallback: match raw tag keys for ReplayGain
-                        let key_lower = tag.key.to_lowercase();
-                        match key_lower.as_str() {
-                            "replaygain_track_gain" => {
-                                metadata.rg_track_gain = parse_rg_gain_from_value(&tag.value);
-                            }
-                            "replaygain_track_peak" => {
-                                metadata.rg_track_peak = parse_rg_peak_from_value(&tag.value);
-                            }
-                            "replaygain_album_gain" => {
-                                metadata.rg_album_gain = parse_rg_gain_from_value(&tag.value);
-                            }
-                            "replaygain_album_peak" => {
-                                metadata.rg_album_peak = parse_rg_peak_from_value(&tag.value);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            // Extract cover art from visual metadata
-            for visual in revision.visuals() {
-                // Take first visual as cover art
-                metadata.cover_art = Some(visual.data.to_vec());
-                metadata.cover_art_mime = Some(visual.media_type.clone());
-                break;
-            }
+            merge_metadata_revision(&mut metadata, revision);
         }
     }
 
@@ -284,6 +230,81 @@ fn extract_metadata(probed: &mut ProbeResult) -> TrackMetadata {
     }
 
     metadata
+}
+
+fn merge_metadata_revision(metadata: &mut TrackMetadata, revision: &MetadataRevision) {
+    for tag in revision.tags() {
+        match tag.std_key {
+            Some(StandardTagKey::TrackTitle) => {
+                metadata.title = metadata.title.take().or_else(|| tag_value_to_string(&tag.value));
+            }
+            Some(StandardTagKey::Artist) => {
+                metadata.artist = metadata.artist.take().or_else(|| tag_value_to_string(&tag.value));
+            }
+            Some(StandardTagKey::Album) => {
+                metadata.album = metadata.album.take().or_else(|| tag_value_to_string(&tag.value));
+            }
+            Some(StandardTagKey::TrackNumber) => {
+                metadata.track_number = metadata.track_number.or_else(|| tag_value_to_u32(&tag.value));
+            }
+            Some(StandardTagKey::DiscNumber) => {
+                metadata.disc_number = metadata.disc_number.or_else(|| tag_value_to_u32(&tag.value));
+            }
+            Some(StandardTagKey::Genre) => {
+                metadata.genre = metadata.genre.take().or_else(|| tag_value_to_string(&tag.value));
+            }
+            Some(StandardTagKey::Date) => {
+                metadata.year = metadata.year.or_else(|| tag_value_to_u32(&tag.value));
+            }
+            _ => {
+                let key_lower = tag.key.to_lowercase();
+                match key_lower.as_str() {
+                    "title" => {
+                        metadata.title = metadata.title.take().or_else(|| tag_value_to_string(&tag.value));
+                    }
+                    "artist" | "albumartist" | "album_artist" => {
+                        metadata.artist = metadata.artist.take().or_else(|| tag_value_to_string(&tag.value));
+                    }
+                    "album" => {
+                        metadata.album = metadata.album.take().or_else(|| tag_value_to_string(&tag.value));
+                    }
+                    "tracknumber" | "track_number" => {
+                        metadata.track_number = metadata.track_number.or_else(|| tag_value_to_u32(&tag.value));
+                    }
+                    "discnumber" | "disc_number" => {
+                        metadata.disc_number = metadata.disc_number.or_else(|| tag_value_to_u32(&tag.value));
+                    }
+                    "genre" => {
+                        metadata.genre = metadata.genre.take().or_else(|| tag_value_to_string(&tag.value));
+                    }
+                    "date" | "year" => {
+                        metadata.year = metadata.year.or_else(|| tag_value_to_u32(&tag.value));
+                    }
+                    "replaygain_track_gain" => {
+                        metadata.rg_track_gain = metadata.rg_track_gain.or_else(|| parse_rg_gain_from_value(&tag.value));
+                    }
+                    "replaygain_track_peak" => {
+                        metadata.rg_track_peak = metadata.rg_track_peak.or_else(|| parse_rg_peak_from_value(&tag.value));
+                    }
+                    "replaygain_album_gain" => {
+                        metadata.rg_album_gain = metadata.rg_album_gain.or_else(|| parse_rg_gain_from_value(&tag.value));
+                    }
+                    "replaygain_album_peak" => {
+                        metadata.rg_album_peak = metadata.rg_album_peak.or_else(|| parse_rg_peak_from_value(&tag.value));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if metadata.cover_art.is_none() {
+        for visual in revision.visuals() {
+            metadata.cover_art = Some(visual.data.to_vec());
+            metadata.cover_art_mime = Some(visual.media_type.clone());
+            break;
+        }
+    }
 }
 
 /// Convert tag value to String
@@ -795,9 +816,12 @@ impl StreamingDecoder {
             .map_err(|e| DecoderError::Probe(e.to_string()))?;
 
         // Extract track metadata from tags BEFORE moving format
-        let metadata = extract_metadata(&mut probed);
+        let mut metadata = extract_metadata(&mut probed);
 
-        let format_reader = probed.format;
+        let mut format_reader = probed.format;
+        if let Some(revision) = format_reader.metadata().current() {
+            merge_metadata_revision(&mut metadata, revision);
+        }
 
         let track = format_reader
             .tracks()

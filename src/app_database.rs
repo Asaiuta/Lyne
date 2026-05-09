@@ -73,6 +73,8 @@ pub struct MediaItemRecord {
     pub duration_secs: Option<f64>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u32>,
+    pub has_cover_art: bool,
+    pub size_bytes: Option<u64>,
     pub updated_at_epoch_secs: u64,
 }
 
@@ -1025,7 +1027,13 @@ impl AppDatabase {
             .prepare(
                 r#"
                 SELECT media_id, source_path, source_kind, title, artist, album, track_number, disc_number,
-                       genre, year, duration_secs, sample_rate, channels, updated_at
+                       genre, year, duration_secs, sample_rate, channels, updated_at,
+                       EXISTS (
+                           SELECT 1
+                           FROM cover_art_cache
+                           WHERE cover_art_cache.media_id = media_items.media_id
+                           LIMIT 1
+                       ) AS has_cover_art
                 FROM media_items
                 ORDER BY updated_at DESC, media_id DESC
                 LIMIT ?1
@@ -1035,9 +1043,10 @@ impl AppDatabase {
 
         let rows = stmt
             .query_map(params![limit as i64], |row| {
+                let source_path: String = row.get(1)?;
                 Ok(MediaItemRecord {
                     media_id: row.get(0)?,
-                    source_path: row.get(1)?,
+                    source_path: source_path.clone(),
                     source_kind: row.get(2)?,
                     title: row.get(3)?,
                     artist: row.get(4)?,
@@ -1049,6 +1058,8 @@ impl AppDatabase {
                     duration_secs: row.get(10)?,
                     sample_rate: row.get::<_, Option<i64>>(11)?.map(|v| v as u32),
                     channels: row.get::<_, Option<i64>>(12)?.map(|v| v as u32),
+                    has_cover_art: row.get::<_, i64>(14)? != 0,
+                    size_bytes: file_size_for_source_path(&source_path),
                     updated_at_epoch_secs: row.get::<_, i64>(13)? as u64,
                 })
             })
@@ -1828,6 +1839,17 @@ impl AppDatabase {
 
 pub(crate) fn media_id_for_path(path: &str) -> String {
     path.replace('\\', "/").to_lowercase()
+}
+
+fn file_size_for_source_path(source_path: &str) -> Option<u64> {
+    if source_path.starts_with("http://") || source_path.starts_with("https://") {
+        return None;
+    }
+
+    std::fs::metadata(source_path)
+        .ok()
+        .filter(|metadata| metadata.is_file())
+        .map(|metadata| metadata.len())
 }
 
 fn prepare_connection(conn: Connection, enable_wal: bool) -> Result<Connection, String> {

@@ -1,17 +1,18 @@
 import { Match, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 import { AppShell } from "../components/AppShell";
+import { PageTransition } from "../components/PageTransition";
 import { BackgroundLayer } from "../components/BackgroundLayer";
 import { FullPlayer } from "../components/FullPlayer";
 import { PlayerBar } from "../components/PlayerBar";
 import { Sidebar } from "../components/Sidebar";
-import type { ActivePage } from "../components/Sidebar";
 import { TopNav } from "../components/TopNav";
 import { WindowControls } from "../components/WindowControls";
 import { HistoryPage } from "../features/history/HistoryPage";
 import { LibraryPage } from "../features/library/LibraryPage";
 import { NeteasePage } from "../features/online/NeteasePage";
 import {
+  findCurrentLyricLine,
   mergeNcmTrackReference,
   readLyricLines,
   readSongDetailSupplement,
@@ -35,6 +36,13 @@ import { useTranslation } from "../shared/i18n";
 import { NcmAccountProvider } from "../shared/state/NcmAccountContext";
 import { UISearchProvider } from "../shared/state/UISearchContext";
 import { useUISettings } from "../shared/state/useUISettings";
+import {
+  isPlaceholderPage,
+  isPlaylistPage,
+  type ActivePage
+} from "../shared/ui/navigation";
+import { applyDynamicAccent, extractAccent } from "../shared/styles/dynamicAccent";
+import type { UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
 
 const api = createApiClient();
 
@@ -78,6 +86,10 @@ export function App() {
   const [queueEntries, setQueueEntries] = createSignal<QueueEntry[]>([]);
   const [livePosition, setLivePosition] = createSignal<number | null>(null);
   const [fullPlayerOpen, setFullPlayerOpen] = createSignal(false);
+  const [selectedPlaylistId, setSelectedPlaylistId] = createSignal<number | null>(null);
+  const [discoverTabRequest, setDiscoverTabRequest] = createSignal<{ tab: string; version: number }>({ tab: "playlists", version: 0 });
+  const [historyStack, setHistoryStack] = createSignal<ActivePage[]>(["recommend"]);
+  const [historyIndex, setHistoryIndex] = createSignal(0);
   const [ncmTrackRefs, setNcmTrackRefs] = createSignal<Record<string, NcmTrackReference>>({});
   const [currentNcmSupplement, setCurrentNcmSupplement] =
     createSignal<NcmTrackSupplement | null>(null);
@@ -251,6 +263,71 @@ export function App() {
     return runPlayerCommand(() => api.setShuffleMode(target));
   };
 
+  const commitPageChange = (page: ActivePage) => {
+    setActivePage(page);
+    if (!isPlaylistPage(page)) {
+      setSelectedPlaylistId(null);
+    }
+  };
+
+  const pushNavigation = (page: ActivePage) => {
+    const current = activePage();
+    if (page === current) {
+      if (!isPlaylistPage(page)) {
+        setSelectedPlaylistId(null);
+      }
+      return;
+    }
+
+    const nextIndex = historyIndex() + 1;
+    setHistoryStack((prev) => [...prev.slice(0, nextIndex), page]);
+    setHistoryIndex(nextIndex);
+    commitPageChange(page);
+  };
+
+  const handleActivePageChange = (page: ActivePage) => {
+    pushNavigation(page);
+  };
+
+  const handleSidebarPlaylistSelect = (page: UserPlaylistMode, playlistId: number) => {
+    if (activePage() !== page) {
+      const nextIndex = historyIndex() + 1;
+      setHistoryStack((prev) => [...prev.slice(0, nextIndex), page]);
+      setHistoryIndex(nextIndex);
+    }
+    commitPageChange(page);
+    setSelectedPlaylistId(playlistId);
+  };
+
+  const handleSelectedPlaylistChange = (playlistId: number | null) => {
+    setSelectedPlaylistId(playlistId);
+  };
+
+  const handleNavigateToDiscover = (tab: string) => {
+    setDiscoverTabRequest((prev) => ({ tab, version: prev.version + 1 }));
+    pushNavigation("discover");
+  };
+
+  const handleGoBack = () => {
+    const nextIndex = historyIndex() - 1;
+    if (nextIndex < 0) return;
+    const target = historyStack()[nextIndex];
+    if (!target) return;
+    setHistoryIndex(nextIndex);
+    commitPageChange(target);
+  };
+
+  const handleGoForward = () => {
+    const nextIndex = historyIndex() + 1;
+    const target = historyStack()[nextIndex];
+    if (!target) return;
+    setHistoryIndex(nextIndex);
+    commitPageChange(target);
+  };
+
+  const canGoBack = createMemo(() => historyIndex() > 0);
+  const canGoForward = createMemo(() => historyIndex() < historyStack().length - 1);
+
   const currentTrackRef = createMemo(() => {
     const path = player()?.file_path;
     return path ? ncmTrackRefs()[path] : undefined;
@@ -261,6 +338,9 @@ export function App() {
   );
   const resolvedCoverUrl = createMemo(() => currentNcmCoverUrl() ?? coverUrl());
   const currentLyricLine = createMemo(() => currentNcmSupplement()?.lyrics ?? []);
+  const currentInlineLyric = createMemo(() =>
+    findCurrentLyricLine(currentLyricLine(), livePosition() ?? player()?.current_time ?? 0)
+  );
   const fullPlayerTitle = createMemo(
     () =>
       currentNcmSupplement()?.title ??
@@ -301,7 +381,6 @@ export function App() {
       setCurrentNcmSupplement(null);
       return;
     }
-
     let cancelled = false;
     setCurrentNcmSupplement({
       status: "loading",
@@ -349,6 +428,22 @@ export function App() {
     });
   });
 
+  createEffect(() => {
+    const url = resolvedCoverUrl();
+    let cancelled = false;
+    if (!url) {
+      applyDynamicAccent(null);
+      return;
+    }
+    void extractAccent(url).then((color) => {
+      if (cancelled) return;
+      applyDynamicAccent(color);
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
   return (
     <NcmAccountProvider>
       <NcmScrobbleBridge
@@ -360,14 +455,20 @@ export function App() {
           sidebar={
             <Sidebar
               activePage={activePage()}
-              onChange={setActivePage}
+              onChange={handleActivePageChange}
               onRefresh={() => void refreshState()}
+              selectedPlaylistId={selectedPlaylistId()}
+              onSelectPlaylist={handleSidebarPlaylistSelect}
             />
           }
           topNav={
             <TopNav
               activePage={activePage()}
-              onOpenSettings={() => setActivePage("settings")}
+              canGoBack={canGoBack()}
+              canGoForward={canGoForward()}
+              onGoBack={handleGoBack}
+              onGoForward={handleGoForward}
+              onOpenSettings={() => handleActivePageChange("settings")}
               windowControls={<WindowControls visible={uiSettings.customChrome} />}
             />
           }
@@ -386,6 +487,7 @@ export function App() {
               wsStatus={wsStatus()}
               commandError={commandError()}
               coverUrl={resolvedCoverUrl()}
+              currentLyric={currentInlineLyric()}
               canSkipPrev={prevEntryId() !== null}
               canSkipNext={nextEntryId() !== null}
               livePosition={livePosition()}
@@ -404,59 +506,67 @@ export function App() {
             />
           }
         >
-          <Switch>
-            <Match when={activePage() === "queue"}>
-              <QueuePage
-                currentTrackPath={currentTrackPath()}
-                preloadRequested={preloadRequested()}
-                onPreloadCleared={() => setPreloadRequested(false)}
-                onStateRefresh={refreshState}
-              />
-            </Match>
-            <Match when={activePage() === "library"}>
-              <LibraryPage
-                onStateRefresh={refreshState}
-                currentTrackPath={currentTrackPath()}
-                isPlaying={Boolean(player()?.is_playing)}
-              />
-            </Match>
-            <Match
-              when={
-                activePage() === "recommend" ||
-                activePage() === "discover" ||
-                activePage() === "created-playlists" ||
-                activePage() === "collected-playlists"
-              }
-            >
-              <NeteasePage
-                mode={
-                  activePage() as "recommend" | "discover" | "created-playlists" | "collected-playlists"
-                }
-                onStateRefresh={refreshState}
-                currentTrackPath={currentTrackPath()}
-                currentSongId={currentNcmSongId()}
-                isPlaying={Boolean(player()?.is_playing)}
-                onRegisterPlayback={registerNcmPlayback}
-              />
-            </Match>
-            <Match when={activePage() === "recent"}>
-              <HistoryPage onStateRefresh={refreshState} />
-            </Match>
-            <Match when={activePage() === "settings"}>
-              <SettingsPage onStateRefresh={refreshState} />
-            </Match>
-            <Match when={activePage() === "liked" || activePage() === "cloud"}>
-              <div class="panel panel-placeholder">
-                <div class="panel-header">
-                  <h2>{td(`sidebar.nav.${activePage()}.label`)}</h2>
-                </div>
-                <p class="panel-note">
-                  {activePage() === "liked" && "喜欢的音乐 — 收藏同步功能开发中"}
-                  {activePage() === "cloud" && "我的云盘 — 云盘功能开发中"}
-                </p>
-              </div>
-            </Match>
-          </Switch>
+          <PageTransition activePage={activePage()} animation={uiSettings.routeAnimation}>
+            {(displayedPage) => (
+              <Switch>
+                <Match when={displayedPage() === "queue"}>
+                  <QueuePage
+                    currentTrackPath={currentTrackPath()}
+                    preloadRequested={preloadRequested()}
+                    onPreloadCleared={() => setPreloadRequested(false)}
+                    onStateRefresh={refreshState}
+                  />
+                </Match>
+                <Match when={displayedPage() === "library"}>
+                  <LibraryPage
+                    onStateRefresh={refreshState}
+                    currentTrackPath={currentTrackPath()}
+                    isPlaying={Boolean(player()?.is_playing)}
+                  />
+                </Match>
+                <Match
+                  when={
+                    displayedPage() === "recommend" ||
+                    displayedPage() === "discover" ||
+                    displayedPage() === "created-playlists" ||
+                    displayedPage() === "collected-playlists"
+                  }
+                >
+                  <NeteasePage
+                    mode={
+                      displayedPage() as "recommend" | "discover" | "created-playlists" | "collected-playlists"
+                    }
+                    onStateRefresh={refreshState}
+                    currentTrackPath={currentTrackPath()}
+                    currentSongId={currentNcmSongId()}
+                    isPlaying={Boolean(player()?.is_playing)}
+                    onRegisterPlayback={registerNcmPlayback}
+                    selectedPlaylistId={selectedPlaylistId()}
+                    onSelectedPlaylistChange={handleSelectedPlaylistChange}
+                    onNavigate={handleActivePageChange}
+                    onNavigateToDiscover={handleNavigateToDiscover}
+                    discoverTabRequest={discoverTabRequest()}
+                  />
+                </Match>
+                <Match when={displayedPage() === "recent"}>
+                  <HistoryPage onStateRefresh={refreshState} />
+                </Match>
+                <Match when={displayedPage() === "settings"}>
+                  <SettingsPage onStateRefresh={refreshState} />
+                </Match>
+                <Match when={isPlaceholderPage(displayedPage() as any)}>
+                  <div class="panel panel-placeholder">
+                    <div class="panel-header">
+                      <h2>{td(`sidebar.nav.${displayedPage()}.label`)}</h2>
+                    </div>
+                    <p class="panel-note">
+                      {td(`page.placeholder.${displayedPage()}`)}
+                    </p>
+                  </div>
+                </Match>
+              </Switch>
+            )}
+          </PageTransition>
         </AppShell>
 
         <FullPlayer

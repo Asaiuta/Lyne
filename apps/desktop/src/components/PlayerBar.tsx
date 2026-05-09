@@ -1,8 +1,12 @@
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup } from "solid-js";
 import type { PlayerState, RepeatMode, RequestState, ShuffleMode } from "../shared/api/types";
 import { useTranslation } from "../shared/i18n";
 import { CoverArt } from "./CoverArt";
 import {
+  IconControls,
+  IconDots,
+  IconExpand,
+  IconHeart,
   IconPause,
   IconPlay,
   IconRepeat,
@@ -10,6 +14,7 @@ import {
   IconShuffle,
   IconSkipNext,
   IconSkipPrev,
+  IconPlaylist,
   IconVolumeHigh,
   IconVolumeMute
 } from "./icons";
@@ -22,6 +27,7 @@ interface PlayerBarProps {
   wsStatus: WsStatus;
   commandError: string | null;
   coverUrl: string | null;
+  currentLyric?: string | null;
   canSkipPrev: boolean;
   canSkipNext: boolean;
   livePosition: number | null;
@@ -40,7 +46,6 @@ interface PlayerBarProps {
 }
 
 const COMMAND_ERROR_AUTO_DISMISS_MS = 4000;
-const VOLUME_POPOVER_BREAKPOINT_PX = 1024;
 
 const formatTime = (value: number) => {
   if (!Number.isFinite(value)) {
@@ -54,32 +59,15 @@ const formatTime = (value: number) => {
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
-const isNarrowForVolumePopover = (): boolean => {
-  if (typeof window === "undefined") return false;
-  return window.innerWidth < VOLUME_POPOVER_BREAKPOINT_PX;
-};
-
 export function PlayerBar(props: PlayerBarProps) {
   void props.onStop;
-  const { t, td } = useTranslation();
+  const { t } = useTranslation();
   const [showRemaining, setShowRemaining] = createSignal(false);
   const [volumePopoverOpen, setVolumePopoverOpen] = createSignal(false);
-  const [narrowVolumeMode, setNarrowVolumeMode] = createSignal(isNarrowForVolumePopover());
   const [errorVisible, setErrorVisible] = createSignal(false);
+  const [moreOpen, setMoreOpen] = createSignal(false);
   let volumeRef: HTMLDivElement | undefined;
-
-  onMount(() => {
-    if (typeof window === "undefined") return;
-    const handler = () => {
-      const next = isNarrowForVolumePopover();
-      setNarrowVolumeMode(next);
-      if (!next) {
-        setVolumePopoverOpen(false);
-      }
-    };
-    window.addEventListener("resize", handler);
-    onCleanup(() => window.removeEventListener("resize", handler));
-  });
+  let moreRef: HTMLDivElement | undefined;
 
   createEffect(() => {
     if (!volumePopoverOpen()) return;
@@ -94,6 +82,29 @@ export function PlayerBar(props: PlayerBarProps) {
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setVolumePopoverOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handlePointer);
+    window.addEventListener("keydown", handleKey);
+    onCleanup(() => {
+      window.removeEventListener("mousedown", handlePointer);
+      window.removeEventListener("keydown", handleKey);
+    });
+  });
+
+  createEffect(() => {
+    if (!moreOpen()) return;
+
+    const handlePointer = (event: MouseEvent) => {
+      if (!moreRef) return;
+      if (event.target instanceof Node && moreRef.contains(event.target)) {
+        return;
+      }
+      setMoreOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMoreOpen(false);
       }
     };
     window.addEventListener("mousedown", handlePointer);
@@ -137,7 +148,14 @@ export function PlayerBar(props: PlayerBarProps) {
 
   const title = () =>
     player()?.title ?? player()?.file_path ?? fallbackTitle() ?? t("player.fallback.empty");
-  const subtitle = () => [player()?.artist, player()?.album].filter(Boolean).join(" · ");
+  const artistLine = () => player()?.artist?.trim() || t("player.subtitle.empty");
+  const currentLyric = () => {
+    const lyric = props.currentLyric?.trim();
+    return lyric ? lyric : null;
+  };
+  const secondaryLine = () => currentLyric() ?? artistLine();
+  const secondaryLabel = () =>
+    currentLyric() ? t("player.meta.lyricLive") : artistLine();
   const duration = () => player()?.duration ?? 0;
   const currentTime = () => props.livePosition ?? player()?.current_time ?? 0;
   const remainingTime = () => Math.max(0, duration() - currentTime());
@@ -152,11 +170,18 @@ export function PlayerBar(props: PlayerBarProps) {
   const shuffleLabel = () =>
     shuffleActive() ? t("player.shuffle.on") : t("player.shuffle.off");
   const playPauseLabel = () => (isPlaying() ? t("player.aria.pause") : t("player.aria.play"));
-  const realtimeLabel = () => t("player.realtime", { status: td(`player.status.${props.wsStatus}`) });
   const timeRight = () =>
     showRemaining() ? `-${formatTime(remainingTime())}` : formatTime(duration());
   const timeToggleLabel = () =>
     showRemaining() ? t("player.toggle.remaining") : t("player.toggle.elapsed");
+  const playbackRateLabel = () => null;
+  const qualityLabel = () => {
+    const state = player();
+    if (!state || state.target_samplerate === null) {
+      return t("player.quality.source");
+    }
+    return t("player.quality.upsampled", { value: state.target_samplerate });
+  };
 
   const seekFromClientX = (clientX: number, rect: DOMRect) => {
     if (!canSeek()) return;
@@ -234,7 +259,9 @@ export function PlayerBar(props: PlayerBarProps) {
           onClick={handleProgressClick}
           onKeyDown={handleProgressKeyDown}
         >
-          <div class="player-progress-edge-fill" style={{ width: `${progress() * 100}%` }} />
+          <div class="player-progress-edge-fill" style={{ width: `${progress() * 100}%` }}>
+            <div class="player-progress-edge-thumb" aria-hidden="true" />
+          </div>
           <Show when={props.loadingProgress !== null}>
             <div
               class="player-progress-edge-loading"
@@ -256,106 +283,147 @@ export function PlayerBar(props: PlayerBarProps) {
               coverUrl={props.coverUrl}
               alt={player()?.title ?? player()?.file_path ?? t("cover.alt")}
             />
+            <span class="player-bar-cover-expand" aria-hidden="true">
+              <IconExpand />
+            </span>
           </button>
           <div class="player-bar-info">
-            <div class="player-bar-title" title={title()}>
-              {title()}
+            <div class="player-bar-title-row">
+              <div class="player-bar-title" title={title()}>
+                {title()}
+              </div>
+              <Show when={playbackRateLabel()}>
+                {(label) => <span class="player-inline-tag player-inline-tag-accent">{label()}</span>}
+              </Show>
+              <button
+                type="button"
+                class="player-inline-icon player-like-icon"
+                aria-label={t("player.aria.favorite")}
+                title={t("player.aria.favorite")}
+              >
+                <IconHeart />
+              </button>
+              <div class="player-inline-menu" ref={moreRef}>
+                <button
+                  type="button"
+                  class="player-inline-icon"
+                  aria-label={t("player.aria.more")}
+                  title={t("player.aria.more")}
+                  aria-expanded={moreOpen()}
+                  aria-haspopup="menu"
+                  onClick={() => setMoreOpen((open) => !open)}
+                >
+                  <IconDots />
+                </button>
+                <Show when={moreOpen()}>
+                  <div class="player-inline-menu-popover" role="menu" aria-label={t("player.aria.more")}>
+                    <button type="button" class="player-menu-item" role="menuitem" onClick={() => setMoreOpen(false)}>
+                      {t("player.menu.openAlbum")}
+                    </button>
+                    <button type="button" class="player-menu-item" role="menuitem" onClick={() => setMoreOpen(false)}>
+                      {t("player.menu.viewCredits")}
+                    </button>
+                    <button type="button" class="player-menu-item" role="menuitem" onClick={() => setMoreOpen(false)}>
+                      {t("player.menu.share")}
+                    </button>
+                  </div>
+                </Show>
+              </div>
             </div>
-            <div class="player-info-secondary" title={subtitle() || undefined}>
-              {subtitle() || t("player.subtitle.empty")}
+            <div class="player-info-secondary" title={secondaryLabel()}>
+              {secondaryLine()}
             </div>
           </div>
         </div>
 
-        <div class="player-bar-transport" role="group" aria-label={t("player.aria.transport")}>
-          <button
-            type="button"
-            class={`transport-button mode-button${shuffleActive() ? " is-active" : ""}`}
-            onClick={props.onToggleShuffle}
-            aria-label={shuffleLabel()}
-            aria-pressed={shuffleActive()}
-            title={shuffleLabel()}
-          >
-            <IconShuffle />
-          </button>
-          <button
-            type="button"
-            class="transport-button"
-            onClick={props.onSkipPrev}
-            disabled={!props.canSkipPrev}
-            aria-label={t("player.aria.prev")}
-            title={t("player.title.prev")}
-          >
-            <IconSkipPrev />
-          </button>
-          <button
-            type="button"
-            class="transport-button transport-primary"
-            onClick={isPlaying() ? props.onPause : props.onPlay}
-            aria-label={playPauseLabel()}
-            title={playPauseLabel()}
-          >
-            <Show when={isPlaying()} fallback={<IconPlay />}>
-              <IconPause />
-            </Show>
-          </button>
-          <button
-            type="button"
-            class="transport-button"
-            onClick={props.onSkipNext}
-            disabled={!props.canSkipNext}
-            aria-label={t("player.aria.next")}
-            title={t("player.title.next")}
-          >
-            <IconSkipNext />
-          </button>
-          <button
-            type="button"
-            class={`transport-button mode-button${repeatActive() ? " is-active" : ""}`}
-            onClick={props.onCycleRepeat}
-            aria-label={repeatLabel()}
-            aria-pressed={repeatActive()}
-            title={repeatLabel()}
-          >
-            {(() => {
-              const Icon = RepeatIcon();
-              return <Icon />;
-            })()}
-          </button>
+        <div class="player-bar-center">
+          <div class="player-bar-transport" role="group" aria-label={t("player.aria.transport")}>
+            <button
+              type="button"
+              class={`transport-button mode-button${shuffleActive() ? " is-active" : ""}`}
+              onClick={props.onToggleShuffle}
+              aria-label={shuffleLabel()}
+              aria-pressed={shuffleActive()}
+              title={shuffleLabel()}
+            >
+              <IconShuffle />
+            </button>
+            <button
+              type="button"
+              class="transport-button"
+              onClick={props.onSkipPrev}
+              disabled={!props.canSkipPrev}
+              aria-label={t("player.aria.prev")}
+              title={t("player.title.prev")}
+            >
+              <IconSkipPrev />
+            </button>
+            <button
+              type="button"
+              class="transport-button transport-primary"
+              onClick={isPlaying() ? props.onPause : props.onPlay}
+              aria-label={playPauseLabel()}
+              title={playPauseLabel()}
+            >
+              <Show when={isPlaying()} fallback={<IconPlay />}>
+                <IconPause />
+              </Show>
+            </button>
+            <button
+              type="button"
+              class="transport-button"
+              onClick={props.onSkipNext}
+              disabled={!props.canSkipNext}
+              aria-label={t("player.aria.next")}
+              title={t("player.title.next")}
+            >
+              <IconSkipNext />
+            </button>
+            <button
+              type="button"
+              class={`transport-button mode-button${repeatActive() ? " is-active" : ""}`}
+              onClick={props.onCycleRepeat}
+              aria-label={repeatLabel()}
+              aria-pressed={repeatActive()}
+              title={repeatLabel()}
+            >
+              {(() => {
+                const Icon = RepeatIcon();
+                return <Icon />;
+              })()}
+            </button>
+          </div>
         </div>
 
         <div class="player-bar-right">
-          <button
-            type="button"
-            class="player-time-toggle"
-            onClick={() => setShowRemaining((prev) => !prev)}
-            aria-label={t("player.aria.timeToggle")}
-            title={timeToggleLabel()}
-          >
-            <span class="player-time-current">{formatTime(currentTime())}</span>
-            <span class="player-time-divider" aria-hidden="true">/</span>
-            <span class="player-time-total">{timeRight()}</span>
-          </button>
-
-          <div class="player-volume" ref={volumeRef}>
-            <Show
-              when={narrowVolumeMode()}
-              fallback={
-                <label class="player-volume-inline" aria-label={t("player.aria.volume")}>
-                  <span class="volume-icon" aria-hidden="true">
-                    {(() => {
-                      const Icon = VolumeIcon();
-                      return <Icon />;
-                    })()}
-                  </span>
-                  <VolumeSlider />
-                  <span class="volume-value">{Math.round(sliderVolume() * 100)}</span>
-                </label>
-              }
+          <div class="player-time-stack">
+            <button
+              type="button"
+              class="player-time-toggle"
+              onClick={() => setShowRemaining((prev) => !prev)}
+              aria-label={t("player.aria.timeToggle")}
+              title={timeToggleLabel()}
             >
+              <span class="player-time-current">{formatTime(currentTime())}</span>
+              <span class="player-time-divider" aria-hidden="true">/</span>
+              <span class="player-time-total">{timeRight()}</span>
+            </button>
+          </div>
+
+          <div class="player-utility-group" role="group" aria-label={t("player.aria.more")}>
+            <span class="player-inline-tag player-right-tag player-utility-hidden">{qualityLabel()}</span>
+            <button
+              type="button"
+              class="player-inline-icon player-utility-button player-utility-hidden"
+              aria-label={t("player.aria.more")}
+              title={t("player.aria.more")}
+            >
+              <IconControls />
+            </button>
+            <div class="player-volume" ref={volumeRef}>
               <button
                 type="button"
-                class="transport-button volume-toggle"
+                class="player-inline-icon player-utility-button volume-toggle player-utility-hidden"
                 onClick={() => setVolumePopoverOpen((open) => !open)}
                 aria-label={t("player.aria.volumePopover")}
                 aria-expanded={volumePopoverOpen()}
@@ -369,13 +437,19 @@ export function PlayerBar(props: PlayerBarProps) {
               <Show when={volumePopoverOpen()}>
                 <div class="player-volume-popover" role="dialog" aria-label={t("player.aria.volume")}>
                   <VolumeSlider />
-                  <span class="volume-value">{Math.round(sliderVolume() * 100)}</span>
+                  <span class="volume-value">{Math.round(sliderVolume() * 100)}%</span>
                 </div>
               </Show>
-            </Show>
+            </div>
+            <button
+              type="button"
+              class="player-inline-icon player-utility-button"
+              aria-label={t("sidebar.nav.queue.label")}
+              title={t("sidebar.nav.queue.label")}
+            >
+              <IconPlaylist />
+            </button>
           </div>
-
-          <span class={`player-realtime-chip status-${props.wsStatus}`}>{realtimeLabel()}</span>
         </div>
       </footer>
     </>

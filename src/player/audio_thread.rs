@@ -13,7 +13,7 @@ use crossbeam::channel::{Receiver, Sender};
 use assert_no_alloc::assert_no_alloc;
 
 use super::callback::{audio_callback_lockfree, LockfreeDspContext};
-use super::state::{AudioCommand, PlayerState, SharedState};
+use super::state::{AudioCommand, PlayerState, SharedState, EVENT_PLAYBACK_STARTED};
 use crate::config::PhaseResponse;
 use crate::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
@@ -87,6 +87,9 @@ pub fn audio_thread_main(
                         let _ = s.play();
                     }
                     shared_state.state.store(PlayerState::Playing);
+                    shared_state
+                        .event_flags
+                        .fetch_or(EVENT_PLAYBACK_STARTED, Ordering::Release);
                     continue;
                 }
 
@@ -351,6 +354,9 @@ pub fn audio_thread_main(
                         let _ = s.play();
                         stream = Some(s);
                         shared_state.state.store(PlayerState::Playing);
+                        shared_state
+                            .event_flags
+                            .fetch_or(EVENT_PLAYBACK_STARTED, Ordering::Release);
 
                         let detected_bits: u32 = match device.default_output_config() {
                             Ok(cfg) => match cfg.sample_format() {
@@ -816,6 +822,9 @@ fn handle_wasapi_exclusive(
             }
 
             shared_state.state.store(PlayerState::Playing);
+            shared_state
+                .event_flags
+                .fetch_or(EVENT_PLAYBACK_STARTED, Ordering::Release);
 
             let mut wait_count = 0;
             while wasapi_player.get_state() == WasapiState::Stopped && wait_count < 300 {
@@ -841,6 +850,9 @@ fn handle_wasapi_exclusive(
                         AudioCommand::Play => {
                             let _ = wasapi_player.play();
                             shared_state.state.store(PlayerState::Playing);
+                            shared_state
+                                .event_flags
+                                .fetch_or(EVENT_PLAYBACK_STARTED, Ordering::Release);
                         }
                         AudioCommand::Seek(time) => {
                             let sr = shared_state.sample_rate.load(Ordering::Relaxed) as f64;
