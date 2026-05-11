@@ -449,15 +449,17 @@ pub fn audio_callback_lockfree(
                 shared.needs_preload.store(false, Ordering::Relaxed);
                 shared.dsp_reset_pending.store(true, Ordering::Release);
 
-                // Signal events via bitmask (single atomic op)
+                // Signal that metadata needs to be copied by main thread
+                // (avoid RwLock writes in audio callback — P0-1 fix)
+                shared.gapless_swap_pending.store(true, Ordering::Release);
+
+                // Publish the event after the deferred metadata marker is visible.
+                // The websocket pusher consumes event_flags with swap(), so setting
+                // the event first can expose a half-swapped gapless state.
                 shared.event_flags.fetch_or(
                     EVENT_TRACK_CHANGED | EVENT_NEEDS_PRELOAD_RESET,
                     Ordering::Release,
                 );
-
-                // Signal that metadata needs to be copied by main thread
-                // (avoid RwLock writes in audio callback — P0-1 fix)
-                shared.gapless_swap_pending.store(true, Ordering::Release);
 
                 let pending_gain_bits = shared.pending_target_gain_db.load(Ordering::Relaxed);
                 let pending_gain_db = f64::from_bits(pending_gain_bits);
@@ -703,6 +705,8 @@ mod tests {
         shared.pending_sample_rate.store(44100, Ordering::Relaxed);
         shared.pending_channels.store(2, Ordering::Relaxed);
         shared.pending_ready.store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared.position_frames.store(2, Ordering::Relaxed);
 
         let eq_params = Arc::new(AtomicEqParams::new());
         let sat_params = Arc::new(AtomicSaturationParams::new());

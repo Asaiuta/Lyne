@@ -187,6 +187,7 @@ pub const EVENT_PLAYBACK_STARTED: u32 = 1 << 8;
 pub const EVENT_PLAYBACK_PAUSED: u32 = 1 << 9;
 pub const EVENT_PLAYBACK_STOPPED: u32 = 1 << 10;
 pub const EVENT_PLAYBACK_SEEKED: u32 = 1 << 11;
+pub const EVENT_PLAYBACK_HISTORY_UPDATED: u32 = 1 << 12;
 
 // ============ Commands & State ============
 
@@ -217,8 +218,8 @@ pub enum AudioCommand {
     SetFirConvolver { ir_data: Vec<f64>, channels: usize },
     ClearFirConvolver,
     SetNoiseShaperCurve { curve: NoiseShaperCurve },
-    LoadComplete(LoadResult),
-    LoadError(String),
+    LoadComplete { generation: u64, result: LoadResult },
+    LoadError { generation: u64, message: String },
 }
 
 /// Repeat behavior at the end of a track or queue.
@@ -413,6 +414,12 @@ pub struct SharedState {
     // Track metadata
     pub track_metadata: RwLock<crate::decoder::TrackMetadata>,
     pub pending_metadata: RwLock<Option<crate::decoder::TrackMetadata>>,
+    /// Monotonic generation for explicit track loads. Async decode results must
+    /// match this value before they are allowed to replace current playback.
+    pub load_generation: AtomicU64,
+    /// Monotonic generation for gapless preload jobs. Cancelling or starting a
+    /// new preload invalidates older preload worker threads.
+    pub preload_generation: AtomicU64,
 
     // Output format info (Defect 37 fix: for NoiseShaper bit depth)
     pub output_bits: std::sync::atomic::AtomicU32,
@@ -464,6 +471,8 @@ impl SharedState {
 
             track_metadata: RwLock::new(crate::decoder::TrackMetadata::default()),
             pending_metadata: RwLock::new(None),
+            load_generation: AtomicU64::new(0),
+            preload_generation: AtomicU64::new(0),
             output_bits: std::sync::atomic::AtomicU32::new(24), // Default 24-bit
             dsp_needs_rebuild: AtomicBool::new(false),
             pending_dsp_chain: ArrayQueue::new(1),

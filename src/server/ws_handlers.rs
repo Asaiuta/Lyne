@@ -9,9 +9,9 @@ use tokio::time::interval;
 
 use super::auth::{bearer_header, constant_time_eq, query_token};
 use crate::player::{
-    EVENT_LOAD_COMPLETE, EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_ENDED, EVENT_PLAYBACK_PAUSED,
-    EVENT_PLAYBACK_SEEKED, EVENT_PLAYBACK_STARTED, EVENT_PLAYBACK_STOPPED, EVENT_QUEUE_UPDATED,
-    EVENT_TRACK_CHANGED,
+    EVENT_LOAD_COMPLETE, EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_ENDED,
+    EVENT_PLAYBACK_HISTORY_UPDATED, EVENT_PLAYBACK_PAUSED, EVENT_PLAYBACK_SEEKED,
+    EVENT_PLAYBACK_STARTED, EVENT_PLAYBACK_STOPPED, EVENT_QUEUE_UPDATED, EVENT_TRACK_CHANGED,
 };
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
@@ -205,15 +205,6 @@ async fn websocket(
                                     }
                                 }
                                 *shared_state.track_metadata.write() = enhanced.clone();
-                                if let Some(ref p) = next_path {
-                                    let _ = data.app_db.record_media_metadata(
-                                        p,
-                                        &enhanced,
-                                        Some(shared_state.duration_secs()),
-                                        Some(shared_state.sample_rate.load(std::sync::atomic::Ordering::Relaxed) as u32),
-                                        Some(shared_state.channels.load(std::sync::atomic::Ordering::Relaxed) as usize),
-                                    );
-                                }
                             }
                             *shared_state.current_track_path.write() = next_path;
                             if let Some(ref current_path) = *shared_state.current_track_path.read() {
@@ -228,6 +219,20 @@ async fn websocket(
                         }
                         let file_path = shared_state.current_track_path.read().clone();
                         let metadata = shared_state.track_metadata.read().clone();
+                        // Persist runtime metadata (and any embedded cover art) for
+                        // every track change — not just gapless transitions. Otherwise
+                        // non-gapless loads (e.g. clicking a track in the History page)
+                        // leave `cover_art_cache` empty even though the decoder already
+                        // pulled the picture, so the subsequent cover-art request 404s.
+                        if let Some(ref path) = file_path {
+                            let _ = data.app_db.record_media_metadata(
+                                path,
+                                &metadata,
+                                Some(shared_state.duration_secs()),
+                                Some(shared_state.sample_rate.load(std::sync::atomic::Ordering::Relaxed) as u32),
+                                Some(shared_state.channels.load(std::sync::atomic::Ordering::Relaxed) as usize),
+                            );
+                        }
                         let media_id = file_path
                             .as_deref()
                             .map(crate::app_database::media_id_for_path);
@@ -237,7 +242,13 @@ async fn websocket(
                         let title = metadata.title.or_else(|| stored.as_ref().and_then(|item| item.title.clone()));
                         let artist = metadata.artist.or_else(|| stored.as_ref().and_then(|item| item.artist.clone()));
                         let album = metadata.album.or_else(|| stored.as_ref().and_then(|item| item.album.clone()));
-                        let external_artwork_url = stored.and_then(|item| item.external_artwork_url);
+                        let stored_has_cover_art = stored
+                            .as_ref()
+                            .map(|item| item.has_cover_art)
+                            .unwrap_or(false);
+                        let external_artwork_url =
+                            stored.and_then(|item| item.external_artwork_url);
+                        let has_cover_art = metadata.cover_art.is_some() || stored_has_cover_art;
                         let msg = serde_json::json!({
                             "type": "track_changed",
                             "file_path": file_path,
@@ -246,6 +257,7 @@ async fn websocket(
                             "title": title,
                             "artist": artist,
                             "album": album,
+                            "has_cover_art": has_cover_art,
                             "external_artwork_url": external_artwork_url,
                         });
                         if session.text(msg.to_string()).await.is_err() {
@@ -318,6 +330,16 @@ async fn websocket(
                         let msg = serde_json::json!({
                             "type": "seek",
                             "position": shared_state.current_time_secs(),
+                            "timestamp": now_millis(),
+                        });
+                        if session.text(msg.to_string()).await.is_err() {
+                            break;
+                        }
+                    }
+
+                    if events & EVENT_PLAYBACK_HISTORY_UPDATED != 0 {
+                        let msg = serde_json::json!({
+                            "type": "playback_history_updated",
                             "timestamp": now_millis(),
                         });
                         if session.text(msg.to_string()).await.is_err() {

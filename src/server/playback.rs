@@ -1,5 +1,5 @@
 use super::*;
-use crate::app_database::QueueEntryRecord;
+use crate::app_database::{media_id_for_path, QueueEntryRecord};
 use crate::player::{RepeatMode, SharedState, ShuffleMode};
 use crate::playlist;
 use actix_web::{web, HttpRequest, HttpResponse};
@@ -75,6 +75,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/domain/media_items/{media_id}/cover_art",
             web::get().to(get_media_cover_art),
+        )
+        .route(
+            "/domain/media_items/cover_art",
+            web::get().to(get_media_cover_art_by_query),
         )
         .route("/domain/current_lyrics", web::get().to(get_current_lyrics))
         .route("/domain/library/roots", web::get().to(get_library_roots))
@@ -173,6 +177,7 @@ struct QueueEntryPath {
 #[derive(Deserialize)]
 struct PlayQueueRequest {
     entry_id: Option<i64>,
+    source_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -298,6 +303,33 @@ fn emit_queue_updated_from_shared(shared: &Arc<SharedState>) {
         .fetch_or(crate::player::EVENT_QUEUE_UPDATED, Ordering::Release);
 }
 
+fn emit_playback_history_updated_from_shared(shared: &Arc<SharedState>) {
+    shared.event_flags.fetch_or(
+        crate::player::EVENT_PLAYBACK_HISTORY_UPDATED,
+        Ordering::Release,
+    );
+}
+
+fn append_playback_history_and_emit(
+    data: &web::Data<Arc<AppState>>,
+    shared: &Arc<SharedState>,
+    session_id: Option<i64>,
+    source_path: &str,
+    event_type: &str,
+    position_secs: Option<f64>,
+    payload: Option<&serde_json::Value>,
+) -> Result<(), String> {
+    data.app_db.append_playback_history(
+        session_id,
+        source_path,
+        event_type,
+        position_secs,
+        payload,
+    )?;
+    emit_playback_history_updated_from_shared(shared);
+    Ok(())
+}
+
 fn emit_playback_event(data: &web::Data<Arc<AppState>>, event: u32) {
     let player = data.player.lock();
     let shared = player.shared_state();
@@ -371,37 +403,101 @@ fn load_queue_entry_for_playback(
     data: &web::Data<Arc<AppState>>,
     entry: QueueEntryRecord,
     autoplay: bool,
-) -> Result<(), String> {
+) -> Result<(StateResponse, Arc<SharedState>), String> {
     let credentials = {
         let cfg = data.webdav_config.lock();
         cfg.http_credentials()
     };
 
-    let shared_state = {
+    let (state_response, shared_state) = {
         let mut player = data.player.lock();
         if autoplay {
             player.load_with_credentials_and_autoplay(&entry.source_path, credentials.as_ref())?;
         } else {
             player.load_with_credentials(&entry.source_path, credentials.as_ref())?;
         }
-        player.shared_state()
+        (get_player_state(&player), player.shared_state())
     };
+
+    let mut state_response = state_response;
+    let media_id = data.app_db.record_media_stub(&entry.source_path);
+    if let Err(e) = &media_id {
+        log::warn!(
+            "Failed to ensure media item for queued '{}': {}",
+            entry.source_path,
+            e
+        );
+    }
+    enrich_state_from_media_database(&data.app_db, &mut state_response);
+    let snapshot = playback_runtime_snapshot_from_state(&state_response);
+
+    let previous_session = { data.active_session_id.lock().take() };
+    if let Some(session_id) = previous_session {
+        if let Err(e) = data
+            .app_db
+            .finish_playback_session(session_id, "replaced", &snapshot)
+        {
+            log::warn!(
+                "Failed to close replaced playback session {}: {}",
+                session_id,
+                e
+            );
+        }
+    }
+
+    let session_id = data.app_db.start_playback_session(
+        &entry.source_path,
+        if autoplay { "playing" } else { "loaded" },
+        &snapshot,
+    )?;
+    *data.active_session_id.lock() = Some(session_id);
+    let payload = serde_json::json!({
+        "media_id": media_id.ok(),
+        "kind": if autoplay { "queue_autoplay" } else { "queue_load" },
+        "entry_id": entry.entry_id
+    });
+    append_playback_history_and_emit(
+        data,
+        &shared_state,
+        Some(session_id),
+        &entry.source_path,
+        "load_requested",
+        snapshot.position_secs,
+        Some(&payload),
+    )?;
 
     data.app_db
         .mark_queue_entry_playing("active", entry.entry_id)?;
     sync_queue_snapshot_from_shared(data, &shared_state);
     emit_queue_updated_from_shared(&shared_state);
-    Ok(())
+    Ok((state_response, shared_state))
+}
+
+fn same_media_identity(left: &str, right: &str) -> bool {
+    media_id_for_path(left) == media_id_for_path(right)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_media_identity;
+
+    #[test]
+    fn same_media_identity_normalizes_windows_paths() {
+        assert!(same_media_identity(
+            r"D:\Music\Artist\Track.FLAC",
+            r"\\?\D:\Music\Artist\Track.flac"
+        ));
+    }
 }
 
 fn finish_active_session_on_natural_end(data: &web::Data<Arc<AppState>>) {
-    let (snapshot, current_path) = {
+    let (snapshot, current_path, shared_state) = {
         let player = data.player.lock();
         let shared = player.shared_state();
         let snapshot = build_runtime_snapshot(&player);
         let current_path = shared.current_track_path.read().clone();
         let file_path = shared.file_path.read().clone();
-        (snapshot, current_path.or(file_path))
+        (snapshot, current_path.or(file_path), shared)
     };
 
     if let Some(ref path) = current_path {
@@ -421,7 +517,9 @@ fn finish_active_session_on_natural_end(data: &web::Data<Arc<AppState>>) {
         }
         if let Some(ref path) = current_path {
             let payload = serde_json::json!({ "reason": "natural_end" });
-            if let Err(e) = data.app_db.append_playback_history(
+            if let Err(e) = append_playback_history_and_emit(
+                data,
+                &shared_state,
                 Some(session_id),
                 path,
                 "playback_ended",
@@ -472,18 +570,14 @@ fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
         }
     }
 
-    if let Some(ref path) = current_path {
-        mark_current_track_as_played(data, path);
-    }
-
     match data
         .app_db
         .peek_next_queue_entry("active", current_path.as_deref())
     {
         Ok(Some(entry)) => {
+            finish_active_session_on_natural_end(data);
             if let Err(e) = load_queue_entry_for_playback(data, entry, true) {
                 log::warn!("Failed to advance queue after natural end: {}", e);
-                finish_active_session_on_natural_end(data);
             }
             return;
         }
@@ -498,9 +592,9 @@ fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
         match data.app_db.reset_queue_cycle_for_repeat_all("active") {
             Ok(Some(entry)) => {
                 log::info!("Repeat all wrapping to '{}'", entry.source_path);
+                finish_active_session_on_natural_end(data);
                 if let Err(e) = load_queue_entry_for_playback(data, entry, true) {
                     log::warn!("Failed to wrap repeat-all queue: {}", e);
-                    finish_active_session_on_natural_end(data);
                 }
                 return;
             }
@@ -579,9 +673,9 @@ fn analysis_error_response(e: &str) -> HttpResponse {
 
 fn is_supported_media_path(path: &std::path::Path) -> bool {
     const SUPPORTED_EXTENSIONS: &[&str] = &[
-        "mp3", "flac", "wav", "aac", "m4a", "ogg", "opus", "wma", "ape", "wv", "alac",
-        "aiff", "aif", "dsf", "dff", "mpc", "tak", "tta", "ac3", "dts", "thd", "truehd",
-        "mka", "mkv", "mp4", "m4v", "mov", "webm", "asf", "amr", "au", "ra", "rm", "3gp",
+        "mp3", "flac", "wav", "aac", "m4a", "ogg", "opus", "wma", "ape", "wv", "alac", "aiff",
+        "aif", "dsf", "dff", "mpc", "tak", "tta", "ac3", "dts", "thd", "truehd", "mka", "mkv",
+        "mp4", "m4v", "mov", "webm", "asf", "amr", "au", "ra", "rm", "3gp",
     ];
 
     path.extension()
@@ -645,7 +739,11 @@ fn external_cover_for_media(path: &std::path::Path) -> Option<(Vec<u8>, String)>
             .unwrap_or_else(|| "application/octet-stream".to_string());
         match std::fs::read(&candidate) {
             Ok(bytes) => return Some((bytes, mime)),
-            Err(e) => log::warn!("Failed to read external cover '{}': {}", candidate.display(), e),
+            Err(e) => log::warn!(
+                "Failed to read external cover '{}': {}",
+                candidate.display(),
+                e
+            ),
         }
     }
 
@@ -715,9 +813,19 @@ fn scan_local_library(
     let total_scanned = file_paths.len() as u64;
     if total_scanned == 0 {
         data.app_db
-            .update_library_root_scan_status(root_id, "completed", Some(0), None, Some(now_epoch_secs()))
+            .update_library_root_scan_status(
+                root_id,
+                "completed",
+                Some(0),
+                None,
+                Some(now_epoch_secs()),
+            )
             .map_err(|e| format!("Failed to finalize library scan state: {}", e))?;
-        return Ok(LibraryScanOutcome { scanned_files: 0, indexed_files: 0, removed_files: 0 });
+        return Ok(LibraryScanOutcome {
+            scanned_files: 0,
+            indexed_files: 0,
+            removed_files: 0,
+        });
     }
 
     // Load existing snapshot for incremental skip.
@@ -766,7 +874,10 @@ fn scan_local_library(
                     Some(track.size),
                 ) {
                     Ok(_) => {
-                        writer_paths.lock().unwrap().push(track.canonical_path.clone());
+                        writer_paths
+                            .lock()
+                            .unwrap()
+                            .push(track.canonical_path.clone());
                         writer_count.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(e) => log::warn!("Failed to index '{}': {}", track.canonical_path, e),
@@ -804,7 +915,10 @@ fn scan_local_library(
                 Some(track.size),
             ) {
                 Ok(_) => {
-                    writer_paths.lock().unwrap().push(track.canonical_path.clone());
+                    writer_paths
+                        .lock()
+                        .unwrap()
+                        .push(track.canonical_path.clone());
                     writer_count.fetch_add(1, Ordering::Relaxed);
                 }
                 Err(e) => log::warn!("Failed to index '{}': {}", track.canonical_path, e),
@@ -850,38 +964,18 @@ fn scan_local_library(
             }
         }
 
-        // Use lofty as primary metadata extractor.
-        let lofty_meta = crate::metadata::extract_lofty_metadata(&canonical);
-        let has_lofty_title = lofty_meta.as_ref().and_then(|m| m.title.as_deref()).is_some();
-
-        let mut metadata = crate::decoder::TrackMetadata::default();
-        let mut duration_secs: Option<f64> = None;
-        let mut sample_rate: Option<u32> = None;
-        let mut channels: Option<usize> = None;
-
-        if let Some(ref lm) = lofty_meta {
-            crate::metadata::merge_lofty_into(&mut metadata, lm);
-            duration_secs = lm.duration_secs;
-        }
-
-        // Fallback to Symphonia for audio properties.
-        if duration_secs.is_none() {
-            match crate::decoder::StreamingDecoder::open(&canonical) {
-                Ok(decoder) => {
-                    let info = decoder.info.clone();
-                    duration_secs = info.duration_secs;
-                    sample_rate = Some(info.sample_rate);
-                    channels = Some(info.channels);
-                    if lofty_meta.is_none() {
-                        metadata = metadata_with_external_cover(path, &info.metadata);
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Skipping media file '{}': {}", canonical, e);
-                    return;
-                }
+        let local_metadata = match crate::metadata::read_local_metadata(&canonical) {
+            Ok(value) => value,
+            Err(e) => {
+                log::warn!("Skipping media file '{}': {}", canonical, e);
+                return;
             }
-        }
+        };
+        let has_lofty_title = local_metadata.has_lofty_title;
+        let mut metadata = metadata_with_external_cover(path, &local_metadata.metadata);
+        let duration_secs = local_metadata.duration_secs;
+        let sample_rate = local_metadata.sample_rate;
+        let channels = local_metadata.channels;
 
         // Filter out short tracks with no title (likely jingles/ads).
         if !has_lofty_title && duration_secs.map_or(false, |d| d < 30.0) {
@@ -893,13 +987,25 @@ fn scan_local_library(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("未知歌曲");
-        if metadata.title.as_deref().map_or(true, |t| t.trim().is_empty()) {
+        if metadata
+            .title
+            .as_deref()
+            .map_or(true, |t| t.trim().is_empty())
+        {
             metadata.title = Some(file_stem.to_string());
         }
-        if metadata.artist.as_deref().map_or(true, |a| a.trim().is_empty()) {
+        if metadata
+            .artist
+            .as_deref()
+            .map_or(true, |a| a.trim().is_empty())
+        {
             metadata.artist = Some("未知艺术家".to_string());
         }
-        if metadata.album.as_deref().map_or(true, |a| a.trim().is_empty()) {
+        if metadata
+            .album
+            .as_deref()
+            .map_or(true, |a| a.trim().is_empty())
+        {
             metadata.album = Some("未知专辑".to_string());
         }
 
@@ -927,7 +1033,9 @@ fn scan_local_library(
     // completes, closing the channel so the writer thread exits its recv loop.
 
     // Wait for the DB writer to finish flushing all remaining items.
-    writer_handle.join().map_err(|_| "DB writer thread panicked".to_string())?;
+    writer_handle
+        .join()
+        .map_err(|_| "DB writer thread panicked".to_string())?;
 
     let final_scanned = scanned.load(Ordering::Relaxed);
     let final_indexed = indexed_count.load(Ordering::Relaxed);
@@ -939,7 +1047,13 @@ fn scan_local_library(
         .map_err(|e| format!("Failed to remove stale local media: {}", e))?;
 
     data.app_db
-        .update_library_root_scan_status(root_id, "completed", Some(final_indexed), None, Some(now_epoch_secs()))
+        .update_library_root_scan_status(
+            root_id,
+            "completed",
+            Some(final_indexed),
+            None,
+            Some(now_epoch_secs()),
+        )
         .map_err(|e| format!("Failed to finalize library scan state: {}", e))?;
 
     persist_library_scan_task(
@@ -1213,12 +1327,12 @@ async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> H
     match load_result {
         Ok((state_response, shared_state)) => {
             let mut state_response = state_response;
-            enrich_state_from_media_database(&data.app_db, &mut state_response);
-            let snapshot = playback_runtime_snapshot_from_state(&state_response);
             let media_id = data.app_db.record_media_stub(&path);
             if let Err(e) = &media_id {
                 log::warn!("Failed to ensure media item for '{}': {}", path, e);
             }
+            enrich_state_from_media_database(&data.app_db, &mut state_response);
+            let snapshot = playback_runtime_snapshot_from_state(&state_response);
 
             let previous_session = { data.active_session_id.lock().take() };
             if let Some(session_id) = previous_session {
@@ -1234,21 +1348,20 @@ async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> H
                 }
             }
 
-            match data
-                .app_db
-                .start_playback_session(
-                    &path,
-                    if autoplay { "playing" } else { "loaded" },
-                    &snapshot,
-                )
-            {
+            match data.app_db.start_playback_session(
+                &path,
+                if autoplay { "playing" } else { "loaded" },
+                &snapshot,
+            ) {
                 Ok(session_id) => {
                     *data.active_session_id.lock() = Some(session_id);
                     let payload = serde_json::json!({
                         "media_id": media_id.ok(),
                         "kind": if autoplay { "autoplay" } else { "load" }
                     });
-                    if let Err(e) = data.app_db.append_playback_history(
+                    if let Err(e) = append_playback_history_and_emit(
+                        &data,
+                        &shared_state,
                         Some(session_id),
                         &path,
                         "load_requested",
@@ -1277,10 +1390,19 @@ async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> H
 }
 
 async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let mut player = data.player.lock();
-    match player.play() {
-        Ok(()) => {
+    let play_result = {
+        let mut player = data.player.lock();
+        player.play().map(|_| {
+            let shared_state = player.shared_state();
             let snapshot = build_runtime_snapshot(&player);
+            let current_path = shared_state.file_path.read().clone();
+            let state_response = get_player_state(&player);
+            (snapshot, current_path, state_response, shared_state)
+        })
+    };
+
+    match play_result {
+        Ok((snapshot, current_path, state_response, shared_state)) => {
             if let Some(session_id) = *data.active_session_id.lock() {
                 if let Err(e) = data
                     .app_db
@@ -1288,8 +1410,10 @@ async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
                 {
                     log::warn!("Failed to update playback session {}: {}", session_id, e);
                 }
-                if let Some(path) = player.shared_state().file_path.read().clone() {
-                    let _ = data.app_db.append_playback_history(
+                if let Some(path) = current_path {
+                    let _ = append_playback_history_and_emit(
+                        &data,
+                        &shared_state,
                         Some(session_id),
                         &path,
                         "play",
@@ -1300,7 +1424,7 @@ async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
             }
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Playback started",
-                get_player_state(&player),
+                state_response,
             ))
         }
         Err(e) => HttpResponse::InternalServerError()
@@ -1309,10 +1433,19 @@ async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
 }
 
 async fn pause(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let mut player = data.player.lock();
-    match player.pause() {
-        Ok(()) => {
+    let pause_result = {
+        let mut player = data.player.lock();
+        player.pause().map(|_| {
+            let shared_state = player.shared_state();
             let snapshot = build_runtime_snapshot(&player);
+            let current_path = shared_state.file_path.read().clone();
+            let state_response = get_player_state(&player);
+            (snapshot, current_path, state_response, shared_state)
+        })
+    };
+
+    match pause_result {
+        Ok((snapshot, current_path, state_response, shared_state)) => {
             if let Some(session_id) = *data.active_session_id.lock() {
                 if let Err(e) = data
                     .app_db
@@ -1320,8 +1453,10 @@ async fn pause(data: web::Data<Arc<AppState>>) -> HttpResponse {
                 {
                     log::warn!("Failed to update playback session {}: {}", session_id, e);
                 }
-                if let Some(path) = player.shared_state().file_path.read().clone() {
-                    let _ = data.app_db.append_playback_history(
+                if let Some(path) = current_path {
+                    let _ = append_playback_history_and_emit(
+                        &data,
+                        &shared_state,
                         Some(session_id),
                         &path,
                         "pause",
@@ -1332,7 +1467,7 @@ async fn pause(data: web::Data<Arc<AppState>>) -> HttpResponse {
             }
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Playback paused",
-                get_player_state(&player),
+                state_response,
             ))
         }
         Err(e) => HttpResponse::InternalServerError()
@@ -1362,7 +1497,9 @@ async fn stop(data: web::Data<Arc<AppState>>) -> HttpResponse {
             log::warn!("Failed to finish playback session {}: {}", session_id, e);
         }
         if let Some(path) = current_path {
-            let _ = data.app_db.append_playback_history(
+            let _ = append_playback_history_and_emit(
+                &data,
+                &shared_state,
                 Some(session_id),
                 &path,
                 "stop",
@@ -1379,10 +1516,20 @@ async fn stop(data: web::Data<Arc<AppState>>) -> HttpResponse {
 }
 
 async fn seek(data: web::Data<Arc<AppState>>, body: web::Json<SeekRequest>) -> HttpResponse {
-    let mut player = data.player.lock();
-    match player.seek(body.position) {
-        Ok(()) => {
+    let target_position = body.position;
+    let seek_result = {
+        let mut player = data.player.lock();
+        player.seek(target_position).map(|_| {
+            let shared_state = player.shared_state();
             let snapshot = build_runtime_snapshot(&player);
+            let current_path = shared_state.file_path.read().clone();
+            let state_response = get_player_state(&player);
+            (snapshot, current_path, state_response, shared_state)
+        })
+    };
+
+    match seek_result {
+        Ok((snapshot, current_path, state_response, shared_state)) => {
             if let Some(session_id) = *data.active_session_id.lock() {
                 if let Err(e) = data
                     .app_db
@@ -1390,20 +1537,22 @@ async fn seek(data: web::Data<Arc<AppState>>, body: web::Json<SeekRequest>) -> H
                 {
                     log::warn!("Failed to update playback session {}: {}", session_id, e);
                 }
-                if let Some(path) = player.shared_state().file_path.read().clone() {
-                    let payload = serde_json::json!({ "target_position": body.position });
-                    let _ = data.app_db.append_playback_history(
+                if let Some(path) = current_path {
+                    let payload = serde_json::json!({ "target_position": target_position });
+                    let _ = append_playback_history_and_emit(
+                        &data,
+                        &shared_state,
                         Some(session_id),
                         &path,
                         "seek",
-                        Some(body.position),
+                        Some(target_position),
                         Some(&payload),
                     );
                 }
             }
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 "Seek successful",
-                get_player_state(&player),
+                state_response,
             ))
         }
         Err(e) => HttpResponse::InternalServerError()
@@ -1999,7 +2148,9 @@ async fn queue_next(
             });
             if let Some(session_id) = *data.active_session_id.lock() {
                 let source_path = current_path.as_deref().unwrap_or(&path);
-                let _ = data.app_db.append_playback_history(
+                let _ = append_playback_history_and_emit(
+                    &data,
+                    &shared_state,
                     Some(session_id),
                     source_path,
                     "queue_next",
@@ -2021,8 +2172,27 @@ async fn play_from_persistent_queue(
 ) -> HttpResponse {
     let entry = match data.app_db.list_queue_entries("active") {
         Ok(entries) => {
-            if let Some(entry_id) = body.entry_id {
+            if let (Some(entry_id), Some(source_path)) =
+                (body.entry_id, body.source_path.as_deref())
+            {
+                entries
+                    .iter()
+                    .find(|entry| {
+                        entry.entry_id == entry_id
+                            && same_media_identity(&entry.source_path, source_path)
+                    })
+                    .cloned()
+                    .or_else(|| {
+                        entries
+                            .into_iter()
+                            .find(|entry| same_media_identity(&entry.source_path, source_path))
+                    })
+            } else if let Some(entry_id) = body.entry_id {
                 entries.into_iter().find(|entry| entry.entry_id == entry_id)
+            } else if let Some(source_path) = body.source_path.as_deref() {
+                entries
+                    .into_iter()
+                    .find(|entry| same_media_identity(&entry.source_path, source_path))
             } else {
                 entries
                     .into_iter()
@@ -2037,15 +2207,10 @@ async fn play_from_persistent_queue(
     };
 
     match load_queue_entry_for_playback(&data, entry, true) {
-        Ok(()) => {
-            let player = data.player.lock();
-            let mut state = get_player_state(&player);
-            enrich_state_from_media_database(&data.app_db, &mut state);
-            HttpResponse::Ok().json(ApiResponse::success_with_state(
-                "Queue playback started",
-                state,
-            ))
-        }
+        Ok((state, _shared_state)) => HttpResponse::Ok().json(ApiResponse::success_with_state(
+            "Queue playback started",
+            state,
+        )),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&format!(
             "Failed to play queue entry: {}",
             e
@@ -2237,11 +2402,27 @@ struct MediaPath {
     media_id: String,
 }
 
+#[derive(Deserialize)]
+struct MediaCoverArtQuery {
+    media_id: String,
+}
+
 async fn get_media_cover_art(
     data: web::Data<Arc<AppState>>,
     path: web::Path<MediaPath>,
 ) -> HttpResponse {
-    match data.app_db.get_cover_art_for_media(&path.media_id) {
+    get_media_cover_art_by_id(&data, &path.media_id)
+}
+
+async fn get_media_cover_art_by_query(
+    data: web::Data<Arc<AppState>>,
+    query: web::Query<MediaCoverArtQuery>,
+) -> HttpResponse {
+    get_media_cover_art_by_id(&data, &query.media_id)
+}
+
+fn get_media_cover_art_by_id(data: &web::Data<Arc<AppState>>, media_id: &str) -> HttpResponse {
+    match data.app_db.get_cover_art_for_media(media_id) {
         Ok(Some((record, bytes))) => {
             let mime = record
                 .mime_type
@@ -2253,9 +2434,90 @@ async fn get_media_cover_art(
                 .insert_header(("X-Cover-Art-Id", record.cover_art_id))
                 .body(bytes)
         }
-        Ok(None) => HttpResponse::NotFound().json(ApiResponse::error("Cover art not found")),
+        Ok(None) => match runtime_cover_art_for_media(data, media_id) {
+            Some((mime, bytes)) => HttpResponse::Ok()
+                .insert_header(("Content-Type", mime))
+                .insert_header(("Content-Length", bytes.len().to_string()))
+                .insert_header(("X-Cover-Art-Id", format!("{}:runtime-cover", media_id)))
+                .body(bytes),
+            None => match local_cover_art_for_media(data, media_id) {
+                Ok(Some((mime, bytes))) => HttpResponse::Ok()
+                    .insert_header(("Content-Type", mime))
+                    .insert_header(("Content-Length", bytes.len().to_string()))
+                    .insert_header(("X-Cover-Art-Id", format!("{}:local-cover", media_id)))
+                    .body(bytes),
+                Ok(None) => {
+                    HttpResponse::NotFound().json(ApiResponse::error("Cover art not found"))
+                }
+                Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
+            },
+        },
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     }
+}
+
+fn runtime_cover_art_for_media(
+    data: &web::Data<Arc<AppState>>,
+    media_id: &str,
+) -> Option<(String, Vec<u8>)> {
+    let player = data.player.lock();
+    let shared = player.shared_state();
+    let current_path = shared
+        .current_track_path
+        .read()
+        .clone()
+        .or_else(|| shared.file_path.read().clone())?;
+    if !same_media_identity(&current_path, media_id) {
+        return None;
+    }
+
+    let metadata = shared.track_metadata.read();
+    let bytes = metadata.cover_art.clone()?;
+    let mime = metadata
+        .cover_art_mime
+        .clone()
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    Some((mime, bytes))
+}
+
+fn local_cover_art_for_media(
+    data: &web::Data<Arc<AppState>>,
+    media_id: &str,
+) -> Result<Option<(String, Vec<u8>)>, String> {
+    let Some(source_path) = data.app_db.source_path_for_media_id(media_id)? else {
+        return Ok(None);
+    };
+    if source_path.starts_with("http://") || source_path.starts_with("https://") {
+        return Ok(None);
+    }
+
+    let path = Path::new(&source_path);
+    let local_metadata = match crate::metadata::read_local_metadata(&source_path) {
+        Ok(value) => value,
+        Err(e) => {
+            log::warn!(
+                "Cover art metadata read failed for '{}': {}",
+                source_path,
+                e
+            );
+            return Ok(None);
+        }
+    };
+    let metadata = metadata_with_external_cover(path, &local_metadata.metadata);
+
+    let Some(bytes) = metadata.cover_art.clone() else {
+        return Ok(None);
+    };
+    let mime = metadata
+        .cover_art_mime
+        .clone()
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let duration_secs = local_metadata.duration_secs;
+
+    data.app_db
+        .record_media_metadata(&source_path, &metadata, duration_secs, None, None)?;
+
+    Ok(Some((mime, bytes)))
 }
 
 async fn get_current_lyrics(data: web::Data<Arc<AppState>>) -> HttpResponse {
@@ -2312,8 +2574,13 @@ fn read_sidecar_lyrics(path: &str) -> Result<Option<(String, String)>, String> {
             continue;
         }
 
-        let content = std::fs::read_to_string(&candidate)
-            .map_err(|error| format!("Failed to read lyric file '{}': {}", candidate.display(), error))?;
+        let content = std::fs::read_to_string(&candidate).map_err(|error| {
+            format!(
+                "Failed to read lyric file '{}': {}",
+                candidate.display(),
+                error
+            )
+        })?;
 
         if content.trim().is_empty() {
             continue;
@@ -2340,12 +2607,16 @@ async fn get_library_scan_task(
     path: web::Path<ScanTaskPath>,
 ) -> HttpResponse {
     match data.app_db.get_analysis_task(path.task_id) {
-        Ok(Some(task)) if task.task_type == "library_scan" => HttpResponse::Ok().json(serde_json::json!({
-            "status": "success",
-            "task_id": task.task_id,
-            "task": task
-        })),
-        Ok(Some(_)) | Ok(None) => HttpResponse::NotFound().json(ApiResponse::error("Library scan task not found")),
+        Ok(Some(task)) if task.task_type == "library_scan" => {
+            HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "task_id": task.task_id,
+                "task": task
+            }))
+        }
+        Ok(Some(_)) | Ok(None) => {
+            HttpResponse::NotFound().json(ApiResponse::error("Library scan task not found"))
+        }
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     }
 }

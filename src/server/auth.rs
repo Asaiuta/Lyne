@@ -93,9 +93,7 @@ where
                     "message": "unauthorized"
                 }))
                 .map_into_boxed_body();
-            Box::pin(async move {
-                Ok(ServiceResponse::new(req, res).map_into_right_body())
-            })
+            Box::pin(async move { Ok(ServiceResponse::new(req, res).map_into_right_body()) })
         }
     }
 }

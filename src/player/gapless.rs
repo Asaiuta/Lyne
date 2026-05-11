@@ -39,6 +39,7 @@ impl GaplessManager {
         }
 
         let path = path.to_string();
+        let generation = shared.preload_generation.fetch_add(1, Ordering::AcqRel) + 1;
         let shared_clone = Arc::clone(shared);
         let loudness_normalizer_clone = Arc::clone(loudness_normalizer);
         let config_clone = config.clone();
@@ -62,7 +63,9 @@ impl GaplessManager {
             log::info!("Gapless preload started: {}", path);
 
             // Check for cancellation before starting (Defect 31 fix)
-            if shared_clone.cancel_preload_signal.load(Ordering::Acquire) {
+            if shared_clone.cancel_preload_signal.load(Ordering::Acquire)
+                || shared_clone.preload_generation.load(Ordering::Acquire) != generation
+            {
                 log::info!("Gapless preload cancelled before decode: {}", path);
                 return;
             }
@@ -77,7 +80,9 @@ impl GaplessManager {
             ) {
                 Ok((samples, sr, channels, metadata)) => {
                     // Check for cancellation after decode (Defect 31 fix)
-                    if shared_clone.cancel_preload_signal.load(Ordering::Acquire) {
+                    if shared_clone.cancel_preload_signal.load(Ordering::Acquire)
+                        || shared_clone.preload_generation.load(Ordering::Acquire) != generation
+                    {
                         log::info!(
                             "Gapless preload cancelled after decode, discarding: {}",
                             path
@@ -129,7 +134,9 @@ impl GaplessManager {
                 }
                 Err(e) => {
                     // Don't restore needs_preload if we were cancelled
-                    if !shared_clone.cancel_preload_signal.load(Ordering::Acquire) {
+                    if !shared_clone.cancel_preload_signal.load(Ordering::Acquire)
+                        && shared_clone.preload_generation.load(Ordering::Acquire) == generation
+                    {
                         log::error!("Gapless preload failed: {}", e);
                         // Restore needs_preload so frontend can retry
                         shared_for_error
@@ -149,12 +156,22 @@ impl GaplessManager {
     ///
     /// Called when user manually changes track or seeks.
     pub fn cancel_preload(shared: &SharedState) {
+        shared.preload_generation.fetch_add(1, Ordering::AcqRel);
         // Signal the preload thread to stop (Defect 31 fix)
         shared.cancel_preload_signal.store(true, Ordering::Release);
         // Clear pending buffer (lock-free atomic swap)
         shared.pending_buffer.store(None);
+        shared.pending_total_frames.store(0, Ordering::Relaxed);
+        shared.pending_sample_rate.store(44100, Ordering::Relaxed);
+        shared.pending_channels.store(2, Ordering::Relaxed);
+        *shared.pending_file_path.write() = None;
+        *shared.pending_metadata.write() = None;
         shared.pending_ready.store(false, Ordering::Relaxed);
         shared.needs_preload.store(false, Ordering::Relaxed);
+        shared.gapless_swap_pending.store(false, Ordering::Release);
+        shared
+            .pending_target_gain_db
+            .store(0.0_f64.to_bits(), Ordering::Relaxed);
         log::info!("Gapless preload cancelled");
     }
 }
@@ -233,4 +250,53 @@ fn decode_to_buffer_with_cancel(
     };
 
     Ok((samples, target_sr, target_channels, metadata))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+
+    use super::GaplessManager;
+    use crate::decoder::TrackMetadata;
+    use crate::player::SharedState;
+
+    #[test]
+    fn cancel_preload_invalidates_and_clears_pending_state() {
+        let shared = Arc::new(SharedState::new());
+        let initial_generation = shared.preload_generation.load(Ordering::Acquire);
+
+        shared.pending_buffer.store(Some(Arc::new(vec![0.0, 1.0])));
+        shared.pending_total_frames.store(1, Ordering::Relaxed);
+        shared.pending_sample_rate.store(48000, Ordering::Relaxed);
+        shared.pending_channels.store(1, Ordering::Relaxed);
+        *shared.pending_file_path.write() = Some("old.flac".to_string());
+        *shared.pending_metadata.write() = Some(TrackMetadata::default());
+        shared.pending_ready.store(true, Ordering::Relaxed);
+        shared.needs_preload.store(true, Ordering::Relaxed);
+        shared.gapless_swap_pending.store(true, Ordering::Relaxed);
+        shared
+            .pending_target_gain_db
+            .store(3.0_f64.to_bits(), Ordering::Relaxed);
+
+        GaplessManager::cancel_preload(&shared);
+
+        assert_eq!(
+            shared.preload_generation.load(Ordering::Acquire),
+            initial_generation + 1
+        );
+        assert!(shared.pending_buffer.load().is_none());
+        assert_eq!(shared.pending_total_frames.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.pending_sample_rate.load(Ordering::Relaxed), 44100);
+        assert_eq!(shared.pending_channels.load(Ordering::Relaxed), 2);
+        assert!(shared.pending_file_path.read().is_none());
+        assert!(shared.pending_metadata.read().is_none());
+        assert!(!shared.pending_ready.load(Ordering::Relaxed));
+        assert!(!shared.needs_preload.load(Ordering::Relaxed));
+        assert!(!shared.gapless_swap_pending.load(Ordering::Relaxed));
+        assert_eq!(
+            f64::from_bits(shared.pending_target_gain_db.load(Ordering::Relaxed)),
+            0.0
+        );
+    }
 }

@@ -236,22 +236,38 @@ fn merge_metadata_revision(metadata: &mut TrackMetadata, revision: &MetadataRevi
     for tag in revision.tags() {
         match tag.std_key {
             Some(StandardTagKey::TrackTitle) => {
-                metadata.title = metadata.title.take().or_else(|| tag_value_to_string(&tag.value));
+                metadata.title = metadata
+                    .title
+                    .take()
+                    .or_else(|| tag_value_to_string(&tag.value));
             }
             Some(StandardTagKey::Artist) => {
-                metadata.artist = metadata.artist.take().or_else(|| tag_value_to_string(&tag.value));
+                metadata.artist = metadata
+                    .artist
+                    .take()
+                    .or_else(|| tag_value_to_string(&tag.value));
             }
             Some(StandardTagKey::Album) => {
-                metadata.album = metadata.album.take().or_else(|| tag_value_to_string(&tag.value));
+                metadata.album = metadata
+                    .album
+                    .take()
+                    .or_else(|| tag_value_to_string(&tag.value));
             }
             Some(StandardTagKey::TrackNumber) => {
-                metadata.track_number = metadata.track_number.or_else(|| tag_value_to_u32(&tag.value));
+                metadata.track_number = metadata
+                    .track_number
+                    .or_else(|| tag_value_to_u32(&tag.value));
             }
             Some(StandardTagKey::DiscNumber) => {
-                metadata.disc_number = metadata.disc_number.or_else(|| tag_value_to_u32(&tag.value));
+                metadata.disc_number = metadata
+                    .disc_number
+                    .or_else(|| tag_value_to_u32(&tag.value));
             }
             Some(StandardTagKey::Genre) => {
-                metadata.genre = metadata.genre.take().or_else(|| tag_value_to_string(&tag.value));
+                metadata.genre = metadata
+                    .genre
+                    .take()
+                    .or_else(|| tag_value_to_string(&tag.value));
             }
             Some(StandardTagKey::Date) => {
                 metadata.year = metadata.year.or_else(|| tag_value_to_u32(&tag.value));
@@ -260,37 +276,61 @@ fn merge_metadata_revision(metadata: &mut TrackMetadata, revision: &MetadataRevi
                 let key_lower = tag.key.to_lowercase();
                 match key_lower.as_str() {
                     "title" => {
-                        metadata.title = metadata.title.take().or_else(|| tag_value_to_string(&tag.value));
+                        metadata.title = metadata
+                            .title
+                            .take()
+                            .or_else(|| tag_value_to_string(&tag.value));
                     }
                     "artist" | "albumartist" | "album_artist" => {
-                        metadata.artist = metadata.artist.take().or_else(|| tag_value_to_string(&tag.value));
+                        metadata.artist = metadata
+                            .artist
+                            .take()
+                            .or_else(|| tag_value_to_string(&tag.value));
                     }
                     "album" => {
-                        metadata.album = metadata.album.take().or_else(|| tag_value_to_string(&tag.value));
+                        metadata.album = metadata
+                            .album
+                            .take()
+                            .or_else(|| tag_value_to_string(&tag.value));
                     }
                     "tracknumber" | "track_number" => {
-                        metadata.track_number = metadata.track_number.or_else(|| tag_value_to_u32(&tag.value));
+                        metadata.track_number = metadata
+                            .track_number
+                            .or_else(|| tag_value_to_u32(&tag.value));
                     }
                     "discnumber" | "disc_number" => {
-                        metadata.disc_number = metadata.disc_number.or_else(|| tag_value_to_u32(&tag.value));
+                        metadata.disc_number = metadata
+                            .disc_number
+                            .or_else(|| tag_value_to_u32(&tag.value));
                     }
                     "genre" => {
-                        metadata.genre = metadata.genre.take().or_else(|| tag_value_to_string(&tag.value));
+                        metadata.genre = metadata
+                            .genre
+                            .take()
+                            .or_else(|| tag_value_to_string(&tag.value));
                     }
                     "date" | "year" => {
                         metadata.year = metadata.year.or_else(|| tag_value_to_u32(&tag.value));
                     }
                     "replaygain_track_gain" => {
-                        metadata.rg_track_gain = metadata.rg_track_gain.or_else(|| parse_rg_gain_from_value(&tag.value));
+                        metadata.rg_track_gain = metadata
+                            .rg_track_gain
+                            .or_else(|| parse_rg_gain_from_value(&tag.value));
                     }
                     "replaygain_track_peak" => {
-                        metadata.rg_track_peak = metadata.rg_track_peak.or_else(|| parse_rg_peak_from_value(&tag.value));
+                        metadata.rg_track_peak = metadata
+                            .rg_track_peak
+                            .or_else(|| parse_rg_peak_from_value(&tag.value));
                     }
                     "replaygain_album_gain" => {
-                        metadata.rg_album_gain = metadata.rg_album_gain.or_else(|| parse_rg_gain_from_value(&tag.value));
+                        metadata.rg_album_gain = metadata
+                            .rg_album_gain
+                            .or_else(|| parse_rg_gain_from_value(&tag.value));
                     }
                     "replaygain_album_peak" => {
-                        metadata.rg_album_peak = metadata.rg_album_peak.or_else(|| parse_rg_peak_from_value(&tag.value));
+                        metadata.rg_album_peak = metadata
+                            .rg_album_peak
+                            .or_else(|| parse_rg_peak_from_value(&tag.value));
                     }
                     _ => {}
                 }

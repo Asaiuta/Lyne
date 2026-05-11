@@ -586,7 +586,15 @@ pub fn audio_thread_main(
                 *shared_state.noise_shaper_curve.write() = curve;
                 log::info!("Noise shaper curve set to {:?} (lock-free path)", curve);
             }
-            Ok(AudioCommand::LoadComplete(result)) => {
+            Ok(AudioCommand::LoadComplete { generation, result }) => {
+                if shared_state.load_generation.load(Ordering::Acquire) != generation {
+                    log::info!(
+                        "Ignoring stale async load complete for '{}' (generation {})",
+                        result.file_path,
+                        generation
+                    );
+                    continue;
+                }
                 log::info!(
                     "Async load complete: {} frames @ {} Hz",
                     result.total_frames,
@@ -759,14 +767,24 @@ pub fn audio_thread_main(
                     _ => {}
                 }
 
-                shared_state.event_flags.fetch_or(
-                    EVENT_LOAD_COMPLETE | EVENT_TRACK_CHANGED,
-                    Ordering::Release,
-                );
+                shared_state
+                    .event_flags
+                    .fetch_or(EVENT_LOAD_COMPLETE | EVENT_TRACK_CHANGED, Ordering::Release);
                 log::debug!("DSP context updated for {} Hz sample rate", sr_u32);
             }
-            Ok(AudioCommand::LoadError(e)) => {
-                log::error!("Async load failed: {}", e);
+            Ok(AudioCommand::LoadError {
+                generation,
+                message,
+            }) => {
+                if shared_state.load_generation.load(Ordering::Acquire) != generation {
+                    log::info!(
+                        "Ignoring stale async load error for generation {}: {}",
+                        generation,
+                        message
+                    );
+                    continue;
+                }
+                log::error!("Async load failed: {}", message);
                 shared_state.state.store(PlayerState::Stopped);
             }
             Ok(AudioCommand::Shutdown) | Err(_) => break,
@@ -931,7 +949,15 @@ fn handle_wasapi_exclusive(
                             *shared_state.noise_shaper_curve.write() = curve;
                             log::info!("Noise shaper curve set to {:?} (WASAPI path)", curve);
                         }
-                        AudioCommand::LoadComplete(result) => {
+                        AudioCommand::LoadComplete { generation, result } => {
+                            if shared_state.load_generation.load(Ordering::Acquire) != generation {
+                                log::info!(
+                                    "Ignoring stale WASAPI load complete for '{}' (generation {})",
+                                    result.file_path,
+                                    generation
+                                );
+                                continue;
+                            }
                             log::info!(
                                 "WASAPI load complete: {} frames @ {} Hz",
                                 result.total_frames,
@@ -987,48 +1013,55 @@ fn handle_wasapi_exclusive(
 
                             loudness_state.set_smoothing(200.0, sr_u32);
 
-                            let calc_safe_gain =
-                                |rg_gain_db: f64, peak: Option<f64>, preamp_db: f64| -> f64 {
-                                    let requested_gain = rg_gain_db + preamp_db;
+                            let calc_safe_gain = |rg_gain_db: f64,
+                                                  peak: Option<f64>,
+                                                  preamp_db: f64|
+                             -> f64 {
+                                let requested_gain = rg_gain_db + preamp_db;
 
-                                    if requested_gain <= 0.0 {
-                                        return requested_gain;
-                                    }
+                                if requested_gain <= 0.0 {
+                                    return requested_gain;
+                                }
 
-                                    if let Some(peak_val) = peak {
-                                        if peak_val > 0.0 {
-                                            const HEADROOM: f64 = 0.99;
-                                            let max_linear = HEADROOM / peak_val;
-                                            let max_gain_db = 20.0 * max_linear.log10();
+                                if let Some(peak_val) = peak {
+                                    if peak_val > 0.0 {
+                                        const HEADROOM: f64 = 0.99;
+                                        let max_linear = HEADROOM / peak_val;
+                                        let max_gain_db = 20.0 * max_linear.log10();
 
-                                            if requested_gain > max_gain_db {
-                                                log::info!(
+                                        if requested_gain > max_gain_db {
+                                            log::info!(
                                                     "WASAPI peak protection: peak={:.4}, requested={:.2} dB, limited to {:.2} dB",
                                                     peak_val,
                                                     requested_gain,
                                                     max_gain_db
                                                 );
-                                                return max_gain_db;
-                                            }
+                                            return max_gain_db;
                                         }
                                     }
+                                }
 
-                                    requested_gain
-                                };
+                                requested_gain
+                            };
 
                             match loudness_state.get_mode() {
                                 crate::config::NormalizationMode::ReplayGainTrack => {
                                     if let Some(rg_gain) = metadata.rg_track_gain {
                                         let peak = metadata.rg_track_peak;
-                                        let preamp = loudness_state.preamp_gain_db.load(Ordering::Relaxed);
-                                        loudness_state.set_target_gain(calc_safe_gain(rg_gain, peak, preamp));
+                                        let preamp =
+                                            loudness_state.preamp_gain_db.load(Ordering::Relaxed);
+                                        loudness_state
+                                            .set_target_gain(calc_safe_gain(rg_gain, peak, preamp));
                                     } else {
-                                        let preamp = loudness_state.preamp_gain_db.load(Ordering::Relaxed);
-                                        let mut meter = crate::processor::LoudnessMeter::new(channels, sr_u32);
+                                        let preamp =
+                                            loudness_state.preamp_gain_db.load(Ordering::Relaxed);
+                                        let mut meter =
+                                            crate::processor::LoudnessMeter::new(channels, sr_u32);
                                         meter.process(&samples_arc);
                                         let loudness = meter.integrated_loudness();
                                         if loudness.is_finite() {
-                                            loudness_state.set_target_gain(-12.0 - loudness + preamp);
+                                            loudness_state
+                                                .set_target_gain(-12.0 - loudness + preamp);
                                         } else {
                                             loudness_state.set_target_gain(preamp);
                                         }
@@ -1037,15 +1070,19 @@ fn handle_wasapi_exclusive(
                                 crate::config::NormalizationMode::ReplayGainAlbum => {
                                     let rg_gain = metadata.rg_album_gain.or(metadata.rg_track_gain);
                                     let peak = metadata.rg_album_peak.or(metadata.rg_track_peak);
-                                    let preamp = loudness_state.preamp_gain_db.load(Ordering::Relaxed);
+                                    let preamp =
+                                        loudness_state.preamp_gain_db.load(Ordering::Relaxed);
                                     if let Some(gain) = rg_gain {
-                                        loudness_state.set_target_gain(calc_safe_gain(gain, peak, preamp));
+                                        loudness_state
+                                            .set_target_gain(calc_safe_gain(gain, peak, preamp));
                                     } else {
-                                        let mut meter = crate::processor::LoudnessMeter::new(channels, sr_u32);
+                                        let mut meter =
+                                            crate::processor::LoudnessMeter::new(channels, sr_u32);
                                         meter.process(&samples_arc);
                                         let loudness = meter.integrated_loudness();
                                         if loudness.is_finite() {
-                                            loudness_state.set_target_gain(-12.0 - loudness + preamp);
+                                            loudness_state
+                                                .set_target_gain(-12.0 - loudness + preamp);
                                         } else {
                                             loudness_state.set_target_gain(preamp);
                                         }
@@ -1059,8 +1096,19 @@ fn handle_wasapi_exclusive(
                                 Ordering::Release,
                             );
                         }
-                        AudioCommand::LoadError(error) => {
-                            log::error!("WASAPI async load failed: {}", error);
+                        AudioCommand::LoadError {
+                            generation,
+                            message,
+                        } => {
+                            if shared_state.load_generation.load(Ordering::Acquire) != generation {
+                                log::info!(
+                                    "Ignoring stale WASAPI load error for generation {}: {}",
+                                    generation,
+                                    message
+                                );
+                                continue;
+                            }
+                            log::error!("WASAPI async load failed: {}", message);
                             shared_state.state.store(PlayerState::Stopped);
                         }
                         AudioCommand::Stop => {

@@ -15,9 +15,9 @@ pub use gapless::GaplessManager;
 pub use state::{
     AtomicPlayerState, AudioCommand, AudioDeviceInfo, PlayerState, RepeatMode, SharedState,
     ShuffleMode, EVENT_LOAD_COMPLETE, EVENT_LOAD_ERROR, EVENT_NEEDS_PRELOAD,
-    EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_ENDED, EVENT_PLAYBACK_PAUSED, EVENT_PLAYBACK_SEEKED,
-    EVENT_PLAYBACK_STARTED, EVENT_PLAYBACK_STOPPED, EVENT_QUEUE_UPDATED, EVENT_TRACK_CHANGED,
-    EVENT_TRACK_EOF,
+    EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_ENDED, EVENT_PLAYBACK_HISTORY_UPDATED,
+    EVENT_PLAYBACK_PAUSED, EVENT_PLAYBACK_SEEKED, EVENT_PLAYBACK_STARTED, EVENT_PLAYBACK_STOPPED,
+    EVENT_QUEUE_UPDATED, EVENT_TRACK_CHANGED, EVENT_TRACK_EOF,
 };
 
 use std::sync::atomic::Ordering;
@@ -332,6 +332,11 @@ impl AudioPlayer {
         );
         self.stop_for_track_load();
         GaplessManager::cancel_preload(&self.shared_state);
+        let generation = self
+            .shared_state
+            .load_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
 
         self.begin_loading_track(path, autoplay);
 
@@ -358,15 +363,26 @@ impl AudioPlayer {
 
             match result {
                 Ok(load_result) => {
-                    let _ = cmd_tx.send(AudioCommand::LoadComplete(load_result));
-                    if autoplay && shared_state.state.load() != PlayerState::Paused {
+                    let _ = cmd_tx.send(AudioCommand::LoadComplete {
+                        generation,
+                        result: load_result,
+                    });
+                    if autoplay
+                        && shared_state.load_generation.load(Ordering::Acquire) == generation
+                        && shared_state.state.load() != PlayerState::Paused
+                    {
                         let _ = cmd_tx.send(AudioCommand::Play);
                     }
                 }
                 Err(e) => {
                     log::error!("Async load failed: {}", e);
-                    *shared_state.load_error.write() = Some(e.clone());
-                    let _ = cmd_tx.send(AudioCommand::LoadError(e));
+                    if shared_state.load_generation.load(Ordering::Acquire) == generation {
+                        *shared_state.load_error.write() = Some(e.clone());
+                    }
+                    let _ = cmd_tx.send(AudioCommand::LoadError {
+                        generation,
+                        message: e,
+                    });
                 }
             }
         });
@@ -375,15 +391,15 @@ impl AudioPlayer {
     }
 
     fn begin_loading_track(&self, path: &str, autoplay: bool) {
-        self.shared_state.position_frames.store(0, Ordering::Relaxed);
-        self.shared_state.total_frames.store(0, Ordering::Relaxed);
         self.shared_state
-            .state
-            .store(if autoplay {
-                PlayerState::Playing
-            } else {
-                PlayerState::Stopped
-            });
+            .position_frames
+            .store(0, Ordering::Relaxed);
+        self.shared_state.total_frames.store(0, Ordering::Relaxed);
+        self.shared_state.state.store(if autoplay {
+            PlayerState::Playing
+        } else {
+            PlayerState::Stopped
+        });
         self.shared_state.is_loading.store(true, Ordering::Release);
         self.shared_state.load_progress.store(0, Ordering::Relaxed);
         *self.shared_state.load_error.write() = None;
@@ -639,7 +655,9 @@ impl AudioPlayer {
     }
 
     pub fn stop(&mut self) {
-        self.shared_state.position_frames.store(0, Ordering::Relaxed);
+        self.shared_state
+            .position_frames
+            .store(0, Ordering::Relaxed);
         self.shared_state.state.store(PlayerState::Stopped);
         self.shared_state
             .event_flags
@@ -648,7 +666,9 @@ impl AudioPlayer {
     }
 
     fn stop_for_track_load(&self) {
-        self.shared_state.position_frames.store(0, Ordering::Relaxed);
+        self.shared_state
+            .position_frames
+            .store(0, Ordering::Relaxed);
         self.shared_state.state.store(PlayerState::Stopped);
         let _ = self.cmd_tx.send(AudioCommand::StopForLoad);
     }

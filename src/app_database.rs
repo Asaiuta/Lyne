@@ -788,7 +788,15 @@ impl AppDatabase {
         sample_rate: Option<u32>,
         channels: Option<usize>,
     ) -> Result<String, String> {
-        self.record_media_metadata_with_scan_info(source_path, metadata, duration_secs, sample_rate, channels, None, None)
+        self.record_media_metadata_with_scan_info(
+            source_path,
+            metadata,
+            duration_secs,
+            sample_rate,
+            channels,
+            None,
+            None,
+        )
     }
 
     pub fn record_media_metadata_with_scan_info(
@@ -807,9 +815,9 @@ impl AppDatabase {
         conn.execute(
             r#"
             UPDATE media_items
-            SET title = ?2,
-                artist = ?3,
-                album = ?4,
+            SET title = COALESCE(NULLIF(?2, ''), title),
+                artist = COALESCE(NULLIF(?3, ''), artist),
+                album = COALESCE(NULLIF(?4, ''), album),
                 track_number = ?5,
                 disc_number = ?6,
                 genre = ?7,
@@ -937,16 +945,17 @@ impl AppDatabase {
         &self,
         media_id: &str,
     ) -> Result<Option<(CoverArtRecord, Vec<u8>)>, String> {
+        let normalized_media_id = media_id_for_path(media_id);
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
             r#"
             SELECT cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at
             FROM cover_art_cache
-            WHERE media_id = ?1
+            WHERE media_id = ?1 OR media_id = ?2
             ORDER BY created_at DESC, cover_art_id DESC
             LIMIT 1
             "#,
-            params![media_id],
+            params![media_id, normalized_media_id],
             |row| {
                 Ok((
                     CoverArtRecord {
@@ -962,6 +971,23 @@ impl AppDatabase {
         )
         .optional()
         .map_err(|e| format!("Failed to read cover art cache: {}", e))
+    }
+
+    pub fn source_path_for_media_id(&self, media_id: &str) -> Result<Option<String>, String> {
+        let normalized_media_id = media_id_for_path(media_id);
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            r#"
+            SELECT source_path
+            FROM media_items
+            WHERE media_id = ?1 OR media_id = ?2 OR source_path = ?3
+            LIMIT 1
+            "#,
+            params![media_id, normalized_media_id, media_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read source path for media '{}': {}", media_id, e))
     }
 
     pub fn start_playback_session(
@@ -1212,7 +1238,9 @@ impl AppDatabase {
 
     /// Load a snapshot of existing local media items for incremental scanning.
     /// Returns a map of source_path -> (mtime, size_bytes, has_cover_art).
-    pub fn load_scan_snapshot(&self) -> Result<std::collections::HashMap<String, (Option<f64>, Option<u64>, bool)>, String> {
+    pub fn load_scan_snapshot(
+        &self,
+    ) -> Result<std::collections::HashMap<String, (Option<f64>, Option<u64>, bool)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
@@ -1270,7 +1298,9 @@ impl AppDatabase {
             .map_err(|e| format!("Failed to decode media cleanup candidates: {}", e))?;
         drop(stmt);
 
-        let root_media_id = media_id_for_path(root_path).trim_end_matches('/').to_string();
+        let root_media_id = media_id_for_path(root_path)
+            .trim_end_matches('/')
+            .to_string();
         let root_id_prefix = format!("{}/", root_media_id);
         let keep = keep_paths
             .iter()
@@ -1290,7 +1320,9 @@ impl AppDatabase {
                     "DELETE FROM media_items WHERE media_id = ?1",
                     params![media_id],
                 )
-                .map_err(|e| format!("Failed to delete stale media item '{}': {}", source_path, e))?;
+                .map_err(|e| {
+                    format!("Failed to delete stale media item '{}': {}", source_path, e)
+                })?;
             removed += changed as u64;
         }
 
@@ -1978,11 +2010,7 @@ impl AppDatabase {
         Ok(())
     }
 
-    pub fn mark_queue_entry_playing(
-        &self,
-        queue_id: &str,
-        entry_id: i64,
-    ) -> Result<(), String> {
+    pub fn mark_queue_entry_playing(&self, queue_id: &str, entry_id: i64) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn
             .transaction()
@@ -2111,7 +2139,9 @@ impl AppDatabase {
 }
 
 pub(crate) fn media_id_for_path(path: &str) -> String {
-    normalize_media_path_for_id(path).replace('\\', "/").to_lowercase()
+    normalize_media_path_for_id(path)
+        .replace('\\', "/")
+        .to_lowercase()
 }
 
 fn normalize_media_path_for_id(path: &str) -> &str {
@@ -2230,6 +2260,40 @@ mod tests {
         assert_eq!(history[0].duration_secs, Some(213.5));
         assert_eq!(
             history[0].external_artwork_url.as_deref(),
+            Some("https://img.example.test/song.jpg")
+        );
+    }
+
+    #[test]
+    fn empty_stream_metadata_does_not_clear_external_metadata() {
+        let db = AppDatabase::in_memory().unwrap();
+        let path = "https://music.example.test/transient-stream.mp3";
+        db.record_external_media_metadata(
+            path,
+            Some("Online Song"),
+            Some("Online Artist"),
+            Some("Online Album"),
+            Some(213.5),
+            Some("https://img.example.test/song.jpg"),
+        )
+        .unwrap();
+
+        db.record_media_metadata(
+            path,
+            &TrackMetadata::default(),
+            Some(214.0),
+            Some(44100),
+            Some(2),
+        )
+        .unwrap();
+
+        let item = db.media_metadata_for_path(path).unwrap().unwrap();
+        assert_eq!(item.title.as_deref(), Some("Online Song"));
+        assert_eq!(item.artist.as_deref(), Some("Online Artist"));
+        assert_eq!(item.album.as_deref(), Some("Online Album"));
+        assert_eq!(item.duration_secs, Some(214.0));
+        assert_eq!(
+            item.external_artwork_url.as_deref(),
             Some("https://img.example.test/song.jpg")
         );
     }
@@ -2389,6 +2453,10 @@ mod tests {
         assert_eq!(cover.0.media_id, media_id);
         assert_eq!(cover.0.mime_type.as_deref(), Some("image/png"));
         assert_eq!(cover.1, vec![1, 2, 3, 4]);
+        assert_eq!(
+            db.source_path_for_media_id(&media_id).unwrap().as_deref(),
+            Some("D:/music/a.flac")
+        );
 
         db.append_queue_entry("active", "D:/music/a.flac").unwrap();
         db.append_queue_entry("active", "D:/music/b.flac").unwrap();
@@ -2432,7 +2500,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
 
         let index_count: i64 = conn
             .query_row(
@@ -2562,6 +2630,41 @@ mod tests {
         assert_eq!(
             media_id_for_path(r"\\?\D:\Music\Artist\Track.FLAC"),
             "d:/music/artist/track.flac"
+        );
+    }
+
+    #[test]
+    fn media_art_lookup_accepts_raw_and_normalized_identity() {
+        let db = AppDatabase::in_memory().unwrap();
+        let metadata = TrackMetadata {
+            cover_art: Some(vec![9, 8, 7]),
+            cover_art_mime: Some("image/jpeg".to_string()),
+            ..TrackMetadata::default()
+        };
+
+        let media_id = db
+            .record_media_metadata(
+                r"D:\Music\Artist\Track.flac",
+                &metadata,
+                Some(120.0),
+                Some(44100),
+                Some(2),
+            )
+            .unwrap();
+
+        assert_eq!(media_id, "d:/music/artist/track.flac");
+        assert_eq!(
+            db.source_path_for_media_id(r"\\?\D:\Music\Artist\Track.FLAC")
+                .unwrap()
+                .as_deref(),
+            Some(r"D:\Music\Artist\Track.flac")
+        );
+        assert_eq!(
+            db.get_cover_art_for_media(r"\\?\D:\Music\Artist\Track.FLAC")
+                .unwrap()
+                .expect("cover art")
+                .1,
+            vec![9, 8, 7]
         );
     }
 

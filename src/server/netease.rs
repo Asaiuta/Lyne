@@ -45,13 +45,7 @@ async fn handle_request(
 
     let query = match extract_merged_query(req.headers(), req.uri().query(), &body, content_type) {
         Ok(query) => query,
-        Err(err) => {
-            return json_error(
-                actix_web::http::StatusCode::BAD_REQUEST,
-                400,
-                &err,
-            )
-        }
+        Err(err) => return json_error(actix_web::http::StatusCode::BAD_REQUEST, 400, &err),
     };
 
     let start = std::time::Instant::now();
@@ -92,19 +86,13 @@ async fn dispatch(
     query: &Query,
 ) -> Result<ApiResponse, DispatchError> {
     match method {
-        "inner_version" => client
-            .inner_version()
-            .await
-            .map_err(DispatchError::Ncm),
+        "inner_version" => client.inner_version().await.map_err(DispatchError::Ncm),
         "login" => client.login(query).await.map_err(DispatchError::Ncm),
         "login_cellphone" => client
             .login_cellphone(query)
             .await
             .map_err(DispatchError::Ncm),
-        "login_qr_key" => client
-            .login_qr_key(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "login_qr_key" => client.login_qr_key(query).await.map_err(DispatchError::Ncm),
         "login_qr_create" => client
             .login_qr_create(query)
             .await
@@ -117,10 +105,7 @@ async fn dispatch(
             .login_refresh(query)
             .await
             .map_err(DispatchError::Ncm),
-        "login_status" => client
-            .login_status(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "login_status" => client.login_status(query).await.map_err(DispatchError::Ncm),
         "logout" => client.logout(query).await.map_err(DispatchError::Ncm),
         "register_anonimous" => client
             .register_anonimous(query)
@@ -130,10 +115,7 @@ async fn dispatch(
             .register_cellphone(query)
             .await
             .map_err(DispatchError::Ncm),
-        "captcha_sent" => client
-            .captcha_sent(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "captcha_sent" => client.captcha_sent(query).await.map_err(DispatchError::Ncm),
         "captcha_verify" => client
             .captcha_verify(query)
             .await
@@ -147,10 +129,7 @@ async fn dispatch(
             .await
             .map_err(DispatchError::Ncm),
         "search" => client.search(query).await.map_err(DispatchError::Ncm),
-        "cloudsearch" => client
-            .cloudsearch(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "cloudsearch" => client.cloudsearch(query).await.map_err(DispatchError::Ncm),
         "search_default" => client
             .search_default(query)
             .await
@@ -172,45 +151,24 @@ async fn dispatch(
             .search_multimatch(query)
             .await
             .map_err(DispatchError::Ncm),
-        "search_match" => client
-            .search_match(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "song_detail" => client
-            .song_detail(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "search_match" => client.search_match(query).await.map_err(DispatchError::Ncm),
+        "song_detail" => client.song_detail(query).await.map_err(DispatchError::Ncm),
         "song_music_detail" => client
             .song_music_detail(query)
             .await
             .map_err(DispatchError::Ncm),
-        "check_music" => client
-            .check_music(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "check_music" => client.check_music(query).await.map_err(DispatchError::Ncm),
         "lyric" => client.lyric(query).await.map_err(DispatchError::Ncm),
-        "lyric_new" => client
-            .lyric_new(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "lyric_new" => client.lyric_new(query).await.map_err(DispatchError::Ncm),
         "album" => client.album(query).await.map_err(DispatchError::Ncm),
-        "album_detail" => client
-            .album_detail(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "album_detail" => client.album_detail(query).await.map_err(DispatchError::Ncm),
         "artist_detail" => client
             .artist_detail(query)
             .await
             .map_err(DispatchError::Ncm),
         "artists" => client.artists(query).await.map_err(DispatchError::Ncm),
-        "song_url" => client
-            .song_url(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "song_url_v1" => client
-            .song_url_v1(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "song_url" => client.song_url(query).await.map_err(DispatchError::Ncm),
+        "song_url_v1" => client.song_url_v1(query).await.map_err(DispatchError::Ncm),
         "song_url_ncmget" => client
             .song_url_ncmget(query)
             .await
@@ -255,10 +213,7 @@ async fn dispatch(
             .playlist_category_list(query)
             .await
             .map_err(DispatchError::Ncm),
-        "playlist_hot" => client
-            .playlist_hot(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "playlist_hot" => client.playlist_hot(query).await.map_err(DispatchError::Ncm),
         "playlist_highquality_tags" => client
             .playlist_highquality_tags(query)
             .await
@@ -299,10 +254,7 @@ async fn dispatch(
             .playlist_mylike(query)
             .await
             .map_err(DispatchError::Ncm),
-        "toplist" => client
-            .toplist(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "toplist" => client.toplist(query).await.map_err(DispatchError::Ncm),
         "toplist_detail" => client
             .toplist_detail(query)
             .await
@@ -315,18 +267,12 @@ async fn dispatch(
             .toplist_artist(query)
             .await
             .map_err(DispatchError::Ncm),
-        "top_playlist" => client
-            .top_playlist(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "top_playlist" => client.top_playlist(query).await.map_err(DispatchError::Ncm),
         "top_playlist_highquality" => client
             .top_playlist_highquality(query)
             .await
             .map_err(DispatchError::Ncm),
-        "top_list" => client
-            .top_list(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "top_list" => client.top_list(query).await.map_err(DispatchError::Ncm),
         "user_playlist" => client
             .user_playlist(query)
             .await
@@ -342,42 +288,18 @@ async fn dispatch(
         // -------- Phase 9: identity, user data chain, activity --------
         // Map directly to the ncm-api-rs methods called out in
         // .trellis/tasks/05-05-ncm-align-identity/research.md.
-        "user_account" => client
-            .user_account(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "user_detail" => client
-            .user_detail(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "user_account" => client.user_account(query).await.map_err(DispatchError::Ncm),
+        "user_detail" => client.user_detail(query).await.map_err(DispatchError::Ncm),
         "user_subcount" => client
             .user_subcount(query)
             .await
             .map_err(DispatchError::Ncm),
-        "user_level" => client
-            .user_level(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "likelist" => client
-            .likelist(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "like" => client
-            .like(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "daily_signin" => client
-            .daily_signin(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "scrobble" => client
-            .scrobble(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "personalized" => client
-            .personalized(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "user_level" => client.user_level(query).await.map_err(DispatchError::Ncm),
+        "likelist" => client.likelist(query).await.map_err(DispatchError::Ncm),
+        "like" => client.like(query).await.map_err(DispatchError::Ncm),
+        "daily_signin" => client.daily_signin(query).await.map_err(DispatchError::Ncm),
+        "scrobble" => client.scrobble(query).await.map_err(DispatchError::Ncm),
+        "personalized" => client.personalized(query).await.map_err(DispatchError::Ncm),
         "personalized_newsong" => client
             .personalized_newsong(query)
             .await
@@ -398,42 +320,18 @@ async fn dispatch(
             .recommend_songs(query)
             .await
             .map_err(DispatchError::Ncm),
-        "personal_fm" => client
-            .personal_fm(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "top_artists" => client
-            .top_artists(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "album_newest" => client
-            .album_newest(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "album_new" => client
-            .album_new(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "top_song" => client
-            .top_song(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "artist_list" => client
-            .artist_list(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "personal_fm" => client.personal_fm(query).await.map_err(DispatchError::Ncm),
+        "top_artists" => client.top_artists(query).await.map_err(DispatchError::Ncm),
+        "album_newest" => client.album_newest(query).await.map_err(DispatchError::Ncm),
+        "album_new" => client.album_new(query).await.map_err(DispatchError::Ncm),
+        "top_song" => client.top_song(query).await.map_err(DispatchError::Ncm),
+        "artist_list" => client.artist_list(query).await.map_err(DispatchError::Ncm),
         "dj_personalize_recommend" => client
             .dj_personalize_recommend(query)
             .await
             .map_err(DispatchError::Ncm),
-        "dj_recommend" => client
-            .dj_recommend(query)
-            .await
-            .map_err(DispatchError::Ncm),
-        "mv_first" => client
-            .mv_first(query)
-            .await
-            .map_err(DispatchError::Ncm),
+        "dj_recommend" => client.dj_recommend(query).await.map_err(DispatchError::Ncm),
+        "mv_first" => client.mv_first(query).await.map_err(DispatchError::Ncm),
         _ => Err(DispatchError::UnsupportedRoute),
     }
 }
@@ -485,13 +383,16 @@ fn merge_params(target: &mut HashMap<String, String>, params: HashMap<String, St
     }
 }
 
-fn parse_body_params(body: &[u8], content_type: Option<&str>) -> Result<HashMap<String, String>, String> {
+fn parse_body_params(
+    body: &[u8],
+    content_type: Option<&str>,
+) -> Result<HashMap<String, String>, String> {
     let content_type = content_type.unwrap_or("");
     if content_type.contains("application/json") {
         parse_json_body(body)
     } else if content_type.contains("application/x-www-form-urlencoded") {
-        let body_str = std::str::from_utf8(body)
-            .map_err(|e| format!("Invalid form body encoding: {}", e))?;
+        let body_str =
+            std::str::from_utf8(body).map_err(|e| format!("Invalid form body encoding: {}", e))?;
         parse_urlencoded(body_str, "form body")
     } else if content_type.is_empty() {
         parse_json_body(body)
@@ -506,8 +407,8 @@ fn parse_urlencoded(input: &str, source: &str) -> Result<HashMap<String, String>
 }
 
 fn parse_json_body(body: &[u8]) -> Result<HashMap<String, String>, String> {
-    let value: Value = serde_json::from_slice(body)
-        .map_err(|e| format!("Failed to parse JSON body: {}", e))?;
+    let value: Value =
+        serde_json::from_slice(body).map_err(|e| format!("Failed to parse JSON body: {}", e))?;
     let obj = value
         .as_object()
         .ok_or_else(|| "JSON body must be an object".to_string())?;
@@ -595,10 +496,7 @@ fn normalize_domain_override(raw: &str) -> Result<String, String> {
         .iter()
         .any(|allowed| allowed.eq_ignore_ascii_case(&normalized))
     {
-        return Err(format!(
-            "Domain override not allowed: {}",
-            normalized
-        ));
+        return Err(format!("Domain override not allowed: {}", normalized));
     }
 
     Ok(normalized)
@@ -660,26 +558,10 @@ fn join_cookie_pairs(set_cookies: &[String]) -> String {
 
 fn build_error_response(err: NcmError) -> HttpResponse {
     let (status, code, message) = match err {
-        NcmError::AuthRequired(msg) => (
-            actix_web::http::StatusCode::UNAUTHORIZED,
-            301,
-            msg,
-        ),
-        NcmError::InvalidParam(msg) => (
-            actix_web::http::StatusCode::BAD_REQUEST,
-            400,
-            msg,
-        ),
-        NcmError::RateLimited(msg) => (
-            actix_web::http::StatusCode::TOO_MANY_REQUESTS,
-            503,
-            msg,
-        ),
-        NcmError::Timeout(msg) => (
-            actix_web::http::StatusCode::GATEWAY_TIMEOUT,
-            504,
-            msg,
-        ),
+        NcmError::AuthRequired(msg) => (actix_web::http::StatusCode::UNAUTHORIZED, 301, msg),
+        NcmError::InvalidParam(msg) => (actix_web::http::StatusCode::BAD_REQUEST, 400, msg),
+        NcmError::RateLimited(msg) => (actix_web::http::StatusCode::TOO_MANY_REQUESTS, 503, msg),
+        NcmError::Timeout(msg) => (actix_web::http::StatusCode::GATEWAY_TIMEOUT, 504, msg),
         NcmError::Api { code, msg } => (
             actix_web::http::StatusCode::from_u16(code as u16)
                 .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR),
@@ -835,8 +717,8 @@ mod tests {
 
     #[test]
     fn domain_override_requires_https_and_allowlist() {
-        let http_err = normalize_domain_override("http://music.163.com")
-            .expect_err("http should be rejected");
+        let http_err =
+            normalize_domain_override("http://music.163.com").expect_err("http should be rejected");
         assert!(http_err.contains("https"));
 
         let host_err = normalize_domain_override("https://example.com")
@@ -905,13 +787,10 @@ mod tests {
         let cookies = vec![
             "MUSIC_U=abc; Path=/; HttpOnly; SameSite=Lax".to_string(),
             "MUSIC_A_T=def; Domain=.music.163.com; Secure".to_string(),
-            "  ".to_string(),                       // whitespace -> dropped
+            "  ".to_string(),                        // whitespace -> dropped
             "garbage_no_equals; Path=/".to_string(), // no `=` -> dropped
         ];
-        assert_eq!(
-            join_cookie_pairs(&cookies),
-            "MUSIC_U=abc; MUSIC_A_T=def"
-        );
+        assert_eq!(join_cookie_pairs(&cookies), "MUSIC_U=abc; MUSIC_A_T=def");
     }
 
     #[actix_web::test]

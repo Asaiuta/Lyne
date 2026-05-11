@@ -765,7 +765,10 @@ fn get_player_state(player: &AudioPlayer) -> StateResponse {
     }
 }
 
-fn enrich_state_from_media_database(app_db: &crate::app_database::AppDatabase, state: &mut StateResponse) {
+fn enrich_state_from_media_database(
+    app_db: &crate::app_database::AppDatabase,
+    state: &mut StateResponse,
+) {
     let Some(path) = state.file_path.as_deref() else {
         return;
     };
@@ -777,13 +780,25 @@ fn enrich_state_from_media_database(app_db: &crate::app_database::AppDatabase, s
     if state.media_id.is_none() {
         state.media_id = Some(item.media_id);
     }
-    if state.title.as_deref().map_or(true, |value| value.trim().is_empty()) {
+    if state
+        .title
+        .as_deref()
+        .map_or(true, |value| value.trim().is_empty())
+    {
         state.title = item.title;
     }
-    if state.artist.as_deref().map_or(true, |value| value.trim().is_empty()) {
+    if state
+        .artist
+        .as_deref()
+        .map_or(true, |value| value.trim().is_empty())
+    {
         state.artist = item.artist;
     }
-    if state.album.as_deref().map_or(true, |value| value.trim().is_empty()) {
+    if state
+        .album
+        .as_deref()
+        .map_or(true, |value| value.trim().is_empty())
+    {
         state.album = item.album;
     }
     if state.duration <= 0.0 {
