@@ -19,6 +19,7 @@ import type {
   WebDavSource
 } from "./types";
 import { invalidateApiToken, peekApiToken, resolveApiToken, resolveBaseUrl } from "./env";
+import { getActiveNcmCookie } from "./ncm/base";
 
 export interface ApiClient {
   getState: () => Promise<PlayerState>;
@@ -43,6 +44,7 @@ export interface ApiClient {
   getLibraryScanTask: (taskId: number) => Promise<LibraryScanTask>;
   getMediaItems: (limit?: number, all?: boolean) => Promise<MediaItem[]>;
   saveExternalMediaMetadata: (metadata: ExternalMediaMetadataInput) => Promise<string>;
+  resolveNcmTrack: (input: ResolveNcmTrackInput) => Promise<ResolvedNcmTrack>;
   // Persistent Queue
   getPersistentQueue: () => Promise<QueueEntry[]>;
   enqueueTrack: (path: string) => Promise<QueueEntry[]>;
@@ -79,6 +81,28 @@ export interface ExternalMediaMetadataInput {
   album?: string | null;
   duration_secs?: number | null;
   external_artwork_url?: string | null;
+}
+
+export interface ResolveNcmTrackInput {
+  songId: number;
+  level?: string | null;
+  sourcePageUrl: string;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  durationSecs?: number | null;
+  artworkUrl?: string | null;
+}
+
+export interface ResolvedNcmTrack {
+  songId: number;
+  streamUrl: string;
+  sourcePageUrl: string;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  coverUrl: string | null;
+  durationSecs: number | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -461,6 +485,43 @@ const parseCurrentLyricsResponse = (value: unknown): { lyrics: string | null; so
   };
 };
 
+const parseResolvedNcmTrackResponse = (value: unknown): ResolvedNcmTrack => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid NCM track response shape");
+  }
+
+  const status = parseStatus(value.status);
+  if (status === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Failed to resolve NCM track");
+  }
+
+  const track = isRecord(value.track) ? value.track : null;
+  if (
+    !track ||
+    !isInteger(track.song_id) ||
+    !isString(track.stream_url) ||
+    !isString(track.source_page_url) ||
+    !isNullableString(track.title) ||
+    !isNullableString(track.artist) ||
+    !isNullableString(track.album) ||
+    !isNullableString(track.cover_url) ||
+    !isNullableNumber(track.duration_secs)
+  ) {
+    throw new Error("Invalid NCM track payload");
+  }
+
+  return {
+    songId: track.song_id,
+    streamUrl: track.stream_url,
+    sourcePageUrl: track.source_page_url,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    coverUrl: track.cover_url,
+    durationSecs: track.duration_secs
+  };
+};
+
 const requestJson = async (baseUrl: string, path: string, init?: RequestInit) => {
   const runRequest = async (forceTokenRefresh: boolean) => {
     const token = await resolveApiToken(forceTokenRefresh);
@@ -716,6 +777,24 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
       throw new Error("Failed to save external media metadata");
     }
     return json.media_id;
+  },
+  resolveNcmTrack: async (input: ResolveNcmTrackInput) => {
+    const activeCookie = getActiveNcmCookie();
+    const json = await requestJson(baseUrl, "/domain/ncm/track/resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        song_id: input.songId,
+        level: input.level ?? null,
+        cookie: activeCookie,
+        source_page_url: input.sourcePageUrl,
+        title: input.title ?? null,
+        artist: input.artist ?? null,
+        album: input.album ?? null,
+        duration_secs: input.durationSecs ?? null,
+        artwork_url: input.artworkUrl ?? null
+      })
+    });
+    return parseResolvedNcmTrackResponse(json);
   },
   getPersistentQueue: async () => {
     const json = await requestJson(baseUrl, "/domain/queue");

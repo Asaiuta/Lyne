@@ -1,9 +1,7 @@
 import type { ApiClient } from "../../../shared/api/client";
 import type { TranslationKey, TranslationParams } from "../../../shared/i18n";
-import { songDetail, songUrlV1 } from "../../../shared/api/ncm";
 import { STORAGE_KEYS } from "../../../shared/state/useUISettings";
-import { readSongDetailSupplement, type NcmTrackReference } from "../ncmPlayback";
-import { readSongUrl } from "./parsers";
+import type { NcmTrackReference } from "../ncmPlayback";
 import type { Feedback, OnlineTrackItem } from "./types";
 
 type Translator = (key: TranslationKey, params?: TranslationParams) => string;
@@ -36,37 +34,18 @@ export function createPlaybackController(ctx: PlaybackContext): PlaybackControll
         return "exhigh";
       }
     })();
-    const [songUrlResponse, detailResponse] = await Promise.all([
-      songUrlV1({ id: item.songId, level: songLevel }),
-      songDetail(item.songId)
-    ]);
-    const url = readSongUrl(songUrlResponse);
-    if (!url) throw new Error(t("ncm.error.songUrlUnavailable"));
-    const detail = readSongDetailSupplement(detailResponse, item.songId);
-    const coverUrl = detail?.coverUrl ?? item.artworkUrl ?? null;
-    onRegisterPlayback({
+    const track = await api.resolveNcmTrack({
       songId: item.songId,
-      streamUrl: url,
+      level: songLevel,
       sourcePageUrl: item.source_path,
-      title: detail?.title ?? item.title,
-      artist: detail?.artist ?? item.artist,
-      album: detail?.album ?? item.album,
-      coverUrl,
+      title: item.title,
+      artist: item.artist,
+      album: item.album,
+      artworkUrl: item.artworkUrl,
       durationSecs: item.duration_secs
     });
-    try {
-      await api.saveExternalMediaMetadata({
-        source_path: url,
-        title: detail?.title ?? item.title,
-        artist: detail?.artist ?? item.artist,
-        album: detail?.album ?? item.album,
-        duration_secs: item.duration_secs,
-        external_artwork_url: coverUrl
-      });
-    } catch {
-      // Metadata persistence is a cache warmup; playback should not depend on it.
-    }
-    return url;
+    onRegisterPlayback(track);
+    return track.streamUrl;
   };
 
   const playOnlineTrack = async (item: OnlineTrackItem) => {

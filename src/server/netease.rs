@@ -2,7 +2,7 @@ use super::*;
 use actix_web::http::header::{self, HeaderMap};
 use actix_web::{web, HttpRequest, HttpResponse};
 use ncm_api_rs::{ApiClient, ApiResponse, NcmError, Query};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,8 +19,167 @@ struct NeteasePath {
 }
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("/api/netease/{tail:.*}", web::get().to(handle_request))
-        .route("/api/netease/{tail:.*}", web::post().to(handle_request));
+    cfg.route(
+        "/domain/ncm/track/resolve",
+        web::post().to(resolve_ncm_track),
+    )
+    .route("/api/netease/{tail:.*}", web::get().to(handle_request))
+    .route("/api/netease/{tail:.*}", web::post().to(handle_request));
+}
+
+#[derive(Deserialize)]
+struct ResolveNcmTrackRequest {
+    song_id: i64,
+    level: Option<String>,
+    cookie: Option<String>,
+    source_page_url: String,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration_secs: Option<f64>,
+    artwork_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct ResolvedNcmTrack {
+    song_id: i64,
+    stream_url: String,
+    source_page_url: String,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    cover_url: Option<String>,
+    duration_secs: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct NcmTrackDetail {
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    cover_url: Option<String>,
+}
+
+async fn resolve_ncm_track(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<ResolveNcmTrackRequest>,
+) -> HttpResponse {
+    let request = body.into_inner();
+    if request.song_id <= 0 {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "status": "error",
+            "message": "NCM song id must be positive"
+        }));
+    }
+
+    let level = request
+        .level
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("exhigh");
+    let cookie = request
+        .cookie
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let mut url_query = Query::new()
+        .param("id", &request.song_id.to_string())
+        .param("level", level);
+    let mut detail_query = Query::new().param("ids", &request.song_id.to_string());
+    if let Some(cookie) = cookie {
+        url_query.cookie = Some(cookie.to_string());
+        detail_query.cookie = Some(cookie.to_string());
+    }
+
+    let start = std::time::Instant::now();
+    let (url_result, detail_result) = tokio::join!(
+        data.ncm_client.song_url_v1(&url_query),
+        data.ncm_client.song_detail(&detail_query)
+    );
+
+    let url_response = match url_result {
+        Ok(response) => response,
+        Err(err) => {
+            log::warn!(
+                "NCM resolve track {} URL -> ERROR: {} ({:.1?})",
+                request.song_id,
+                err,
+                start.elapsed()
+            );
+            return build_error_response(err);
+        }
+    };
+
+    let stream_url = match read_song_url(&url_response.body) {
+        Some(url) => match super::validate_path(&url) {
+            Ok(value) => value,
+            Err(err) => {
+                return HttpResponse::BadGateway().json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("NCM song URL rejected: {}", err)
+                }));
+            }
+        },
+        None => {
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "status": "error",
+                "message": "NCM song URL unavailable"
+            }));
+        }
+    };
+
+    let detail = match detail_result {
+        Ok(response) => read_song_detail(&response.body, request.song_id),
+        Err(err) => {
+            log::warn!(
+                "NCM resolve track {} detail -> ERROR: {} ({:.1?})",
+                request.song_id,
+                err,
+                start.elapsed()
+            );
+            None
+        }
+    }
+    .unwrap_or_default();
+
+    let track = ResolvedNcmTrack {
+        song_id: request.song_id,
+        stream_url,
+        source_page_url: request.source_page_url,
+        title: detail.title.or(request.title),
+        artist: detail.artist.or(request.artist),
+        album: detail.album.or(request.album),
+        cover_url: detail.cover_url.or(request.artwork_url),
+        duration_secs: request.duration_secs,
+    };
+
+    if let Err(err) = data.app_db.record_external_media_metadata(
+        &track.stream_url,
+        track.title.as_deref(),
+        track.artist.as_deref(),
+        track.album.as_deref(),
+        track.duration_secs,
+        track.cover_url.as_deref(),
+    ) {
+        log::warn!(
+            "Failed to persist NCM metadata for song {}: {}",
+            track.song_id,
+            err
+        );
+    }
+
+    log::info!(
+        "NCM resolve track {} -> OK ({:.1?})",
+        track.song_id,
+        start.elapsed()
+    );
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "success",
+        "track": track
+    }))
 }
 
 async fn handle_request(
@@ -427,6 +586,71 @@ fn json_value_to_string(value: &Value) -> String {
     }
 }
 
+fn read_song_url(payload: &Value) -> Option<String> {
+    payload
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("url"))
+        .and_then(read_non_empty_string)
+}
+
+fn read_song_detail(payload: &Value, fallback_song_id: i64) -> Option<NcmTrackDetail> {
+    let songs = payload.get("songs")?.as_array()?;
+    let target = songs
+        .iter()
+        .find(|song| {
+            song.get("id")
+                .and_then(Value::as_i64)
+                .is_some_and(|id| id == fallback_song_id)
+        })
+        .or_else(|| songs.first())?;
+    let album = target
+        .get("al")
+        .and_then(Value::as_object)
+        .or_else(|| target.get("album").and_then(Value::as_object));
+
+    Some(NcmTrackDetail {
+        title: target.get("name").and_then(read_non_empty_string),
+        artist: read_artists(target.get("ar"))
+            .or_else(|| read_artists(target.get("artists")))
+            .or_else(|| {
+                target
+                    .get("artist")
+                    .and_then(|artist| artist.get("name"))
+                    .and_then(read_non_empty_string)
+            }),
+        album: album
+            .and_then(|album| album.get("name"))
+            .and_then(read_non_empty_string),
+        cover_url: album
+            .and_then(|album| album.get("picUrl"))
+            .and_then(read_non_empty_string)
+            .or_else(|| target.get("picUrl").and_then(read_non_empty_string)),
+    })
+}
+
+fn read_non_empty_string(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn read_artists(value: Option<&Value>) -> Option<String> {
+    let names = value?
+        .as_array()?
+        .iter()
+        .filter_map(|item| item.get("name").and_then(read_non_empty_string))
+        .collect::<Vec<_>>();
+    if names.is_empty() {
+        None
+    } else {
+        Some(names.join(", "))
+    }
+}
+
 fn apply_query_overrides(query: &mut Query) -> Result<(), String> {
     if let Some(cookie) = query.params.remove("cookie") {
         if !cookie.trim().is_empty() {
@@ -713,6 +937,75 @@ mod tests {
         assert_eq!(query.e_r, Some(true));
         assert_eq!(query.domain.as_deref(), Some("https://music.163.com"));
         assert!(query.params.is_empty());
+    }
+
+    #[test]
+    fn read_song_url_extracts_first_stream_url() {
+        let payload = json!({
+            "data": [
+                { "id": 42, "url": "https://m701.music.126.net/song.flac" }
+            ]
+        });
+
+        assert_eq!(
+            read_song_url(&payload).as_deref(),
+            Some("https://m701.music.126.net/song.flac")
+        );
+    }
+
+    #[test]
+    fn read_song_detail_prefers_matching_song_and_modern_fields() {
+        let payload = json!({
+            "songs": [
+                {
+                    "id": 1,
+                    "name": "Wrong",
+                    "ar": [{ "name": "Wrong Artist" }],
+                    "al": { "name": "Wrong Album", "picUrl": "wrong.jpg" }
+                },
+                {
+                    "id": 42,
+                    "name": "Needle",
+                    "ar": [{ "name": "A" }, { "name": "B" }],
+                    "al": { "name": "Album", "picUrl": "cover.jpg" }
+                }
+            ]
+        });
+
+        assert_eq!(
+            read_song_detail(&payload, 42),
+            Some(NcmTrackDetail {
+                title: Some("Needle".to_string()),
+                artist: Some("A, B".to_string()),
+                album: Some("Album".to_string()),
+                cover_url: Some("cover.jpg".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn read_song_detail_supports_legacy_fields() {
+        let payload = json!({
+            "songs": [
+                {
+                    "id": 42,
+                    "name": "Legacy",
+                    "artists": [{ "name": "Legacy Artist" }],
+                    "album": { "name": "Legacy Album" },
+                    "picUrl": "legacy.jpg"
+                }
+            ]
+        });
+
+        assert_eq!(
+            read_song_detail(&payload, 42),
+            Some(NcmTrackDetail {
+                title: Some("Legacy".to_string()),
+                artist: Some("Legacy Artist".to_string()),
+                album: Some("Legacy Album".to_string()),
+                cover_url: Some("legacy.jpg".to_string()),
+            })
+        );
     }
 
     #[test]
