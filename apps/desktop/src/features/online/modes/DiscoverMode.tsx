@@ -4,9 +4,8 @@ import { Portal } from "solid-js/web";
 import { PageHeader } from "../../../components/page/PageHeader";
 import { SegmentedTabs } from "../../../components/page/SegmentedTabs";
 import { useTranslation } from "../../../shared/i18n";
-import { search } from "../../../shared/api/ncm";
 import { createApiClient } from "../../../shared/api/client";
-import { readSearchPlaylists, type OnlinePlaylistSummary } from "../ncmPlaylistSummary";
+import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { AlbumDetail } from "../details/AlbumDetail";
 import { ArtistDetail } from "../details/ArtistDetail";
 import { DailySongsDetail } from "../details/DailySongsDetail";
@@ -258,12 +257,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
         setSongResults(await api.searchNcmTracks({ keywords: query, limit: SEARCH_LIMIT }));
         setPlaylistResults([]);
       } else {
-        const response = await search({
-          keywords: query,
-          type: 1000,
-          limit: SEARCH_LIMIT
-        });
-        const playlists = readSearchPlaylists(response);
+        const playlists = await api.searchNcmPlaylists({ keywords: query, limit: SEARCH_LIMIT });
         setPlaylistResults(playlists);
         setSongResults([]);
         if (playlists.length > 0) {

@@ -54,6 +54,7 @@ export interface ApiClient {
   deleteNcmAccount: (userId: number) => Promise<NcmAccountState>;
   listNcmUserPlaylists: (input: ListNcmUserPlaylistsInput) => Promise<NcmPlaylistSummary[]>;
   searchNcmTracks: (input: SearchNcmTracksInput) => Promise<NcmTrackSummary[]>;
+  searchNcmPlaylists: (input: SearchNcmTracksInput) => Promise<NcmPlaylistSummary[]>;
   listNcmPlaylistTracks: (input: ListNcmPlaylistTracksInput) => Promise<NcmTrackSummary[]>;
   listNcmDailySongTracks: () => Promise<NcmTrackSummary[]>;
   listNcmSongDetailTracks: (ids: number[]) => Promise<NcmTrackSummary[]>;
@@ -1639,6 +1640,17 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
       })
     });
     return parseNcmTracksResponse(json);
+  },
+  searchNcmPlaylists: async (input: SearchNcmTracksInput) => {
+    const json = await requestJson(baseUrl, "/domain/ncm/search/playlists", {
+      method: "POST",
+      body: JSON.stringify({
+        keywords: input.keywords,
+        limit: input.limit ?? null,
+        offset: input.offset ?? null
+      })
+    });
+    return parseNcmUserPlaylistsResponse(json);
   },
   listNcmPlaylistTracks: async (input: ListNcmPlaylistTracksInput) => {
     const json = await requestJson(baseUrl, "/domain/ncm/playlist/tracks", {
