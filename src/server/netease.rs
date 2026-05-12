@@ -14,6 +14,9 @@ const ALLOWED_DOMAIN_OVERRIDES: &[&str] = &[
     "https://interface.music.163.com",
     "https://interface3.music.163.com",
 ];
+const RADAR_PLAYLIST_IDS: &[i64] = &[
+    3136952023, 8402996200, 5320167908, 5327906368, 5362359247, 5300458264, 5341776086,
+];
 
 #[derive(Deserialize)]
 struct NeteasePath {
@@ -29,6 +32,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         "/domain/ncm/track/supplement",
         web::post().to(resolve_ncm_track_supplement),
     )
+    .route("/domain/ncm/home_feed", web::post().to(get_ncm_home_feed))
     .route("/domain/ncm/accounts", web::get().to(list_ncm_accounts))
     .route("/domain/ncm/accounts", web::post().to(upsert_ncm_account))
     .route(
@@ -108,6 +112,11 @@ struct ResolveNcmTrackRequest {
 struct ResolveNcmTrackSupplementRequest {
     song_id: i64,
     cookie: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct HomeFeedRequest {
+    user_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -229,6 +238,52 @@ struct NcmTrackSummary {
     album: Option<String>,
     duration_secs: Option<f64>,
     artwork_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+struct NcmHomeFeed {
+    daily_picks: Vec<NcmHomeFeedCard>,
+    daily_song_covers: Vec<NcmHomeTrackCover>,
+    liked_song_covers: Vec<NcmHomeTrackCover>,
+    personal_fm_covers: Vec<NcmHomeTrackCover>,
+    personal_fm_preview: Option<NcmHomePersonalFmPreview>,
+    radar_playlists: Vec<NcmHomeFeedCard>,
+    recommended_playlists: Vec<NcmHomeFeedCard>,
+    new_albums: Vec<NcmHomeFeedCard>,
+    featured_artists: Vec<NcmHomeFeedCard>,
+    recommended_mvs: Vec<NcmHomeFeedCard>,
+    podcasts: Vec<NcmHomeFeedCard>,
+    errors: Vec<NcmHomeFeedError>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct NcmHomeFeedCard {
+    id: i64,
+    title: String,
+    subtitle: Option<String>,
+    cover_url: Option<String>,
+    play_count: Option<f64>,
+    description: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct NcmHomeTrackCover {
+    id: i64,
+    url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct NcmHomePersonalFmPreview {
+    title: String,
+    artist: Option<String>,
+    album: Option<String>,
+    cover_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+struct NcmHomeFeedError {
+    section: String,
+    message: String,
 }
 
 async fn list_ncm_accounts(data: web::Data<Arc<AppState>>) -> HttpResponse {
@@ -422,6 +477,141 @@ async fn list_ncm_user_playlists(
         }
         Err(err) => build_error_response(err),
     }
+}
+
+async fn get_ncm_home_feed(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<HomeFeedRequest>,
+) -> HttpResponse {
+    let request = body.into_inner();
+    if request.user_id.is_some_and(|user_id| user_id <= 0) {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "status": "error",
+            "message": "NCM user id must be positive"
+        }));
+    }
+
+    let active_cookie = active_ncm_cookie(&data);
+    let mut feed = NcmHomeFeed::default();
+
+    if request.user_id.is_some() && active_cookie.is_some() {
+        let mut query = Query::new();
+        attach_cookie(&mut query, active_cookie.as_deref());
+        match data.ncm_client.recommend_resource(&query).await {
+            Ok(response) => feed.daily_picks = read_recommend_resource_cards(&response.body),
+            Err(err) => push_home_feed_error(&mut feed.errors, "daily_picks", err),
+        }
+
+        let mut query = Query::new();
+        attach_cookie(&mut query, active_cookie.as_deref());
+        match data.ncm_client.recommend_songs(&query).await {
+            Ok(response) => {
+                let tracks = read_daily_song_tracks(&response.body);
+                feed.daily_song_covers = track_covers(&tracks);
+            }
+            Err(err) => push_home_feed_error(&mut feed.errors, "daily_song_covers", err),
+        }
+
+        if let Some(user_id) = request.user_id {
+            let mut query = Query::new().param("uid", &user_id.to_string());
+            attach_cookie(&mut query, active_cookie.as_deref());
+            match data.ncm_client.likelist(&query).await {
+                Ok(response) => {
+                    let ids = read_likelist_ids(&response.body);
+                    if !ids.is_empty() {
+                        let mut detail_query = Query::new().param(
+                            "ids",
+                            &ids.iter()
+                                .take(9)
+                                .map(i64::to_string)
+                                .collect::<Vec<_>>()
+                                .join(","),
+                        );
+                        attach_cookie(&mut detail_query, active_cookie.as_deref());
+                        match data.ncm_client.song_detail(&detail_query).await {
+                            Ok(detail_response) => {
+                                let tracks = read_song_detail_tracks(&detail_response.body);
+                                feed.liked_song_covers = track_covers(&tracks);
+                            }
+                            Err(err) => {
+                                push_home_feed_error(&mut feed.errors, "liked_song_covers", err)
+                            }
+                        }
+                    }
+                }
+                Err(err) => push_home_feed_error(&mut feed.errors, "liked_song_covers", err),
+            }
+        }
+
+        let mut query = Query::new();
+        attach_cookie(&mut query, active_cookie.as_deref());
+        match data.ncm_client.personal_fm(&query).await {
+            Ok(response) => {
+                let tracks = read_personal_fm_tracks(&response.body);
+                feed.personal_fm_covers = track_covers(&tracks);
+                feed.personal_fm_preview = personal_fm_preview(&tracks);
+            }
+            Err(err) => push_home_feed_error(&mut feed.errors, "personal_fm", err),
+        }
+    }
+
+    for playlist_id in RADAR_PLAYLIST_IDS {
+        let mut query = Query::new().param("id", &playlist_id.to_string());
+        attach_cookie(&mut query, active_cookie.as_deref());
+        match data.ncm_client.playlist_detail(&query).await {
+            Ok(response) => {
+                if let Some(card) = read_radar_playlist_card(&response.body) {
+                    feed.radar_playlists.push(card);
+                }
+            }
+            Err(err) => push_home_feed_error(&mut feed.errors, "radar_playlists", err),
+        }
+    }
+
+    let mut query = Query::new().param("limit", "21");
+    attach_cookie(&mut query, active_cookie.as_deref());
+    match data.ncm_client.personalized(&query).await {
+        Ok(response) => {
+            feed.recommended_playlists = read_personalized_playlist_cards(&response.body)
+                .into_iter()
+                .filter(|item| !item.title.contains("雷达"))
+                .collect();
+        }
+        Err(err) => push_home_feed_error(&mut feed.errors, "recommended_playlists", err),
+    }
+
+    let mut query = Query::new().param("limit", "12");
+    attach_cookie(&mut query, active_cookie.as_deref());
+    match data.ncm_client.album_newest(&query).await {
+        Ok(response) => feed.new_albums = read_newest_album_cards(&response.body),
+        Err(err) => push_home_feed_error(&mut feed.errors, "new_albums", err),
+    }
+
+    let mut query = Query::new().param("limit", "10");
+    attach_cookie(&mut query, active_cookie.as_deref());
+    match data.ncm_client.top_artists(&query).await {
+        Ok(response) => feed.featured_artists = read_top_artist_cards(&response.body),
+        Err(err) => push_home_feed_error(&mut feed.errors, "featured_artists", err),
+    }
+
+    let mut query = Query::new();
+    attach_cookie(&mut query, active_cookie.as_deref());
+    match data.ncm_client.personalized_mv(&query).await {
+        Ok(response) => feed.recommended_mvs = read_personalized_mv_cards(&response.body),
+        Err(err) => push_home_feed_error(&mut feed.errors, "recommended_mvs", err),
+    }
+
+    let mut query = Query::new();
+    attach_cookie(&mut query, active_cookie.as_deref());
+    match data.ncm_client.personalized_djprogram(&query).await {
+        Ok(response) => feed.podcasts = read_personalized_dj_cards(&response.body),
+        Err(err) => push_home_feed_error(&mut feed.errors, "podcasts", err),
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "success",
+        "feed": feed
+    }))
 }
 
 async fn search_ncm_tracks(
@@ -1455,6 +1645,226 @@ fn filter_playlist_summaries(
     }
 }
 
+fn read_personalized_playlist_cards(payload: &Value) -> Vec<NcmHomeFeedCard> {
+    payload
+        .get("result")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(read_personalized_playlist_card)
+        .collect()
+}
+
+fn read_recommend_resource_cards(payload: &Value) -> Vec<NcmHomeFeedCard> {
+    payload
+        .get("recommend")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(read_recommend_resource_card)
+        .collect()
+}
+
+fn read_newest_album_cards(payload: &Value) -> Vec<NcmHomeFeedCard> {
+    payload
+        .get("albums")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(read_newest_album_card)
+        .collect()
+}
+
+fn read_top_artist_cards(payload: &Value) -> Vec<NcmHomeFeedCard> {
+    payload
+        .get("artists")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(read_top_artist_card)
+        .collect()
+}
+
+fn read_personalized_mv_cards(payload: &Value) -> Vec<NcmHomeFeedCard> {
+    payload
+        .get("result")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(read_personalized_mv_card)
+        .collect()
+}
+
+fn read_personalized_dj_cards(payload: &Value) -> Vec<NcmHomeFeedCard> {
+    payload
+        .get("result")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(read_personalized_dj_card)
+        .collect()
+}
+
+fn read_personalized_playlist_card(value: &Value) -> Option<NcmHomeFeedCard> {
+    let item = value.as_object()?;
+    let id = item.get("id").and_then(Value::as_i64)?;
+    let title = item.get("name").and_then(read_non_empty_string)?;
+    Some(NcmHomeFeedCard {
+        id,
+        title,
+        subtitle: item
+            .get("creator")
+            .and_then(|creator| creator.get("nickname"))
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("copywriter").and_then(read_non_empty_string)),
+        cover_url: item.get("picUrl").and_then(read_non_empty_string),
+        play_count: item.get("playCount").and_then(Value::as_f64),
+        description: item
+            .get("copywriter")
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("description").and_then(read_non_empty_string)),
+    })
+}
+
+fn read_recommend_resource_card(value: &Value) -> Option<NcmHomeFeedCard> {
+    let item = value.as_object()?;
+    let id = item.get("id").and_then(Value::as_i64)?;
+    let title = item.get("name").and_then(read_non_empty_string)?;
+    Some(NcmHomeFeedCard {
+        id,
+        title,
+        subtitle: item
+            .get("creator")
+            .and_then(|creator| creator.get("nickname"))
+            .and_then(read_non_empty_string),
+        cover_url: item.get("picUrl").and_then(read_non_empty_string),
+        play_count: item
+            .get("playcount")
+            .and_then(Value::as_f64)
+            .or_else(|| item.get("playCount").and_then(Value::as_f64)),
+        description: item
+            .get("copywriter")
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("description").and_then(read_non_empty_string)),
+    })
+}
+
+fn read_newest_album_card(value: &Value) -> Option<NcmHomeFeedCard> {
+    let item = value.as_object()?;
+    let id = item.get("id").and_then(Value::as_i64)?;
+    let title = item.get("name").and_then(read_non_empty_string)?;
+    Some(NcmHomeFeedCard {
+        id,
+        title,
+        subtitle: item
+            .get("artist")
+            .and_then(|artist| artist.get("name"))
+            .and_then(read_non_empty_string)
+            .or_else(|| read_artists(item.get("artists"))),
+        cover_url: item.get("picUrl").and_then(read_non_empty_string),
+        play_count: None,
+        description: item.get("description").and_then(read_non_empty_string),
+    })
+}
+
+fn read_top_artist_card(value: &Value) -> Option<NcmHomeFeedCard> {
+    let item = value.as_object()?;
+    let id = item.get("id").and_then(Value::as_i64)?;
+    let title = item.get("name").and_then(read_non_empty_string)?;
+    Some(NcmHomeFeedCard {
+        id,
+        title,
+        subtitle: None,
+        cover_url: item
+            .get("picUrl")
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("img1v1Url").and_then(read_non_empty_string)),
+        play_count: None,
+        description: None,
+    })
+}
+
+fn read_personalized_mv_card(value: &Value) -> Option<NcmHomeFeedCard> {
+    let item = value.as_object()?;
+    let id = item.get("id").and_then(Value::as_i64)?;
+    let title = item.get("name").and_then(read_non_empty_string)?;
+    Some(NcmHomeFeedCard {
+        id,
+        title,
+        subtitle: item
+            .get("artistName")
+            .and_then(read_non_empty_string)
+            .or_else(|| read_artists(item.get("artists"))),
+        cover_url: item
+            .get("picUrl")
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("cover").and_then(read_non_empty_string)),
+        play_count: item.get("playCount").and_then(Value::as_f64),
+        description: item
+            .get("copywriter")
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("description").and_then(read_non_empty_string)),
+    })
+}
+
+fn read_personalized_dj_card(value: &Value) -> Option<NcmHomeFeedCard> {
+    let item = value.as_object()?;
+    let id = item.get("id").and_then(Value::as_i64)?;
+    let title = item.get("name").and_then(read_non_empty_string)?;
+    Some(NcmHomeFeedCard {
+        id,
+        title,
+        subtitle: item
+            .get("copywriter")
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("description").and_then(read_non_empty_string)),
+        cover_url: item.get("picUrl").and_then(read_non_empty_string),
+        play_count: item.get("playCount").and_then(Value::as_f64),
+        description: item
+            .get("copywriter")
+            .and_then(read_non_empty_string)
+            .or_else(|| item.get("description").and_then(read_non_empty_string)),
+    })
+}
+
+fn read_radar_playlist_card(payload: &Value) -> Option<NcmHomeFeedCard> {
+    let playlist = payload.get("playlist")?.as_object()?;
+    let id = playlist.get("id").and_then(Value::as_i64)?;
+    let title = playlist.get("name").and_then(read_non_empty_string)?;
+    Some(NcmHomeFeedCard {
+        id,
+        title,
+        subtitle: playlist
+            .get("creator")
+            .and_then(|creator| creator.get("nickname"))
+            .and_then(read_non_empty_string),
+        cover_url: playlist.get("coverImgUrl").and_then(read_non_empty_string),
+        play_count: playlist.get("playCount").and_then(Value::as_f64),
+        description: playlist.get("description").and_then(read_non_empty_string),
+    })
+}
+
+fn track_covers(tracks: &[NcmTrackSummary]) -> Vec<NcmHomeTrackCover> {
+    tracks
+        .iter()
+        .map(|track| NcmHomeTrackCover {
+            id: track.song_id,
+            url: track.artwork_url.clone(),
+        })
+        .collect()
+}
+
+fn personal_fm_preview(tracks: &[NcmTrackSummary]) -> Option<NcmHomePersonalFmPreview> {
+    let track = tracks.first()?;
+    let title = track.title.clone()?;
+    Some(NcmHomePersonalFmPreview {
+        title,
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        cover_url: track.artwork_url.clone(),
+    })
+}
+
 fn read_search_tracks(payload: &Value) -> Vec<NcmTrackSummary> {
     payload
         .get("result")
@@ -1601,6 +2011,21 @@ fn inject_active_ncm_cookie(data: &web::Data<Arc<AppState>>, query: &mut Query) 
     if let Some(cookie) = active_ncm_cookie(data) {
         query.cookie = Some(cookie);
     }
+}
+
+fn attach_cookie(query: &mut Query, cookie: Option<&str>) {
+    if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
+        query.cookie = Some(cookie.to_string());
+    }
+}
+
+fn push_home_feed_error(errors: &mut Vec<NcmHomeFeedError>, section: &'static str, err: NcmError) {
+    let message = err.to_string();
+    log::warn!("NCM home feed section {} failed: {}", section, message);
+    errors.push(NcmHomeFeedError {
+        section: section.to_string(),
+        message,
+    });
 }
 
 fn apply_query_overrides(query: &mut Query) -> Result<(), String> {
@@ -2084,6 +2509,128 @@ mod tests {
                 duration_secs: Some(90.0),
                 artwork_url: Some("legacy.jpg".to_string()),
             }]
+        );
+    }
+
+    #[test]
+    fn read_home_feed_cards_support_common_section_shapes() {
+        let personalized = json!({
+            "result": [{
+                "id": 1,
+                "name": "Playlist",
+                "copywriter": "copy",
+                "picUrl": "playlist.jpg",
+                "playCount": 1234,
+                "description": "desc"
+            }]
+        });
+        let resource = json!({
+            "recommend": [{
+                "id": 2,
+                "name": "Daily",
+                "creator": { "nickname": "Ada" },
+                "picUrl": "daily.jpg",
+                "playcount": 4321
+            }]
+        });
+        let albums = json!({
+            "albums": [{
+                "id": 3,
+                "name": "Album",
+                "artist": { "name": "Artist" },
+                "picUrl": "album.jpg"
+            }]
+        });
+        let artists = json!({
+            "artists": [{
+                "id": 4,
+                "name": "Singer",
+                "img1v1Url": "artist.jpg"
+            }]
+        });
+        let mvs = json!({
+            "result": [{
+                "id": 5,
+                "name": "MV",
+                "artistName": "Director",
+                "cover": "mv.jpg",
+                "playCount": 55
+            }]
+        });
+        let djs = json!({
+            "result": [{
+                "id": 6,
+                "name": "Podcast",
+                "copywriter": "story",
+                "picUrl": "podcast.jpg",
+                "playCount": 66
+            }]
+        });
+
+        assert_eq!(
+            read_personalized_playlist_cards(&personalized)[0].title,
+            "Playlist"
+        );
+        assert_eq!(
+            read_recommend_resource_cards(&resource)[0]
+                .subtitle
+                .as_deref(),
+            Some("Ada")
+        );
+        assert_eq!(
+            read_newest_album_cards(&albums)[0].subtitle.as_deref(),
+            Some("Artist")
+        );
+        assert_eq!(
+            read_top_artist_cards(&artists)[0].cover_url.as_deref(),
+            Some("artist.jpg")
+        );
+        assert_eq!(
+            read_personalized_mv_cards(&mvs)[0].cover_url.as_deref(),
+            Some("mv.jpg")
+        );
+        assert_eq!(
+            read_personalized_dj_cards(&djs)[0].description.as_deref(),
+            Some("story")
+        );
+    }
+
+    #[test]
+    fn read_home_feed_radar_and_personal_fm_preview() {
+        let radar = json!({
+            "playlist": {
+                "id": 7,
+                "name": "Radar",
+                "creator": { "nickname": "NetEase" },
+                "coverImgUrl": "radar.jpg",
+                "playCount": 777,
+                "description": "fresh"
+            }
+        });
+        let track = NcmTrackSummary {
+            id: "ncm-song-8".to_string(),
+            song_id: 8,
+            source_path: "https://music.163.com/#/song?id=8".to_string(),
+            title: Some("FM".to_string()),
+            artist: Some("Artist".to_string()),
+            album: Some("Album".to_string()),
+            duration_secs: Some(30.0),
+            artwork_url: Some("fm.jpg".to_string()),
+        };
+
+        let card = read_radar_playlist_card(&radar).expect("radar card");
+        assert_eq!(card.title, "Radar");
+        assert_eq!(card.cover_url.as_deref(), Some("radar.jpg"));
+        assert_eq!(
+            track_covers(&[track.clone()]),
+            vec![NcmHomeTrackCover {
+                id: 8,
+                url: Some("fm.jpg".to_string())
+            }]
+        );
+        assert_eq!(
+            personal_fm_preview(&[track]).map(|preview| preview.title),
+            Some("FM".to_string())
         );
     }
 
