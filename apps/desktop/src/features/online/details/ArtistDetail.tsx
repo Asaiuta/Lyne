@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 import { IconChevronLeft } from "../../../components/icons";
 import { MediaList } from "../../../components/media/MediaList";
 import { useTranslation } from "../../../shared/i18n";
+import { useUISettings } from "../../../shared/state/useUISettings";
 import type { PlaybackController } from "../shared/playback";
 import type { FeedCardItem, OnlineTrackItem } from "../shared/types";
 
@@ -18,6 +19,7 @@ export interface ArtistDetailProps {
 
 export function ArtistDetail(props: ArtistDetailProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   const artist = props.artist;
   if (!artist) return null;
   return (
@@ -30,8 +32,8 @@ export function ArtistDetail(props: ArtistDetailProps) {
         <IconChevronLeft />
         {t("ncm.artist.backToFeed")}
       </button>
-      <header class="ncm-daily-detail-hero">
-        <Show when={artist.coverUrl}>
+      <header class={`ncm-daily-detail-hero${uiSettings.hiddenCovers.artistDetail ? " is-cover-hidden" : ""}`}>
+        <Show when={!uiSettings.hiddenCovers.artistDetail && artist.coverUrl}>
           {(url) => <img class="ncm-detail-hero-cover ncm-detail-hero-cover--round" src={url()} alt="" />}
         </Show>
         <h2>{artist.title}</h2>

@@ -8,6 +8,8 @@ import type { NcmTrackReference } from "./ncmPlayback";
 import type { Feedback, NcmProfile, NeteasePageMode } from "./shared/types";
 import { createPlaybackController } from "./shared/playback";
 import { DiscoverMode } from "./modes/DiscoverMode";
+import { LikedCollectionMode } from "./modes/LikedCollectionMode";
+import { LikedSongsMode } from "./modes/LikedSongsMode";
 import { RecommendMode } from "./modes/RecommendMode";
 import { UserPlaylistsMode } from "./modes/UserPlaylistsMode";
 
@@ -19,6 +21,9 @@ interface NeteasePageProps {
   currentTrackPath: string | null;
   currentSongId: number | null;
   isPlaying: boolean;
+  onPlay: () => Promise<void>;
+  onPause: () => Promise<void>;
+  onSkipNext: () => Promise<void> | undefined;
   onRegisterPlayback: (track: NcmTrackReference) => void;
   selectedPlaylistId?: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
@@ -119,6 +124,9 @@ export function NeteasePage(props: NeteasePageProps) {
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}
             isPlaying={props.isPlaying}
+            onPlay={props.onPlay}
+            onPause={props.onPause}
+            onSkipNext={props.onSkipNext}
           />
         </Match>
         <Match when={props.mode === "discover"}>
@@ -129,6 +137,34 @@ export function NeteasePage(props: NeteasePageProps) {
             pendingDiscoverSearch={pendingDiscoverSearch}
             clearPendingDiscoverSearch={() => setPendingDiscoverSearch(false)}
             discoverTabRequest={props.discoverTabRequest}
+            onSelectedPlaylistChange={props.onSelectedPlaylistChange}
+            setFeedback={setRawFeedback}
+            playback={playback}
+            currentTrackPath={props.currentTrackPath}
+            currentSongId={props.currentSongId}
+            isPlaying={props.isPlaying}
+          />
+        </Match>
+        <Match when={props.mode === "liked-songs"}>
+          <LikedSongsMode
+            loginProfile={loginProfile}
+            isCheckingLogin={isCheckingLogin}
+            isLoginBusy={isLoginBusy}
+            onBeginLogin={beginLogin}
+            setFeedback={setRawFeedback}
+            playback={playback}
+            currentTrackPath={props.currentTrackPath}
+            currentSongId={props.currentSongId}
+            isPlaying={props.isPlaying}
+          />
+        </Match>
+        <Match when={props.mode === "liked"}>
+          <LikedCollectionMode
+            loginProfile={loginProfile}
+            isCheckingLogin={isCheckingLogin}
+            isLoginBusy={isLoginBusy}
+            onBeginLogin={beginLogin}
+            onLogout={handleLogout}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={playback}

@@ -32,6 +32,7 @@ export interface NcmUserSubcountData {
   createdPlaylistCount?: number;
   /** Subscribed (collected) playlists. */
   subPlaylistCount?: number;
+  albumCount?: number;
   artistCount?: number;
   mvCount?: number;
   djRadioCount?: number;

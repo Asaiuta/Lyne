@@ -9,12 +9,13 @@ import { TopNav } from "../components/TopNav";
 import { WindowControls } from "../components/WindowControls";
 import { HistoryPage } from "../features/history/HistoryPage";
 import { LibraryPage } from "../features/library/LibraryPage";
+import { CloudPage } from "../features/online/CloudPage";
 import { NeteasePage } from "../features/online/NeteasePage";
+import { NeteaseRadioPage } from "../features/online/NeteaseRadioPage";
 import { QueueDrawer } from "../features/queue/QueueDrawer";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { createApiClient } from "../shared/api/client";
 import { useTranslation } from "../shared/i18n";
-import { NcmAccountProvider } from "../shared/state/NcmAccountContext";
 import { UISearchProvider } from "../shared/state/UISearchContext";
 import { useAppController } from "./useAppController";
 
@@ -104,6 +105,7 @@ function AppContent() {
                   <LibraryPage
                     onStateRefresh={refreshPlayback}
                     currentTrackPath={controller.currentTrackPath()}
+                    currentMediaId={controller.currentMediaId()}
                     isPlaying={Boolean(controller.player()?.is_playing)}
                   />
                 </Match>
@@ -111,6 +113,8 @@ function AppContent() {
                   when={
                     displayedPage() === "recommend" ||
                     displayedPage() === "discover" ||
+                    displayedPage() === "liked-songs" ||
+                    displayedPage() === "liked" ||
                     displayedPage() === "created-playlists" ||
                     displayedPage() === "collected-playlists"
                   }
@@ -120,6 +124,8 @@ function AppContent() {
                       displayedPage() as
                         | "recommend"
                         | "discover"
+                        | "liked-songs"
+                        | "liked"
                         | "created-playlists"
                         | "collected-playlists"
                     }
@@ -127,6 +133,9 @@ function AppContent() {
                     currentTrackPath={controller.currentTrackPath()}
                     currentSongId={controller.currentNcmSongId()}
                     isPlaying={Boolean(controller.player()?.is_playing)}
+                    onPlay={controller.handlePlay}
+                    onPause={controller.handlePause}
+                    onSkipNext={controller.handleSkipNext}
                     onRegisterPlayback={controller.registerNcmPlayback}
                     selectedPlaylistId={controller.selectedPlaylistId()}
                     onSelectedPlaylistChange={controller.handleSelectedPlaylistChange}
@@ -139,7 +148,24 @@ function AppContent() {
                   <HistoryPage
                     refreshVersion={controller.playbackHistoryVersion()}
                     onStateRefresh={refreshPlayback}
+                    currentTrackPath={controller.currentTrackPath()}
+                    currentMediaId={controller.currentMediaId()}
+                    currentSongId={controller.currentNcmSongId()}
+                    isPlaying={Boolean(controller.player()?.is_playing)}
+                    onRegisterPlayback={controller.registerNcmPlayback}
                   />
+                </Match>
+                <Match when={displayedPage() === "cloud"}>
+                  <CloudPage
+                    onStateRefresh={refreshPlayback}
+                    currentTrackPath={controller.currentTrackPath()}
+                    currentSongId={controller.currentNcmSongId()}
+                    isPlaying={Boolean(controller.player()?.is_playing)}
+                    onRegisterPlayback={controller.registerNcmPlayback}
+                  />
+                </Match>
+                <Match when={displayedPage() === "radio"}>
+                  <NeteaseRadioPage />
                 </Match>
                 <Match when={controller.isPlaceholderPage(displayedPage() as any)}>
                   <div class="panel panel-placeholder">
@@ -174,6 +200,7 @@ function AppContent() {
           shuffleMode={controller.shuffleMode()}
           canSkipPrev={controller.prevEntryId() !== null}
           canSkipNext={controller.nextEntryId() !== null}
+          bgBlur={controller.uiSettings.bgBlur}
           onPlay={controller.handlePlay}
           onPause={controller.handlePause}
           onSeek={controller.handleSeek}
@@ -207,11 +234,7 @@ function AppContent() {
 }
 
 export function App() {
-  return (
-    <NcmAccountProvider>
-      <AppContent />
-    </NcmAccountProvider>
-  );
+  return <AppContent />;
 }
 
 export default App;

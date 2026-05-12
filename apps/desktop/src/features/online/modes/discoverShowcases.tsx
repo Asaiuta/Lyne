@@ -3,6 +3,7 @@ import type { Resource } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { MediaList } from "../../../components/media/MediaList";
 import { useTranslation } from "../../../shared/i18n";
+import { useUISettings } from "../../../shared/state/useUISettings";
 import { isTranslationKey } from "../shared/parsers";
 import type { PlaybackController } from "../shared/playback";
 import type {
@@ -36,6 +37,7 @@ export interface DiscoverPlaylistShowcaseProps {
 
 export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   return (
     <section class="online-discover-section online-discover-playlists">
       <div class="online-discover-menu">
@@ -68,6 +70,7 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
                 title={item.title}
                 subtitle={item.subtitle}
                 coverUrl={item.coverUrl}
+                coverVisible={!uiSettings.hiddenCovers.playlist}
                 onClick={() =>
                   void props.onLoadPlaylist({
                     id: item.id,
@@ -113,6 +116,7 @@ export interface DiscoverArtistShowcaseProps {
 
 export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   return (
     <section class="online-discover-section online-discover-artists">
       <div class="online-discover-filter-menu">
@@ -142,7 +146,16 @@ export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
       <Show when={(props.discoverArtists() ?? []).length > 0} fallback={<div class="panel-note">{t("ncm.home.empty")}</div>}>
         <div class="album-grid">
           <For each={props.discoverArtists() ?? []}>
-            {(item) => <AlbumCard title={item.title} subtitle={item.subtitle} coverUrl={item.coverUrl} shape="round" size="sm" />}
+            {(item) => (
+              <AlbumCard
+                title={item.title}
+                subtitle={item.subtitle}
+                coverUrl={item.coverUrl}
+                coverVisible={!uiSettings.hiddenCovers.artist}
+                shape="round"
+                size="sm"
+              />
+            )}
           </For>
         </div>
       </Show>
@@ -157,6 +170,7 @@ export interface DiscoverToplistShowcaseProps {
 
 export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   const officialItems = () => (props.discoverToplists() ?? []).filter((item) => item.isOfficial);
   const selectedItems = () => (props.discoverToplists() ?? []).filter((item) => !item.isOfficial);
   return (
@@ -168,7 +182,7 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
             {(item) => (
               <button
                 type="button"
-                class="online-toplist-card"
+                class={`online-toplist-card${uiSettings.hiddenCovers.toplist ? " is-cover-hidden" : ""}`}
                 onClick={() =>
                   void props.onLoadPlaylist({
                     id: item.id,
@@ -180,11 +194,13 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
                   })
                 }
               >
-                <div class="online-toplist-cover" aria-hidden="true">
-                  <Show when={item.coverUrl} fallback={<span>{item.title.slice(0, 1)}</span>}>
-                    {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
-                  </Show>
-                </div>
+                <Show when={!uiSettings.hiddenCovers.toplist}>
+                  <div class="online-toplist-cover" aria-hidden="true">
+                    <Show when={item.coverUrl} fallback={<span>{item.title.slice(0, 1)}</span>}>
+                      {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
+                    </Show>
+                  </div>
+                </Show>
                 <div class="online-toplist-copy">
                   <strong>{item.title}</strong>
                   <Show when={item.subtitle}>
@@ -216,6 +232,7 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
                 title={item.title}
                 subtitle={item.subtitle ?? item.description}
                 coverUrl={item.coverUrl}
+                coverVisible={!uiSettings.hiddenCovers.toplist}
                 onClick={() =>
                   void props.onLoadPlaylist({
                     id: item.id,
@@ -256,6 +273,7 @@ export interface DiscoverNewShowcaseProps {
 
 export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   const songs = () => props.discoverSongs() ?? [];
   const hasVisibleItems = () => (props.discoverNewKind === "albums" ? props.allAlbums.length > 0 : songs().length > 0);
 
@@ -294,6 +312,7 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
               currentSourcePath={props.currentTrackPath}
               currentSongId={props.currentSongId}
               isPlayingNow={props.isPlaying}
+              hideArtwork={uiSettings.hiddenCovers.new}
               onPlay={(item) => void props.playback.playOnlineTrack(item)}
               onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
               emptyState={<div class="panel-note">{t("ncm.empty.noSongs")}</div>}
@@ -303,7 +322,14 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
           <div class="online-discover-card-stack">
             <div class="album-grid">
               <For each={props.allAlbums}>
-                {(item) => <AlbumCard title={item.title} subtitle={item.subtitle} coverUrl={item.coverUrl} />}
+                {(item) => (
+                  <AlbumCard
+                    title={item.title}
+                    subtitle={item.subtitle}
+                    coverUrl={item.coverUrl}
+                    coverVisible={!uiSettings.hiddenCovers.new}
+                  />
+                )}
               </For>
             </div>
             <Show when={props.hasMoreAlbums}>

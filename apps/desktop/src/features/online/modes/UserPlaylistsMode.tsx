@@ -5,6 +5,7 @@ import { IconPlayCircle } from "../../../components/icons";
 import { PageHeader } from "../../../components/page/PageHeader";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
+import { useUISettings } from "../../../shared/state/useUISettings";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { PlaylistDetail } from "../details/PlaylistDetail";
 import type { PlaybackController } from "../shared/playback";
@@ -33,6 +34,7 @@ export interface UserPlaylistsModeProps {
 
 export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
 
   const [userPlaylistsState, setUserPlaylistsState] = createSignal<OnlinePlaylistSummary[]>([]);
   const [isLoadingUserPlaylists, setIsLoadingUserPlaylists] = createSignal(false);
@@ -216,6 +218,7 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
                         creator: playlist.creator ?? t("ncm.playlist.creatorUnknown")
                       })}
                       coverUrl={playlist.coverUrl}
+                      coverVisible={!uiSettings.hiddenCovers.playlist}
                       size="md"
                       active={detailNav.selectedPlaylist()?.id === playlist.id}
                       onClick={() => void detailNav.loadPlaylistTracks(playlist)}

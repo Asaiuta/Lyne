@@ -2,11 +2,11 @@ import { For, Show, createMemo, createResource } from "solid-js";
 import { AlbumCard } from "../../components/AlbumCard";
 import { DailySongsCard, type DailySongsCardCover } from "../../components/DailySongsCard";
 import { HorizontalCardRow } from "../../components/HorizontalCardRow";
-import { IconAlbum, IconArtist, IconPause, IconPlay, IconPlaylist, IconSkipNext } from "../../components/icons";
+import { IconAlbum, IconArtist, IconPause, IconPlay, IconPlaylist, IconSkipNext, IconThumbDown } from "../../components/icons";
 import { createApiClient, type NcmHomeFeed } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { cacheFetch } from "../../shared/state/cacheFetch";
-import { useUISettings, type HomeSectionKey } from "../../shared/state/useUISettings";
+import { useUISettings, type CoverHiddenKey, type HomeSectionKey } from "../../shared/state/useUISettings";
 import type { OnlinePlaylistSummary } from "./ncmPlaylistSummary";
 import type { DiscoverTab, FeedCardItem } from "./shared/types";
 
@@ -32,6 +32,11 @@ interface NeteaseHomeFeedProps {
   onSelectDailySongs?: () => void;
   onSelectLikedSongs?: () => void;
   onPlayPersonalFm?: () => void;
+  onPlay?: () => void;
+  onPause?: () => void;
+  onSkipNext?: () => void;
+  onDislikePersonalFm?: (songId: number | null) => void;
+  isPlaying?: boolean;
   onSelectAlbum?: (album: FeedCardItem) => void;
   onSelectArtist?: (artist: FeedCardItem) => void;
   onNavigateToDiscover?: (tab: DiscoverTab) => void;
@@ -52,6 +57,48 @@ const loadHomeFeed = async (userId: number | null): Promise<NcmHomeFeed> => {
     return EMPTY_HOME_FEED;
   }
 };
+
+function HomeFeedSkeleton() {
+  return (
+    <>
+      <section class="card-row ncm-home-feed-skeleton" aria-hidden="true">
+        <header class="card-row-head">
+          <div class="card-row-copy">
+            <span class="card-row-title ncm-home-feed-skeleton-title" />
+          </div>
+        </header>
+        <div class="card-row-grid" role="list">
+          <For each={[0, 1, 2, 3, 4, 5]}>
+            {() => (
+              <div class="album-card ncm-home-feed-skeleton-card">
+                <span class="album-card-art ncm-home-feed-skeleton-cover" />
+                <span class="ncm-home-feed-skeleton-line ncm-home-feed-skeleton-line--title" />
+                <span class="ncm-home-feed-skeleton-line" />
+              </div>
+            )}
+          </For>
+        </div>
+      </section>
+      <section class="card-row ncm-home-feed-skeleton" aria-hidden="true">
+        <header class="card-row-head">
+          <div class="card-row-copy">
+            <span class="card-row-title ncm-home-feed-skeleton-title" />
+          </div>
+        </header>
+        <div class="card-row-grid" role="list">
+          <For each={[0, 1, 2, 3, 4, 5]}>
+            {() => (
+              <div class="album-card album-card--round ncm-home-feed-skeleton-card">
+                <span class="album-card-art ncm-home-feed-skeleton-cover" />
+                <span class="ncm-home-feed-skeleton-line ncm-home-feed-skeleton-line--title" />
+              </div>
+            )}
+          </For>
+        </div>
+      </section>
+    </>
+  );
+}
 
 export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
   const { t } = useTranslation();
@@ -92,8 +139,10 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
   const personalFmArtist = createMemo(() => feed().personalFmPreview?.artist ?? t("ncm.fm.preview.artist"));
   const personalFmAlbum = createMemo(() => feed().personalFmPreview?.album ?? t("ncm.fm.preview.album"));
   const personalFmCoverUrl = createMemo(() => feed().personalFmPreview?.coverUrl ?? personalFmCoverPreview()[0]?.url ?? null);
+  const personalFmSongId = createMemo(() => feed().personalFmCovers[0]?.id ?? null);
 
   const uiSettings = useUISettings();
+  const showCover = (key: CoverHiddenKey) => !uiSettings.hiddenCovers[key];
 
   const visibleSections = createMemo<HomeSectionKey[]>(() => {
     const sections = uiSettings.homeSections;
@@ -115,6 +164,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                     title={item.title}
                     subtitle={item.subtitle}
                     coverUrl={item.coverUrl}
+                    coverVisible={showCover("home")}
                     playCount={item.playCount}
                     description={item.description}
                     onClick={() => handlePlaylist(item)}
@@ -134,6 +184,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                     title={item.title}
                     subtitle={item.subtitle}
                     coverUrl={item.coverUrl}
+                    coverVisible={showCover("home")}
                     playCount={item.playCount}
                     description={item.description}
                     onClick={() => handlePlaylist(item)}
@@ -153,6 +204,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                     title={item.title}
                     subtitle={item.subtitle}
                     coverUrl={item.coverUrl}
+                    coverVisible={showCover("home")}
                     playCount={item.playCount}
                     description={item.description}
                     onClick={() => handlePlaylist(item)}
@@ -171,6 +223,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                   <AlbumCard
                     title={item.title}
                     coverUrl={item.coverUrl}
+                    coverVisible={showCover("home")}
                     shape="round"
                     size="sm"
                     onClick={() => props.onSelectArtist?.(item)}
@@ -183,13 +236,14 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
       case "mvs":
         return (
           <Show when={feed().recommendedMvs.length > 0}>
-            <HorizontalCardRow title={t("ncm.home.section.recommendedMv")}>
+            <HorizontalCardRow class="card-row-videos" title={t("ncm.home.section.recommendedMv")}>
               <For each={feed().recommendedMvs}>
                 {(item) => (
                   <AlbumCard
                     title={item.title}
                     subtitle={item.subtitle}
                     coverUrl={item.coverUrl}
+                    coverVisible={showCover("home")}
                     playCount={item.playCount}
                     description={item.description}
                     onClick={() => window.open(`https://music.163.com/#/mv?id=${item.id}`, "_blank")}
@@ -209,6 +263,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                     title={item.title}
                     subtitle={item.subtitle}
                     coverUrl={item.coverUrl}
+                    coverVisible={showCover("home")}
                     playCount={item.playCount}
                     description={item.description}
                     onClick={() => window.open(`https://music.163.com/#/program?id=${item.id}`, "_blank")}
@@ -228,6 +283,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                     title={item.title}
                     subtitle={item.subtitle}
                     coverUrl={item.coverUrl}
+                    coverVisible={showCover("home")}
                     description={item.description}
                     onClick={() => props.onSelectAlbum?.(item)}
                   />
@@ -249,6 +305,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                 title={t("ncm.daily.title")}
                 description={t("ncm.daily.description")}
                 covers={dailySongsCoverPreview()}
+                coverVisible={showCover("home")}
                 variant="daily"
                 onClick={() => props.onSelectDailySongs?.()}
               />
@@ -258,14 +315,27 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                 title={t("ncm.liked.title")}
                 description={t("ncm.liked.description")}
                 covers={likedSongsCoverPreview()}
+                coverVisible={showCover("home")}
                 variant="liked"
                 onClick={() => props.onSelectLikedSongs?.()}
               />
             </Show>
           </div>
           <Show when={props.onPlayPersonalFm}>
-            <button type="button" class="ncm-home-feed-fm-card" onClick={() => props.onPlayPersonalFm?.()}>
-              <Show when={personalFmCoverUrl()}>
+            <div
+              class={`ncm-home-feed-fm-card${showCover("personalFM") ? "" : " is-cover-hidden"}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => props.onPlayPersonalFm?.()}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  props.onPlayPersonalFm?.();
+                }
+              }}
+            >
+              <Show when={showCover("personalFM") ? personalFmCoverUrl() : null}>
                 {(coverUrl) => (
                   <>
                     <img class="ncm-home-feed-fm-card-blur" src={coverUrl()} alt="" loading="lazy" />
@@ -291,25 +361,56 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                     </span>
                   )}
                 </Show>
-                <div class="ncm-home-feed-fm-card-controls" aria-hidden="true">
-                  <span class="ncm-home-feed-fm-card-control ncm-home-feed-fm-card-control--primary">
-                    <IconPause />
-                  </span>
-                  <span class="ncm-home-feed-fm-card-control">
-                    <IconPlay />
-                  </span>
-                  <span class="ncm-home-feed-fm-card-control">
+                <div class="ncm-home-feed-fm-card-controls">
+                  <button
+                    type="button"
+                    class="ncm-home-feed-fm-card-control"
+                    aria-label="不喜欢"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      props.onDislikePersonalFm?.(personalFmSongId());
+                    }}
+                  >
+                    <IconThumbDown />
+                  </button>
+                  <button
+                    type="button"
+                    class="ncm-home-feed-fm-card-control ncm-home-feed-fm-card-control--primary"
+                    aria-label={props.isPlaying ? t("player.aria.pause") : t("player.aria.play")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (props.isPlaying) props.onPause?.();
+                      else props.onPlay?.();
+                    }}
+                  >
+                    <Show when={props.isPlaying} fallback={<IconPlay />}>
+                      <IconPause />
+                    </Show>
+                  </button>
+                  <button
+                    type="button"
+                    class="ncm-home-feed-fm-card-control"
+                    aria-label={t("player.aria.next")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      props.onSkipNext?.();
+                    }}
+                  >
                     <IconSkipNext />
-                  </span>
+                  </button>
                 </div>
                 <span class="ncm-home-feed-fm-card-badge">
                   <IconPlaylist />
                   {t("ncm.fm.title")}
                 </span>
               </div>
-            </button>
+            </div>
           </Show>
         </div>
+      </Show>
+
+      <Show when={homeFeed.loading && homeFeed() === undefined}>
+        <HomeFeedSkeleton />
       </Show>
 
       <For each={visibleSections()}>

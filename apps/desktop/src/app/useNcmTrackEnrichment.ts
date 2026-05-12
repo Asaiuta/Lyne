@@ -40,6 +40,22 @@ interface NcmTrackEnrichmentDeps {
   coverUrl: Accessor<string | null>;
 }
 
+interface SupplementRequest {
+  key: string;
+  trackRef: NcmTrackReference | null;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  coverUrl: string | null;
+}
+
+const sameSupplementRequest = (
+  previous: SupplementRequest | null,
+  next: SupplementRequest | null
+) => previous?.key === next?.key;
+
+const ncmSongPageUrl = (songId: number): string => `https://music.163.com/#/song?id=${songId}`;
+
 /**
  * Owns NCM-side track metadata that hangs off the currently-playing track:
  * the track reference dictionary, the on-demand song/lyric supplement,
@@ -58,39 +74,74 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
     createSignal<NcmTrackSupplement | null>(null);
   const [likedSongIds, setLikedSongIds] = createSignal<Set<number>>(new Set());
 
-  let activeSupplementKey: string | null = null;
+  const currentPlayerPath = createMemo(() => player()?.file_path ?? null);
+  const currentPlayerTitle = createMemo(() => player()?.title ?? null);
+  const currentPlayerArtist = createMemo(() => player()?.artist ?? null);
+  const currentPlayerAlbum = createMemo(() => player()?.album ?? null);
+  const currentPlayerCoverUrl = createMemo(() => player()?.external_artwork_url ?? null);
+  const currentPlayerTime = createMemo(() => player()?.current_time ?? 0);
+  const currentPlayerDuration = createMemo(() => player()?.duration ?? null);
+  const currentPlayerNcmSongId = createMemo(() => player()?.ncm_song_id ?? null);
+  const currentPlayerNcmSourcePageUrl = createMemo(() => player()?.ncm_source_page_url ?? null);
 
   const currentTrackRef = createMemo(() => {
-    const path = player()?.file_path;
+    const path = currentPlayerPath();
     if (!path) return undefined;
     const refs = ncmTrackRefs();
-    return refs[path] ?? refs[mediaKeyForPath(path) ?? ""] ?? undefined;
+    const registeredRef = refs[path] ?? refs[mediaKeyForPath(path) ?? ""] ?? undefined;
+    if (registeredRef) {
+      return registeredRef;
+    }
+
+    const songId = currentPlayerNcmSongId();
+    if (songId === null) {
+      return undefined;
+    }
+
+    return {
+      songId,
+      streamUrl: path,
+      sourcePageUrl: currentPlayerNcmSourcePageUrl() ?? ncmSongPageUrl(songId),
+      title: currentPlayerTitle(),
+      artist: currentPlayerArtist(),
+      album: currentPlayerAlbum(),
+      coverUrl: currentPlayerCoverUrl(),
+      durationSecs: currentPlayerDuration()
+    };
   });
   const currentNcmSongId = createMemo(() => currentTrackRef()?.songId ?? null);
   const currentNcmCoverUrl = createMemo(
     () => firstNonEmpty(currentNcmSupplement()?.coverUrl, currentTrackRef()?.coverUrl)
   );
   const resolvedCoverUrl = createMemo(() =>
-    firstNonEmpty(currentNcmCoverUrl(), player()?.external_artwork_url, coverUrl())
+    firstNonEmpty(currentNcmCoverUrl(), currentPlayerCoverUrl(), coverUrl())
   );
   const currentLyricLines = createMemo(() => currentNcmSupplement()?.lyrics ?? []);
   const currentInlineLyric = createMemo(() =>
-    findCurrentLyricLine(currentLyricLines(), livePosition() ?? player()?.current_time ?? 0)
+    findCurrentLyricLine(currentLyricLines(), livePosition() ?? currentPlayerTime())
   );
   const fullPlayerTitle = createMemo(
     () =>
       firstNonEmpty(
         currentNcmSupplement()?.title,
         currentTrackRef()?.title,
-        player()?.title
+        currentPlayerTitle()
       ) ??
-      player()?.file_path ??
+      currentPlayerPath() ??
       ""
   );
   const fullPlayerSubtitle = createMemo(() =>
     [
-      firstNonEmpty(currentNcmSupplement()?.artist, currentTrackRef()?.artist, player()?.artist),
-      firstNonEmpty(currentNcmSupplement()?.album, currentTrackRef()?.album, player()?.album)
+      firstNonEmpty(
+        currentNcmSupplement()?.artist,
+        currentTrackRef()?.artist,
+        currentPlayerArtist()
+      ),
+      firstNonEmpty(
+        currentNcmSupplement()?.album,
+        currentTrackRef()?.album,
+        currentPlayerAlbum()
+      )
     ]
       .filter(Boolean)
       .join(" · ")
@@ -119,56 +170,70 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
     }));
   };
 
+  const supplementRequest = createMemo<SupplementRequest | null>(
+    () => {
+      const trackRef = currentTrackRef();
+      const mediaKey = mediaKeyForPath(trackRef?.streamUrl ?? currentPlayerPath());
+      if (!mediaKey) {
+        return null;
+      }
+      const title = firstNonEmpty(trackRef?.title, currentPlayerTitle());
+      const artist = firstNonEmpty(trackRef?.artist, currentPlayerArtist());
+      const album = firstNonEmpty(trackRef?.album, currentPlayerAlbum());
+      const requestCoverUrl = firstNonEmpty(trackRef?.coverUrl, currentPlayerCoverUrl());
+      const key = [
+        trackRef ? `ncm:${trackRef.songId}` : `media:${mediaKey}`,
+        title ?? "",
+        artist ?? "",
+        album ?? "",
+        requestCoverUrl ?? ""
+      ].join("|");
+
+      return {
+        key,
+        trackRef: trackRef ?? null,
+        title,
+        artist,
+        album,
+        coverUrl: requestCoverUrl
+      };
+    },
+    null,
+    { equals: sameSupplementRequest }
+  );
+
   createEffect(() => {
-    const trackRef = currentTrackRef();
-    const playerState = player();
-    const mediaKey = mediaKeyForPath(trackRef?.streamUrl ?? playerState?.file_path);
-    if (!mediaKey) {
-      activeSupplementKey = null;
+    const request = supplementRequest();
+    if (request === null) {
       setCurrentNcmSupplement(null);
       return;
     }
-    const baseTitle = firstNonEmpty(trackRef?.title, playerState?.title);
-    const baseArtist = firstNonEmpty(trackRef?.artist, playerState?.artist);
-    const baseAlbum = firstNonEmpty(trackRef?.album, playerState?.album);
-    const baseCover = firstNonEmpty(trackRef?.coverUrl, playerState?.external_artwork_url);
-    const supplementKey = [
-      trackRef ? `ncm:${trackRef.songId}` : `media:${mediaKey}`,
-      baseTitle ?? "",
-      baseArtist ?? "",
-      baseAlbum ?? "",
-      baseCover ?? ""
-    ].join("|");
-    if (supplementKey === activeSupplementKey) {
-      return;
-    }
-    activeSupplementKey = supplementKey;
 
     let cancelled = false;
 
     setCurrentNcmSupplement({
       status: "loading",
-      title: baseTitle,
-      artist: baseArtist,
-      album: baseAlbum,
-      coverUrl: baseCover,
+      title: request.title,
+      artist: request.artist,
+      album: request.album,
+      coverUrl: request.coverUrl,
       lyrics: [],
       error: null
     });
 
-    const request = trackRef
+    const fetchSupplement = request.trackRef
       ? Promise.allSettled([
-          api.resolveNcmTrackSupplement(trackRef.songId),
+          api.resolveNcmTrackSupplement(request.trackRef.songId),
           api.getCurrentLyrics()
         ])
       : Promise.allSettled([api.getCurrentLyrics()]);
 
-    void request.then((results) => {
+    void fetchSupplement.then((results) => {
       if (cancelled) {
         return;
       }
 
-      if (trackRef) {
+      if (request.trackRef) {
         const [supplementResult, localLyricResult] = results as [
           PromiseSettledResult<Awaited<ReturnType<ApiClient["resolveNcmTrackSupplement"]>>>,
           PromiseSettledResult<Awaited<ReturnType<ApiClient["getCurrentLyrics"]>>>
@@ -201,10 +266,10 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
 
         setCurrentNcmSupplement({
           status: error && !hasRemoteSupplement && lyrics.length === 0 ? "error" : "success",
-          title: resolvedSupplement?.title ?? trackRef.title,
-          artist: resolvedSupplement?.artist ?? trackRef.artist,
-          album: resolvedSupplement?.album ?? trackRef.album,
-          coverUrl: resolvedSupplement?.coverUrl ?? trackRef.coverUrl,
+          title: resolvedSupplement?.title ?? request.trackRef.title,
+          artist: resolvedSupplement?.artist ?? request.trackRef.artist,
+          album: resolvedSupplement?.album ?? request.trackRef.album,
+          coverUrl: resolvedSupplement?.coverUrl ?? request.trackRef.coverUrl,
           lyrics,
           error
         });
@@ -223,10 +288,10 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
 
       setCurrentNcmSupplement({
         status: error && localLyrics.length === 0 ? "error" : "success",
-        title: baseTitle,
-        artist: baseArtist,
-        album: baseAlbum,
-        coverUrl: baseCover,
+        title: request.title,
+        artist: request.artist,
+        album: request.album,
+        coverUrl: request.coverUrl,
         lyrics: localLyrics,
         error
       });

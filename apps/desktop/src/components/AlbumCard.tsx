@@ -12,6 +12,7 @@ interface AlbumCardProps {
   active?: boolean;
   playCount?: number | null;
   description?: string | null;
+  coverVisible?: boolean;
   onClick?: () => void;
 }
 
@@ -32,54 +33,70 @@ export function AlbumCard(props: AlbumCardProps) {
   // 卡片显示尺寸约 120-184px，使用 m 档 (300px) 足够
   const sizedUrl = () => coverSizeUrl(props.coverUrl, "m");
   const shadowUrl = () => coverSizeUrl(props.coverUrl, "s");
+  const coverVisible = () => props.coverVisible ?? true;
+  const playCountText = () => {
+    const count = props.playCount;
+    return count != null && count > 0 ? formatPlayCount(count) : null;
+  };
+  const descriptionText = () => props.description?.trim() || null;
+  const isRoundCard = () => props.shape === "round";
+  const hasOverlayMask = () => playCountText() !== null || descriptionText() !== null;
 
   return (
     <button
       type="button"
-      class={`album-card${sizeClass(props.size)}${shapeClass(props.shape)}${props.active ? " is-active" : ""}`}
+      class={`album-card${sizeClass(props.size)}${shapeClass(props.shape)}${props.active ? " is-active" : ""}${coverVisible() ? "" : " is-cover-hidden"}`}
       onClick={() => props.onClick?.()}
     >
-      <div class="album-card-art" aria-hidden="true">
-        <Show
-          when={props.coverUrl}
-          fallback={<span class="album-card-fallback">{fallbackInitial()}</span>}
-        >
-          {(_) => (
-            <>
-              <SImage
-                src={sizedUrl()}
-                class="album-card-art-img"
-                observeVisibility={true}
-                releaseOnHide={false}
-              />
-              <Show when={props.shape === "round"}>
+      <Show when={coverVisible()}>
+        <div class="album-card-art" aria-hidden="true">
+          <Show
+            when={props.coverUrl}
+            fallback={<span class="album-card-fallback">{fallbackInitial()}</span>}
+          >
+            {(_) => (
+              <>
                 <SImage
-                  src={shadowUrl()}
-                  class="album-card-art-shadow"
+                  src={sizedUrl()}
+                  class="album-card-art-img"
                   observeVisibility={true}
-                  releaseOnHide={true}
+                  releaseOnHide={false}
                 />
-                <span class="album-card-art-artist-icon">
-                  <IconArtist />
-                </span>
-              </Show>
-            </>
-          )}
-        </Show>
-        <div class="album-card-art-mask" />
-        <Show when={props.playCount != null && props.playCount > 0}>
-          <span class="album-card-play-count">
-            <IconPlay />
-            {formatPlayCount(props.playCount!)}
-          </span>
-        </Show>
-        <Show when={props.description}>
-          {(desc) => <span class="album-card-description">{desc()}</span>}
-        </Show>
-        <span class="album-card-play-btn" aria-hidden="true">
-          <IconPlay />
-        </span>
-      </div>
+                <Show when={isRoundCard()}>
+                  <SImage
+                    src={shadowUrl()}
+                    class="album-card-art-shadow"
+                    observeVisibility={true}
+                    releaseOnHide={true}
+                  />
+                  <span class="album-card-art-artist-icon">
+                    <IconArtist />
+                  </span>
+                </Show>
+              </>
+            )}
+          </Show>
+          <Show when={hasOverlayMask()}>
+            <div class="album-card-art-mask" />
+          </Show>
+          <Show when={playCountText()}>
+            {(count) => (
+              <span class="album-card-play-count">
+                <IconPlay />
+                {count()}
+              </span>
+            )}
+          </Show>
+          <Show when={descriptionText()}>
+            {(desc) => <span class="album-card-description">{desc()}</span>}
+          </Show>
+          <Show when={!isRoundCard()}>
+            <span class="album-card-play-btn" aria-hidden="true">
+              <IconPlay />
+            </span>
+          </Show>
+        </div>
+      </Show>
       <div class="album-card-copy">
         <span class="album-card-title">{props.title}</span>
         <Show when={props.subtitle}>

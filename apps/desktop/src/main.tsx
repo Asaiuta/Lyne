@@ -1,6 +1,7 @@
 import { render } from "solid-js/web";
 import App from "./app/App";
 import { I18nProvider } from "./shared/i18n";
+import { NcmAccountProvider } from "./shared/state/NcmAccountContext";
 import "./shared/styles/global.css";
 import "./shared/styles/components/shell.css";
 import "./shared/styles/components/pages.css";
@@ -34,7 +35,9 @@ if (!root) {
 render(
   () => (
     <I18nProvider>
-      <App />
+      <NcmAccountProvider>
+        <App />
+      </NcmAccountProvider>
     </I18nProvider>
   ),
   root

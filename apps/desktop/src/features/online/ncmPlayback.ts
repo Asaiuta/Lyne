@@ -45,13 +45,21 @@ export const findActiveLyricIndex = (
     return -1;
   }
 
-  for (let index = lyrics.length - 1; index >= 0; index -= 1) {
-    if (currentTime >= lyrics[index].time) {
-      return index;
+  let low = 0;
+  let high = lyrics.length - 1;
+  let activeIndex = -1;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (currentTime >= lyrics[middle].time) {
+      activeIndex = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
     }
   }
 
-  return -1;
+  return activeIndex;
 };
 
 export const findCurrentLyricLine = (

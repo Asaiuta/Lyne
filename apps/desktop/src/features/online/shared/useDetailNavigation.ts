@@ -12,6 +12,10 @@ const PLAYLIST_TRACK_LIMIT = 200;
 const LIKED_SONGS_DETAIL_LIMIT = 100;
 const api = createApiClient();
 
+interface LoadPlaylistTracksOptions {
+  limit?: number;
+}
+
 export interface DetailNavigationContext {
   t: Translator;
   loginProfile: Accessor<NcmProfile | null>;
@@ -62,7 +66,10 @@ export function useDetailNavigation(ctx: DetailNavigationContext) {
     onSelectedPlaylistChange?.(null);
   };
 
-  const loadPlaylistTracks = async (playlist: OnlinePlaylistSummary) => {
+  const loadPlaylistTracks = async (
+    playlist: OnlinePlaylistSummary,
+    options: LoadPlaylistTracksOptions = {}
+  ) => {
     setSelectedDailySongs(false);
     setSelectedLikedSongs(false);
     setSelectedAlbum(null);
@@ -78,7 +85,7 @@ export function useDetailNavigation(ctx: DetailNavigationContext) {
     try {
       const tracks = await api.listNcmPlaylistTracks({
         id: playlist.id,
-        limit: PLAYLIST_TRACK_LIMIT
+        limit: options.limit ?? PLAYLIST_TRACK_LIMIT
       });
       setPlaylistTracksState(tracks);
     } catch (error) {

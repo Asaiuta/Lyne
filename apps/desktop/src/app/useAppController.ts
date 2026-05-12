@@ -149,6 +149,11 @@ export function useAppController(api: ApiClient): AppController {
         data: {
           ...next,
           media_id: next.media_id ?? current.data.media_id,
+          ncm_song_id: next.ncm_song_id ?? current.data.ncm_song_id,
+          ncm_source_page_url: firstNonEmpty(
+            next.ncm_source_page_url,
+            current.data.ncm_source_page_url
+          ),
           title: firstNonEmpty(next.title, current.data.title),
           artist: firstNonEmpty(next.artist, current.data.artist),
           album: firstNonEmpty(next.album, current.data.album),
@@ -251,9 +256,25 @@ export function useAppController(api: ApiClient): AppController {
     }
   };
 
+  const refreshQueueAdjacent = async () => {
+    try {
+      setQueueAdjacent(await api.getQueueAdjacent());
+    } catch {
+      setQueueAdjacent({ previousEntryId: null, nextEntryId: null });
+    }
+  };
+
+  const refreshQueueForCurrentSurface = () => {
+    if (queueDrawerOpen()) {
+      void refreshQueue();
+      return;
+    }
+    void refreshQueueAdjacent();
+  };
+
   onMount(() => {
     void refreshState();
-    void refreshQueue();
+    refreshQueueForCurrentSurface();
   });
 
   const scheduleRefresh = (expectedPath?: string | null) => {
@@ -269,7 +290,7 @@ export function useAppController(api: ApiClient): AppController {
     onOpen: () => {
       setWsStatus("connected");
       void refreshState();
-      void refreshQueue();
+      refreshQueueForCurrentSurface();
     },
     onClose: () => setWsStatus("disconnected"),
     onError: () => setWsStatus("disconnected"),
@@ -315,6 +336,8 @@ export function useAppController(api: ApiClient): AppController {
               file_path: event.file_path,
               duration: event.duration,
               media_id: event.media_id,
+              ncm_song_id: event.ncm_song_id,
+              ncm_source_page_url: event.ncm_source_page_url,
               title: event.title,
               artist: event.artist,
               album: event.album,
@@ -327,7 +350,7 @@ export function useAppController(api: ApiClient): AppController {
           setPreloadRequested(false);
           setLivePosition(0);
           scheduleRefresh(event.file_path);
-          void refreshQueue();
+          refreshQueueForCurrentSurface();
           break;
         case "playback_ended":
           setPreloadRequested(false);
@@ -338,7 +361,7 @@ export function useAppController(api: ApiClient): AppController {
           setPreloadRequested(true);
           break;
         case "queue_updated":
-          void refreshQueue();
+          refreshQueueForCurrentSurface();
           break;
         case "play":
           patchPlayerState({
@@ -565,11 +588,12 @@ export function useAppController(api: ApiClient): AppController {
 
   const handleOpenQueue = () => {
     setQueueDrawerOpen(true);
-    void refreshQueue();
+    window.setTimeout(() => {
+      void refreshQueue();
+    }, 0);
   };
 
   const handleOpenQueueFromFullPlayer = () => {
-    setFullPlayerOpen(false);
     handleOpenQueue();
   };
 

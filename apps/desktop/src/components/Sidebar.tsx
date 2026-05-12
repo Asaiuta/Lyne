@@ -1,8 +1,9 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Component, JSX } from "solid-js";
 import type { ActivePage } from "../shared/ui/navigation";
 import { createApiClient } from "../shared/api/client";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
+import { useUISettings, type SidebarHiddenItemKey } from "../shared/state/useUISettings";
 import { useTranslation } from "../shared/i18n";
 import {
   type OnlinePlaylistSummary,
@@ -59,6 +60,7 @@ const SECTIONS: ReadonlyArray<NavSection> = [
     key: "mine",
     labelKey: "sidebar.section.myMusic",
     items: [
+      { key: "liked-songs", icon: IconHeart, labelKey: "sidebar.nav.likedSongs.label" },
       { key: "liked", icon: IconHeart, labelKey: "sidebar.nav.liked.label" },
       { key: "cloud", icon: IconCloud, labelKey: "sidebar.nav.cloud.label" },
       { key: "download", icon: IconQueueAdd, labelKey: "sidebar.nav.download.label" },
@@ -97,6 +99,22 @@ const STORAGE_KEY = "ui.sidebar.collapsed";
 const SECTIONS_STORAGE_KEY = "ui.sidebar.collapsedSections";
 const NARROW_BREAKPOINT = 980;
 
+const SIDEBAR_SETTING_KEY_BY_PAGE: Record<ActivePage, SidebarHiddenItemKey> = {
+  recommend: "recommend",
+  discover: "discover",
+  "personal-fm": "personalFm",
+  radio: "radio",
+  "liked-songs": "likedSongs",
+  liked: "liked",
+  cloud: "cloud",
+  download: "download",
+  streaming: "streaming",
+  library: "library",
+  recent: "recent",
+  "created-playlists": "createdPlaylists",
+  "collected-playlists": "collectedPlaylists"
+};
+
 const readPersistedCollapse = (): boolean => {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(STORAGE_KEY) === "1";
@@ -127,6 +145,7 @@ interface SidebarProps {
 
 export function Sidebar(props: SidebarProps) {
   const { t, td } = useTranslation();
+  const uiSettings = useUISettings();
   const accountStore = useNcmAccount();
   const [collapsedPersisted, setCollapsedPersisted] = createSignal(readPersistedCollapse());
   const [forceCollapsedNarrow, setForceCollapsedNarrow] = createSignal(isNarrowViewport());
@@ -207,6 +226,14 @@ export function Sidebar(props: SidebarProps) {
   const toggleAria = () =>
     collapsedPersisted() ? t("sidebar.aria.expand") : t("sidebar.aria.collapse");
   const ToggleIcon = () => (collapsedPersisted() ? IconExpand : IconCollapse);
+  const isItemHidden = (item: NavItem): boolean =>
+    uiSettings.sidebarHiddenItems[SIDEBAR_SETTING_KEY_BY_PAGE[item.key]];
+  const visibleSections = createMemo<ReadonlyArray<NavSection>>(() =>
+    SECTIONS.map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !isItemHidden(item))
+    })).filter((section) => section.items.length > 0)
+  );
   const playlistItemsForSection = (sectionKey: string): OnlinePlaylistSummary[] =>
     sectionKey === "created" ? createdPlaylists() : sectionKey === "collected" ? collectedPlaylists() : [];
   const handlePlaylistSelect = (page: UserPlaylistMode, playlistId: number) => {
@@ -226,7 +253,7 @@ export function Sidebar(props: SidebarProps) {
 
       <div class="sidebar-scroll">
         <div class="sidebar-sections">
-          <For each={SECTIONS}>
+          <For each={visibleSections()}>
             {(section) => {
               const sectionCollapsed = () => collapsedSections().has(section.key);
               const sectionLabel = () => td(section.labelKey);
@@ -309,18 +336,20 @@ export function Sidebar(props: SidebarProps) {
                                     <li>
                                       <button
                                         type="button"
-                                        class={`sidebar-playlist-item${isActive() ? " is-active" : ""}`}
+                                        class={`sidebar-playlist-item${isActive() ? " is-active" : ""}${uiSettings.menuShowCover ? "" : " is-cover-hidden"}`}
                                         onClick={() => handlePlaylistSelect(page, playlist.id)}
                                         title={playlist.name}
                                       >
-                                        <div class="sidebar-playlist-cover" aria-hidden="true">
-                                          <Show
-                                            when={playlist.coverUrl}
-                                            fallback={<span>{playlist.name.slice(0, 1)}</span>}
-                                          >
-                                            {(coverUrl) => <img src={coverUrl()} alt="" />}
-                                          </Show>
-                                        </div>
+                                        <Show when={uiSettings.menuShowCover}>
+                                          <div class="sidebar-playlist-cover" aria-hidden="true">
+                                            <Show
+                                              when={playlist.coverUrl}
+                                              fallback={<span>{playlist.name.slice(0, 1)}</span>}
+                                            >
+                                              {(coverUrl) => <img src={coverUrl()} alt="" />}
+                                            </Show>
+                                          </div>
+                                        </Show>
                                         <div class="sidebar-playlist-copy">
                                           <span class="sidebar-playlist-name">{playlist.name}</span>
                                         </div>

@@ -26,6 +26,9 @@ export interface RecommendModeProps {
   currentTrackPath: string | null;
   currentSongId: number | null;
   isPlaying: boolean;
+  onPlay: () => Promise<void>;
+  onPause: () => Promise<void>;
+  onSkipNext: () => Promise<void> | undefined;
 }
 
 const api = createApiClient();
@@ -81,6 +84,19 @@ export function RecommendMode(props: RecommendModeProps) {
     }
   };
 
+  const dislikePersonalFmTrack = async (previewSongId: number | null) => {
+    const songId = props.currentSongId ?? previewSongId;
+    try {
+      if (songId !== null) {
+        await api.trashNcmPersonalFmTrack(songId);
+        props.setFeedback("success", t("ncm.fm.feedback.disliked"));
+      }
+      await props.onSkipNext();
+    } catch (error) {
+      props.setFeedback("error", readErrorMessage(error));
+    }
+  };
+
   const handleNavigateToDiscover = (tab: string) => {
     detailNav.clearAllDetailViews();
     props.onNavigateToDiscover?.(tab);
@@ -123,6 +139,11 @@ export function RecommendMode(props: RecommendModeProps) {
                             onSelectDailySongs={detailNav.enterDailySongs}
                             onSelectLikedSongs={detailNav.enterLikedSongs}
                             onPlayPersonalFm={() => void playPersonalFmRadio()}
+                            onPlay={() => void props.onPlay()}
+                            onPause={() => void props.onPause()}
+                            onSkipNext={() => void props.onSkipNext()}
+                            onDislikePersonalFm={(songId) => void dislikePersonalFmTrack(songId)}
+                            isPlaying={props.isPlaying}
                             onSelectAlbum={(item) => void detailNav.loadAlbumTracks(item)}
                             onSelectArtist={(item) => void detailNav.loadArtistTracks(item)}
                             onNavigateToDiscover={(tab) => handleNavigateToDiscover(tab)}

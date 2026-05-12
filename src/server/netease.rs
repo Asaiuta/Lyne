@@ -109,6 +109,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         web::post().to(list_ncm_personal_fm_tracks),
     )
     .route(
+        "/domain/ncm/personal_fm/trash",
+        web::post().to(trash_ncm_personal_fm_track),
+    )
+    .route(
         "/domain/ncm/album/tracks",
         web::post().to(list_ncm_album_tracks),
     )
@@ -119,6 +123,14 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     .route(
         "/domain/ncm/user/likelist",
         web::post().to(list_ncm_likelist_ids),
+    )
+    .route(
+        "/domain/ncm/user/cloud",
+        web::post().to(list_ncm_cloud_tracks),
+    )
+    .route(
+        "/domain/ncm/user/cloud/delete",
+        web::post().to(delete_ncm_cloud_track),
     )
     .route(
         "/domain/ncm/accounts/{user_id}",
@@ -233,6 +245,11 @@ struct EntityTracksRequest {
 }
 
 #[derive(Deserialize)]
+struct PersonalFmTrashRequest {
+    song_id: i64,
+}
+
+#[derive(Deserialize)]
 struct SongDetailTracksRequest {
     ids: Vec<i64>,
 }
@@ -240,6 +257,17 @@ struct SongDetailTracksRequest {
 #[derive(Deserialize)]
 struct LikelistRequest {
     uid: i64,
+}
+
+#[derive(Deserialize)]
+struct CloudTracksRequest {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct CloudDeleteRequest {
+    song_id: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -310,6 +338,15 @@ struct NcmTrackSummary {
     album: Option<String>,
     duration_secs: Option<f64>,
     artwork_url: Option<String>,
+    size_bytes: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+struct NcmCloudTracksPage {
+    tracks: Vec<NcmTrackSummary>,
+    count: i64,
+    size_bytes: i64,
+    max_size_bytes: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -1064,6 +1101,29 @@ async fn list_ncm_personal_fm_tracks(data: web::Data<Arc<AppState>>) -> HttpResp
     }
 }
 
+async fn trash_ncm_personal_fm_track(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<PersonalFmTrashRequest>,
+) -> HttpResponse {
+    let song_id = body.song_id;
+    if song_id <= 0 {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "status": "error",
+            "message": "NCM personal FM song id must be positive"
+        }));
+    }
+
+    let mut query = Query::new().param("id", &song_id.to_string());
+    inject_active_ncm_cookie(&data, &mut query);
+
+    match data.ncm_client.fm_trash(&query).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success"
+        })),
+        Err(err) => build_error_response(err),
+    }
+}
+
 async fn list_ncm_album_tracks(
     data: web::Data<Arc<AppState>>,
     body: web::Json<EntityTracksRequest>,
@@ -1131,6 +1191,58 @@ async fn list_ncm_likelist_ids(
         Ok(response) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "ids": read_likelist_ids(&response.body)
+        })),
+        Err(err) => build_error_response(err),
+    }
+}
+
+async fn list_ncm_cloud_tracks(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<CloudTracksRequest>,
+) -> HttpResponse {
+    let request = body.into_inner();
+    let mut query = Query::new();
+    if let Some(limit) = request.limit.filter(|value| *value > 0) {
+        query = query.param("limit", &limit.to_string());
+    }
+    if let Some(offset) = request.offset.filter(|value| *value >= 0) {
+        query = query.param("offset", &offset.to_string());
+    }
+    inject_active_ncm_cookie(&data, &mut query);
+
+    match data.ncm_client.user_cloud(&query).await {
+        Ok(response) => {
+            let page = read_cloud_tracks_page(&response.body);
+            HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "tracks": page.tracks,
+                "count": page.count,
+                "size_bytes": page.size_bytes,
+                "max_size_bytes": page.max_size_bytes
+            }))
+        }
+        Err(err) => build_error_response(err),
+    }
+}
+
+async fn delete_ncm_cloud_track(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<CloudDeleteRequest>,
+) -> HttpResponse {
+    let song_id = body.song_id;
+    if song_id <= 0 {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "status": "error",
+            "message": "NCM cloud song id must be positive"
+        }));
+    }
+
+    let mut query = Query::new().param("id", &song_id.to_string());
+    inject_active_ncm_cookie(&data, &mut query);
+
+    match data.ncm_client.user_cloud_del(&query).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success"
         })),
         Err(err) => build_error_response(err),
     }
@@ -1694,6 +1806,11 @@ async fn dispatch(
         // Map directly to the ncm-api-rs methods called out in
         // .trellis/tasks/05-05-ncm-align-identity/research.md.
         "user_account" => client.user_account(query).await.map_err(DispatchError::Ncm),
+        "user_cloud" => client.user_cloud(query).await.map_err(DispatchError::Ncm),
+        "user_cloud_del" => client
+            .user_cloud_del(query)
+            .await
+            .map_err(DispatchError::Ncm),
         "user_detail" => client.user_detail(query).await.map_err(DispatchError::Ncm),
         "user_subcount" => client
             .user_subcount(query)
@@ -1725,6 +1842,7 @@ async fn dispatch(
             .recommend_songs(query)
             .await
             .map_err(DispatchError::Ncm),
+        "fm_trash" => client.fm_trash(query).await.map_err(DispatchError::Ncm),
         "personal_fm" => client.personal_fm(query).await.map_err(DispatchError::Ncm),
         "top_artists" => client.top_artists(query).await.map_err(DispatchError::Ncm),
         "album_newest" => client.album_newest(query).await.map_err(DispatchError::Ncm),
@@ -1735,7 +1853,21 @@ async fn dispatch(
             .dj_personalize_recommend(query)
             .await
             .map_err(DispatchError::Ncm),
+        "dj_catelist" => client.dj_catelist(query).await.map_err(DispatchError::Ncm),
+        "dj_category_recommend" => client
+            .dj_category_recommend(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "dj_detail" => client.dj_detail(query).await.map_err(DispatchError::Ncm),
+        "dj_program" => client.dj_program(query).await.map_err(DispatchError::Ncm),
+        "dj_radio_hot" => client.dj_radio_hot(query).await.map_err(DispatchError::Ncm),
         "dj_recommend" => client.dj_recommend(query).await.map_err(DispatchError::Ncm),
+        "dj_recommend_type" => client
+            .dj_recommend_type(query)
+            .await
+            .map_err(DispatchError::Ncm),
+        "dj_sub" => client.dj_sub(query).await.map_err(DispatchError::Ncm),
+        "dj_toplist" => client.dj_toplist(query).await.map_err(DispatchError::Ncm),
         "mv_first" => client.mv_first(query).await.map_err(DispatchError::Ncm),
         _ => Err(DispatchError::UnsupportedRoute),
     }
@@ -2627,6 +2759,41 @@ fn read_likelist_ids(payload: &Value) -> Vec<i64> {
         .collect()
 }
 
+fn read_cloud_tracks_page(payload: &Value) -> NcmCloudTracksPage {
+    NcmCloudTracksPage {
+        tracks: read_cloud_tracks(payload),
+        count: payload.get("count").and_then(Value::as_i64).unwrap_or(0),
+        size_bytes: payload.get("size").and_then(Value::as_i64).unwrap_or(0),
+        max_size_bytes: payload.get("maxSize").and_then(Value::as_i64).unwrap_or(0),
+    }
+}
+
+fn read_cloud_tracks(payload: &Value) -> Vec<NcmTrackSummary> {
+    payload
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(read_cloud_track_summary)
+        .collect()
+}
+
+fn read_cloud_track_summary(value: &Value) -> Option<NcmTrackSummary> {
+    let item = value.as_object()?;
+    let song = item
+        .get("simpleSong")
+        .or_else(|| item.get("songInfo"))
+        .unwrap_or(value);
+    let mut track = read_track_summary(song)?;
+    track.id = format!("ncm-cloud-song-{}", track.song_id);
+    track.size_bytes = item
+        .get("fileSize")
+        .or_else(|| item.get("size"))
+        .and_then(Value::as_i64)
+        .or_else(|| song.get("size").and_then(Value::as_i64));
+    Some(track)
+}
+
 fn read_track_summary(value: &Value) -> Option<NcmTrackSummary> {
     let item = value.as_object()?;
     let song_id = item.get("id").and_then(Value::as_i64)?;
@@ -2661,6 +2828,7 @@ fn read_track_summary(value: &Value) -> Option<NcmTrackSummary> {
             .and_then(|album| album.get("picUrl"))
             .and_then(read_non_empty_string)
             .or_else(|| item.get("picUrl").and_then(read_non_empty_string)),
+        size_bytes: item.get("size").and_then(Value::as_i64),
     })
 }
 
@@ -2924,11 +3092,20 @@ mod tests {
             ("/personalized/djprogram", "personalized_djprogram"),
             ("/recommend/resource", "recommend_resource"),
             ("/recommend/songs", "recommend_songs"),
+            ("/fm_trash", "fm_trash"),
             ("/personal_fm", "personal_fm"),
             ("/top/artists", "top_artists"),
             ("/album/newest", "album_newest"),
             ("/dj/personalize/recommend", "dj_personalize_recommend"),
+            ("/dj/catelist", "dj_catelist"),
+            ("/dj/category/recommend", "dj_category_recommend"),
+            ("/dj/detail", "dj_detail"),
+            ("/dj/program", "dj_program"),
+            ("/dj/radio/hot", "dj_radio_hot"),
             ("/dj/recommend", "dj_recommend"),
+            ("/dj/recommend/type", "dj_recommend_type"),
+            ("/dj/sub", "dj_sub"),
+            ("/dj/toplist", "dj_toplist"),
             ("/mv/first", "mv_first"),
         ];
         for (path, expected) in cases {
@@ -3163,6 +3340,7 @@ mod tests {
                 album: Some("Album".to_string()),
                 duration_secs: Some(180.0),
                 artwork_url: Some("cover.jpg".to_string()),
+                size_bytes: None,
             }]
         );
     }
@@ -3222,6 +3400,7 @@ mod tests {
                 album: Some("Legacy Album".to_string()),
                 duration_secs: Some(90.0),
                 artwork_url: Some("legacy.jpg".to_string()),
+                size_bytes: None,
             }]
         );
     }
@@ -3328,6 +3507,7 @@ mod tests {
                 album: Some("Album".to_string()),
                 duration_secs: Some(210.0),
                 artwork_url: Some("song.jpg".to_string()),
+                size_bytes: None,
             }]
         );
     }
@@ -3436,6 +3616,7 @@ mod tests {
             album: Some("Album".to_string()),
             duration_secs: Some(30.0),
             artwork_url: Some("fm.jpg".to_string()),
+            size_bytes: None,
         };
 
         let card = read_radar_playlist_card(&radar).expect("radar card");

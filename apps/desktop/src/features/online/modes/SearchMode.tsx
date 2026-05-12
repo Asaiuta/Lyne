@@ -2,6 +2,7 @@ import { For, Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import { MediaList } from "../../../components/media/MediaList";
 import { useTranslation } from "../../../shared/i18n";
+import { useUISettings } from "../../../shared/state/useUISettings";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import type { PlaybackController } from "../shared/playback";
 import type { OnlineTrackItem, SearchTab } from "../shared/types";
@@ -9,6 +10,7 @@ import type { OnlineTrackItem, SearchTab } from "../shared/types";
 interface PlaylistBrowserCardProps {
   playlist: OnlinePlaylistSummary;
   active: boolean;
+  coverVisible: boolean;
   onSelect: () => void;
 }
 
@@ -17,14 +19,16 @@ function PlaylistBrowserCard(props: PlaylistBrowserCardProps) {
   return (
     <button
       type="button"
-      class={`online-playlist-card${props.active ? " is-active" : ""}`}
+      class={`online-playlist-card${props.active ? " is-active" : ""}${props.coverVisible ? "" : " is-cover-hidden"}`}
       onClick={props.onSelect}
     >
-      <div class="online-playlist-art" aria-hidden="true">
-        <Show when={props.playlist.coverUrl} fallback={<span>{props.playlist.name.slice(0, 1)}</span>}>
-          {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
-        </Show>
-      </div>
+      <Show when={props.coverVisible}>
+        <div class="online-playlist-art" aria-hidden="true">
+          <Show when={props.playlist.coverUrl} fallback={<span>{props.playlist.name.slice(0, 1)}</span>}>
+            {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
+          </Show>
+        </div>
+      </Show>
       <div class="online-playlist-copy">
         <strong>{props.playlist.name}</strong>
         <span>
@@ -108,6 +112,7 @@ function SongsResultPanel(props: SearchModeProps) {
 
 function SearchPlaylistLayout(props: SearchModeProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   return (
     <section class="online-result-panel">
       <div class="online-result-panel-head">
@@ -145,6 +150,7 @@ function SearchPlaylistLayout(props: SearchModeProps) {
                   <PlaylistBrowserCard
                     playlist={playlist}
                     active={props.selectedPlaylist?.id === playlist.id}
+                    coverVisible={!uiSettings.hiddenCovers.playlist}
                     onSelect={() => void props.onSelectPlaylist(playlist)}
                   />
                 )}
@@ -158,12 +164,14 @@ function SearchPlaylistLayout(props: SearchModeProps) {
             >
               {(playlist) => (
                 <>
-                  <header class="online-playlist-tracks-head">
-                    <div class="online-playlist-tracks-art" aria-hidden="true">
-                      <Show when={playlist().coverUrl} fallback={<span>{playlist().name.slice(0, 1)}</span>}>
-                        {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
-                      </Show>
-                    </div>
+                  <header class={`online-playlist-tracks-head${uiSettings.hiddenCovers.playlist ? " is-cover-hidden" : ""}`}>
+                    <Show when={!uiSettings.hiddenCovers.playlist}>
+                      <div class="online-playlist-tracks-art" aria-hidden="true">
+                        <Show when={playlist().coverUrl} fallback={<span>{playlist().name.slice(0, 1)}</span>}>
+                          {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
+                        </Show>
+                      </div>
+                    </Show>
                     <div class="online-playlist-tracks-copy">
                       <span class="online-playlist-tracks-eyebrow">{t("ncm.discover.search.playlistEyebrow")}</span>
                       <h3>{playlist().name}</h3>

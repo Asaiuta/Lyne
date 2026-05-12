@@ -1,7 +1,13 @@
 import type { TranslationKey } from "../../../shared/i18n";
 import type { MediaListItem } from "../../../components/media/MediaList";
 
-export type NeteasePageMode = "recommend" | "discover" | "created-playlists" | "collected-playlists";
+export type NeteasePageMode =
+  | "recommend"
+  | "discover"
+  | "liked-songs"
+  | "liked"
+  | "created-playlists"
+  | "collected-playlists";
 export type SearchTab = "songs" | "playlists";
 export type DiscoverTab = "playlists" | "toplists" | "artists" | "new";
 export type DiscoverPlaylistKind = "normal" | "hq";
@@ -35,6 +41,7 @@ export interface Feedback {
 }
 
 export interface OnlineTrackItem extends MediaListItem {
+  source_path: string;
   songId: number;
 }
 

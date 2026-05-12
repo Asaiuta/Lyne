@@ -15,6 +15,7 @@ interface DailySongsCardProps {
   fallbackInitial?: string;
   active?: boolean;
   variant?: "default" | "daily" | "liked";
+  coverVisible?: boolean;
   onClick?: () => void;
 }
 
@@ -26,40 +27,43 @@ export function DailySongsCard(props: DailySongsCardProps) {
 
   const stackedCovers = () => props.covers.slice(0, 3);
   const currentDay = () => new Date().getDate();
+  const coverVisible = () => props.coverVisible ?? true;
 
   return (
     <button
       type="button"
-      class={`daily-songs-card daily-songs-card--${props.variant ?? "default"}${props.active ? " is-active" : ""}`}
+      class={`daily-songs-card daily-songs-card--${props.variant ?? "default"}${props.active ? " is-active" : ""}${coverVisible() ? "" : " is-cover-hidden"}`}
       onClick={() => props.onClick?.()}
     >
-      <div class="daily-songs-card-art" aria-hidden="true">
-        <Show
-          when={stackedCovers().length > 0}
-          fallback={<span class="daily-songs-card-fallback">{fallback()}</span>}
-        >
-          <div class="daily-songs-card-stack">
-            <For each={stackedCovers()}>
-              {(cover, index) => (
-                <div class={`daily-songs-card-stack-slot stack-slot-${index()}`}>
-                  <Show when={cover.url} fallback={<span>{fallback()}</span>}>
-                    {(url) => (
-                      <SImage
-                        src={coverSizeUrl(url(), "s")}
-                        observeVisibility={true}
-                        releaseOnHide={false}
-                      />
-                    )}
-                  </Show>
-                </div>
-              )}
-            </For>
-          </div>
-        </Show>
-        <span class="daily-songs-card-play" aria-hidden="true">
-          <IconPlayCircle />
-        </span>
-      </div>
+      <Show when={coverVisible()}>
+        <div class="daily-songs-card-art" aria-hidden="true">
+          <Show
+            when={stackedCovers().length > 0}
+            fallback={<span class="daily-songs-card-fallback">{fallback()}</span>}
+          >
+            <div class="daily-songs-card-stack">
+              <For each={stackedCovers()}>
+                {(cover, index) => (
+                  <div class={`daily-songs-card-stack-slot stack-slot-${index()}`}>
+                    <Show when={cover.url} fallback={<span>{fallback()}</span>}>
+                      {(url) => (
+                        <SImage
+                          src={coverSizeUrl(url(), "s")}
+                          observeVisibility={true}
+                          releaseOnHide={false}
+                        />
+                      )}
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+          <span class="daily-songs-card-play" aria-hidden="true">
+            <IconPlayCircle />
+          </span>
+        </div>
+      </Show>
       <div class="daily-songs-card-copy">
         <Show
           when={props.variant === "daily"}

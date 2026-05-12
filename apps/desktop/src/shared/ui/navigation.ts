@@ -3,6 +3,7 @@ export const ACTIVE_PAGES = [
   "discover",
   "personal-fm",
   "radio",
+  "liked-songs",
   "liked",
   "cloud",
   "download",
@@ -23,9 +24,6 @@ export const SEARCH_ENABLED_PAGES = ["recommend", "discover", "library"] as cons
 
 export const PLACEHOLDER_PAGES = [
   "personal-fm",
-  "radio",
-  "liked",
-  "cloud",
   "download",
   "streaming"
 ] as const;
