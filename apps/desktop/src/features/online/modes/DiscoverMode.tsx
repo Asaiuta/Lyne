@@ -15,7 +15,6 @@ import type { PlaybackController } from "../shared/playback";
 import type {
   DiscoverArtistArea,
   DiscoverArtistInitial,
-  DiscoverCardItem,
   DiscoverNewArea,
   DiscoverNewKind,
   DiscoverPlaylistKind,
@@ -26,6 +25,7 @@ import type {
   SearchTab
 } from "../shared/types";
 import { useDetailNavigation } from "../shared/useDetailNavigation";
+import { createPagedDiscoverCards } from "../shared/usePagedDiscoverCards";
 import {
   DiscoverArtistShowcase,
   DiscoverNewShowcase,
@@ -127,16 +127,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
   const [catEntries, setCatEntries] = createSignal<CatEntry[]>([]);
   const [hqCatNames, setHqCatNames] = createSignal<Set<string>>(new Set());
 
-  const [playlistOffset, setPlaylistOffset] = createSignal(0);
-  const [allPlaylists, setAllPlaylists] = createSignal<DiscoverCardItem[]>([]);
-  const [isLoadingPlaylists, setIsLoadingPlaylists] = createSignal(false);
-  const [hasMorePlaylists, setHasMorePlaylists] = createSignal(true);
-
-  const [albumOffset, setAlbumOffset] = createSignal(0);
-  const [allAlbums, setAllAlbums] = createSignal<DiscoverCardItem[]>([]);
-  const [isLoadingAlbums, setIsLoadingAlbums] = createSignal(false);
-  const [hasMoreAlbums, setHasMoreAlbums] = createSignal(true);
-
   const detailNav = useDetailNavigation({
     t,
     loginProfile: props.loginProfile,
@@ -148,73 +138,65 @@ export function DiscoverMode(props: DiscoverModeProps) {
   const readErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.error.requestFailed");
 
-  const fetchPlaylists = async (reset = false) => {
-    const offset = reset ? 0 : playlistOffset();
-    setIsLoadingPlaylists(true);
-    try {
+  const selectedArtistArea = createMemo(() => ARTIST_AREAS[discoverArtistAreaIndex()] ?? ARTIST_AREAS[0]);
+  const selectedNewArea = createMemo(() => NEW_AREAS[discoverNewAreaIndex()] ?? NEW_AREAS[0]);
+
+  const playlistCards = createPagedDiscoverCards(
+    ({ offset, currentItems }) => {
       const kind = discoverPlaylistKind();
       const cat = catName();
-      const currentPlaylists = allPlaylists();
-      const lastCursor = currentPlaylists.length > 0 ? currentPlaylists[currentPlaylists.length - 1]?.cursor ?? null : null;
-      const page = await api.listNcmDiscoverPlaylists({
+      const lastCursor = currentItems.length > 0 ? currentItems[currentItems.length - 1]?.cursor ?? null : null;
+      return api.listNcmDiscoverPlaylists({
         cat,
         kind,
         limit: DISCOVER_PAGE_LIMIT,
         offset,
         before: kind === "hq" && offset > 0 ? lastCursor : null
       });
-      if (reset) {
-        setAllPlaylists(page.items);
-        setPlaylistOffset(0);
-      } else {
-        setAllPlaylists((prev) => [...prev, ...page.items]);
-      }
-      setHasMorePlaylists(page.hasMore);
-    } catch {
-      if (reset) setAllPlaylists([]);
-      setHasMorePlaylists(false);
-    } finally {
-      setIsLoadingPlaylists(false);
+    },
+    {
+      pageSize: DISCOVER_PAGE_LIMIT,
+      onError: (error) => console.warn("[NeteasePage] discover playlists fetch failed", error)
     }
-  };
+  );
 
-  const fetchAlbums = async (reset = false) => {
-    const offset = reset ? 0 : albumOffset();
-    setIsLoadingAlbums(true);
-    try {
+  const albumCards = createPagedDiscoverCards(
+    ({ offset }) => {
       const area = selectedNewArea().albumArea;
-      const page = await api.listNcmDiscoverAlbums({ area, limit: DISCOVER_PAGE_LIMIT, offset });
-      if (reset) {
-        setAllAlbums(page.items);
-        setAlbumOffset(0);
-      } else {
-        setAllAlbums((prev) => [...prev, ...page.items]);
-      }
-      setHasMoreAlbums(page.hasMore);
-    } catch {
-      if (reset) setAllAlbums([]);
-      setHasMoreAlbums(false);
-    } finally {
-      setIsLoadingAlbums(false);
+      return api.listNcmDiscoverAlbums({ area, limit: DISCOVER_PAGE_LIMIT, offset });
+    },
+    {
+      pageSize: DISCOVER_PAGE_LIMIT,
+      onError: (error) => console.warn("[NeteasePage] discover albums fetch failed", error)
     }
-  };
+  );
+
+  const shouldShowPlaylistCards = () => discoverTab() === "playlists";
+  const shouldShowAlbumCards = () => discoverTab() === "new" && discoverNewKind() === "albums";
+
+  createEffect(() => {
+    if (shouldShowPlaylistCards()) void playlistCards.ensureLoaded();
+    if (shouldShowAlbumCards()) void albumCards.ensureLoaded();
+  });
 
   createEffect(on(
     () => [catName(), discoverPlaylistKind()] as const,
-    () => { setPlaylistOffset(0); void fetchPlaylists(true); },
+    () => { void playlistCards.reset(); },
     { defer: true }
   ));
 
   createEffect(on(
     () => selectedNewArea().albumArea,
-    () => { setAlbumOffset(0); void fetchAlbums(true); },
+    () => {
+      if (!albumCards.hasLoaded() && !shouldShowAlbumCards()) return;
+      void albumCards.reset();
+    },
     { defer: true }
   ));
 
   const [discoverToplists] = createResource(() =>
     safeLoadDiscover(() => api.listNcmDiscoverToplists(), [])
   );
-  const selectedArtistArea = createMemo(() => ARTIST_AREAS[discoverArtistAreaIndex()] ?? ARTIST_AREAS[0]);
   const [discoverArtists] = createResource(
     () => ({
       initial: discoverArtistInitial(),
@@ -234,7 +216,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
         []
       )
   );
-  const selectedNewArea = createMemo(() => NEW_AREAS[discoverNewAreaIndex()] ?? NEW_AREAS[0]);
   const [discoverSongs] = createResource(
     () => selectedNewArea().songType,
     (type) => safeLoadDiscover(() => api.listNcmDiscoverSongs({ type }), [])
@@ -466,11 +447,11 @@ export function DiscoverMode(props: DiscoverModeProps) {
                                 setCatModalOpen={setCatModalOpen}
                                 discoverSectionTitle={discoverSectionTitle()}
                                 discoverSectionSubtitle={discoverSectionSubtitle()}
-                                allPlaylists={allPlaylists()}
-                                isLoadingPlaylists={isLoadingPlaylists()}
-                                hasMorePlaylists={hasMorePlaylists()}
+                                allPlaylists={playlistCards.items()}
+                                isLoadingPlaylists={playlistCards.isLoading()}
+                                hasMorePlaylists={playlistCards.hasMore()}
                                 onLoadPlaylist={(playlist) => void detailNav.loadPlaylistTracks(playlist)}
-                                onLoadMore={() => { setPlaylistOffset((o) => o + DISCOVER_PAGE_LIMIT); void fetchPlaylists(false); }}
+                                onLoadMore={() => { void playlistCards.loadMore(); }}
                               />
                             </Show>
                             <Show when={discoverTab() === "toplists"}>
@@ -501,11 +482,11 @@ export function DiscoverMode(props: DiscoverModeProps) {
                                 setDiscoverNewAreaIndex={setDiscoverNewAreaIndex}
                                 discoverSectionTitle={discoverSectionTitle()}
                                 discoverSectionSubtitle={discoverSectionSubtitle()}
-                                allAlbums={allAlbums()}
+                                allAlbums={albumCards.items()}
                                 discoverSongs={discoverSongs}
-                                isLoadingAlbums={isLoadingAlbums()}
-                                hasMoreAlbums={hasMoreAlbums()}
-                                onLoadMoreAlbums={() => { setAlbumOffset((o) => o + DISCOVER_PAGE_LIMIT); void fetchAlbums(false); }}
+                                isLoadingAlbums={albumCards.isLoading()}
+                                hasMoreAlbums={albumCards.hasMore()}
+                                onLoadMoreAlbums={() => { void albumCards.loadMore(); }}
                                 playback={props.playback}
                                 currentTrackPath={props.currentTrackPath}
                                 currentSongId={props.currentSongId}

@@ -256,6 +256,9 @@ export interface DiscoverNewShowcaseProps {
 
 export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
   const { t } = useTranslation();
+  const songs = () => props.discoverSongs() ?? [];
+  const hasVisibleItems = () => (props.discoverNewKind === "albums" ? props.allAlbums.length > 0 : songs().length > 0);
+
   return (
     <section class="online-discover-section online-discover-new">
       <div class="online-discover-menu">
@@ -283,11 +286,11 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
           <span>{props.discoverSectionSubtitle}</span>
         </div>
       </div>
-      <Show when={props.allAlbums.length > 0 || (props.discoverSongs() ?? []).length > 0} fallback={<div class="panel-note">{props.isLoadingAlbums ? t("ncm.playlist.loading") : t("ncm.home.empty")}</div>}>
+      <Show when={hasVisibleItems()} fallback={<div class="panel-note">{props.isLoadingAlbums ? t("ncm.playlist.loading") : t("ncm.home.empty")}</div>}>
         <Show when={props.discoverNewKind === "albums"} fallback={
           <div class="online-discover-card-stack">
             <MediaList
-              items={(props.discoverSongs() ?? []).slice(0, 50)}
+              items={songs().slice(0, 50)}
               currentSourcePath={props.currentTrackPath}
               currentSongId={props.currentSongId}
               isPlayingNow={props.isPlaying}
