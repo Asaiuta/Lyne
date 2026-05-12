@@ -28,6 +28,11 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         "/domain/ncm/track/resolve",
         web::post().to(resolve_ncm_track),
     )
+    .route("/domain/ncm/track/play", web::post().to(play_ncm_track))
+    .route(
+        "/domain/ncm/track/enqueue",
+        web::post().to(enqueue_ncm_track),
+    )
     .route(
         "/domain/ncm/track/supplement",
         web::post().to(resolve_ncm_track_supplement),
@@ -267,6 +272,13 @@ struct NcmTrackDetail {
     artist: Option<String>,
     album: Option<String>,
     cover_url: Option<String>,
+}
+
+#[derive(Debug)]
+enum NcmTrackResolveError {
+    BadRequest(String),
+    BadGateway(String),
+    Upstream(NcmError),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1128,12 +1140,72 @@ async fn resolve_ncm_track(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ResolveNcmTrackRequest>,
 ) -> HttpResponse {
-    let request = body.into_inner();
-    if request.song_id <= 0 {
-        return HttpResponse::BadRequest().json(serde_json::json!({
+    match resolve_ncm_track_inner(&data, body.into_inner()).await {
+        Ok(track) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "track": track
+        })),
+        Err(err) => ncm_track_resolve_error_response(err),
+    }
+}
+
+async fn play_ncm_track(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<ResolveNcmTrackRequest>,
+) -> HttpResponse {
+    let track = match resolve_ncm_track_inner(&data, body.into_inner()).await {
+        Ok(track) => track,
+        Err(err) => return ncm_track_resolve_error_response(err),
+    };
+
+    match super::playback::load_validated_path_for_playback(
+        &data,
+        &track.stream_url,
+        true,
+        "ncm_autoplay",
+    ) {
+        Ok((state, _shared_state)) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "track": track,
+            "state": state
+        })),
+        Err(err) => HttpResponse::InternalServerError().json(serde_json::json!({
             "status": "error",
-            "message": "NCM song id must be positive"
-        }));
+            "message": format!("Failed to play NCM track: {}", err)
+        })),
+    }
+}
+
+async fn enqueue_ncm_track(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<ResolveNcmTrackRequest>,
+) -> HttpResponse {
+    let track = match resolve_ncm_track_inner(&data, body.into_inner()).await {
+        Ok(track) => track,
+        Err(err) => return ncm_track_resolve_error_response(err),
+    };
+
+    match super::playback::append_validated_path_to_persistent_queue(&data, &track.stream_url) {
+        Ok(queue) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "track": track,
+            "queue": queue
+        })),
+        Err(err) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "status": "error",
+            "message": format!("Failed to enqueue NCM track: {}", err)
+        })),
+    }
+}
+
+async fn resolve_ncm_track_inner(
+    data: &web::Data<Arc<AppState>>,
+    request: ResolveNcmTrackRequest,
+) -> Result<ResolvedNcmTrack, NcmTrackResolveError> {
+    if request.song_id <= 0 {
+        return Err(NcmTrackResolveError::BadRequest(
+            "NCM song id must be positive".to_string(),
+        ));
     }
 
     let level = request
@@ -1148,7 +1220,7 @@ async fn resolve_ncm_track(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| active_ncm_cookie(&data));
+        .or_else(|| active_ncm_cookie(data));
 
     let mut url_query = Query::new()
         .param("id", &request.song_id.to_string())
@@ -1174,7 +1246,7 @@ async fn resolve_ncm_track(
                 err,
                 start.elapsed()
             );
-            return build_error_response(err);
+            return Err(NcmTrackResolveError::Upstream(err));
         }
     };
 
@@ -1182,17 +1254,16 @@ async fn resolve_ncm_track(
         Some(url) => match super::validate_path(&url) {
             Ok(value) => value,
             Err(err) => {
-                return HttpResponse::BadGateway().json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("NCM song URL rejected: {}", err)
-                }));
+                return Err(NcmTrackResolveError::BadGateway(format!(
+                    "NCM song URL rejected: {}",
+                    err
+                )));
             }
         },
         None => {
-            return HttpResponse::BadGateway().json(serde_json::json!({
-                "status": "error",
-                "message": "NCM song URL unavailable"
-            }));
+            return Err(NcmTrackResolveError::BadGateway(
+                "NCM song URL unavailable".to_string(),
+            ));
         }
     };
 
@@ -1253,10 +1324,25 @@ async fn resolve_ncm_track(
         start.elapsed()
     );
 
-    HttpResponse::Ok().json(serde_json::json!({
-        "status": "success",
-        "track": track
-    }))
+    Ok(track)
+}
+
+fn ncm_track_resolve_error_response(err: NcmTrackResolveError) -> HttpResponse {
+    match err {
+        NcmTrackResolveError::BadRequest(message) => {
+            HttpResponse::BadRequest().json(serde_json::json!({
+                "status": "error",
+                "message": message
+            }))
+        }
+        NcmTrackResolveError::BadGateway(message) => {
+            HttpResponse::BadGateway().json(serde_json::json!({
+                "status": "error",
+                "message": message
+            }))
+        }
+        NcmTrackResolveError::Upstream(err) => build_error_response(err),
+    }
 }
 
 async fn resolve_ncm_track_supplement(

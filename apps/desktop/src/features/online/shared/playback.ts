@@ -1,4 +1,4 @@
-import type { ApiClient } from "../../../shared/api/client";
+import type { ApiClient, ResolveNcmTrackInput } from "../../../shared/api/client";
 import type { TranslationKey, TranslationParams } from "../../../shared/i18n";
 import { STORAGE_KEYS } from "../../../shared/state/useUISettings";
 import type { NcmTrackReference } from "../ncmPlayback";
@@ -15,7 +15,6 @@ export interface PlaybackContext {
 }
 
 export interface PlaybackController {
-  registerAndResolveTrack: (item: OnlineTrackItem) => Promise<string>;
   playOnlineTrack: (item: OnlineTrackItem) => Promise<void>;
   enqueueOnlineTrack: (item: OnlineTrackItem) => Promise<void>;
 }
@@ -26,34 +25,31 @@ export function createPlaybackController(ctx: PlaybackContext): PlaybackControll
   const readErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.error.requestFailed");
 
-  const registerAndResolveTrack = async (item: OnlineTrackItem): Promise<string> => {
-    const songLevel = (() => {
-      try {
-        return localStorage.getItem(STORAGE_KEYS.ncmSongLevel) ?? "exhigh";
-      } catch {
-        return "exhigh";
-      }
-    })();
-    const track = await api.resolveNcmTrack({
-      songId: item.songId,
-      level: songLevel,
-      sourcePageUrl: item.source_path,
-      title: item.title,
-      artist: item.artist,
-      album: item.album,
-      artworkUrl: item.artworkUrl,
-      durationSecs: item.duration_secs
-    });
-    onRegisterPlayback(track);
-    return track.streamUrl;
+  const readSongLevel = () => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.ncmSongLevel) ?? "exhigh";
+    } catch {
+      return "exhigh";
+    }
   };
+
+  const buildResolveInput = (item: OnlineTrackItem): ResolveNcmTrackInput => ({
+    songId: item.songId,
+    level: readSongLevel(),
+    sourcePageUrl: item.source_path,
+    title: item.title,
+    artist: item.artist,
+    album: item.album,
+    artworkUrl: item.artworkUrl,
+    durationSecs: item.duration_secs
+  });
 
   const playOnlineTrack = async (item: OnlineTrackItem) => {
     setFeedback("neutral", t("ncm.feedback.initial"));
     try {
-      const url = await registerAndResolveTrack(item);
-      await api.load(url, { autoplay: true });
-      await onStateRefresh(url);
+      const result = await api.playNcmTrack(buildResolveInput(item));
+      onRegisterPlayback(result.track);
+      await onStateRefresh(result.track.streamUrl);
       setFeedback("neutral", t("ncm.feedback.initial"));
     } catch (error) {
       setFeedback("error", readErrorMessage(error));
@@ -62,13 +58,13 @@ export function createPlaybackController(ctx: PlaybackContext): PlaybackControll
 
   const enqueueOnlineTrack = async (item: OnlineTrackItem) => {
     try {
-      const url = await registerAndResolveTrack(item);
-      await api.enqueueTrack(url);
+      const result = await api.enqueueNcmTrack(buildResolveInput(item));
+      onRegisterPlayback(result.track);
       setFeedback("success", t("ncm.feedback.trackQueued", { title: item.title ?? item.songId }));
     } catch (error) {
       setFeedback("error", readErrorMessage(error));
     }
   };
 
-  return { registerAndResolveTrack, playOnlineTrack, enqueueOnlineTrack };
+  return { playOnlineTrack, enqueueOnlineTrack };
 }

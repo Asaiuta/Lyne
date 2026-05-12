@@ -44,6 +44,8 @@ export interface ApiClient {
   getMediaItems: (limit?: number, all?: boolean) => Promise<MediaItem[]>;
   saveExternalMediaMetadata: (metadata: ExternalMediaMetadataInput) => Promise<string>;
   resolveNcmTrack: (input: ResolveNcmTrackInput) => Promise<ResolvedNcmTrack>;
+  playNcmTrack: (input: ResolveNcmTrackInput) => Promise<NcmTrackPlaybackResult>;
+  enqueueNcmTrack: (input: ResolveNcmTrackInput) => Promise<NcmTrackQueueResult>;
   resolveNcmTrackSupplement: (songId: number) => Promise<ResolvedNcmTrackSupplement>;
   getNcmAccounts: () => Promise<NcmAccountState>;
   upsertNcmAccount: (input: NcmAccountUpsertInput) => Promise<NcmAccountState>;
@@ -135,6 +137,16 @@ export interface ResolvedNcmTrack {
   album: string | null;
   coverUrl: string | null;
   durationSecs: number | null;
+}
+
+export interface NcmTrackPlaybackResult {
+  track: ResolvedNcmTrack;
+  state: PlayerState;
+}
+
+export interface NcmTrackQueueResult {
+  track: ResolvedNcmTrack;
+  queue: QueueEntry[];
 }
 
 export interface ParsedLyricWord {
@@ -793,6 +805,36 @@ const parseCurrentLyricsResponse = (value: unknown): { lyrics: ParsedLyricLine[]
   };
 };
 
+const parseResolvedNcmTrack = (value: unknown, errorMessage: string): ResolvedNcmTrack => {
+  if (!isRecord(value)) {
+    throw new Error(errorMessage);
+  }
+
+  if (
+    !isInteger(value.song_id) ||
+    !isString(value.stream_url) ||
+    !isString(value.source_page_url) ||
+    !isNullableString(value.title) ||
+    !isNullableString(value.artist) ||
+    !isNullableString(value.album) ||
+    !isNullableString(value.cover_url) ||
+    !isNullableNumber(value.duration_secs)
+  ) {
+    throw new Error(errorMessage);
+  }
+
+  return {
+    songId: value.song_id,
+    streamUrl: value.stream_url,
+    sourcePageUrl: value.source_page_url,
+    title: value.title,
+    artist: value.artist,
+    album: value.album,
+    coverUrl: value.cover_url,
+    durationSecs: value.duration_secs
+  };
+};
+
 const parseResolvedNcmTrackResponse = (value: unknown): ResolvedNcmTrack => {
   if (!isRecord(value)) {
     throw new Error("Invalid NCM track response shape");
@@ -803,31 +845,44 @@ const parseResolvedNcmTrackResponse = (value: unknown): ResolvedNcmTrack => {
     throw new Error(typeof value.message === "string" ? value.message : "Failed to resolve NCM track");
   }
 
-  const track = isRecord(value.track) ? value.track : null;
-  if (
-    !track ||
-    !isInteger(track.song_id) ||
-    !isString(track.stream_url) ||
-    !isString(track.source_page_url) ||
-    !isNullableString(track.title) ||
-    !isNullableString(track.artist) ||
-    !isNullableString(track.album) ||
-    !isNullableString(track.cover_url) ||
-    !isNullableNumber(track.duration_secs)
-  ) {
-    throw new Error("Invalid NCM track payload");
+  return parseResolvedNcmTrack(value.track, "Invalid NCM track payload");
+};
+
+const parseNcmTrackPlaybackResponse = (value: unknown): NcmTrackPlaybackResult => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid NCM playback response shape");
   }
 
-  return {
-    songId: track.song_id,
-    streamUrl: track.stream_url,
-    sourcePageUrl: track.source_page_url,
-    title: track.title,
-    artist: track.artist,
-    album: track.album,
-    coverUrl: track.cover_url,
-    durationSecs: track.duration_secs
-  };
+  const status = parseStatus(value.status);
+  if (status === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Failed to play NCM track");
+  }
+
+  const track = parseResolvedNcmTrack(value.track, "Invalid NCM playback track payload");
+  const state = parsePlayerState(value.state);
+  if (!state) {
+    throw new Error("Invalid NCM playback state payload");
+  }
+
+  return { track, state };
+};
+
+const parseNcmTrackQueueResponse = (value: unknown): NcmTrackQueueResult => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid NCM queue response shape");
+  }
+
+  const status = parseStatus(value.status);
+  if (status === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Failed to enqueue NCM track");
+  }
+
+  const track = parseResolvedNcmTrack(value.track, "Invalid NCM queue track payload");
+  if (!Array.isArray(value.queue)) {
+    throw new Error("Invalid NCM queue payload");
+  }
+
+  return { track, queue: value.queue as QueueEntry[] };
 };
 
 const parseResolvedNcmTrackSupplementResponse = (value: unknown): ResolvedNcmTrackSupplement => {
@@ -1321,6 +1376,17 @@ const requestEnvelope = async (baseUrl: string, path: string, init?: RequestInit
   return parseEnvelope(json);
 };
 
+const buildResolveNcmTrackBody = (input: ResolveNcmTrackInput) => ({
+  song_id: input.songId,
+  level: input.level ?? null,
+  source_page_url: input.sourcePageUrl,
+  title: input.title ?? null,
+  artist: input.artist ?? null,
+  album: input.album ?? null,
+  duration_secs: input.durationSecs ?? null,
+  artwork_url: input.artworkUrl ?? null
+});
+
 export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
   // Eagerly warm the token cache so synchronous callers (e.g. `getCoverArtUrl`)
   // see a value as soon as possible after construction.
@@ -1546,18 +1612,23 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
   resolveNcmTrack: async (input: ResolveNcmTrackInput) => {
     const json = await requestJson(baseUrl, "/domain/ncm/track/resolve", {
       method: "POST",
-      body: JSON.stringify({
-        song_id: input.songId,
-        level: input.level ?? null,
-        source_page_url: input.sourcePageUrl,
-        title: input.title ?? null,
-        artist: input.artist ?? null,
-        album: input.album ?? null,
-        duration_secs: input.durationSecs ?? null,
-        artwork_url: input.artworkUrl ?? null
-      })
+      body: JSON.stringify(buildResolveNcmTrackBody(input))
     });
     return parseResolvedNcmTrackResponse(json);
+  },
+  playNcmTrack: async (input: ResolveNcmTrackInput) => {
+    const json = await requestJson(baseUrl, "/domain/ncm/track/play", {
+      method: "POST",
+      body: JSON.stringify(buildResolveNcmTrackBody(input))
+    });
+    return parseNcmTrackPlaybackResponse(json);
+  },
+  enqueueNcmTrack: async (input: ResolveNcmTrackInput) => {
+    const json = await requestJson(baseUrl, "/domain/ncm/track/enqueue", {
+      method: "POST",
+      body: JSON.stringify(buildResolveNcmTrackBody(input))
+    });
+    return parseNcmTrackQueueResponse(json);
   },
   resolveNcmTrackSupplement: async (songId: number) => {
     const json = await requestJson(baseUrl, "/domain/ncm/track/supplement", {

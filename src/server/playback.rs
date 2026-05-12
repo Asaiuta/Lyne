@@ -650,6 +650,86 @@ fn load_queue_entry_for_playback(
     Ok((state_response, shared_state))
 }
 
+pub(super) fn load_validated_path_for_playback(
+    data: &web::Data<Arc<AppState>>,
+    path: &str,
+    autoplay: bool,
+    history_kind: &'static str,
+) -> Result<(StateResponse, Arc<SharedState>), String> {
+    let credentials = {
+        let cfg = data.webdav_config.lock();
+        cfg.http_credentials()
+    };
+
+    let (state_response, shared_state) = {
+        let mut player = data.player.lock();
+        if autoplay {
+            player.load_with_credentials_and_autoplay(path, credentials.as_ref())?;
+        } else {
+            player.load_with_credentials(path, credentials.as_ref())?;
+        }
+        (get_player_state(&player), player.shared_state())
+    };
+
+    let mut state_response = state_response;
+    let media_id = data.app_db.record_media_stub(path);
+    if let Err(e) = &media_id {
+        log::warn!("Failed to ensure media item for '{}': {}", path, e);
+    }
+    enrich_state_from_media_database(&data.app_db, &mut state_response);
+    let snapshot = playback_runtime_snapshot_from_state(&state_response);
+
+    let previous_session = { data.active_session_id.lock().take() };
+    if let Some(session_id) = previous_session {
+        finish_ncm_scrobble_session(data, session_id, "replaced");
+        if let Err(e) = data
+            .app_db
+            .finish_playback_session(session_id, "replaced", &snapshot)
+        {
+            log::warn!(
+                "Failed to close replaced playback session {}: {}",
+                session_id,
+                e
+            );
+        }
+    }
+
+    match data.app_db.start_playback_session(
+        path,
+        if autoplay { "playing" } else { "loaded" },
+        &snapshot,
+    ) {
+        Ok(session_id) => {
+            *data.active_session_id.lock() = Some(session_id);
+            begin_ncm_scrobble_session(
+                data,
+                session_id,
+                path,
+                state_response.is_playing && !state_response.is_loading,
+            );
+            let payload = serde_json::json!({
+                "media_id": media_id.ok(),
+                "kind": history_kind
+            });
+            if let Err(e) = append_playback_history_and_emit(
+                data,
+                &shared_state,
+                Some(session_id),
+                path,
+                "load_requested",
+                snapshot.position_secs,
+                Some(&payload),
+            ) {
+                log::warn!("Failed to append load history: {}", e);
+            }
+        }
+        Err(e) => log::warn!("Failed to start playback session for '{}': {}", path, e),
+    }
+
+    sync_queue_snapshot_from_shared(data, &shared_state);
+    Ok((state_response, shared_state))
+}
+
 fn same_media_identity(left: &str, right: &str) -> bool {
     media_id_for_path(left) == media_id_for_path(right)
 }
@@ -1498,79 +1578,14 @@ async fn load(data: web::Data<Arc<AppState>>, body: web::Json<LoadRequest>) -> H
         Err(e) => return HttpResponse::BadRequest().json(ApiResponse::error(&e)),
     };
 
-    let credentials = {
-        let cfg = data.webdav_config.lock();
-        cfg.http_credentials()
-    };
     let autoplay = body.autoplay.unwrap_or(false);
-    let load_result = {
-        let mut player = data.player.lock();
-        let result = if autoplay {
-            player.load_with_credentials_and_autoplay(&path, credentials.as_ref())
-        } else {
-            player.load_with_credentials(&path, credentials.as_ref())
-        };
-        result.map(|_| (get_player_state(&player), player.shared_state()))
-    };
-
-    match load_result {
-        Ok((state_response, shared_state)) => {
-            let mut state_response = state_response;
-            let media_id = data.app_db.record_media_stub(&path);
-            if let Err(e) = &media_id {
-                log::warn!("Failed to ensure media item for '{}': {}", path, e);
-            }
-            enrich_state_from_media_database(&data.app_db, &mut state_response);
-            let snapshot = playback_runtime_snapshot_from_state(&state_response);
-
-            let previous_session = { data.active_session_id.lock().take() };
-            if let Some(session_id) = previous_session {
-                finish_ncm_scrobble_session(&data, session_id, "replaced");
-                if let Err(e) = data
-                    .app_db
-                    .finish_playback_session(session_id, "replaced", &snapshot)
-                {
-                    log::warn!(
-                        "Failed to close replaced playback session {}: {}",
-                        session_id,
-                        e
-                    );
-                }
-            }
-
-            match data.app_db.start_playback_session(
-                &path,
-                if autoplay { "playing" } else { "loaded" },
-                &snapshot,
-            ) {
-                Ok(session_id) => {
-                    *data.active_session_id.lock() = Some(session_id);
-                    begin_ncm_scrobble_session(
-                        &data,
-                        session_id,
-                        &path,
-                        state_response.is_playing && !state_response.is_loading,
-                    );
-                    let payload = serde_json::json!({
-                        "media_id": media_id.ok(),
-                        "kind": if autoplay { "autoplay" } else { "load" }
-                    });
-                    if let Err(e) = append_playback_history_and_emit(
-                        &data,
-                        &shared_state,
-                        Some(session_id),
-                        &path,
-                        "load_requested",
-                        snapshot.position_secs,
-                        Some(&payload),
-                    ) {
-                        log::warn!("Failed to append load history: {}", e);
-                    }
-                }
-                Err(e) => log::warn!("Failed to start playback session for '{}': {}", path, e),
-            }
-
-            sync_queue_snapshot_from_shared(&data, &shared_state);
+    match load_validated_path_for_playback(
+        &data,
+        &path,
+        autoplay,
+        if autoplay { "autoplay" } else { "load" },
+    ) {
+        Ok((state_response, _shared_state)) => {
             HttpResponse::Ok().json(ApiResponse::success_with_state(
                 if autoplay {
                     "Track playback requested"
@@ -3083,6 +3098,15 @@ async fn get_persistent_queue(data: web::Data<Arc<AppState>>) -> HttpResponse {
     }
 }
 
+pub(super) fn append_validated_path_to_persistent_queue(
+    data: &web::Data<Arc<AppState>>,
+    path: &str,
+) -> Result<Vec<QueueEntryRecord>, String> {
+    data.app_db.append_queue_entry("active", path)?;
+    emit_queue_updated(data);
+    data.app_db.list_queue_entries("active")
+}
+
 async fn replace_persistent_queue(
     data: web::Data<Arc<AppState>>,
     body: web::Json<QueueReplaceRequest>,
@@ -3113,11 +3137,11 @@ async fn enqueue_persistent_queue(
         Err(e) => return HttpResponse::BadRequest().json(ApiResponse::error(&e)),
     };
 
-    match data.app_db.append_queue_entry("active", &path) {
-        Ok(()) => {
-            emit_queue_updated(&data);
-            get_persistent_queue(data).await
-        }
+    match append_validated_path_to_persistent_queue(&data, &path) {
+        Ok(entries) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "queue": entries
+        })),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     }
 }
