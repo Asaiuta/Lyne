@@ -324,6 +324,16 @@ export function IconFolder(props: IconProps) {
   );
 }
 
+export function IconFolderPlus(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h3.2L9 6.5h6.5A1.5 1.5 0 0 1 17 8v6.5A1.5 1.5 0 0 1 15.5 16h-11A1.5 1.5 0 0 1 3 14.5z" />
+      <path d="M10 9v5" />
+      <path d="M7.5 11.5h5" />
+    </svg>
+  );
+}
+
 export function IconQueueAdd(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>

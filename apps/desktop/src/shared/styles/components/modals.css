@@ -91,6 +91,26 @@
     padding: 22px;
   }
 
+  .modal-card-size-sm {
+    width: min(100%, 460px);
+  }
+
+  .modal-card-size-md {
+    width: min(100%, 720px);
+  }
+
+  .modal-card-size-login {
+    width: min(100%, 400px);
+  }
+
+  .modal-card-size-directory {
+    width: min(100%, 600px);
+  }
+
+  .modal-card-size-lg {
+    width: min(100%, 980px);
+  }
+
   .queue-drawer-backdrop {
     position: fixed;
     inset: 0;
@@ -337,46 +357,154 @@
   .login-modal-section {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-3);
+  }
+
+  .login-modal-body {
+    align-items: center;
+  }
+
+  .login-modal-section,
+  .login-modal-form {
+    width: 100%;
+  }
+
+  .login-modal-section[hidden] {
+    display: none;
+  }
+
+  .login-modal-logo {
+    display: grid;
+    place-items: center;
+    width: 60px;
+    height: 60px;
+    margin: 20px auto 18px;
+    border-radius: 50%;
+    color: var(--accent-foreground);
+    background: var(--accent);
+  }
+
+  .login-modal-logo svg {
+    width: 34px;
+    height: 34px;
   }
 
   .login-modal-feedback {
-    padding: 12px 14px;
+    width: 100%;
+    padding: 10px 12px;
     border-radius: var(--radius-lg);
-  }
-  .login-modal-qr {
-    display: grid;
-    place-items: center;
-    gap: var(--space-4);
-    padding: var(--space-5);
-    border-radius: var(--radius-xl);
-    background: color-mix(in oklch, var(--surface-2) 72%, transparent);
+    font-size: var(--text-sm);
+    text-align: center;
     border: 1px solid var(--border-overlay);
   }
 
-  .login-modal-qr-image,
+  .login-modal-feedback-success {
+    color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 10%, transparent);
+  }
+
+  .login-modal-feedback-error {
+    color: color-mix(in oklch, var(--danger) 86%, white 14%);
+    background: color-mix(in oklch, var(--danger) 10%, transparent);
+  }
+
+  .login-modal-feedback-neutral {
+    color: var(--text-soft);
+    background: color-mix(in oklch, var(--surface-2) 76%, transparent);
+  }
+
+  .login-modal-qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .login-modal-qr-frame,
   .login-modal-qr-placeholder {
-    width: min(260px, 100%);
+    width: 180px;
     aspect-ratio: 1 / 1;
-    border-radius: var(--radius-xl);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .login-modal-qr-frame {
+    position: relative;
+    display: grid;
+    place-items: center;
+    background: white;
   }
 
   .login-modal-qr-image {
-    background: white;
-    padding: 14px;
+    width: 180px;
+    height: 180px;
+    min-width: 180px;
+    min-height: 180px;
+    padding: 0;
+    object-fit: contain;
+    transition:
+      opacity var(--duration-base) var(--ease-standard),
+      filter var(--duration-base) var(--ease-standard);
+  }
+
+  .login-modal-qr-frame.is-scanned .login-modal-qr-image {
+    opacity: 0.5;
+    filter: blur(4px);
   }
 
   .login-modal-qr-placeholder {
     display: grid;
     place-items: center;
+    padding: 16px;
     text-align: center;
     color: var(--muted);
     background: color-mix(in oklch, var(--surface-3) 82%, transparent);
   }
 
+  .login-modal-scan-user {
+    position: absolute;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    max-width: 150px;
+    color: #111827;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .login-modal-scan-avatar {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    color: var(--accent-foreground);
+    background: var(--accent);
+    object-fit: cover;
+    overflow: hidden;
+  }
+
   .login-modal-qr-status {
     color: var(--muted);
     font-size: var(--text-sm);
+    min-height: 20px;
+    text-align: center;
+  }
+
+  .login-modal-regenerate {
+    min-height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-pill);
+    color: var(--text-soft);
+    background: transparent;
+  }
+
+  .login-modal-regenerate:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--border-faint);
   }
 
   .login-modal-field {
@@ -389,6 +517,68 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--space-2);
+  }
+
+  .login-modal-submit {
+    width: 100%;
+  }
+
+  .login-modal-help {
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    color: var(--text-soft);
+    font-size: var(--text-sm);
+    line-height: 1.6;
+    background: var(--border-faint);
+    border: 1px solid var(--border-overlay);
+  }
+
+  .login-modal-other {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    margin: 8px 0 2px;
+  }
+
+  .login-modal-link-button {
+    min-width: 140px;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: var(--radius-pill);
+    color: var(--text-soft);
+    background: transparent;
+  }
+
+  .login-modal-link-button:hover,
+  .login-modal-link-button.is-active {
+    color: var(--text);
+    background: var(--border-faint);
+  }
+
+  .login-modal-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border-overlay);
+  }
+
+  .login-modal-cancel {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: 34px;
+    margin-bottom: 8px;
+    padding: 0 16px;
+    border-radius: var(--radius-pill);
+    color: var(--text-soft);
+    background: var(--border-faint);
+    border: 1px solid var(--border-overlay);
+  }
+
+  .login-modal-cancel:hover {
+    color: var(--text);
+    background: var(--surface-hover);
   }
 
   .login-modal-toggle {
@@ -1045,6 +1235,15 @@
     .full-player-stage.is-lyrics-layout .full-player-lyric-line {
       font-size: clamp(22px, 7.8vw, 34px);
     }
+  }
+
+  .full-player-stage.is-no-lyric:not(.is-player-type-fullscreen):not(.is-comment-visible) {
+    grid-template-areas: none;
+    grid-template-rows: none;
+    height: calc(100% - 160px);
+    min-height: 0;
+    padding: 0 clamp(24px, 3vw, 44px);
+    overflow: hidden;
   }
 
   /* ============================================================

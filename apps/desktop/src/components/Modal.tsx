@@ -11,7 +11,10 @@ interface ModalProps {
   closeAriaLabel?: string;
   children: JSX.Element;
   footer?: JSX.Element;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "directory" | "login";
+  closeOnBackdrop?: boolean;
+  closeOnEscape?: boolean;
+  hideHeader?: boolean;
 }
 
 /**
@@ -30,7 +33,7 @@ export function Modal(props: ModalProps) {
     }
 
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && props.closeOnEscape !== false) {
         props.onClose();
       }
     };
@@ -74,22 +77,30 @@ export function Modal(props: ModalProps) {
           aria-modal="true"
           aria-label={props.title}
           onMouseDown={(event) => {
-            if (props.open && event.target === event.currentTarget) props.onClose();
+            if (
+              props.open &&
+              props.closeOnBackdrop !== false &&
+              event.target === event.currentTarget
+            ) {
+              props.onClose();
+            }
           }}
         >
           <div class={`modal-card modal-card-size-${size()}`}>
-            <header class="modal-card-header">
-              <h3 class="modal-card-title">{props.title}</h3>
-              <button
-                type="button"
-                class="modal-card-close"
-                aria-label={closeLabel()}
-                title={closeLabel()}
-                onClick={props.onClose}
-              >
-                <IconClose />
-              </button>
-            </header>
+            <Show when={!props.hideHeader}>
+              <header class="modal-card-header">
+                <h3 class="modal-card-title">{props.title}</h3>
+                <button
+                  type="button"
+                  class="modal-card-close"
+                  aria-label={closeLabel()}
+                  title={closeLabel()}
+                  onClick={props.onClose}
+                >
+                  <IconClose />
+                </button>
+              </header>
+            </Show>
             <div class="modal-card-body">{props.children}</div>
             <Show when={props.footer}>
               {(footer) => <footer class="modal-card-footer">{footer()}</footer>}

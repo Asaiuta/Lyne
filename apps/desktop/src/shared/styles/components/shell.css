@@ -710,9 +710,12 @@
     max-width: 208px;
     min-height: 44px;
     padding: 0 12px 0 4px;
+    border: 0;
     border-radius: var(--radius-pill);
     background: var(--surface-hover);
+    color: inherit;
     cursor: pointer;
+    font: inherit;
     transition:
       background-color var(--duration-fast) var(--ease-standard),
       color var(--duration-fast) var(--ease-standard);

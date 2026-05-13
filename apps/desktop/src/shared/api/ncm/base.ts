@@ -5,6 +5,7 @@ export interface NcmRequestOptions {
   params?: Record<string, string | number | boolean | null | undefined>;
   data?: object | undefined;
   noCache?: boolean;
+  allowErrorCodes?: readonly number[];
   /**
    * Per-request cookie override for login validation flows. `undefined`
    * lets the Rust proxy inject the active backend-owned cookie. A non-empty
@@ -128,7 +129,7 @@ export const requestNcm = async <T = unknown>(
   const json = (await response.json()) as unknown;
   const envelope = parseNcmEnvelope<T>(json);
   const code = typeof envelope.code === "number" ? envelope.code : null;
-  if (code !== null && code >= 400) {
+  if (code !== null && code >= 400 && !options.allowErrorCodes?.includes(code)) {
     throw new Error(typeof envelope.msg === "string" ? envelope.msg : `NCM request failed: ${code}`);
   }
   return envelope;

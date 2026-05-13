@@ -7,23 +7,22 @@ import {
 } from "solid-js";
 import { Modal } from "./Modal";
 import { SegmentedTabs } from "./page/SegmentedTabs";
+import { IconClose, IconLogo } from "./icons";
 import {
-  buildNcmAccountFromStatus,
   useNcmAccount,
   type NcmAccountInput
 } from "../shared/state/NcmAccountContext";
 import {
-  checkLoginQr,
-  createLoginQr,
-  getLoginQrKey,
-  getLoginStatusWithCookie,
   loginCellphone,
   sentCaptcha,
   userDetail
 } from "../shared/api/ncm";
 import { useTranslation } from "../shared/i18n";
+import { completeNcmLogin } from "../shared/state/ncmLoginCompletion";
+import { useQrLoginSession } from "./login/useQrLoginSession";
 
-type LoginTab = "qr" | "phone" | "uid" | "cookie";
+type LoginTab = "qr" | "phone";
+type SpecialLoginMode = "uid" | "cookie" | null;
 type Tone = "neutral" | "success" | "error";
 
 interface LoginModalProps {
@@ -31,7 +30,6 @@ interface LoginModalProps {
   onClose: () => void;
 }
 
-const QR_POLL_INTERVAL_MS = 2000;
 const CAPTCHA_RESEND_SECONDS = 60;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -45,12 +43,6 @@ const readString = (value: unknown): string | null =>
 
 const readErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-interface QrSession {
-  key: string;
-  imageUrl: string | null;
-  phase: "creating" | "waiting" | "scanned" | "confirmed";
-}
 
 /**
  * Multi-tab login dialog. Each tab captures a session cookie via a
@@ -70,13 +62,43 @@ export function LoginModal(props: LoginModalProps) {
   const { t } = useTranslation();
   const accountStore = useNcmAccount();
   const [activeTab, setActiveTab] = createSignal<LoginTab>("qr");
+  const [specialMode, setSpecialMode] = createSignal<SpecialLoginMode>(null);
   const [feedback, setFeedback] = createSignal<{ tone: Tone; message: string } | null>(null);
+
+  const onCookieCaptured = async (cookie: string, primaryEnvelope?: unknown): Promise<void> => {
+    const account = await completeNcmLogin({
+      cookie,
+      primaryEnvelope,
+      upsertAccount: accountStore.upsertAccount
+    });
+    if (!account) {
+      throw new Error(t("ncm.loginModal.error.cookieInvalid"));
+    }
+
+    setFeedback({
+      tone: "success",
+      message: t("ncm.loginModal.success.signedIn", {
+        name: account.nickname ?? account.userId
+      })
+    });
+    props.onClose();
+  };
+
+  const qrLogin = useQrLoginSession({
+    enabled: () => props.open && activeTab() === "qr",
+    missingQrMessage: t("ncm.loginModal.error.qrKeyMissing"),
+    expiredMessage: t("ncm.loginModal.qr.status.expired"),
+    sessionFailedMessage: (reason) =>
+      t("ncm.loginModal.error.qrSessionFailed", { reason }),
+    onFeedback: setFeedback,
+    onCookieCaptured
+  });
 
   // Reset state every time the dialog opens.
   createEffect(() => {
     if (!props.open) {
       setFeedback(null);
-      setQrSession(null);
+      qrLogin.reset();
       setPhoneCountryCode("86");
       setPhoneNumber("");
       setPhoneCaptcha("");
@@ -89,97 +111,15 @@ export function LoginModal(props: LoginModalProps) {
       setIsSubmittingUid(false);
       setCookieValue("");
       setIsSubmittingCookie(false);
-      setIsCreatingQr(false);
       setActiveTab("qr");
+      setSpecialMode(null);
     }
   });
 
   const tabs = createMemo(() => [
     { value: "qr", label: t("ncm.loginModal.tab.qr") },
-    { value: "phone", label: t("ncm.loginModal.tab.phone") },
-    { value: "uid", label: t("ncm.loginModal.tab.uid") },
-    { value: "cookie", label: t("ncm.loginModal.tab.cookie") }
+    { value: "phone", label: t("ncm.loginModal.tab.phone") }
   ]);
-
-  // ----- QR tab -----
-  const [qrSession, setQrSession] = createSignal<QrSession | null>(null);
-  const [isCreatingQr, setIsCreatingQr] = createSignal(false);
-
-  const startQrSession = async () => {
-    setIsCreatingQr(true);
-    try {
-      const keyResponse = await getLoginQrKey();
-      const key =
-        readString(isRecord(keyResponse.data) ? keyResponse.data.unikey : null) ??
-        readString(keyResponse.unikey);
-      if (!key) {
-        throw new Error(t("ncm.loginModal.error.qrKeyMissing"));
-      }
-      const qrResponse = await createLoginQr(key, true);
-      const data = isRecord(qrResponse.data) ? qrResponse.data : null;
-      const imageUrl = readString(data?.qrimg) ?? readString(data?.qrurl);
-      setQrSession({ key, imageUrl, phase: "waiting" });
-      setFeedback(null);
-    } catch (error) {
-      setFeedback({ tone: "error", message: readErrorMessage(error) });
-    } finally {
-      setIsCreatingQr(false);
-    }
-  };
-
-  // Poll /login/qr/check every 2s while a session is active. The proxy mirrors
-  // any Set-Cookie back into body.cookie when code === 803 (login confirmed).
-  createEffect(() => {
-    const session = qrSession();
-    if (!session || session.phase === "confirmed") return;
-
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await checkLoginQr(session.key);
-        if (cancelled) return;
-        const code = readNumber(response.code);
-        if (code === 800) {
-          setQrSession(null);
-          setFeedback({
-            tone: "error",
-            message: t("ncm.loginModal.qr.status.expired")
-          });
-          return;
-        }
-        if (code === 801) {
-          setQrSession((current) => (current ? { ...current, phase: "waiting" } : current));
-          return;
-        }
-        if (code === 802) {
-          setQrSession((current) => (current ? { ...current, phase: "scanned" } : current));
-          return;
-        }
-        if (code === 803) {
-          // Proxy injected the joined cookie string into body.cookie.
-          const cookie = readString(response.cookie) ?? "";
-          if (!cookie) {
-            throw new Error(t("ncm.loginModal.error.qrKeyMissing"));
-          }
-          await onCookieCaptured(cookie);
-          setQrSession((current) => (current ? { ...current, phase: "confirmed" } : current));
-          return;
-        }
-      } catch (error) {
-        if (cancelled) return;
-        setQrSession(null);
-        setFeedback({
-          tone: "error",
-          message: t("ncm.loginModal.error.qrSessionFailed", { reason: readErrorMessage(error) })
-        });
-      }
-    }, QR_POLL_INTERVAL_MS);
-
-    onCleanup(() => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    });
-  });
 
   // ----- Phone tab -----
   const [phoneCountryCode, setPhoneCountryCode] = createSignal("86");
@@ -317,13 +257,14 @@ export function LoginModal(props: LoginModalProps) {
     try {
       // Validate the cookie before storing it so we don't pollute the backend
       // account store with a dud. The cookie is sent only for this probe.
-      const probe = await getLoginStatusWithCookie(cookie);
-      const account = buildNcmAccountFromStatus(probe, cookie);
+      const account = await completeNcmLogin({
+        cookie,
+        upsertAccount: accountStore.upsertAccount
+      });
       if (!account) {
         setFeedback({ tone: "error", message: t("ncm.loginModal.error.cookieInvalid") });
         return;
       }
-      await accountStore.upsertAccount(account);
       setFeedback({
         tone: "success",
         message: t("ncm.loginModal.success.signedIn", {
@@ -338,57 +279,26 @@ export function LoginModal(props: LoginModalProps) {
     }
   };
 
-  /**
-   * Shared completion path for QR + phone logins. Uses the just-captured
-   * cookie only for validation when needed, then hands it to Rust storage.
-   * Subsequent NCM calls use the backend-owned active session.
-   */
-  const onCookieCaptured = async (cookie: string, primaryEnvelope?: unknown): Promise<void> => {
-    if (!cookie) {
-      throw new Error(t("ncm.loginModal.error.cookieInvalid"));
-    }
-
-    // Try the response we already have first — loginCellphone returns
-    // account+profile inline, and the proxy mirrors the joined cookie into
-    // the body when Set-Cookie is present.
-    let account: NcmAccountInput | null = primaryEnvelope
-      ? buildNcmAccountFromStatus(primaryEnvelope, cookie)
-      : null;
-
-    // Fallback: probe /login/status with the captured cookie as a per-request
-    // override. Do not use the active backend session here; it may still point
-    // at the previous account.
-    if (!account) {
-      const probe = await getLoginStatusWithCookie(cookie);
-      account = buildNcmAccountFromStatus(probe, cookie);
-    }
-
-    if (!account) {
-      throw new Error(t("ncm.loginModal.error.cookieInvalid"));
-    }
-
-    await accountStore.upsertAccount(account);
-    setFeedback({
-      tone: "success",
-      message: t("ncm.loginModal.success.signedIn", {
-        name: account.nickname ?? account.userId
-      })
-    });
-    props.onClose();
-  };
-
   return (
     <Modal
       open={props.open}
       onClose={props.onClose}
       title={t("ncm.loginModal.title")}
-      size="md"
+      size="login"
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+      hideHeader
     >
       <div class="login-modal-body">
-        <p class="panel-note">{t("ncm.loginModal.subtitle")}</p>
+        <div class="login-modal-logo" aria-hidden="true">
+          <IconLogo />
+        </div>
         <SegmentedTabs
           value={activeTab()}
-          onChange={(next) => setActiveTab(next as LoginTab)}
+          onChange={(next) => {
+            setSpecialMode(null);
+            setActiveTab(next as LoginTab);
+          }}
           items={tabs()}
           ariaLabel={t("ncm.loginModal.tabs.aria")}
         />
@@ -405,29 +315,53 @@ export function LoginModal(props: LoginModalProps) {
         </Show>
 
         <Show when={activeTab() === "qr"}>
-          <section class="login-modal-section">
-            <p class="panel-note">{t("ncm.loginModal.qr.hint")}</p>
+          <section class="login-modal-section" hidden={specialMode() !== null}>
             <div class="login-modal-qr">
               <Show
-                when={qrSession()?.imageUrl}
+                when={qrLogin.session()?.imageUrl}
                 fallback={
                   <div class="login-modal-qr-placeholder">
-                    {isCreatingQr()
+                    {qrLogin.isCreating()
                       ? t("ncm.loginModal.qr.status.creating")
                       : t("ncm.loginModal.qr.status.idle")}
                   </div>
                 }
               >
                 {(imageUrl) => (
-                  <img
-                    src={imageUrl()}
-                    alt={t("ncm.login.qr.alt")}
-                    class="login-modal-qr-image"
-                  />
+                  <div
+                    class={`login-modal-qr-frame${qrLogin.session()?.phase === "scanned" ? " is-scanned" : ""}`}
+                  >
+                    <img
+                      src={imageUrl()}
+                      alt={t("ncm.login.qr.alt")}
+                      class="login-modal-qr-image"
+                    />
+                    <Show when={qrLogin.session()?.phase === "scanned"}>
+                      <div class="login-modal-scan-user">
+                        <Show
+                          when={qrLogin.session()?.avatarUrl}
+                          fallback={
+                            <div class="login-modal-scan-avatar">
+                              <IconLogo />
+                            </div>
+                          }
+                        >
+                          {(avatarUrl) => (
+                            <img
+                              src={`${avatarUrl().replace(/^http:/, "https:")}?param=100y100`}
+                              alt=""
+                              class="login-modal-scan-avatar"
+                            />
+                          )}
+                        </Show>
+                        <span>{qrLogin.session()?.nickname ?? t("ncm.loginModal.qr.status.scanned")}</span>
+                      </div>
+                    </Show>
+                  </div>
                 )}
               </Show>
               <div class="login-modal-qr-status">
-                <Show when={qrSession()}>
+                <Show when={qrLogin.session()}>
                   {(session) => (
                     <span>
                       {session().phase === "scanned"
@@ -441,11 +375,11 @@ export function LoginModal(props: LoginModalProps) {
               </div>
               <button
                 type="button"
-                class="primary-button"
-                onClick={() => void startQrSession()}
-                disabled={isCreatingQr()}
+                class="login-modal-regenerate"
+                onClick={() => void qrLogin.start()}
+                disabled={qrLogin.isCreating()}
               >
-                {qrSession()
+                {qrLogin.session()
                   ? t("ncm.loginModal.qr.action.regenerate")
                   : t("ncm.loginModal.qr.action.start")}
               </button>
@@ -454,7 +388,7 @@ export function LoginModal(props: LoginModalProps) {
         </Show>
 
         <Show when={activeTab() === "phone"}>
-          <section class="login-modal-section">
+          <section class="login-modal-section" hidden={specialMode() !== null}>
             <form
               class="login-modal-form"
               onSubmit={(event) => {
@@ -547,7 +481,7 @@ export function LoginModal(props: LoginModalProps) {
 
               <button
                 type="submit"
-                class="primary-button"
+                class="primary-button login-modal-submit"
                 disabled={isSubmittingPhone()}
               >
                 {isSubmittingPhone()
@@ -558,9 +492,9 @@ export function LoginModal(props: LoginModalProps) {
           </section>
         </Show>
 
-        <Show when={activeTab() === "uid"}>
-          <section class="login-modal-section">
-            <p class="panel-note">{t("ncm.loginModal.uid.hint")}</p>
+        <Show when={specialMode() === "uid"}>
+          <section class="login-modal-section login-modal-special">
+            <div class="login-modal-help">{t("ncm.loginModal.uid.hint")}</div>
             <form
               class="login-modal-form"
               onSubmit={(event) => {
@@ -581,7 +515,7 @@ export function LoginModal(props: LoginModalProps) {
               </label>
               <button
                 type="submit"
-                class="primary-button"
+                class="primary-button login-modal-submit"
                 disabled={isSubmittingUid()}
               >
                 {isSubmittingUid()
@@ -592,9 +526,9 @@ export function LoginModal(props: LoginModalProps) {
           </section>
         </Show>
 
-        <Show when={activeTab() === "cookie"}>
-          <section class="login-modal-section">
-            <p class="panel-note">{t("ncm.loginModal.cookie.hint")}</p>
+        <Show when={specialMode() === "cookie"}>
+          <section class="login-modal-section login-modal-special">
+            <div class="login-modal-help">{t("ncm.loginModal.cookie.hint")}</div>
             <form
               class="login-modal-form"
               onSubmit={(event) => {
@@ -614,7 +548,7 @@ export function LoginModal(props: LoginModalProps) {
               </label>
               <button
                 type="submit"
-                class="primary-button"
+                class="primary-button login-modal-submit"
                 disabled={isSubmittingCookie()}
               >
                 {isSubmittingCookie()
@@ -624,6 +558,31 @@ export function LoginModal(props: LoginModalProps) {
             </form>
           </section>
         </Show>
+
+        <div class="login-modal-other">
+          <button
+            type="button"
+            class="login-modal-link-button"
+            classList={{ "is-active": specialMode() === "uid" }}
+            onClick={() => setSpecialMode(specialMode() === "uid" ? null : "uid")}
+          >
+            {t("ncm.loginModal.tab.uid")}
+          </button>
+          <span class="login-modal-divider" aria-hidden="true" />
+          <button
+            type="button"
+            class="login-modal-link-button"
+            classList={{ "is-active": specialMode() === "cookie" }}
+            onClick={() => setSpecialMode(specialMode() === "cookie" ? null : "cookie")}
+          >
+            {t("ncm.loginModal.tab.cookie")}
+          </button>
+        </div>
+
+        <button type="button" class="login-modal-cancel" onClick={props.onClose}>
+          <IconClose />
+          {t("ncm.loginModal.action.cancel")}
+        </button>
       </div>
     </Modal>
   );

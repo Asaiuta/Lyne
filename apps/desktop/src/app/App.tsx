@@ -1,7 +1,8 @@
-import { Match, Switch } from "solid-js";
+import { Match, Switch, createSignal } from "solid-js";
 import { AppShell } from "../components/AppShell";
 import { BackgroundLayer } from "../components/BackgroundLayer";
 import { FullPlayer } from "../components/FullPlayer";
+import { LoginModal } from "../components/LoginModal";
 import { PageTransition } from "../components/PageTransition";
 import { PlayerBar } from "../components/PlayerBar";
 import { Sidebar } from "../components/Sidebar";
@@ -16,6 +17,7 @@ import { QueueDrawer } from "../features/queue/QueueDrawer";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { createApiClient } from "../shared/api/client";
 import { useTranslation } from "../shared/i18n";
+import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import { UISearchProvider } from "../shared/state/UISearchContext";
 import { useAppController } from "./useAppController";
 
@@ -24,12 +26,16 @@ const api = createApiClient();
 function AppContent() {
   const controller = useAppController(api);
   const { td } = useTranslation();
+  const accountStore = useNcmAccount();
+  const [isNcmLoginOpen, setIsNcmLoginOpen] = createSignal<boolean>(false);
   const refreshPlayback = async (expectedPath?: string | null) => {
     await Promise.all([
       controller.refreshState(expectedPath),
       controller.refreshQueue()
     ]);
   };
+  const requireNcmLogin = () => setIsNcmLoginOpen(true);
+  const isNcmLoggedIn = () => accountStore.activeAccount() !== null;
 
   return (
     <>
@@ -41,6 +47,8 @@ function AppContent() {
               onChange={controller.handleActivePageChange}
               selectedPlaylistId={controller.selectedPlaylistId()}
               onSelectPlaylist={controller.handleSidebarPlaylistSelect}
+              isNcmLoggedIn={isNcmLoggedIn()}
+              onRequireNcmLogin={requireNcmLogin}
             />
           }
           topNav={
@@ -51,6 +59,7 @@ function AppContent() {
               onGoBack={controller.handleGoBack}
               onGoForward={controller.handleGoForward}
               onOpenSettings={() => controller.setSettingsOpen(true)}
+              onRequireNcmLogin={requireNcmLogin}
               windowControls={<WindowControls visible={controller.uiSettings.customChrome} />}
             />
           }
@@ -142,6 +151,7 @@ function AppContent() {
                     onNavigate={controller.handleActivePageChange}
                     onNavigateToDiscover={controller.handleNavigateToDiscover}
                     discoverTabRequest={controller.discoverTabRequest()}
+                    onRequireNcmLogin={requireNcmLogin}
                   />
                 </Match>
                 <Match when={displayedPage() === "recent"}>
@@ -162,6 +172,7 @@ function AppContent() {
                     currentSongId={controller.currentNcmSongId()}
                     isPlaying={Boolean(controller.player()?.is_playing)}
                     onRegisterPlayback={controller.registerNcmPlayback}
+                    onRequireNcmLogin={requireNcmLogin}
                   />
                 </Match>
                 <Match when={displayedPage() === "radio"}>
@@ -228,6 +239,7 @@ function AppContent() {
           onClose={() => controller.setSettingsOpen(false)}
           onStateRefresh={controller.refreshState}
         />
+        <LoginModal open={isNcmLoginOpen()} onClose={() => setIsNcmLoginOpen(false)} />
       </UISearchProvider>
     </>
   );

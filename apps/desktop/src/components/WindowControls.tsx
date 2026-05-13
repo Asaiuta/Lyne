@@ -13,17 +13,25 @@ interface WindowControlsProps {
  */
 export function WindowControls(props: WindowControlsProps) {
   const { t } = useTranslation();
+  const [appWindow, setAppWindow] = createSignal<ReturnType<typeof getCurrentWindow> | null>(null);
   const [maximized, setMaximized] = createSignal(false);
   let unlisten: (() => void) | undefined;
 
   onMount(() => {
-    const appWindow = getCurrentWindow();
-    void appWindow.onResized(() => {
-      void appWindow.isMaximized().then(setMaximized);
+    let currentWindow: ReturnType<typeof getCurrentWindow>;
+    try {
+      currentWindow = getCurrentWindow();
+    } catch {
+      return;
+    }
+
+    setAppWindow(currentWindow);
+    void currentWindow.onResized(() => {
+      void currentWindow.isMaximized().then(setMaximized);
     }).then((fn) => {
       unlisten = fn;
     });
-    void appWindow.isMaximized().then(setMaximized);
+    void currentWindow.isMaximized().then(setMaximized);
   });
 
   onCleanup(() => {
@@ -31,19 +39,19 @@ export function WindowControls(props: WindowControlsProps) {
   });
 
   const handleMinimize = () => {
-    void getCurrentWindow().minimize();
+    void appWindow()?.minimize();
   };
 
   const handleToggleMaximize = () => {
-    void getCurrentWindow().toggleMaximize();
+    void appWindow()?.toggleMaximize();
   };
 
   const handleClose = () => {
-    void getCurrentWindow().close();
+    void appWindow()?.close();
   };
 
   return (
-    <Show when={props.visible}>
+    <Show when={props.visible && appWindow() !== null}>
       <div class="window-controls" data-no-drag>
         <button
           type="button"

@@ -1,7 +1,6 @@
 import { Match, Show, Switch, createMemo, createSignal, onMount } from "solid-js";
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
-import { LoginModal } from "../../components/LoginModal";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { useUISearch } from "../../shared/state/UISearchContext";
 import type { NcmTrackReference } from "./ncmPlayback";
@@ -30,6 +29,7 @@ interface NeteasePageProps {
   onNavigate?: (page: "recommend" | "discover") => void;
   onNavigateToDiscover?: (tab: string) => void;
   discoverTabRequest?: { tab: string; version: number };
+  onRequireNcmLogin: () => void;
 }
 
 export function NeteasePage(props: NeteasePageProps) {
@@ -39,7 +39,6 @@ export function NeteasePage(props: NeteasePageProps) {
 
   const [isCheckingLogin, setIsCheckingLogin] = createSignal(false);
   const [isLoginBusy, setIsLoginBusy] = createSignal(false);
-  const [isLoginModalOpen, setIsLoginModalOpen] = createSignal(false);
   const [feedback, setFeedback] = createSignal<Feedback>({ tone: "neutral", message: t("ncm.feedback.initial") });
   const [pendingDiscoverSearch, setPendingDiscoverSearch] = createSignal(false);
 
@@ -80,10 +79,6 @@ export function NeteasePage(props: NeteasePageProps) {
   onMount(() => {
     void refreshLoginStatus();
   });
-
-  const beginLogin = () => {
-    setIsLoginModalOpen(true);
-  };
 
   const handleLogout = async () => {
     setIsLoginBusy(true);
@@ -150,7 +145,7 @@ export function NeteasePage(props: NeteasePageProps) {
             loginProfile={loginProfile}
             isCheckingLogin={isCheckingLogin}
             isLoginBusy={isLoginBusy}
-            onBeginLogin={beginLogin}
+            onBeginLogin={props.onRequireNcmLogin}
             setFeedback={setRawFeedback}
             playback={playback}
             currentTrackPath={props.currentTrackPath}
@@ -163,7 +158,7 @@ export function NeteasePage(props: NeteasePageProps) {
             loginProfile={loginProfile}
             isCheckingLogin={isCheckingLogin}
             isLoginBusy={isLoginBusy}
-            onBeginLogin={beginLogin}
+            onBeginLogin={props.onRequireNcmLogin}
             onLogout={handleLogout}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
@@ -179,7 +174,7 @@ export function NeteasePage(props: NeteasePageProps) {
             loginProfile={loginProfile}
             isCheckingLogin={isCheckingLogin}
             isLoginBusy={isLoginBusy}
-            onBeginLogin={beginLogin}
+            onBeginLogin={props.onRequireNcmLogin}
             onLogout={handleLogout}
             selectedPlaylistId={props.selectedPlaylistId ?? null}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
@@ -202,7 +197,6 @@ export function NeteasePage(props: NeteasePageProps) {
         </section>
       </Show>
 
-      <LoginModal open={isLoginModalOpen()} onClose={() => setIsLoginModalOpen(false)} />
     </div>
   );
 }

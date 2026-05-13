@@ -1,4 +1,8 @@
-import { requestNcm, type NcmResponseEnvelope } from "./base";
+import {
+  requestNcm,
+  type NcmRequestOptions,
+  type NcmResponseEnvelope
+} from "./base";
 
 export interface NcmQrKeyData {
   unikey?: string;
@@ -52,24 +56,35 @@ export interface NcmLoginCellphoneParams {
   countrycode?: string;
 }
 
-export const getLoginQrKey = () =>
-  requestNcm<NcmQrKeyData>("login/qr/key", {
+const QR_CHECK_TERMINAL_CODES = [800, 803] as const;
+
+const requestAnonymousLogin = <T = unknown>(
+  endpoint: string,
+  options: Omit<NcmRequestOptions, "method" | "cookieOverride" | "noCache"> = {}
+): Promise<NcmResponseEnvelope<T>> =>
+  requestNcm<T>(endpoint, {
+    ...options,
     method: "POST",
+    params: {
+      ...(options.params ?? {}),
+      noCookie: true
+    },
+    cookieOverride: "",
     noCache: true
   });
 
+export const getLoginQrKey = () =>
+  requestAnonymousLogin<NcmQrKeyData>("login/qr/key");
+
 export const createLoginQr = (key: string, qrimg = true) =>
-  requestNcm<NcmQrCreateData>("login/qr/create", {
-    method: "POST",
-    params: { key, qrimg },
-    noCache: true
+  requestAnonymousLogin<NcmQrCreateData>("login/qr/create", {
+    params: { key, qrimg }
   });
 
 export const checkLoginQr = (key: string) =>
-  requestNcm("login/qr/check", {
-    method: "POST",
+  requestAnonymousLogin("login/qr/check", {
     params: { key },
-    noCache: true
+    allowErrorCodes: QR_CHECK_TERMINAL_CODES
   });
 
 export const getLoginStatus = () =>

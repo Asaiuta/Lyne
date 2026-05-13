@@ -98,6 +98,14 @@ const SECTIONS: ReadonlyArray<NavSection> = [
 const STORAGE_KEY = "ui.sidebar.collapsed";
 const SECTIONS_STORAGE_KEY = "ui.sidebar.collapsedSections";
 const NARROW_BREAKPOINT = 980;
+const LOGIN_REQUIRED_PAGES = new Set<ActivePage>([
+  "personal-fm",
+  "liked-songs",
+  "liked",
+  "cloud",
+  "created-playlists",
+  "collected-playlists"
+]);
 
 const SIDEBAR_SETTING_KEY_BY_PAGE: Record<ActivePage, SidebarHiddenItemKey> = {
   recommend: "recommend",
@@ -141,6 +149,8 @@ interface SidebarProps {
   onChange: (page: ActivePage) => void;
   selectedPlaylistId?: number | null;
   onSelectPlaylist?: (page: UserPlaylistMode, playlistId: number) => void;
+  isNcmLoggedIn: boolean;
+  onRequireNcmLogin: () => void;
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -236,7 +246,17 @@ export function Sidebar(props: SidebarProps) {
   );
   const playlistItemsForSection = (sectionKey: string): OnlinePlaylistSummary[] =>
     sectionKey === "created" ? createdPlaylists() : sectionKey === "collected" ? collectedPlaylists() : [];
+  const canOpenPage = (page: ActivePage): boolean => {
+    if (props.isNcmLoggedIn || !LOGIN_REQUIRED_PAGES.has(page)) return true;
+    props.onRequireNcmLogin();
+    return false;
+  };
+  const handleNavItemClick = (page: ActivePage) => {
+    if (!canOpenPage(page)) return;
+    props.onChange(page);
+  };
   const handlePlaylistSelect = (page: UserPlaylistMode, playlistId: number) => {
+    if (!canOpenPage(page)) return;
     props.onSelectPlaylist?.(page, playlistId);
   };
 
@@ -302,7 +322,7 @@ export function Sidebar(props: SidebarProps) {
                                   <button
                                     type="button"
                                     class={`sidebar-nav-item${isActive() ? " is-active" : ""}`}
-                                    onClick={() => props.onChange(item.key)}
+                                    onClick={() => handleNavItemClick(item.key)}
                                     aria-current={isActive() ? "page" : undefined}
                                     title={collapsed() ? label() : undefined}
                                   >

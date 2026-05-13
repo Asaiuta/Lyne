@@ -20,6 +20,7 @@ interface TopNavProps {
   onGoBack: () => void;
   onGoForward: () => void;
   onOpenSettings: () => void;
+  onRequireNcmLogin: () => void;
   windowControls?: JSX.Element;
 }
 
@@ -72,6 +73,11 @@ export function TopNav(props: TopNavProps) {
     }
     submitSearch();
     setHistoryOpen(false);
+  };
+  const handleAccountClick = () => {
+    if (account() === null) {
+      props.onRequireNcmLogin();
+    }
   };
 
   return (
@@ -160,7 +166,12 @@ export function TopNav(props: TopNavProps) {
       </div>
 
       <div class="top-nav-group top-nav-actions" data-no-drag>
-        <div class="top-nav-account" aria-label={t("nav.account.aria", { name: accountName() })}>
+        <button
+          type="button"
+          class="top-nav-account"
+          aria-label={t("nav.account.aria", { name: accountName() })}
+          onClick={handleAccountClick}
+        >
           <span class="top-nav-account-avatar" aria-hidden="true">
             <Show when={accountAvatar()} fallback={<IconArtist />}>
               {(avatar) => <img src={avatar()} alt="" />}
@@ -172,7 +183,7 @@ export function TopNav(props: TopNavProps) {
           <span class="top-nav-account-badge">
             <IconChevronDown />
           </span>
-        </div>
+        </button>
         <button
           type="button"
           class="top-nav-icon-button"

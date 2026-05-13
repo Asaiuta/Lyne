@@ -1,5 +1,4 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { LoginModal } from "../../components/LoginModal";
 import { MediaList, type MediaContextAction } from "../../components/media/MediaList";
 import {
   IconCloud,
@@ -27,6 +26,7 @@ interface CloudPageProps {
   currentSongId: number | null;
   isPlaying: boolean;
   onRegisterPlayback: (track: NcmTrackReference) => void;
+  onRequireNcmLogin: () => void;
 }
 
 const formatGb = (bytes: number): string => {
@@ -48,7 +48,6 @@ export function CloudPage(props: CloudPageProps) {
   const [maxSizeBytes, setMaxSizeBytes] = createSignal<number>(0);
   const [searchValue, setSearchValue] = createSignal<string>("");
   const [isLoading, setIsLoading] = createSignal<boolean>(false);
-  const [isLoginModalOpen, setIsLoginModalOpen] = createSignal<boolean>(false);
   const [feedback, setFeedback] = createSignal<Feedback>({
     tone: "neutral",
     message: t("ncm.feedback.initial")
@@ -179,11 +178,10 @@ export function CloudPage(props: CloudPageProps) {
                 <strong>{t("ncm.login.title")}</strong>
                 <span class="status-line">{t("ncm.cloud.loginRequired")}</span>
               </div>
-              <button type="button" class="primary-button" onClick={() => setIsLoginModalOpen(true)}>
+              <button type="button" class="primary-button" onClick={props.onRequireNcmLogin}>
                 {t("ncm.login.action.qr")}
               </button>
             </section>
-            <LoginModal open={isLoginModalOpen()} onClose={() => setIsLoginModalOpen(false)} />
           </>
         }
       >
