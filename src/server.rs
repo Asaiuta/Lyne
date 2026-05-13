@@ -134,6 +134,7 @@ mod netease;
 mod playback;
 mod settings_handlers;
 mod webdav_handlers;
+mod ws_events;
 mod ws_handlers;
 
 pub mod auth;

@@ -1,3 +1,7 @@
+// Event names mirror the backend registry in `src/server/ws_events.rs`
+// (`event_type::*` / `KNOWN_EVENT_TYPES`). Adding a new event requires
+// updating both sides; `parseWsEvent` returns `null` for unknown types
+// so older frontends remain forward-compatible.
 export type WsEvent =
   | { type: "loading_progress"; progress: number }
   | { type: "load_complete"; file_path: string | null; duration: number }
