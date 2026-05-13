@@ -130,7 +130,7 @@ async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -
 
             if any_set {
                 if let Err(e) = player.set_fir_bands(&gains) {
-                    return HttpResponse::InternalServerError().json(ApiResponse::error(&e));
+                    return internal_server_error_response(e);
                 }
             }
         }
@@ -196,15 +196,15 @@ async fn set_eq_type(
                     if not_implemented_error(&e) {
                         HttpResponse::NotImplemented().json(ApiResponse::error(&e))
                     } else {
-                        HttpResponse::InternalServerError().json(ApiResponse::error(&e))
+                        internal_server_error_response(e)
                     }
                 }
             }
         }
-        _ => HttpResponse::BadRequest().json(ApiResponse::error(&format!(
+        _ => bad_request_response(format!(
             "Unknown EQ type: '{}'. Supported types: IIR, FIR",
             body.eq_type
-        ))),
+        )),
     }
 }
 
@@ -338,8 +338,7 @@ async fn set_dynamic_loudness(
     }
     if let Some(strength) = body.strength {
         if !(0.0..=1.0).contains(&strength) {
-            return HttpResponse::BadRequest()
-                .json(ApiResponse::error("Strength must be between 0.0 and 1.0"));
+            return bad_request_response("Strength must be between 0.0 and 1.0");
         }
         player.set_dynamic_loudness_strength(strength);
     }
@@ -382,16 +381,16 @@ async fn set_noise_shaper_curve(
         "improvede9" => crate::processor::NoiseShaperCurve::ImprovedE9,
         "tpdfonly" => crate::processor::NoiseShaperCurve::TpdfOnly,
         _ => {
-            return HttpResponse::BadRequest().json(ApiResponse::error(&format!(
+            return bad_request_response(format!(
                 "Unknown noise shaper curve '{}'. Supported: Lipshitz5, FWeighted9, ModifiedE9, ImprovedE9, TpdfOnly",
                 body.curve
-            )));
+            ));
         }
     };
 
     let player = data.player.lock();
     if let Err(e) = player.set_noise_shaper_curve(curve) {
-        return HttpResponse::InternalServerError().json(ApiResponse::error(&e));
+        return internal_server_error_response(e);
     }
 
     persist_noise_shaper_config(&data, &player);
@@ -425,9 +424,7 @@ async fn configure_output_bits(
     body: web::Json<SetOutputBitsRequest>,
 ) -> HttpResponse {
     if body.bits != 16 && body.bits != 24 && body.bits != 32 {
-        return HttpResponse::BadRequest().json(ApiResponse::error(
-            "Invalid bit depth. Supported: 16, 24, 32",
-        ));
+        return bad_request_response("Invalid bit depth. Supported: 16, 24, 32");
     }
 
     let player = data.player.lock();

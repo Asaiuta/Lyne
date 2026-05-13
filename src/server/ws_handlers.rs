@@ -73,10 +73,7 @@ async fn websocket(
         Ok(protocol) => protocol,
         Err(_) => {
             log::warn!("WebSocket upgrade rejected: missing or invalid bearer token");
-            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
-                "status": "error",
-                "message": "unauthorized"
-            })));
+            return Ok(unauthorized_response("unauthorized"));
         }
     };
 
