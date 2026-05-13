@@ -1,9 +1,9 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { Modal } from "../../components/Modal";
-import { IconPlaylist, IconPlus } from "../../components/icons";
+import { IconDelete, IconPlaylist, IconPlus } from "../../components/icons";
 import type { LocalPlaylist } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
-import type { LibraryListItem } from "./useLibraryDataController";
+import type { LibraryListItem } from "./libraryDataTypes";
 
 interface LibraryPlaylistTargetModalProps {
   open: boolean;
@@ -25,6 +25,14 @@ interface LibraryConfirmActionModalProps {
   confirmLabel: string;
   onClose: () => void;
   onConfirm: () => Promise<void>;
+}
+
+interface LibraryBatchModalProps {
+  open: boolean;
+  items: readonly LibraryListItem[];
+  onClose: () => void;
+  onAddToPlaylist: (items: readonly LibraryListItem[]) => void;
+  onDeleteFromLibrary: (items: readonly LibraryListItem[]) => void;
 }
 
 export function LibraryPlaylistTargetModal(props: LibraryPlaylistTargetModalProps) {
@@ -140,6 +148,192 @@ export function LibraryPlaylistTargetModal(props: LibraryPlaylistTargetModalProp
             <IconPlus />
             <span>{hasItems() ? t("library.playlists.createAndAdd") : t("library.action.createPlaylist")}</span>
           </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+export function LibraryBatchModal(props: LibraryBatchModalProps) {
+  const { t } = useTranslation();
+  const [checkedIds, setCheckedIds] = createSignal<string[]>([]);
+  const [rangeOpen, setRangeOpen] = createSignal<boolean>(false);
+  const [rangeStart, setRangeStart] = createSignal<string>("");
+  const [rangeEnd, setRangeEnd] = createSignal<string>("");
+
+  createEffect(() => {
+    if (props.open) return;
+    setCheckedIds([]);
+    setRangeOpen(false);
+    setRangeStart("");
+    setRangeEnd("");
+  });
+
+  const checkedSet = createMemo<Set<string>>(() => new Set(checkedIds()));
+  const selectedItems = createMemo<LibraryListItem[]>(() => {
+    const ids = checkedSet();
+    return props.items.filter((item) => ids.has(item.id));
+  });
+  const allChecked = createMemo<boolean>(
+    () => props.items.length > 0 && props.items.every((item) => checkedSet().has(item.id))
+  );
+
+  const displayTitle = (item: LibraryListItem): string =>
+    item.title ?? item.fileName ?? item.source_path ?? item.id;
+  const displayText = (value: string | null | undefined, fallback: string): string => {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : fallback;
+  };
+
+  const toggleItem = (id: string) => {
+    const next = new Set(checkedSet());
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setCheckedIds([...next]);
+  };
+
+  const toggleAll = () => {
+    if (allChecked()) {
+      setCheckedIds([]);
+      return;
+    }
+    setCheckedIds(props.items.map((item) => item.id));
+  };
+
+  const applyRange = () => {
+    const startValue = Number(rangeStart());
+    const endValue = Number(rangeEnd());
+    if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) return;
+    const start = Math.max(1, Math.min(Math.floor(startValue), props.items.length));
+    const end = Math.max(1, Math.min(Math.floor(endValue), props.items.length));
+    if (start > end) return;
+    setCheckedIds(props.items.slice(start - 1, end).map((item) => item.id));
+    setRangeOpen(false);
+  };
+
+  const handleAddToPlaylist = () => {
+    const items = selectedItems();
+    if (items.length === 0) return;
+    props.onAddToPlaylist(items);
+  };
+
+  const handleDelete = () => {
+    const items = selectedItems();
+    if (items.length === 0) return;
+    props.onDeleteFromLibrary(items);
+  };
+
+  return (
+    <Modal
+      open={props.open}
+      title={t("library.batch.title")}
+      closeAriaLabel={t("library.modal.manageRoots.close")}
+      onClose={props.onClose}
+      size="lg"
+    >
+      <div class="local-batch-modal">
+        <div class="local-batch-table" role="table" aria-label={t("library.batch.title")}>
+          <div class="local-batch-row local-batch-head" role="row">
+            <span class="local-batch-cell local-batch-check" role="columnheader">
+              <input
+                type="checkbox"
+                aria-label={t("library.batch.selectAll")}
+                checked={allChecked()}
+                onChange={toggleAll}
+              />
+            </span>
+            <span class="local-batch-cell local-batch-index" role="columnheader">#</span>
+            <span class="local-batch-cell" role="columnheader">{t("media.column.title")}</span>
+            <span class="local-batch-cell" role="columnheader">{t("media.sort.artist")}</span>
+            <span class="local-batch-cell" role="columnheader">{t("media.sort.album")}</span>
+          </div>
+          <div class="local-batch-body" role="rowgroup">
+            <For each={props.items}>
+              {(item, index) => (
+                <label class="local-batch-row" role="row">
+                  <span class="local-batch-cell local-batch-check" role="cell">
+                    <input
+                      type="checkbox"
+                      aria-label={t("media.selection.item", { title: displayTitle(item) })}
+                      checked={checkedSet().has(item.id)}
+                      onChange={() => toggleItem(item.id)}
+                    />
+                  </span>
+                  <span class="local-batch-cell local-batch-index" role="cell">{index() + 1}</span>
+                  <span class="local-batch-cell local-batch-title" role="cell" title={displayTitle(item)}>
+                    {displayTitle(item)}
+                  </span>
+                  <span class="local-batch-cell" role="cell">
+                    {displayText(item.artist, t("library.group.unknownArtist"))}
+                  </span>
+                  <span class="local-batch-cell" role="cell">
+                    {displayText(item.album, t("library.group.unknownAlbum"))}
+                  </span>
+                </label>
+              )}
+            </For>
+          </div>
+        </div>
+        <div class="local-batch-footer">
+          <div class="local-batch-footer-left">
+            <span class="local-batch-count">
+              {t("library.selection.count", { count: selectedItems().length })}
+            </span>
+            <div class="local-batch-range">
+              <button type="button" class="ghost-button" onClick={() => setRangeOpen((open) => !open)}>
+                {t("library.batch.advancedFilter")}
+              </button>
+              <Show when={rangeOpen()}>
+                <div class="local-batch-range-popover">
+                  <input
+                    class="text-input"
+                    type="number"
+                    min="1"
+                    max={props.items.length}
+                    value={rangeStart()}
+                    placeholder={t("library.batch.rangeStart")}
+                    onInput={(event) => setRangeStart(event.currentTarget.value)}
+                  />
+                  <span>-</span>
+                  <input
+                    class="text-input"
+                    type="number"
+                    min="1"
+                    max={props.items.length}
+                    value={rangeEnd()}
+                    placeholder={t("library.batch.rangeEnd")}
+                    onInput={(event) => setRangeEnd(event.currentTarget.value)}
+                  />
+                  <button type="button" class="ghost-button" onClick={applyRange}>
+                    {t("library.batch.rangeSelect")}
+                  </button>
+                </div>
+              </Show>
+            </div>
+          </div>
+          <div class="local-batch-actions">
+            <button
+              type="button"
+              class="primary-button"
+              disabled={selectedItems().length === 0}
+              onClick={handleAddToPlaylist}
+            >
+              <IconPlaylist />
+              <span>{t("library.action.addToPlaylist")}</span>
+            </button>
+            <button
+              type="button"
+              class="primary-button danger-button"
+              disabled={selectedItems().length === 0}
+              onClick={handleDelete}
+            >
+              <IconDelete />
+              <span>{t("library.batch.deleteSongs")}</span>
+            </button>
+          </div>
         </div>
       </div>
     </Modal>

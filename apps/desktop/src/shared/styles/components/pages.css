@@ -209,34 +209,6 @@
     min-height: 0;
   }
 
-  .local-batch-toolbar {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 8px;
-    min-height: 42px;
-    padding: 6px 8px;
-    border: 1px solid var(--border-overlay);
-    border-radius: var(--radius-card);
-    color: var(--text-soft);
-    background: color-mix(in oklch, var(--surface-2) 88%, transparent);
-  }
-
-  .local-batch-count {
-    flex: 1;
-    min-width: 0;
-    padding: 0 8px;
-    color: var(--text);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .local-batch-toolbar .page-action {
-    height: 32px;
-    min-height: 32px;
-    padding-inline: 12px;
-  }
-
   .danger-button {
     color: color-mix(in oklch, var(--danger) 86%, white 14%);
   }
@@ -738,6 +710,238 @@
     font-size: 12px;
   }
 
+  .local-directory-modal {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .local-list-tip {
+    display: block;
+    margin-bottom: 12px;
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1.5;
+    opacity: 0.8;
+  }
+
+  .local-directory-scroll {
+    max-height: 50vh;
+    overflow: auto;
+  }
+
+  .local-directory-list {
+    overflow: hidden;
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-card);
+    background: color-mix(in oklch, var(--surface-1) 84%, transparent);
+  }
+
+  .local-directory-empty {
+    display: grid;
+    min-height: 104px;
+    place-items: center;
+    padding: 20px 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .local-directory-item {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    align-items: center;
+    min-height: 52px;
+    border-bottom: 1px solid var(--border-overlay);
+    color: var(--text);
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .local-directory-item:last-child {
+    border-bottom: 0;
+  }
+
+  .local-directory-item:hover {
+    background: color-mix(in oklch, var(--accent) 8%, transparent);
+  }
+
+  .local-directory-prefix {
+    display: grid;
+    place-items: center;
+    color: var(--text-soft);
+  }
+
+  .local-directory-prefix svg,
+  .local-directory-delete svg,
+  .local-directory-add svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .local-directory-path {
+    min-width: 0;
+    overflow: hidden;
+    padding-right: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+  }
+
+  .local-directory-delete {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: var(--radius-icon-btn);
+    color: var(--text-soft);
+    background: transparent;
+  }
+
+  .local-directory-delete:hover:not(:disabled) {
+    color: var(--danger);
+    background: color-mix(in oklch, var(--danger) 10%, transparent);
+  }
+
+  .local-directory-footer {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+  }
+
+  .local-directory-add {
+    min-height: 36px;
+    padding-inline: 18px;
+  }
+
+  .local-batch-modal {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .local-batch-table {
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-lg);
+    background: color-mix(in oklch, var(--surface-1) 86%, transparent);
+  }
+
+  .local-batch-row {
+    display: grid;
+    grid-template-columns: 48px 72px minmax(180px, 1.35fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr);
+    align-items: center;
+    min-height: 42px;
+    border-bottom: 1px solid var(--border-overlay);
+    color: var(--text-soft);
+    font-size: 13px;
+  }
+
+  .local-batch-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    min-height: 40px;
+    color: var(--muted);
+    background: var(--floating-surface);
+    font-weight: 600;
+  }
+
+  .local-batch-body {
+    max-height: 60vh;
+    overflow: auto;
+  }
+
+  .local-batch-body .local-batch-row {
+    cursor: pointer;
+    transition:
+      color var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .local-batch-body .local-batch-row:hover {
+    color: var(--text);
+    background: color-mix(in oklch, var(--accent) 10%, transparent);
+  }
+
+  .local-batch-body .local-batch-row:last-child {
+    border-bottom: 0;
+  }
+
+  .local-batch-cell {
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .local-batch-check {
+    display: grid;
+    place-items: center;
+    padding: 0;
+  }
+
+  .local-batch-check input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+  }
+
+  .local-batch-index {
+    color: var(--muted);
+  }
+
+  .local-batch-title {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .local-batch-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .local-batch-footer-left,
+  .local-batch-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .local-batch-count {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .local-batch-range {
+    position: relative;
+  }
+
+  .local-batch-range-popover {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 360px;
+    padding: 10px;
+    border: 1px solid var(--floating-border);
+    border-radius: var(--radius-lg);
+    background: var(--floating-surface);
+    box-shadow: var(--floating-shadow);
+  }
+
+  .local-batch-range-popover .text-input {
+    width: 96px;
+  }
+
   .local-playlist-create-inline {
     display: grid;
     gap: 10px;
@@ -798,31 +1002,6 @@
       var(--media-list-size-track);
     align-items: center;
     gap: 0;
-  }
-
-  .media-list-table.is-selectable .media-list-header,
-  .media-list-table.is-selectable .media-row {
-    grid-template-columns:
-      32px
-      40px
-      minmax(220px, 1.55fr)
-      var(--media-list-album-track)
-      var(--media-list-actions-track)
-      var(--media-list-duration-track)
-      var(--media-list-size-track);
-  }
-
-  .media-cell-select {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    min-width: 32px;
-  }
-
-  .media-cell-select input {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--accent);
   }
 
   .media-list-table:has(.media-list-header .media-cell-size:last-child:nth-child(n)) {

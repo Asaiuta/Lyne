@@ -84,8 +84,36 @@ pub fn read_lyric_lines_from_source(lyric: &str, source: &str) -> Vec<LyricLineD
     match source {
         "ttml" => parse_ttml_lyric_text(lyric),
         "yrc" => parse_yrc_lyric_text(lyric),
+        "srt" => parse_srt_lyric_text(lyric),
+        "ass" | "ssa" => parse_ass_lyric_text(lyric),
         _ => parse_timed_lyric_text(lyric),
     }
+}
+
+pub fn read_embedded_lyric_lines(lyric: &str) -> Vec<LyricLineDto> {
+    let timed = parse_timed_lyric_text(lyric);
+    if !timed.is_empty() {
+        return timed;
+    }
+
+    let mut lines = Vec::new();
+    let mut offset = 0.0;
+    for raw_line in lyric.lines() {
+        let text = raw_line.trim();
+        if text.is_empty() || text.starts_with('[') {
+            continue;
+        }
+        lines.push(LyricLineDto {
+            time: offset,
+            end_time: None,
+            text: text.to_string(),
+            translated: None,
+            roman: None,
+            words: None,
+        });
+        offset += 5.0;
+    }
+    lines
 }
 
 fn read_payload_lyric(body: &JsonValue, key: &str) -> Option<String> {
@@ -161,6 +189,29 @@ fn parse_lrc_timestamp(raw_value: &str) -> Option<f64> {
         .then_some(minutes * 60.0 + seconds + fraction)
 }
 
+fn parse_subtitle_timestamp(raw_value: &str) -> Option<f64> {
+    parse_clock_timestamp(&raw_value.trim().replace(',', "."))
+}
+
+fn strip_subtitle_markup(value: &str) -> String {
+    let mut output = String::new();
+    let mut in_override = false;
+    let mut in_angle = false;
+
+    for character in value.chars() {
+        match character {
+            '{' if !in_angle => in_override = true,
+            '}' if in_override => in_override = false,
+            '<' if !in_override => in_angle = true,
+            '>' if in_angle => in_angle = false,
+            _ if !in_override && !in_angle => output.push(character),
+            _ => {}
+        }
+    }
+
+    decode_xml_entities(&output)
+}
+
 fn parse_timed_lyric_text(lyric: &str) -> Vec<LyricLineDto> {
     let mut lines = Vec::new();
     for raw_line in lyric.lines() {
@@ -197,6 +248,89 @@ fn parse_timed_lyric_text(lyric: &str) -> Vec<LyricLineDto> {
             });
         }
     }
+    sort_lines(lines)
+}
+
+fn parse_srt_lyric_text(lyric: &str) -> Vec<LyricLineDto> {
+    let normalized = lyric.replace("\r\n", "\n").replace('\r', "\n");
+    let mut lines = Vec::new();
+
+    for block in normalized.split("\n\n") {
+        let mut block_lines = block.lines().map(str::trim).filter(|line| !line.is_empty());
+        let first = block_lines.next();
+        let timing = match first {
+            Some(line) if line.contains("-->") => Some(line),
+            Some(_) => block_lines.next().filter(|line| line.contains("-->")),
+            None => None,
+        };
+        let Some(timing) = timing else {
+            continue;
+        };
+        let Some((raw_start, raw_end)) = timing.split_once("-->") else {
+            continue;
+        };
+        let Some(start_time) = parse_subtitle_timestamp(raw_start) else {
+            continue;
+        };
+        let end_time = parse_subtitle_timestamp(raw_end.split_whitespace().next().unwrap_or(""));
+        let text = block_lines
+            .map(strip_subtitle_markup)
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        lines.push(LyricLineDto {
+            time: start_time,
+            end_time,
+            text: text.to_string(),
+            translated: None,
+            roman: None,
+            words: None,
+        });
+    }
+
+    sort_lines(lines)
+}
+
+fn parse_ass_lyric_text(lyric: &str) -> Vec<LyricLineDto> {
+    let mut lines = Vec::new();
+
+    for raw_line in lyric.lines() {
+        let line = raw_line.trim();
+        let Some(rest) = line
+            .strip_prefix("Dialogue:")
+            .or_else(|| line.strip_prefix("Comment:"))
+        else {
+            continue;
+        };
+        let fields = rest.splitn(10, ',').map(str::trim).collect::<Vec<_>>();
+        if fields.len() < 10 {
+            continue;
+        }
+        let Some(start_time) = parse_subtitle_timestamp(fields[1]) else {
+            continue;
+        };
+        let end_time = parse_subtitle_timestamp(fields[2]);
+        let text = strip_subtitle_markup(&fields[9].replace("\\N", "\n").replace("\\n", "\n"));
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        lines.push(LyricLineDto {
+            time: start_time,
+            end_time,
+            text: text.to_string(),
+            translated: None,
+            roman: None,
+            words: None,
+        });
+    }
+
     sort_lines(lines)
 }
 
@@ -785,5 +919,42 @@ mod tests {
         assert_eq!(lines[0].translated.as_deref(), Some("你好"));
         assert_eq!(lines[0].roman.as_deref(), Some("ni hao"));
         assert_eq!(lines[0].words.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn parses_srt_sidecar_text() {
+        let lines = read_lyric_lines_from_source(
+            "1\n00:00:01,200 --> 00:00:03,400\n<i>Hello</i>\nworld\n",
+            "srt",
+        );
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time, 1.2);
+        assert_eq!(lines[0].end_time, Some(3.4));
+        assert_eq!(lines[0].text, "Hello\nworld");
+    }
+
+    #[test]
+    fn parses_ass_sidecar_text() {
+        let lines = read_lyric_lines_from_source(
+            "[Events]\nDialogue: 0,0:00:01.20,0:00:03.40,Default,,0,0,0,,{\\an8}Hello\\Nworld",
+            "ass",
+        );
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time, 1.2);
+        assert_eq!(lines[0].end_time, Some(3.4));
+        assert_eq!(lines[0].text, "Hello\nworld");
+    }
+
+    #[test]
+    fn parses_embedded_plain_text_as_displayable_lines() {
+        let lines = read_embedded_lyric_lines("First line\n\n[by:tag]\nSecond line");
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].time, 0.0);
+        assert_eq!(lines[0].text, "First line");
+        assert_eq!(lines[1].time, 5.0);
+        assert_eq!(lines[1].text, "Second line");
     }
 }

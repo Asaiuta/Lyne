@@ -5,6 +5,7 @@ use crate::app_database::{
 };
 use crate::player::{PlayerState, RepeatMode, SharedState, ShuffleMode};
 use crate::playlist;
+use actix_web::http::StatusCode;
 use actix_web::{web, HttpRequest, HttpResponse};
 use ncm_api_rs::Query;
 use serde::Deserialize;
@@ -138,6 +139,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         )
         .route("/domain/current_lyrics", web::get().to(get_current_lyrics))
         .route("/domain/library/roots", web::get().to(get_library_roots))
+        .route(
+            "/domain/library/roots/{root_id}",
+            web::delete().to(delete_library_root),
+        )
         .route("/domain/library/scan", web::post().to(scan_library_root))
         .route(
             "/domain/library/scan_tasks/{task_id}",
@@ -187,6 +192,11 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 #[derive(Deserialize)]
 struct ScanTaskPath {
     task_id: u64,
+}
+
+#[derive(Deserialize)]
+struct LibraryRootPath {
+    root_id: i64,
 }
 
 #[derive(Deserialize)]
@@ -246,6 +256,31 @@ struct LibraryQueueQueryRequest {
 struct LibraryQueueTrackKeysRequest {
     track_keys: Vec<i64>,
     start_track_key: Option<i64>,
+}
+
+type LibraryQueueRow = (i64, String);
+
+struct LibraryQueuePlayback {
+    state: StateResponse,
+    queued_count: usize,
+}
+
+#[derive(Debug)]
+enum LibraryQueueFailure {
+    BadRequest(String),
+    NotFound(String),
+    Internal(String),
+}
+
+impl LibraryQueueFailure {
+    fn into_response(self) -> HttpResponse {
+        let (status, message) = match self {
+            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+            Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
+            Self::Internal(message) => (StatusCode::INTERNAL_SERVER_ERROR, message),
+        };
+        HttpResponse::build(status).json(ApiResponse::error(&message))
+    }
 }
 
 #[derive(Deserialize)]
@@ -687,7 +722,10 @@ fn load_queue_entry_for_playback(
         } else {
             player.load_with_credentials(&entry.source_path, credentials.as_ref())?;
         }
-        (get_enriched_player_state(&player, &data.app_db), player.shared_state())
+        (
+            get_enriched_player_state(&player, &data.app_db),
+            player.shared_state(),
+        )
     };
 
     let media_id = data.app_db.record_media_stub(&entry.source_path);
@@ -767,7 +805,10 @@ pub(super) fn load_validated_path_for_playback(
         } else {
             player.load_with_credentials(path, credentials.as_ref())?;
         }
-        (get_enriched_player_state(&player, &data.app_db), player.shared_state())
+        (
+            get_enriched_player_state(&player, &data.app_db),
+            player.shared_state(),
+        )
     };
 
     let media_id = data.app_db.record_media_stub(path);
@@ -844,7 +885,7 @@ fn current_queue_cursor_path(data: &web::Data<Arc<AppState>>) -> Option<String> 
 
 #[cfg(test)]
 mod tests {
-    use super::same_media_identity;
+    use super::{library_queue_start_index, same_media_identity, LibraryQueueFailure};
 
     #[test]
     fn same_media_identity_normalizes_windows_paths() {
@@ -852,6 +893,42 @@ mod tests {
             r"D:\Music\Artist\Track.FLAC",
             r"\\?\D:\Music\Artist\Track.flac"
         ));
+    }
+
+    #[test]
+    fn library_queue_start_index_defaults_to_first_track() {
+        let rows = vec![
+            (10, "D:/music/a.flac".to_string()),
+            (20, "D:/music/b.flac".to_string()),
+        ];
+
+        let start_index = library_queue_start_index(&rows, None, "missing").unwrap();
+
+        assert_eq!(start_index, 0);
+    }
+
+    #[test]
+    fn library_queue_start_index_finds_requested_track() {
+        let rows = vec![
+            (10, "D:/music/a.flac".to_string()),
+            (20, "D:/music/b.flac".to_string()),
+        ];
+
+        let start_index = library_queue_start_index(&rows, Some(20), "missing").unwrap();
+
+        assert_eq!(start_index, 1);
+    }
+
+    #[test]
+    fn library_queue_start_index_rejects_missing_requested_track() {
+        let rows = vec![(10, "D:/music/a.flac".to_string())];
+
+        let error = library_queue_start_index(&rows, Some(20), "missing track").unwrap_err();
+
+        match error {
+            LibraryQueueFailure::NotFound(message) => assert_eq!(message, "missing track"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
     }
 }
 
@@ -2870,8 +2947,23 @@ fn load_replaced_queue_at_position(
         .app_db
         .queue_entry_at_position("active", start_index as i64)?
         .ok_or_else(|| "Queue entry not found after replacing library queue".to_string())?;
-    let (state, _) = load_queue_entry_for_playback(data, entry, true)?;
+    let (state, _) = load_queue_entry_for_playback(data, entry, true)
+        .map_err(|e| format!("Failed to play queue entry: {}", e))?;
     Ok(state)
+}
+
+fn library_queue_start_index(
+    rows: &[LibraryQueueRow],
+    start_track_key: Option<i64>,
+    missing_start_message: &str,
+) -> Result<usize, LibraryQueueFailure> {
+    match start_track_key {
+        Some(track_key) => rows
+            .iter()
+            .position(|(row_track_key, _)| *row_track_key == track_key)
+            .ok_or_else(|| LibraryQueueFailure::NotFound(missing_start_message.to_string())),
+        None => Ok(0),
+    }
 }
 
 fn validate_library_queue_paths(paths: &[String]) -> Result<Vec<String>, String> {
@@ -2880,6 +2972,39 @@ fn validate_library_queue_paths(paths: &[String]) -> Result<Vec<String>, String>
         validated.push(validate_path(path)?);
     }
     Ok(validated)
+}
+
+fn play_library_queue_rows(
+    data: &web::Data<Arc<AppState>>,
+    rows: &[LibraryQueueRow],
+    start_track_key: Option<i64>,
+    empty_message: &str,
+    missing_start_message: &str,
+) -> Result<LibraryQueuePlayback, LibraryQueueFailure> {
+    if rows.is_empty() {
+        return Err(LibraryQueueFailure::NotFound(empty_message.to_string()));
+    }
+    let start_index = library_queue_start_index(rows, start_track_key, missing_start_message)?;
+    let paths = rows
+        .iter()
+        .map(|(_, source_path)| source_path.clone())
+        .collect::<Vec<_>>();
+    let validated_paths =
+        validate_library_queue_paths(&paths).map_err(LibraryQueueFailure::BadRequest)?;
+    let state = load_replaced_queue_at_position(data, &validated_paths, start_index)
+        .map_err(LibraryQueueFailure::Internal)?;
+    Ok(LibraryQueuePlayback {
+        state,
+        queued_count: validated_paths.len(),
+    })
+}
+
+fn library_queue_playback_response(playback: LibraryQueuePlayback) -> HttpResponse {
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "success",
+        "state": playback.state,
+        "queued_count": playback.queued_count
+    }))
 }
 
 async fn replace_queue_from_library_query(
@@ -2891,38 +3016,15 @@ async fn replace_queue_from_library_query(
         Ok(rows) => rows,
         Err(e) => return HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     };
-    if rows.is_empty() {
-        return HttpResponse::NotFound().json(ApiResponse::error(
-            "No library tracks matched the current view",
-        ));
-    }
-    let start_index = body
-        .start_track_key
-        .and_then(|key| rows.iter().position(|(track_key, _)| *track_key == key))
-        .unwrap_or(0);
-    if body.start_track_key.is_some()
-        && start_index == 0
-        && rows[0].0 != body.start_track_key.unwrap_or(rows[0].0)
-    {
-        return HttpResponse::NotFound().json(ApiResponse::error(
-            "Start track is not in the current library view",
-        ));
-    }
-    let paths = rows
-        .iter()
-        .map(|(_, source_path)| source_path.clone())
-        .collect::<Vec<_>>();
-    let validated_paths = match validate_library_queue_paths(&paths) {
-        Ok(paths) => paths,
-        Err(e) => return HttpResponse::BadRequest().json(ApiResponse::error(&e)),
-    };
-    match load_replaced_queue_at_position(&data, &validated_paths, start_index) {
-        Ok(state) => HttpResponse::Ok().json(serde_json::json!({
-            "status": "success",
-            "state": state,
-            "queued_count": validated_paths.len()
-        })),
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
+    match play_library_queue_rows(
+        &data,
+        &rows,
+        body.start_track_key,
+        "No library tracks matched the current view",
+        "Start track is not in the current library view",
+    ) {
+        Ok(playback) => library_queue_playback_response(playback),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -2937,39 +3039,15 @@ async fn replace_queue_from_track_keys(
         Ok(rows) => rows,
         Err(e) => return HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     };
-    if rows.is_empty() {
-        return HttpResponse::NotFound().json(ApiResponse::error("Library tracks not found"));
-    }
-    let start_index = if let Some(start_track_key) = body.start_track_key {
-        match rows
-            .iter()
-            .position(|(track_key, _)| *track_key == start_track_key)
-        {
-            Some(index) => index,
-            None => {
-                return HttpResponse::NotFound().json(ApiResponse::error(
-                    "Start track is not in the submitted library view",
-                ))
-            }
-        }
-    } else {
-        0
-    };
-    let paths = rows
-        .iter()
-        .map(|(_, source_path)| source_path.clone())
-        .collect::<Vec<_>>();
-    let validated_paths = match validate_library_queue_paths(&paths) {
-        Ok(paths) => paths,
-        Err(e) => return HttpResponse::BadRequest().json(ApiResponse::error(&e)),
-    };
-    match load_replaced_queue_at_position(&data, &validated_paths, start_index) {
-        Ok(state) => HttpResponse::Ok().json(serde_json::json!({
-            "status": "success",
-            "state": state,
-            "queued_count": validated_paths.len()
-        })),
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
+    match play_library_queue_rows(
+        &data,
+        &rows,
+        body.start_track_key,
+        "Library tracks not found",
+        "Start track is not in the submitted library view",
+    ) {
+        Ok(playback) => library_queue_playback_response(playback),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -3256,9 +3334,13 @@ fn local_cover_art_for_media(
 }
 
 async fn get_current_lyrics(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let current_path = {
+    let (current_path, runtime_lyrics) = {
         let player = data.player.lock();
-        player.shared_state().current_track_path.read().clone()
+        let shared = player.shared_state();
+        let current_track_path = shared.current_track_path.read().clone();
+        let file_path = shared.file_path.read().clone();
+        let lyrics = shared.track_metadata.read().lyrics.clone();
+        (current_track_path.or(file_path), lyrics)
     };
 
     let Some(path) = current_path else {
@@ -3277,10 +3359,10 @@ async fn get_current_lyrics(data: web::Data<Arc<AppState>>) -> HttpResponse {
         }));
     }
 
-    match read_sidecar_lyrics(&path) {
-        Ok(Some((lyrics, source))) => HttpResponse::Ok().json(serde_json::json!({
+    match read_current_local_lyrics(&path, runtime_lyrics.as_deref()) {
+        Ok(Some((lyric_lines, source))) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
-            "lyrics": lyrics::read_lyric_lines_from_source(&lyrics, &source),
+            "lyrics": lyric_lines,
             "source": source
         })),
         Ok(None) => HttpResponse::Ok().json(serde_json::json!({
@@ -3290,6 +3372,40 @@ async fn get_current_lyrics(data: web::Data<Arc<AppState>>) -> HttpResponse {
         })),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     }
+}
+
+fn read_current_local_lyrics(
+    path: &str,
+    runtime_lyrics: Option<&str>,
+) -> Result<Option<(Vec<lyrics::LyricLineDto>, String)>, String> {
+    if let Some((lyric_text, source)) = read_sidecar_lyrics(path)? {
+        let lyric_lines = lyrics::read_lyric_lines_from_source(&lyric_text, &source);
+        if !lyric_lines.is_empty() {
+            return Ok(Some((lyric_lines, source)));
+        }
+    }
+
+    if let Some(lyric_lines) = runtime_lyrics.and_then(read_embedded_lyrics_if_present) {
+        return Ok(Some((lyric_lines, "embedded".to_string())));
+    }
+
+    match crate::metadata::read_local_metadata(path) {
+        Ok(local_metadata) => Ok(local_metadata
+            .metadata
+            .lyrics
+            .as_deref()
+            .and_then(read_embedded_lyrics_if_present)
+            .map(|lines| (lines, "embedded".to_string()))),
+        Err(e) => {
+            log::debug!("Embedded lyric metadata read failed for '{}': {}", path, e);
+            Ok(None)
+        }
+    }
+}
+
+fn read_embedded_lyrics_if_present(lyric_text: &str) -> Option<Vec<lyrics::LyricLineDto>> {
+    let lyric_lines = lyrics::read_embedded_lyric_lines(lyric_text);
+    (!lyric_lines.is_empty()).then_some(lyric_lines)
 }
 
 fn read_sidecar_lyrics(path: &str) -> Result<Option<(String, String)>, String> {
@@ -3303,11 +3419,15 @@ fn read_sidecar_lyrics(path: &str) -> Result<Option<(String, String)>, String> {
         None => return Ok(None),
     };
 
-    for extension in ["ttml", "yrc", "lrc"] {
-        let candidate = parent.join(format!("{stem}.{extension}"));
-        if !candidate.is_file() {
+    for extension in ["ttml", "yrc", "lrc", "srt", "ass", "ssa"] {
+        let candidates = [
+            parent.join(format!("{stem}.{extension}")),
+            Path::new(&format!("{path}.{extension}")).to_path_buf(),
+        ];
+
+        let Some(candidate) = candidates.into_iter().find(|candidate| candidate.is_file()) else {
             continue;
-        }
+        };
 
         let content = std::fs::read_to_string(&candidate).map_err(|error| {
             format!(
@@ -3333,6 +3453,21 @@ async fn get_library_roots(data: web::Data<Arc<AppState>>) -> HttpResponse {
             "status": "success",
             "roots": roots
         })),
+        Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
+    }
+}
+
+async fn delete_library_root(
+    data: web::Data<Arc<AppState>>,
+    path: web::Path<LibraryRootPath>,
+) -> HttpResponse {
+    match data.app_db.delete_library_root(path.root_id) {
+        Ok(Some((root_path, removed_media_count))) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "root_path": root_path,
+            "removed_media_count": removed_media_count
+        })),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::error("Library root not found")),
         Err(e) => HttpResponse::InternalServerError().json(ApiResponse::error(&e)),
     }
 }

@@ -1,74 +1,11 @@
 import type { LibraryFolderSummary, LibraryTrackSummary } from "../../shared/api/types";
-import type { LibrarySortState } from "./useLibraryDataController";
-
-export interface LibraryWorkerFolderGroup {
-  key: string;
-  label: string;
-  path: string;
-  count: number;
-}
-
-export interface LibraryWorkerRow {
-  id: string;
-  trackKey: number;
-  source_path: null;
-  media_id: string | null;
-  title: string | null;
-  artist: string | null;
-  album: string | null;
-  track_number: number | null;
-  duration_secs: number | null;
-  size_bytes: number | null;
-  added_at_epoch_secs: number | null;
-  updated_at_epoch_secs: number | null;
-  fileName: string;
-  artworkUrl: string | null;
-  hasCoverArt: boolean;
-  externalArtworkUrl: string | null;
-}
-
-export type LibraryWorkerRequest =
-  | {
-      type: "INIT";
-      requestId: number;
-      tracks: LibraryTrackSummary[];
-      folders: LibraryFolderSummary[];
-    }
-  | {
-      type: "VIEW";
-      requestId: number;
-      queries: string[];
-      folderKey: string | null;
-      sort: LibrarySortState;
-      range: { start: number; end: number };
-    }
-  | {
-      type: "TRACK_KEYS";
-      requestId: number;
-      queries: string[];
-      folderKey: string | null;
-      sort: LibrarySortState;
-    };
-
-export type LibraryWorkerResponse =
-  | {
-      type: "READY";
-      requestId: number;
-      total: number;
-    }
-  | {
-      type: "VIEW_RESULT";
-      requestId: number;
-      rows: LibraryWorkerRow[];
-      total: number;
-      totalSizeBytes: number;
-      folders: LibraryWorkerFolderGroup[];
-    }
-  | {
-      type: "TRACK_KEYS_RESULT";
-      requestId: number;
-      trackKeys: number[];
-    };
+import type {
+  LibrarySortState,
+  LibraryWorkerFolderGroup,
+  LibraryWorkerRequest,
+  LibraryWorkerResponse,
+  LibraryWorkerRow
+} from "./libraryDataTypes";
 
 interface IndexedTrack {
   summary: LibraryTrackSummary;
@@ -89,6 +26,20 @@ let folderByKey = new Map<string, LibraryFolderSummary>();
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 const normalizeQuery = (value: string): string => value.trim().toLowerCase();
+
+const normalizePath = (path: string): string =>
+  path
+    .replace(/^\\\\\?\\UNC\\/i, "\\\\")
+    .replace(/^\\\\\?\\/i, "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+
+const pathContainsFolder = (parentFolder: string, childFolder: string): boolean => {
+  const parent = normalizePath(parentFolder);
+  const child = normalizePath(childFolder);
+  return child === parent || child.startsWith(`${parent}/`);
+};
 
 const haystackForTrack = (track: LibraryTrackSummary): string =>
   [
@@ -224,7 +175,11 @@ const snapshotForView = (
   const queryFiltered = summaries.filter((track) => matchesQueries(track, queries));
   const folders = buildFolders(queryFiltered);
   const folderFiltered = folderKey
-    ? queryFiltered.filter((track) => track.summary.folder_key === folderKey)
+    ? queryFiltered.filter((track) => {
+        if (track.summary.folder_key === folderKey) return true;
+        const folder = folderByKey.get(track.summary.folder_key);
+        return folder ? pathContainsFolder(folderKey, folder.path) : false;
+      })
     : queryFiltered;
   const sortedTracks = sortTracks(folderFiltered, sort);
   const totalSizeBytes = folderFiltered.reduce(
@@ -272,6 +227,18 @@ const handleTrackKeys = (
   };
 };
 
+const handleRows = (
+  message: Extract<LibraryWorkerRequest, { type: "ROWS" }>
+): LibraryWorkerResponse => {
+  const queries = message.queries.map(normalizeQuery).filter((query) => query.length > 0);
+  const snapshot = snapshotForView(queries, message.folderKey, message.sort);
+  return {
+    type: "ROWS_RESULT",
+    requestId: message.requestId,
+    rows: snapshot.sortedTracks.map((track) => rowForTrack(track.summary))
+  };
+};
+
 self.onmessage = (event: MessageEvent<LibraryWorkerRequest>) => {
   const message = event.data;
   if (message.type === "INIT") {
@@ -295,5 +262,10 @@ self.onmessage = (event: MessageEvent<LibraryWorkerRequest>) => {
     return;
   }
 
-  self.postMessage(handleTrackKeys(message));
+  if (message.type === "TRACK_KEYS") {
+    self.postMessage(handleTrackKeys(message));
+    return;
+  }
+
+  self.postMessage(handleRows(message));
 };

@@ -75,9 +75,6 @@ interface MediaListProps<T extends MediaListItem> {
   emptyState?: JSX.Element;
   hideSize?: boolean;
   hideArtwork?: boolean;
-  selectable?: boolean;
-  selectedIds?: readonly string[];
-  onSelectedIdsChange?: (ids: string[]) => void;
   contextActions?: readonly MediaContextAction[];
   deleteActionLabel?: string;
   sort?: MediaSortState;
@@ -193,7 +190,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   let viewportRef: HTMLDivElement | undefined;
   let sortMenuRef: HTMLDivElement | undefined;
 
-  const selectedSet = createMemo<Set<string>>(() => new Set(props.selectedIds ?? []));
   const contextActionSet = createMemo<Set<MediaContextAction>>(
     () => new Set(props.contextActions ?? ["play", "enqueue", "copy-path"])
   );
@@ -221,9 +217,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const remoteVirtualStart = createMemo<number | null>(() =>
     props.totalCount !== undefined ? props.virtualStart ?? 0 : null
   );
-  const allItemsSelected = createMemo<boolean>(() =>
-    props.items.length > 0 && props.items.every((item) => selectedSet().has(item.id))
-  );
   const currentRenderedIndex = createMemo<number>(() =>
     props.items.findIndex((item) =>
       isMediaListItemCurrent(item, {
@@ -234,30 +227,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     )
   );
   const canLocateCurrent = createMemo<boolean>(() => currentRenderedIndex() >= 0);
-
-  const emitSelection = (ids: Set<string>) => {
-    props.onSelectedIdsChange?.([...ids]);
-  };
-
-  const toggleItemSelection = (item: T) => {
-    const next = new Set(selectedSet());
-    if (next.has(item.id)) {
-      next.delete(item.id);
-    } else {
-      next.add(item.id);
-    }
-    emitSelection(next);
-  };
-
-  const toggleAllSelection = () => {
-    const next = new Set(selectedSet());
-    if (allItemsSelected()) {
-      props.items.forEach((item) => next.delete(item.id));
-    } else {
-      props.items.forEach((item) => next.add(item.id));
-    }
-    emitSelection(next);
-  };
 
   const closeMenu = () => {
     setMenu((current) => ({ ...current, open: false, itemId: null }));
@@ -495,7 +464,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
       <div
         class="media-list-table"
         classList={{
-          "is-selectable": props.selectable === true,
           "is-album-hidden": !uiSettings.showSongAlbum,
           "is-actions-hidden": !uiSettings.showSongOperations,
           "is-duration-hidden": !uiSettings.showSongDuration,
@@ -505,16 +473,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
         aria-busy={props.isLoading || undefined}
       >
         <div class="media-list-header" role="row">
-          <Show when={props.selectable}>
-            <span class="media-cell media-cell-select" role="columnheader">
-              <input
-                type="checkbox"
-                aria-label={t("media.selection.all")}
-                checked={allItemsSelected()}
-                onChange={toggleAllSelection}
-              />
-            </span>
-          </Show>
           <span class="media-cell media-cell-index" role="columnheader">
             {t("media.column.index")}
           </span>
@@ -570,7 +528,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                   songId: props.currentSongId
                 });
               const isSelected = () => selectedId() === item.id;
-              const isChecked = () => selectedSet().has(item.id);
               const title = () => item.title ?? displayNameFromSourcePath(item.source_path ?? item.id);
               const displayTitle = () => displaySongText(title());
               const credits = () =>
@@ -580,8 +537,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                 [
                   "media-row",
                   isCurrent() ? "is-current" : "",
-                  isSelected() ? "is-selected" : "",
-                  isChecked() ? "is-checked" : ""
+                  isSelected() ? "is-selected" : ""
                 ]
                   .filter(Boolean)
                   .join(" ");
@@ -594,17 +550,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                   onDblClick={() => props.onPlay(item)}
                   onContextMenu={(event) => handleRowContextMenu(event, item.id)}
                 >
-                  <Show when={props.selectable}>
-                    <span class="media-cell media-cell-select" role="cell">
-                      <input
-                        type="checkbox"
-                        aria-label={t("media.selection.item", { title: title() })}
-                        checked={isChecked()}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => toggleItemSelection(item)}
-                      />
-                    </span>
-                  </Show>
                   <span class="media-cell media-cell-index" role="cell">
                     <Show
                       when={isCurrent()}

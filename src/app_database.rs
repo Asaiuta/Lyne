@@ -2931,6 +2931,30 @@ impl AppDatabase {
             .map_err(|e| format!("Failed to decode library roots: {}", e))
     }
 
+    pub fn delete_library_root(&self, root_id: i64) -> Result<Option<(String, u64)>, String> {
+        let root_path = {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            match conn.query_row(
+                "SELECT source_path FROM library_roots WHERE root_id = ?1",
+                params![root_id],
+                |row| row.get::<_, String>(0),
+            ) {
+                Ok(path) => path,
+                Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+                Err(e) => return Err(format!("Failed to fetch library root: {}", e)),
+            }
+        };
+
+        let removed_media = self.delete_local_media_not_in_root(&root_path, &[])?;
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM library_roots WHERE root_id = ?1",
+            params![root_id],
+        )
+        .map_err(|e| format!("Failed to delete library root: {}", e))?;
+        Ok(Some((root_path, removed_media)))
+    }
+
     pub fn replace_queue_entries(&self, queue_id: &str, entries: &[String]) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn

@@ -46,6 +46,7 @@ export interface ApiClient {
   // Library
   getLibraryRoots: () => Promise<LibraryRoot[]>;
   scanLibraryRoot: (path: string, displayName?: string, sourceKey?: string) => Promise<ScanResult>;
+  deleteLibraryRoot: (rootId: number) => Promise<void>;
   getLibraryScanTask: (taskId: number) => Promise<LibraryScanTask>;
   getMediaItems: (limit?: number, all?: boolean) => Promise<MediaItem[]>;
   getLibraryTrackSummaries: () => Promise<LibraryTrackSummariesResponse>;
@@ -1634,7 +1635,16 @@ const requestJson = async (baseUrl: string, path: string, init?: RequestInit) =>
   }
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    let message = `Request failed: ${response.status}`;
+    try {
+      const body = (await response.json()) as unknown;
+      if (isRecord(body) && isString(body.message) && body.message.trim().length > 0) {
+        message = body.message;
+      }
+    } catch {
+      // Keep the status-only fallback when the server did not return JSON.
+    }
+    throw new Error(message);
   }
 
   return (await response.json()) as unknown;
@@ -1852,6 +1862,15 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
       scanned_files: json.scanned_files as number,
       indexed_files: json.indexed_files as number
     };
+  },
+  deleteLibraryRoot: async (rootId: number) => {
+    const json = await requestJson(baseUrl, `/domain/library/roots/${rootId}`, {
+      method: "DELETE"
+    });
+    const response = parseStatusMessage(json);
+    if (response.status === "error") {
+      throw new Error(response.message ?? "Failed to delete library root");
+    }
   },
   getLibraryScanTask: async (taskId: number) => {
     const json = await requestJson(baseUrl, `/domain/library/scan_tasks/${taskId}`);

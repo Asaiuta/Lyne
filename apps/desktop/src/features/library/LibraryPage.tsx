@@ -3,14 +3,11 @@ import { useTranslation } from "../../shared/i18n";
 import { useUISearch } from "../../shared/state/UISearchContext";
 import {
   IconChevronDown,
-  IconDelete,
   IconFolder,
   IconList,
   IconMusic,
-  IconPlaylist,
   IconPlayCircle,
   IconPlus,
-  IconQueueAdd,
   IconRefresh,
   IconSearch,
   IconStorage
@@ -20,16 +17,16 @@ import { MediaList, type MediaContextAction } from "../../components/media/Media
 import type { LocalPlaylist } from "../../shared/api/types";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
 import { ManageRootsModal } from "./ManageRootsModal";
-import { LibraryConfirmActionModal, LibraryPlaylistTargetModal } from "./LibraryActionModals";
+import {
+  LibraryBatchModal,
+  LibraryConfirmActionModal,
+  LibraryPlaylistTargetModal
+} from "./LibraryActionModals";
 import { LibraryFoldersView } from "./LibraryFoldersView";
 import { LibraryGroupedView } from "./LibraryGroupedView";
 import { LibraryPlaylistsView } from "./LibraryPlaylistsView";
-import {
-  ALL_FOLDERS_VALUE,
-  type LibraryListItem,
-  type LibraryTab,
-  useLibraryDataController
-} from "./useLibraryDataController";
+import type { LibraryListItem, LibraryTab } from "./libraryDataTypes";
+import { ALL_FOLDERS_VALUE, useLibraryDataController } from "./useLibraryDataController";
 
 interface LibraryPageProps {
   onStateRefresh: (expectedPath?: string | null) => Promise<void>;
@@ -38,7 +35,7 @@ interface LibraryPageProps {
   isPlaying: boolean;
 }
 
-export type { LibraryListItem } from "./useLibraryDataController";
+export type { LibraryListItem } from "./libraryDataTypes";
 
 type LibraryConfirmAction =
   | { kind: "delete-library"; items: LibraryListItem[] }
@@ -50,6 +47,7 @@ export function LibraryPage(props: LibraryPageProps) {
   const { query: globalQuery } = useUISearch();
   const controller = useLibraryDataController({ t, globalQuery });
   const [playlistModalItems, setPlaylistModalItems] = createSignal<LibraryListItem[] | null>(null);
+  const [batchModalItems, setBatchModalItems] = createSignal<LibraryListItem[] | null>(null);
   const [confirmAction, setConfirmAction] = createSignal<LibraryConfirmAction | null>(null);
   const [moreMenu, setMoreMenu] = createSignal({ open: false, x: 0, y: 0 });
   const [groupPlaybackItems, setGroupPlaybackItems] = createSignal<LibraryListItem[]>([]);
@@ -65,7 +63,6 @@ export function LibraryPage(props: LibraryPageProps) {
     controller.activeTab() === "songs" ? controller.virtualTotal() : activePlaybackItems().length
   );
 
-  const selectedActionItems = createMemo<LibraryListItem[]>(() => controller.selectedItems());
   const confirmTitle = createMemo<string>(() => {
     const action = confirmAction();
     if (!action) return "";
@@ -205,7 +202,7 @@ export function LibraryPage(props: LibraryPageProps) {
       key: "batch",
       label: t("library.action.batch"),
       icon: <IconList />,
-      disabled: activePlaybackItems().length === 0
+      disabled: activePlaybackCount() === 0
     }
   ];
 
@@ -215,7 +212,7 @@ export function LibraryPage(props: LibraryPageProps) {
       return;
     }
     if (key === "batch") {
-      controller.setSelectedMediaIds(activePlaybackItems().map((item) => item.id));
+      void controller.getCurrentBatchItems().then(setBatchModalItems);
     }
   };
 
@@ -330,55 +327,6 @@ export function LibraryPage(props: LibraryPageProps) {
       </header>
 
       <div class="local-library-router">
-        <Show when={selectedActionItems().length > 0}>
-          <div class="local-batch-toolbar">
-            <span class="local-batch-count">
-              {t("library.selection.count", { count: selectedActionItems().length })}
-            </span>
-            <button
-              type="button"
-              class="ghost-button page-action"
-              onClick={() => void controller.enqueueItems(selectedActionItems())}
-            >
-              <IconQueueAdd />
-              <span>{t("library.action.enqueueSelected")}</span>
-            </button>
-            <button
-              type="button"
-              class="ghost-button page-action"
-              onClick={() => openAddToPlaylist(selectedActionItems())}
-            >
-              <IconPlaylist />
-              <span>{t("library.action.addToPlaylist")}</span>
-            </button>
-            <Show when={controller.activeTab() === "playlists"}>
-              <button
-                type="button"
-                class="ghost-button page-action"
-                onClick={() => openRemoveFromPlaylist(selectedActionItems())}
-              >
-                <IconDelete />
-                <span>{t("library.action.removeFromPlaylist")}</span>
-              </button>
-            </Show>
-            <button
-              type="button"
-              class="ghost-button page-action danger-button"
-              onClick={() => openDeleteFromLibrary(selectedActionItems())}
-            >
-              <IconDelete />
-              <span>{t("library.action.deleteFromLibrary")}</span>
-            </button>
-            <button
-              type="button"
-              class="ghost-button page-action"
-              onClick={() => controller.setSelectedMediaIds([])}
-            >
-              {t("library.action.clearSelection")}
-            </button>
-          </div>
-        </Show>
-
         <Show when={controller.activeTab() === "songs"}>
           <Show
             when={controller.virtualTotal() > 0}
@@ -418,9 +366,6 @@ export function LibraryPage(props: LibraryPageProps) {
               onVisibleRangeChange={controller.setVirtualRange}
               isLoading={controller.isFetching()}
               emptyState={t("library.tracks.emptyAll")}
-              selectable
-              selectedIds={controller.selectedMediaIds()}
-              onSelectedIdsChange={controller.setSelectedMediaIds}
               contextActions={["play", "enqueue", "add-to-playlist", "copy-path", "delete"]}
               deleteActionLabel={t("library.action.deleteFromLibrary")}
               sort={controller.sort()}
@@ -474,9 +419,7 @@ export function LibraryPage(props: LibraryPageProps) {
             currentTrackPath={props.currentTrackPath}
             isPlaying={props.isPlaying}
             isLoading={controller.isFetching()}
-            selectedIds={controller.selectedMediaIds()}
             sort={controller.sort()}
-            onSelectedIdsChange={controller.setSelectedMediaIds}
             onSortChange={controller.updateSort}
             onSortOrderChange={controller.updateSortOrder}
             onSelectPlaylist={(playlistId) => void controller.selectLocalPlaylist(playlistId)}
@@ -543,8 +486,7 @@ export function LibraryPage(props: LibraryPageProps) {
         roots={controller.roots()}
         isScanning={controller.isScanning()}
         onAddRoot={controller.handleScan}
-        onRescan={controller.handleRescan}
-        formatScanTimestamp={controller.formatScanTimestamp}
+        onDeleteRoot={controller.deleteLibraryRoot}
       />
       <LibraryPlaylistTargetModal
         open={playlistModalItems() !== null}
@@ -553,6 +495,19 @@ export function LibraryPage(props: LibraryPageProps) {
         onClose={() => setPlaylistModalItems(null)}
         onAddToPlaylist={handleAddToExistingPlaylist}
         onCreateAndAdd={handleCreatePlaylistAndMaybeAdd}
+      />
+      <LibraryBatchModal
+        open={batchModalItems() !== null}
+        items={batchModalItems() ?? []}
+        onClose={() => setBatchModalItems(null)}
+        onAddToPlaylist={(items) => {
+          setBatchModalItems(null);
+          openAddToPlaylist(items);
+        }}
+        onDeleteFromLibrary={(items) => {
+          setBatchModalItems(null);
+          openDeleteFromLibrary(items);
+        }}
       />
       <LibraryConfirmActionModal
         open={confirmAction() !== null}

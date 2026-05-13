@@ -19,7 +19,7 @@ import type { LocalPlaylist } from "../../shared/api/types";
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { useUISettings } from "../../shared/state/useUISettings";
-import type { LibraryListItem } from "./useLibraryDataController";
+import type { LibraryListItem } from "./libraryDataTypes";
 
 interface LibraryPlaylistsViewProps {
   playlists: readonly LocalPlaylist[];
@@ -28,9 +28,7 @@ interface LibraryPlaylistsViewProps {
   currentTrackPath: string | null;
   isPlaying: boolean;
   isLoading: boolean;
-  selectedIds: readonly string[];
   sort: MediaSortState;
-  onSelectedIdsChange: (ids: string[]) => void;
   onSortChange: (field: MediaSortField) => void;
   onSortOrderChange: (order: MediaSortOrder) => void;
   onSelectPlaylist: (playlistId: string) => void;
@@ -208,9 +206,6 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
                   onScroll={(event) => setIsScrolled((event.currentTarget as HTMLElement).scrollTop > 12)}
                   isLoading={props.isLoading}
                   emptyState={t("library.playlists.emptyTracks")}
-                  selectable
-                  selectedIds={props.selectedIds}
-                  onSelectedIdsChange={props.onSelectedIdsChange}
                   contextActions={["play", "enqueue", "copy-path", "delete"]}
                   deleteActionLabel={t("library.action.removeFromPlaylist")}
                   sort={props.sort}

@@ -9,10 +9,10 @@ import {
 } from "../../components/media/MediaList";
 import { useTranslation } from "../../shared/i18n";
 import {
-  ALL_FOLDERS_VALUE,
   type LibraryFolderNode,
   type LibraryListItem
-} from "./useLibraryDataController";
+} from "./libraryDataTypes";
+import { ALL_FOLDERS_VALUE } from "./useLibraryDataController";
 
 interface LibraryFoldersViewProps {
   nodes: readonly LibraryFolderNode[];

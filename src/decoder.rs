@@ -182,6 +182,8 @@ pub struct TrackMetadata {
     pub cover_art: Option<Vec<u8>>,
     /// Cover art MIME type (e.g., "image/jpeg", "image/png")
     pub cover_art_mime: Option<String>,
+    /// Embedded lyric text from tags. May be timed (LRC/SYLT-like) or plain text.
+    pub lyrics: Option<String>,
     /// ReplayGain track gain in dB (e.g., -6.54)
     pub rg_track_gain: Option<f64>,
     /// ReplayGain track peak (linear, 0.0-1.0+)
@@ -272,6 +274,12 @@ fn merge_metadata_revision(metadata: &mut TrackMetadata, revision: &MetadataRevi
             Some(StandardTagKey::Date) => {
                 metadata.year = metadata.year.or_else(|| tag_value_to_u32(&tag.value));
             }
+            Some(StandardTagKey::Lyrics) => {
+                metadata.lyrics = metadata
+                    .lyrics
+                    .take()
+                    .or_else(|| tag_value_to_non_empty_string(&tag.value));
+            }
             _ => {
                 let key_lower = tag.key.to_lowercase();
                 match key_lower.as_str() {
@@ -311,6 +319,21 @@ fn merge_metadata_revision(metadata: &mut TrackMetadata, revision: &MetadataRevi
                     }
                     "date" | "year" => {
                         metadata.year = metadata.year.or_else(|| tag_value_to_u32(&tag.value));
+                    }
+                    "lyrics"
+                    | "lyric"
+                    | "unsyncedlyrics"
+                    | "unsynced lyrics"
+                    | "unsynchronisedlyrics"
+                    | "unsynchronised lyrics"
+                    | "unsynchronizedlyrics"
+                    | "unsynchronized lyrics"
+                    | "syncedlyrics"
+                    | "synced lyrics" => {
+                        metadata.lyrics = metadata
+                            .lyrics
+                            .take()
+                            .or_else(|| tag_value_to_non_empty_string(&tag.value));
                     }
                     "replaygain_track_gain" => {
                         metadata.rg_track_gain = metadata
@@ -354,6 +377,21 @@ fn tag_value_to_string(value: &Value) -> Option<String> {
         Value::UnsignedInt(n) => Some(n.to_string()),
         Value::SignedInt(n) => Some(n.to_string()),
         _ => None,
+    }
+}
+
+fn tag_value_to_non_empty_string(value: &Value) -> Option<String> {
+    tag_value_to_string(value).and_then(non_empty_string)
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else if trimmed.len() == value.len() {
+        Some(value)
+    } else {
+        Some(trimmed.to_string())
     }
 }
 

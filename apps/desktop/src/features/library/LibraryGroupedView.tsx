@@ -9,7 +9,7 @@ import { MediaList } from "../../components/media/MediaList";
 import type { MediaContextAction, MediaSortField, MediaSortOrder, MediaSortState } from "../../components/media/MediaList";
 import { useTranslation } from "../../shared/i18n";
 import { useUISettings } from "../../shared/state/useUISettings";
-import type { LibraryListItem } from "./useLibraryDataController";
+import type { LibraryListItem } from "./libraryDataTypes";
 
 export interface LibraryGroup {
   key: string;

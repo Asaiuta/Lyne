@@ -2,6 +2,7 @@ import { For, Show, createSignal } from "solid-js";
 import type { LibraryRoot } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
 import { Modal } from "../../components/Modal";
+import { IconDelete, IconFolder, IconFolderPlus } from "../../components/icons";
 
 export interface ManageRootsModalProps {
   open: boolean;
@@ -9,24 +10,28 @@ export interface ManageRootsModalProps {
   roots: LibraryRoot[];
   isScanning: boolean;
   onAddRoot: (path: string, displayName: string) => Promise<void>;
-  onRescan: (root: LibraryRoot) => Promise<void>;
-  formatScanTimestamp: (epochSecs: number | null) => string;
+  onDeleteRoot: (root: LibraryRoot) => Promise<void>;
 }
 
 export function ManageRootsModal(props: ManageRootsModalProps) {
   const { t } = useTranslation();
-  const [scanPath, setScanPath] = createSignal("");
-  const [scanDisplayName, setScanDisplayName] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
 
   const handleAdd = async () => {
-    const path = scanPath().trim();
+    const path = window.prompt(t("library.add.pathPlaceholder"))?.trim() ?? "";
     if (!path) return;
     setSubmitting(true);
     try {
-      await props.onAddRoot(path, scanDisplayName().trim());
-      setScanPath("");
-      setScanDisplayName("");
+      await props.onAddRoot(path, "");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (root: LibraryRoot) => {
+    setSubmitting(true);
+    try {
+      await props.onDeleteRoot(root);
     } finally {
       setSubmitting(false);
     }
@@ -38,68 +43,58 @@ export function ManageRootsModal(props: ManageRootsModalProps) {
       title={t("library.modal.manageRoots.title")}
       closeAriaLabel={t("library.modal.manageRoots.close")}
       onClose={props.onClose}
-      size="lg"
+      size="directory"
+      closeOnBackdrop={false}
+      closeOnEscape={false}
     >
-      <div class="settings-group">
-        <span class="field-label">{t("library.roots.title")}</span>
-        <Show when={props.roots.length > 0} fallback={<div class="status-line">{t("library.roots.empty")}</div>}>
-          <ul class="library-roots">
+      <div class="local-directory-modal">
+        <span class="local-list-tip">
+          {t("library.modal.manageRoots.tip")}
+        </span>
+        <div class="local-directory-scroll">
+          <div class="local-directory-list">
+            <Show
+              when={props.roots.length > 0}
+              fallback={
+                <div class="local-directory-empty">
+                  {t("library.roots.empty")}
+                </div>
+              }
+            >
             <For each={props.roots}>
               {(root) => (
-                <li class="library-root">
-                  <div class="library-root-meta">
-                    <span class="library-root-name">{root.display_name}</span>
-                    <span class="library-root-path" title={root.source_path}>{root.source_path}</span>
-                    <span class="library-root-stats">
-                      {t("library.root.info", {
-                        count: root.track_count,
-                        kind: root.source_kind,
-                        when: props.formatScanTimestamp(root.last_scan_finished_at_epoch_secs),
-                        status: root.scan_status
-                      })}
-                    </span>
-                  </div>
+                <div class="local-directory-item">
+                  <span class="local-directory-prefix" aria-hidden="true">
+                    <IconFolder />
+                  </span>
+                  <span class="local-directory-path" title={root.source_path}>
+                    {root.source_path}
+                  </span>
                   <button
                     type="button"
-                    class="ghost-button"
-                    onClick={() => void props.onRescan(root)}
+                    class="local-directory-delete"
+                    onClick={() => void handleDelete(root)}
                     disabled={props.isScanning || submitting()}
+                    aria-label={t("library.roots.delete")}
+                    title={t("library.roots.delete")}
                   >
-                    {t("library.root.rescan")}
+                    <IconDelete />
                   </button>
-                </li>
+                </div>
               )}
             </For>
-          </ul>
-        </Show>
-      </div>
-
-      <div class="settings-group">
-        <span class="field-label">{t("library.add.title")}</span>
-        <div class="settings-grid">
-          <input
-            class="text-input"
-            type="text"
-            value={scanPath()}
-            onInput={(event) => setScanPath(event.currentTarget.value)}
-            placeholder={t("library.add.pathPlaceholder")}
-          />
-          <input
-            class="text-input"
-            type="text"
-            value={scanDisplayName()}
-            onInput={(event) => setScanDisplayName(event.currentTarget.value)}
-            placeholder={t("library.add.namePlaceholder")}
-          />
+            </Show>
+          </div>
         </div>
-        <div class="button-row">
+        <div class="local-directory-footer">
           <button
-            class="primary-button"
+            class="ghost-button local-directory-add"
             type="button"
             onClick={() => void handleAdd()}
-            disabled={props.isScanning || submitting() || !scanPath().trim()}
+            disabled={props.isScanning || submitting()}
           >
-            {t("library.add.scan")}
+            <IconFolderPlus />
+            <span>{t("library.add.folder")}</span>
           </button>
         </div>
       </div>

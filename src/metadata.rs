@@ -17,6 +17,7 @@ pub struct LoftyMetadata {
     pub year: Option<u32>,
     pub cover_art: Option<Vec<u8>>,
     pub cover_art_mime: Option<String>,
+    pub lyrics: Option<String>,
     pub duration_secs: Option<f64>,
     pub bitrate_bps: Option<f64>,
 }
@@ -50,6 +51,27 @@ pub fn extract_lofty_metadata(path: &str) -> Option<LoftyMetadata> {
     meta.track_number = tag.track().map(|v| v as u32);
     meta.disc_number = tag.disk().map(|v| v as u32);
     meta.genre = tag.genre().map(|s| s.to_string());
+    meta.lyrics = tag
+        .get_string(&ItemKey::Lyrics)
+        .and_then(non_empty_tag_string)
+        .or_else(|| {
+            [
+                "LYRICS",
+                "UNSYNCEDLYRICS",
+                "UNSYNCED LYRICS",
+                "UNSYNCHRONISEDLYRICS",
+                "UNSYNCHRONISED LYRICS",
+                "UNSYNCHRONIZEDLYRICS",
+                "UNSYNCHRONIZED LYRICS",
+                "SYNCEDLYRICS",
+                "SYNCED LYRICS",
+            ]
+            .into_iter()
+            .find_map(|key| {
+                tag.get_string(&ItemKey::Unknown(key.to_string()))
+                    .and_then(non_empty_tag_string)
+            })
+        });
 
     // lofty returns year from the Date tag; extract just the year component.
     if let Some(date_str) = tag.get_string(&ItemKey::RecordingDate) {
@@ -127,6 +149,15 @@ fn parse_year_from_date(date_str: &str) -> Option<u32> {
     }
 }
 
+fn non_empty_tag_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 /// Merge lofty metadata into Symphonia's `TrackMetadata`.
 ///
 /// Fields from `lofty` take precedence because its tag parsing is more complete.
@@ -152,6 +183,9 @@ pub fn merge_lofty_into(symphonia: &mut TrackMetadata, lofty_meta: &LoftyMetadat
     }
     if let Some(v) = lofty_meta.year {
         symphonia.year = Some(v);
+    }
+    if let Some(ref v) = lofty_meta.lyrics {
+        symphonia.lyrics = Some(v.clone());
     }
     // Only use lofty cover art if Symphonia didn't extract any.
     if symphonia.cover_art.is_none() {
