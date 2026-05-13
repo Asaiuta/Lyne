@@ -24,10 +24,7 @@ pub(super) async fn list_ncm_song_detail_tracks(
         .filter(|id| *id > 0)
         .collect::<Vec<_>>();
     if ids.is_empty() {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM song ids must include at least one positive id"
-        }));
+        return bad_request_response("NCM song ids must include at least one positive id");
     }
 
     let mut query = Query::new().param(
@@ -64,10 +61,7 @@ pub(super) async fn trash_ncm_personal_fm_track(
 ) -> HttpResponse {
     let song_id = body.song_id;
     if song_id <= 0 {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM personal FM song id must be positive"
-        }));
+        return bad_request_response("NCM personal FM song id must be positive");
     }
 
     let mut query = Query::new().param("id", &song_id.to_string());
@@ -87,10 +81,7 @@ pub(super) async fn list_ncm_album_tracks(
 ) -> HttpResponse {
     let id = body.id;
     if id <= 0 {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM album id must be positive"
-        }));
+        return bad_request_response("NCM album id must be positive");
     }
 
     let mut query = Query::new().param("id", &id.to_string());
@@ -111,10 +102,7 @@ pub(super) async fn list_ncm_artist_tracks(
 ) -> HttpResponse {
     let id = body.id;
     if id <= 0 {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM artist id must be positive"
-        }));
+        return bad_request_response("NCM artist id must be positive");
     }
 
     let mut query = Query::new().param("id", &id.to_string());

@@ -609,6 +609,10 @@ pub(crate) fn bad_request_response(message: impl Into<String>) -> HttpResponse {
     error_response(StatusCode::BAD_REQUEST, message)
 }
 
+pub(crate) fn bad_gateway_response(message: impl Into<String>) -> HttpResponse {
+    error_response(StatusCode::BAD_GATEWAY, message)
+}
+
 pub(crate) fn unauthorized_response(message: impl Into<String>) -> HttpResponse {
     error_response(StatusCode::UNAUTHORIZED, message)
 }

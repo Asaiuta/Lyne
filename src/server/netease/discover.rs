@@ -10,10 +10,7 @@ pub(super) async fn get_ncm_home_feed(
 ) -> HttpResponse {
     let request = body.into_inner();
     if request.user_id.is_some_and(|user_id| user_id <= 0) {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM user id must be positive"
-        }));
+        return bad_request_response("NCM user id must be positive");
     }
 
     let active_cookie = active_ncm_cookie(&data);
@@ -151,10 +148,7 @@ pub(super) async fn list_ncm_discover_playlists(
         .filter(|value| !value.is_empty())
         .unwrap_or("normal");
     if kind != "normal" && kind != "hq" {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM discover playlist kind must be normal or hq"
-        }));
+        return bad_request_response("NCM discover playlist kind must be normal or hq");
     }
 
     let cat = request
@@ -277,10 +271,7 @@ pub(super) async fn list_ncm_discover_songs(
 ) -> HttpResponse {
     let song_type = body.song_type.unwrap_or(0);
     if !matches!(song_type, 0 | 7 | 96 | 16 | 8) {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM discover song type is invalid"
-        }));
+        return bad_request_response("NCM discover song type is invalid");
     }
 
     let mut query = Query::new().param("type", &song_type.to_string());

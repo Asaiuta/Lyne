@@ -7,10 +7,7 @@ pub(super) async fn search_ncm_tracks(
     let request = body.into_inner();
     let keywords = request.keywords.trim();
     if keywords.is_empty() {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM search keywords must not be empty"
-        }));
+        return bad_request_response("NCM search keywords must not be empty");
     }
 
     let mut query = Query::new().param("keywords", keywords).param("type", "1");
@@ -38,10 +35,7 @@ pub(super) async fn search_ncm_playlists(
     let request = body.into_inner();
     let keywords = request.keywords.trim();
     if keywords.is_empty() {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM search keywords must not be empty"
-        }));
+        return bad_request_response("NCM search keywords must not be empty");
     }
 
     let mut query = Query::new()

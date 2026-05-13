@@ -6,10 +6,7 @@ pub(super) async fn list_ncm_likelist_ids(
 ) -> HttpResponse {
     let uid = body.uid;
     if uid <= 0 {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM user id must be positive"
-        }));
+        return bad_request_response("NCM user id must be positive");
     }
 
     let mut query = Query::new().param("uid", &uid.to_string());
@@ -59,10 +56,7 @@ pub(super) async fn delete_ncm_cloud_track(
 ) -> HttpResponse {
     let song_id = body.song_id;
     if song_id <= 0 {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM cloud song id must be positive"
-        }));
+        return bad_request_response("NCM cloud song id must be positive");
     }
 
     let mut query = Query::new().param("id", &song_id.to_string());

@@ -33,10 +33,7 @@ pub(super) async fn play_ncm_track(
             "track": track,
             "state": state
         })),
-        Err(err) => HttpResponse::InternalServerError().json(serde_json::json!({
-            "status": "error",
-            "message": format!("Failed to play NCM track: {}", err)
-        })),
+        Err(err) => internal_server_error_response(format!("Failed to play NCM track: {}", err)),
     }
 }
 
@@ -58,10 +55,7 @@ pub(super) async fn enqueue_ncm_track(
             "track": track,
             "queue": queue
         })),
-        Err(err) => HttpResponse::InternalServerError().json(serde_json::json!({
-            "status": "error",
-            "message": format!("Failed to enqueue NCM track: {}", err)
-        })),
+        Err(err) => internal_server_error_response(format!("Failed to enqueue NCM track: {}", err)),
     }
 }
 
@@ -196,18 +190,8 @@ async fn resolve_ncm_track_inner(
 
 fn ncm_track_resolve_error_response(err: NcmTrackResolveError) -> HttpResponse {
     match err {
-        NcmTrackResolveError::BadRequest(message) => {
-            HttpResponse::BadRequest().json(serde_json::json!({
-                "status": "error",
-                "message": message
-            }))
-        }
-        NcmTrackResolveError::BadGateway(message) => {
-            HttpResponse::BadGateway().json(serde_json::json!({
-                "status": "error",
-                "message": message
-            }))
-        }
+        NcmTrackResolveError::BadRequest(message) => bad_request_response(message),
+        NcmTrackResolveError::BadGateway(message) => bad_gateway_response(message),
         NcmTrackResolveError::Upstream(err) => build_error_response(err),
     }
 }
@@ -218,10 +202,7 @@ pub(super) async fn resolve_ncm_track_supplement(
 ) -> HttpResponse {
     let request = body.into_inner();
     if request.song_id <= 0 {
-        return HttpResponse::BadRequest().json(serde_json::json!({
-            "status": "error",
-            "message": "NCM song id must be positive"
-        }));
+        return bad_request_response("NCM song id must be positive");
     }
 
     let cookie = request
