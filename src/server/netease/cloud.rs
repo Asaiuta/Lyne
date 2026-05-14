@@ -17,7 +17,7 @@ pub(super) async fn list_ncm_likelist_ids(
             "status": "success",
             "ids": read_likelist_ids(&response.body)
         })),
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
 
@@ -46,7 +46,7 @@ pub(super) async fn list_ncm_cloud_tracks(
                 "max_size_bytes": page.max_size_bytes
             }))
         }
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
 
@@ -66,6 +66,6 @@ pub(super) async fn delete_ncm_cloud_track(
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success"
         })),
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
