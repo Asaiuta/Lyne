@@ -83,11 +83,7 @@ pub(super) async fn daily_signin_active_ncm_account(
     let account = match data.app_db.active_ncm_account() {
         Ok(Some(account)) => account,
         Ok(None) => {
-            return HttpResponse::Ok().json(serde_json::json!({
-                "status": "success",
-                "accounts": [],
-                "active_user_id": null
-            }));
+            return account_state_response(Vec::new(), None);
         }
         Err(err) => {
             return internal_server_error_response(err);
