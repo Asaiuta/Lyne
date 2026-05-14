@@ -24,12 +24,13 @@ import type {
   WebDavBrowseEntry,
   WebDavSource
 } from "./types";
-import { invalidateApiToken, peekApiToken, resolveApiToken, resolveBaseUrl } from "./env";
+import { peekApiToken, resolveApiToken, resolveBaseUrl } from "./env";
 import {
   getCurrentLyrics as requestCurrentLyrics,
   parseCurrentLyricsResponse,
   type CurrentLyricsResponse
 } from "./lyrics";
+import { requestEnvelope as requestTransportEnvelope, requestJson } from "./transport";
 import {
   createEffectsApiClient,
   type EffectsApiClient,
@@ -1388,48 +1389,8 @@ const parseQueueAdjacentResponse = (value: unknown): QueueAdjacent => {
   };
 };
 
-const requestJson = async (baseUrl: string, path: string, init?: RequestInit) => {
-  const runRequest = async (forceTokenRefresh: boolean) => {
-    const token = await resolveApiToken(forceTokenRefresh);
-    const headers = new Headers(init?.headers ?? {});
-    if (!headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-    return fetch(`${baseUrl}${path}`, {
-      ...init,
-      headers
-    });
-  };
-
-  let response = await runRequest(false);
-  if (response.status === 401) {
-    invalidateApiToken();
-    response = await runRequest(true);
-  }
-
-  if (!response.ok) {
-    let message = `Request failed: ${response.status}`;
-    try {
-      const body = (await response.json()) as unknown;
-      if (isRecord(body) && isString(body.message) && body.message.trim().length > 0) {
-        message = body.message;
-      }
-    } catch {
-      // Keep the status-only fallback when the server did not return JSON.
-    }
-    throw new Error(message);
-  }
-
-  return (await response.json()) as unknown;
-};
-
-const requestEnvelope = async (baseUrl: string, path: string, init?: RequestInit) => {
-  const json = await requestJson(baseUrl, path, init);
-  return parseEnvelope(json);
-};
+const requestEnvelope = (baseUrl: string, path: string, init?: RequestInit) =>
+  requestTransportEnvelope(baseUrl, path, parseEnvelope, init);
 
 const buildResolveNcmTrackBody = (input: ResolveNcmTrackInput) => ({
   song_id: input.songId,
