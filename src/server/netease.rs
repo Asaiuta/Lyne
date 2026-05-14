@@ -758,6 +758,37 @@ mod tests {
         assert!(host_err.contains("not allowed"));
     }
 
+    async fn read_json_body(response: actix_web::HttpResponse) -> Value {
+        let body = actix_web::body::to_bytes(response.into_body())
+            .await
+            .expect("body should serialize");
+        serde_json::from_slice(&body).expect("body should be JSON")
+    }
+
+    #[actix_web::test]
+    async fn raw_success_response_preserves_upstream_body_code() {
+        let response = build_success_response(ApiResponse {
+            status: 200,
+            body: json!({
+                "code": 803,
+                "message": "authorized",
+                "cookie": "from_upstream=1",
+            }),
+            cookie: Vec::new(),
+        });
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            read_json_body(response).await,
+            json!({
+                "code": 803,
+                "message": "authorized",
+                "cookie": "from_upstream=1",
+            }),
+            "raw /api/netease responses must keep upstream body fields verbatim"
+        );
+    }
+
     #[actix_web::test]
     async fn success_response_forwards_set_cookie_headers() {
         let response = build_success_response(ApiResponse {
@@ -836,11 +867,20 @@ mod tests {
         assert_eq!(body, br#"{"code":400,"msg":"bad input"}"#.as_slice());
     }
 
+    #[actix_web::test]
+    async fn raw_rate_limit_error_keeps_http_status_and_upstream_code_distinct() {
+        let response = build_error_response(NcmError::RateLimited("slow down".to_string()));
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            read_json_body(response).await,
+            json!({"code": 503, "msg": "slow down"}),
+            "raw /api/netease errors expose the upstream-compatible body code"
+        );
+    }
+
     async fn read_canonical_error_body(response: actix_web::HttpResponse) -> Value {
-        let body = actix_web::body::to_bytes(response.into_body())
-            .await
-            .expect("body should serialize");
-        serde_json::from_slice(&body).expect("body should be canonical JSON")
+        read_json_body(response).await
     }
 
     #[actix_web::test]
