@@ -189,7 +189,7 @@ pub(super) async fn list_ncm_discover_playlists(
                 "has_more": has_more
             }))
         }
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
 
@@ -222,7 +222,7 @@ pub(super) async fn list_ncm_discover_albums(
                 "has_more": has_more
             }))
         }
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
 
@@ -248,7 +248,7 @@ pub(super) async fn list_ncm_discover_artists(
             "status": "success",
             "items": read_discover_artist_cards(&response.body)
         })),
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
 
@@ -261,7 +261,7 @@ pub(super) async fn list_ncm_discover_toplists(data: web::Data<Arc<AppState>>) -
             "status": "success",
             "toplists": read_discover_toplists(&response.body)
         })),
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
 
@@ -282,7 +282,7 @@ pub(super) async fn list_ncm_discover_songs(
             "status": "success",
             "tracks": read_top_song_tracks(&response.body)
         })),
-        Err(err) => build_error_response(err),
+        Err(err) => ncm_upstream_error_response(err),
     }
 }
 
@@ -301,7 +301,7 @@ pub(super) async fn get_ncm_discover_playlist_categories(
 
     let cat_response = match cat_result {
         Ok(response) => response,
-        Err(err) => return build_error_response(err),
+        Err(err) => return ncm_upstream_error_response(err),
     };
     let hq_body = match hq_result {
         Ok(response) => response.body,
