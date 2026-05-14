@@ -12,10 +12,12 @@ import type {
   LibrarySortState,
   LibraryTab,
   LibraryWorkerFolderGroup,
-  LibraryWorkerRequest,
-  LibraryWorkerResponse,
   LibraryWorkerRow
 } from "./libraryDataTypes";
+import {
+  LibraryWorkerClient,
+  createLibraryWorkerViewInput
+} from "./libraryWorkerClient";
 
 const api = createApiClient();
 const ALL_FOLDERS_VALUE = "__all";
@@ -318,25 +320,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const readErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.error.requestFailed");
 
-  let worker: Worker | null = null;
-  let workerRequestId = 0;
-  let latestInitRequestId = 0;
-  let latestViewRequestId = 0;
   const detailCache = new Map<number, MediaItem>();
-  const pendingTrackKeyRequests = new Map<
-    number,
-    {
-      resolve: (trackKeys: number[]) => void;
-      reject: (error: Error) => void;
-    }
-  >();
-  const pendingRowRequests = new Map<
-    number,
-    {
-      resolve: (rows: LibraryWorkerRow[]) => void;
-      reject: (error: Error) => void;
-    }
-  >();
 
   const setKeyedFeedback = (tone: Feedback["tone"], key: TranslationKey) => {
     setFeedbackKey(key);
@@ -348,109 +332,43 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     setFeedback({ tone, message });
   };
 
-  const rejectPendingTrackKeyRequests = (message: string) => {
-    pendingTrackKeyRequests.forEach((pending) => {
-      pending.reject(new Error(message));
-    });
-    pendingTrackKeyRequests.clear();
-    pendingRowRequests.forEach((pending) => {
-      pending.reject(new Error(message));
-    });
-    pendingRowRequests.clear();
-  };
-
-  const ensureWorker = () => {
-    if (worker) return worker;
-    worker = new Worker(new URL("./libraryWorker.ts", import.meta.url), { type: "module" });
-    worker.onmessage = (event: MessageEvent<LibraryWorkerResponse>) => {
-      const message = event.data;
-      if (message.type === "READY") {
-        if (message.requestId === latestInitRequestId) {
-          setWorkerReady(true);
-          setVirtualTotal(message.total);
-        }
-        return;
-      }
-      if (message.type === "TRACK_KEYS_RESULT") {
-        const pending = pendingTrackKeyRequests.get(message.requestId);
-        if (pending) {
-          pendingTrackKeyRequests.delete(message.requestId);
-          pending.resolve(message.trackKeys);
-        }
-        return;
-      }
-      if (message.type === "ROWS_RESULT") {
-        const pending = pendingRowRequests.get(message.requestId);
-        if (pending) {
-          pendingRowRequests.delete(message.requestId);
-          pending.resolve(message.rows);
-        }
-        return;
-      }
-      if (message.requestId !== latestViewRequestId) {
-        return;
-      }
-      setVirtualRows(message.rows.map(adaptWorkerRow));
-      setVirtualTotal(message.total);
-      setVirtualSizeBytes(message.totalSizeBytes);
-      setFolderOptions(message.folders);
-    };
-    worker.onerror = () => {
+  const workerClient = new LibraryWorkerClient({
+    onReady: (total) => {
+      setWorkerReady(true);
+      setVirtualTotal(total);
+    },
+    onViewResult: (result) => {
+      setVirtualRows(result.rows.map(adaptWorkerRow));
+      setVirtualTotal(result.total);
+      setVirtualSizeBytes(result.totalSizeBytes);
+      setFolderOptions(result.folders);
+    },
+    onError: () => {
       setWorkerReady(false);
-      rejectPendingTrackKeyRequests("Library worker failed");
-    };
-    return worker;
-  };
+    }
+  });
 
   onCleanup(() => {
-    rejectPendingTrackKeyRequests("Library worker was disposed");
-    worker?.terminate();
-    worker = null;
+    workerClient.dispose();
   });
 
-  const currentWorkerViewInput = () => ({
-    queries: debouncedQueries(),
-    folderKey: selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
-    sort: sort()
-  });
+  const currentWorkerViewInput = () =>
+    createLibraryWorkerViewInput(
+      debouncedQueries(),
+      selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
+      sort()
+    );
 
   const postWorkerView = () => {
     if (!workerReady()) return;
-    const target = ensureWorker();
-    const requestId = workerRequestId + 1;
-    workerRequestId = requestId;
-    latestViewRequestId = requestId;
-    const view = currentWorkerViewInput();
-    const message: LibraryWorkerRequest = {
-      type: "VIEW",
-      requestId,
-      queries: view.queries,
-      folderKey: view.folderKey,
-      sort: view.sort,
-      range: virtualRange()
-    };
-    target.postMessage(message);
+    workerClient.requestView(currentWorkerViewInput(), virtualRange());
   };
 
   const requestWorkerTrackKeys = async (): Promise<number[]> => {
     if (!workerReady()) {
       throw new Error(t("common.error.requestFailed"));
     }
-    const target = ensureWorker();
-    const requestId = workerRequestId + 1;
-    workerRequestId = requestId;
-    const view = currentWorkerViewInput();
-    const message: LibraryWorkerRequest = {
-      type: "TRACK_KEYS",
-      requestId,
-      queries: view.queries,
-      folderKey: view.folderKey,
-      sort: view.sort
-    };
-    const trackKeys = await new Promise<number[]>((resolve, reject) => {
-      pendingTrackKeyRequests.set(requestId, { resolve, reject });
-      target.postMessage(message);
-    });
+    const trackKeys = await workerClient.requestTrackKeys(currentWorkerViewInput());
     if (trackKeys.length === 0) {
       throw new Error(t("library.tracks.emptyFilter"));
     }
@@ -461,21 +379,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     if (!workerReady()) {
       throw new Error(t("common.error.requestFailed"));
     }
-    const target = ensureWorker();
-    const requestId = workerRequestId + 1;
-    workerRequestId = requestId;
-    const view = currentWorkerViewInput();
-    const message: LibraryWorkerRequest = {
-      type: "ROWS",
-      requestId,
-      queries: view.queries,
-      folderKey: view.folderKey,
-      sort: view.sort
-    };
-    const rows = await new Promise<LibraryWorkerRow[]>((resolve, reject) => {
-      pendingRowRequests.set(requestId, { resolve, reject });
-      target.postMessage(message);
-    });
+    const rows = await workerClient.requestRows(currentWorkerViewInput());
     return rows.map(adaptWorkerRow);
   };
 
@@ -530,19 +434,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
       setVirtualTotal(response.total_count);
       setVirtualSizeBytes(response.total_size_bytes);
       setWorkerReady(false);
-      rejectPendingTrackKeyRequests("Library index refreshed");
-      const target = ensureWorker();
-      const requestId = workerRequestId + 1;
-      workerRequestId = requestId;
-      latestInitRequestId = requestId;
-      latestViewRequestId = 0;
-      const message: LibraryWorkerRequest = {
-        type: "INIT",
-        requestId,
-        tracks: response.tracks,
-        folders: response.folders
-      };
-      target.postMessage(message);
+      workerClient.init(response.tracks, response.folders);
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
     } finally {
