@@ -835,4 +835,113 @@ mod tests {
             .expect("body should serialize");
         assert_eq!(body, br#"{"code":400,"msg":"bad input"}"#.as_slice());
     }
+
+    async fn read_canonical_error_body(response: actix_web::HttpResponse) -> Value {
+        let body = actix_web::body::to_bytes(response.into_body())
+            .await
+            .expect("body should serialize");
+        serde_json::from_slice(&body).expect("body should be canonical JSON")
+    }
+
+    #[actix_web::test]
+    async fn upstream_error_maps_auth_required_to_canonical_envelope() {
+        let response =
+            ncm_upstream_error_response(NcmError::AuthRequired("login required".to_string()));
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            read_canonical_error_body(response).await,
+            json!({"status": "error", "message": "login required"})
+        );
+    }
+
+    #[actix_web::test]
+    async fn upstream_error_maps_invalid_param_to_canonical_envelope() {
+        let response =
+            ncm_upstream_error_response(NcmError::InvalidParam("missing id".to_string()));
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            read_canonical_error_body(response).await,
+            json!({"status": "error", "message": "missing id"})
+        );
+    }
+
+    #[actix_web::test]
+    async fn upstream_error_maps_rate_limited_to_canonical_envelope() {
+        let response = ncm_upstream_error_response(NcmError::RateLimited("slow down".to_string()));
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            read_canonical_error_body(response).await,
+            json!({"status": "error", "message": "slow down"})
+        );
+    }
+
+    #[actix_web::test]
+    async fn upstream_error_maps_timeout_to_canonical_envelope() {
+        let response = ncm_upstream_error_response(NcmError::Timeout("upstream slow".to_string()));
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            read_canonical_error_body(response).await,
+            json!({"status": "error", "message": "upstream slow"})
+        );
+    }
+
+    #[actix_web::test]
+    async fn upstream_error_maps_api_to_bad_gateway() {
+        let response = ncm_upstream_error_response(NcmError::Api {
+            code: 512,
+            msg: "VIP only".to_string(),
+        });
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            read_canonical_error_body(response).await,
+            json!({"status": "error", "message": "VIP only"})
+        );
+    }
+
+    #[actix_web::test]
+    async fn upstream_error_maps_unknown_variant_to_bad_gateway() {
+        let response =
+            ncm_upstream_error_response(NcmError::Unknown("unhandled upstream".to_string()));
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = read_canonical_error_body(response).await;
+        assert_eq!(body["status"], "error");
+        assert!(
+            body["message"]
+                .as_str()
+                .is_some_and(|msg| msg.contains("unhandled upstream")),
+            "expected upstream message to flow through to canonical body, got {body}"
+        );
+    }
+
+    #[test]
+    fn domain_handlers_never_use_raw_proxy_error_helper() {
+        const HANDLER_SOURCES: &[(&str, &str)] = &[
+            ("accounts.rs", include_str!("netease/accounts.rs")),
+            ("cloud.rs", include_str!("netease/cloud.rs")),
+            ("discover.rs", include_str!("netease/discover.rs")),
+            (
+                "playback_actions.rs",
+                include_str!("netease/playback_actions.rs"),
+            ),
+            ("playlists.rs", include_str!("netease/playlists.rs")),
+            ("search.rs", include_str!("netease/search.rs")),
+            ("tracks.rs", include_str!("netease/tracks.rs")),
+        ];
+
+        let offenders: Vec<&str> = HANDLER_SOURCES
+            .iter()
+            .filter_map(|(name, content)| {
+                content
+                    .contains("build_error_response")
+                    .then_some(*name)
+            })
+            .collect();
+
+        assert!(
+            offenders.is_empty(),
+            "build_error_response leaked into {:?}; /domain/ncm/* handlers must call \
+             ncm_upstream_error_response (raw {{code, msg}} body is reserved for /api/netease/* in proxy.rs)",
+            offenders
+        );
+    }
 }
