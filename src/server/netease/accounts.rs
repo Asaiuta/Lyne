@@ -50,11 +50,8 @@ pub(super) async fn refresh_active_ncm_account(data: web::Data<Arc<AppState>>) -
     let account = match data.app_db.active_ncm_account() {
         Ok(Some(account)) => account,
         Ok(None) => {
-            return HttpResponse::Ok().json(serde_json::json!({
-                "status": "success",
-                "accounts": [],
-                "active_user_id": null
-            }));
+            return HttpResponse::Ok()
+                .json(NcmAccountStateResponse::success(Vec::new(), None));
         }
         Err(err) => {
             return internal_server_error_response(err);
@@ -135,11 +132,7 @@ fn account_state_response(
     accounts: Vec<NcmAccountRecord>,
     active_user_id: Option<i64>,
 ) -> HttpResponse {
-    HttpResponse::Ok().json(serde_json::json!({
-        "status": "success",
-        "accounts": accounts,
-        "active_user_id": active_user_id
-    }))
+    HttpResponse::Ok().json(NcmAccountStateResponse::success(accounts, active_user_id))
 }
 
 async fn refresh_account_with_ncm(

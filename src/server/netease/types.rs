@@ -1,4 +1,5 @@
 use super::super::lyrics::LyricLine;
+use crate::app_database::NcmAccountRecord;
 use ncm_api_rs::NcmError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -303,4 +304,21 @@ pub(super) struct NcmDiscoverPlaylistCategoryEntry {
     pub(super) name: String,
     pub(super) category: i64,
     pub(super) hot: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct NcmAccountStateResponse {
+    pub(super) status: &'static str,
+    pub(super) accounts: Vec<NcmAccountRecord>,
+    pub(super) active_user_id: Option<i64>,
+}
+
+impl NcmAccountStateResponse {
+    pub(super) fn success(accounts: Vec<NcmAccountRecord>, active_user_id: Option<i64>) -> Self {
+        Self {
+            status: "success",
+            accounts,
+            active_user_id,
+        }
+    }
 }
