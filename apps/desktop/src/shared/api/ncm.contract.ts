@@ -29,6 +29,8 @@ import type {
   ResolvedNcmTrackSupplement,
   SearchNcmTracksInput
 } from "./client";
+import type { ApiStatus } from "./types";
+import type { NcmResponseEnvelope } from "./ncm/base";
 
 type Equal<Actual, Expected> =
   (<T>() => T extends Actual ? 1 : 2) extends
@@ -78,3 +80,69 @@ export type NcmApiValueContract = [
   Expect<Equal<NcmDiscoverAlbumArea, "ALL" | "ZH" | "EA" | "KR" | "JP">>,
   Expect<Equal<NcmDiscoverSongType, 0 | 7 | 96 | 16 | 8>>
 ];
+
+type DomainNcmSuccessEnvelope<Payload> = {
+  status: Extract<ApiStatus, "success">;
+} & Payload;
+
+type DomainNcmErrorEnvelope = {
+  status: Extract<ApiStatus, "error">;
+  message: string;
+};
+
+export const rawNcmProxyWireFixtures = {
+  qrAuthorized: {
+    code: 803,
+    nickname: "Ada",
+    avatarUrl: "https://example.test/avatar.jpg",
+    cookie: "MUSIC_U=secret"
+  },
+  rateLimited: {
+    code: 503,
+    msg: "slow down"
+  }
+} satisfies Record<string, NcmResponseEnvelope>;
+
+export const domainNcmWireFixtures = {
+  tracksSuccess: {
+    status: "success",
+    tracks: [
+      {
+        id: "ncm-song-42",
+        songId: 42,
+        source_path: "https://music.163.com/#/song?id=42",
+        title: "Needle",
+        artist: "Ada",
+        album: null,
+        duration_secs: 180,
+        artworkUrl: "https://example.test/cover.jpg",
+        size_bytes: null
+      }
+    ]
+  },
+  accountStateSuccess: {
+    status: "success",
+    accounts: [
+      {
+        userId: 42,
+        nickname: "Ada",
+        avatarUrl: null,
+        hasCookie: true,
+        vipType: 11,
+        level: 8,
+        signinAt: null,
+        addedAt: 1710000000000,
+        refreshedAt: 1710000000001
+      }
+    ],
+    activeUserId: 42
+  },
+  upstreamError: {
+    status: "error",
+    message: "login required"
+  }
+} satisfies {
+  tracksSuccess: DomainNcmSuccessEnvelope<{ tracks: NcmTrackSummary[] }>;
+  accountStateSuccess: DomainNcmSuccessEnvelope<NcmAccountState>;
+  upstreamError: DomainNcmErrorEnvelope;
+};
