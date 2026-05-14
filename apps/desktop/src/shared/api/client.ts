@@ -18,9 +18,7 @@ import type {
   QueueEntry,
   QueueStatus,
   PlayerState,
-  RepeatMode,
   ScanResult,
-  ShuffleMode,
   WebDavBrowseEntry,
   WebDavSource
 } from "./types";
@@ -30,6 +28,11 @@ import {
   parseCurrentLyricsResponse,
   type CurrentLyricsResponse
 } from "./lyrics";
+import {
+  createPlaybackApiClient,
+  type PlaybackApiClient,
+  type PlaybackApiTransport
+} from "./playback";
 import { requestEnvelope as requestTransportEnvelope, requestJson } from "./transport";
 import {
   createEffectsApiClient,
@@ -70,6 +73,7 @@ import type {
   SearchNcmTracksInput
 } from "./ncmDomainTypes";
 export type { CurrentLyricsResponse, LyricLine, LyricWord } from "./lyrics";
+export type { LoadOptions, PlaybackApiClient } from "./playback";
 export type {
   GetNcmHomeFeedInput,
   ListNcmCloudTracksInput,
@@ -128,18 +132,7 @@ export type {
   StatusMessageResponse
 } from "./effects";
 
-export interface ApiClient extends EffectsApiClient {
-  getState: () => Promise<PlayerState>;
-  play: () => Promise<PlayerState>;
-  pause: () => Promise<PlayerState>;
-  stop: () => Promise<PlayerState>;
-  load: (path: string, options?: LoadOptions) => Promise<PlayerState>;
-  seek: (position: number) => Promise<PlayerState>;
-  setVolume: (volume: number) => Promise<PlayerState>;
-  setRepeatMode: (mode: RepeatMode) => Promise<PlayerState>;
-  setShuffleMode: (mode: ShuffleMode) => Promise<PlayerState>;
-  listDevices: () => Promise<DevicesResponse>;
-  configureOutput: (deviceId: number | null, exclusive?: boolean) => Promise<PlayerState>;
+export interface ApiClient extends PlaybackApiClient, EffectsApiClient {
   getQueueStatus: () => Promise<QueueStatus>;
   queueNext: (path: string) => Promise<void>;
   cancelPreload: () => Promise<void>;
@@ -217,10 +210,6 @@ export interface ApiClient extends EffectsApiClient {
   // Cover Art
   getCoverArtUrl: (mediaId: string) => string;
   getLibraryTrackCoverArtUrl: (trackKey: number) => string;
-}
-
-interface LoadOptions {
-  autoplay?: boolean;
 }
 
 export interface PlayQueueOptions {
@@ -1412,143 +1401,17 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
     requestJson: (path, init) => requestJson(baseUrl, path, init),
     requestEnvelope: (path, init) => requestEnvelope(baseUrl, path, init)
   };
+  const playbackTransport: PlaybackApiTransport = {
+    requestEnvelope: (path, init) => requestEnvelope(baseUrl, path, init)
+  };
   const effectsClient = createEffectsApiClient(effectsTransport);
+  const playbackClient = createPlaybackApiClient(playbackTransport);
 
   return {
-  getState: async () => {
-    const envelope = await requestEnvelope(baseUrl, "/state");
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to fetch state");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  play: async () => {
-    const envelope = await requestEnvelope(baseUrl, "/play", { method: "POST" });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to play");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  pause: async () => {
-    const envelope = await requestEnvelope(baseUrl, "/pause", { method: "POST" });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to pause");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  stop: async () => {
-    const envelope = await requestEnvelope(baseUrl, "/stop", { method: "POST" });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to stop");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  load: async (path: string, options?: LoadOptions) => {
-    const envelope = await requestEnvelope(baseUrl, "/load", {
-      method: "POST",
-      body: JSON.stringify({
-        path,
-        ...(options?.autoplay ? { autoplay: true } : {})
-      })
-    });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to load");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  seek: async (position: number) => {
-    const envelope = await requestEnvelope(baseUrl, "/seek", {
-      method: "POST",
-      body: JSON.stringify({ position })
-    });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to seek");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  setVolume: async (volume: number) => {
-    const envelope = await requestEnvelope(baseUrl, "/volume", {
-      method: "POST",
-      body: JSON.stringify({ volume })
-    });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to set volume");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  setRepeatMode: async (mode: RepeatMode) => {
-    const envelope = await requestEnvelope(baseUrl, "/repeat", {
-      method: "POST",
-      body: JSON.stringify({ mode })
-    });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to set repeat mode");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  setShuffleMode: async (mode: ShuffleMode) => {
-    const envelope = await requestEnvelope(baseUrl, "/shuffle", {
-      method: "POST",
-      body: JSON.stringify({ mode })
-    });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to set shuffle mode");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
-  },
-  listDevices: async () => {
-    const envelope = await requestEnvelope(baseUrl, "/devices");
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to list devices");
-    }
-    if (!envelope.devices) {
-      throw new Error("Devices missing from response");
-    }
-    return envelope.devices;
-  },
+  ...playbackClient,
   getQueueStatus: async () => {
     const json = await requestJson(baseUrl, "/queue_status");
     return parseQueueStatusResponse(json);
-  },
-  configureOutput: async (deviceId: number | null, exclusive = false) => {
-    const envelope = await requestEnvelope(baseUrl, "/configure_output", {
-      method: "POST",
-      body: JSON.stringify({ device_id: deviceId, exclusive })
-    });
-    if (envelope.status === "error") {
-      throw new Error(envelope.message ?? "Failed to configure output");
-    }
-    if (!envelope.state) {
-      throw new Error("State missing from response");
-    }
-    return envelope.state;
   },
   queueNext: async (path: string) => {
     const envelope = await requestEnvelope(baseUrl, "/queue_next", {
