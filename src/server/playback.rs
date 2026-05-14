@@ -2415,7 +2415,7 @@ async fn scan_loudness_background(
     });
 
     HttpResponse::Accepted().json(serde_json::json!({
-        "status": "accepted",
+        "status": "success",
         "task_id": task_id,
         "path": path
     }))
