@@ -247,7 +247,10 @@ mod tests {
     fn event_type_registry_has_no_duplicates() {
         let mut unique = std::collections::BTreeSet::new();
         for event_type in KNOWN_EVENT_TYPES {
-            assert!(unique.insert(event_type), "duplicate event type: {event_type}");
+            assert!(
+                unique.insert(event_type),
+                "duplicate event type: {event_type}"
+            );
         }
         assert_eq!(unique.len(), KNOWN_EVENT_TYPES.len());
     }
@@ -256,8 +259,14 @@ mod tests {
     fn typed_event_builders_emit_stable_names() {
         let cases = [
             (loading_progress(10), event_type::LOADING_PROGRESS),
-            (load_complete(Some("track.flac".to_string()), 12.5), event_type::LOAD_COMPLETE),
-            (load_error("decode failed".to_string()), event_type::LOAD_ERROR),
+            (
+                load_complete(Some("track.flac".to_string()), 12.5),
+                event_type::LOAD_COMPLETE,
+            ),
+            (
+                load_error("decode failed".to_string()),
+                event_type::LOAD_ERROR,
+            ),
             (queue_updated(), event_type::QUEUE_UPDATED),
             (playback_ended(34.0), event_type::PLAYBACK_ENDED),
             (play(1.0, 1000), event_type::PLAY),

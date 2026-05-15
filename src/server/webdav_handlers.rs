@@ -142,9 +142,9 @@ async fn upsert_webdav_source(
             "status": "success",
             "source": source,
         })),
-        Ok(None) => internal_server_error_response(
-            "WebDAV source was saved but could not be reloaded",
-        ),
+        Ok(None) => {
+            internal_server_error_response("WebDAV source was saved but could not be reloaded")
+        }
         Err(e) => internal_server_error_response(e),
     }
 }
