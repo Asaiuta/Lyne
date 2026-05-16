@@ -55,6 +55,7 @@ fn inject_active_ncm_cookie(data: &web::Data<Arc<AppState>>, query: &mut Query) 
         .params
         .remove("_ncm_no_active_cookie")
         .or_else(|| query.params.remove("no_active_cookie"))
+        .or_else(|| query.params.remove("noCookie"))
         .is_some_and(|value| parse_bool(&value));
     if suppress || query.cookie.is_some() {
         return;

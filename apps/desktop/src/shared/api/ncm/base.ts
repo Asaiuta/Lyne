@@ -1,4 +1,5 @@
 import { invalidateApiToken, resolveApiToken, resolveBaseUrl } from "../env";
+import { fetchWithTimeout } from "../fetchWithTimeout";
 
 export interface NcmRequestOptions {
   method?: "GET" | "POST";
@@ -108,7 +109,7 @@ export const requestNcm = async <T = unknown>(
             ...(cookieOverride.suppressActiveCookie ? { [SUPPRESS_ACTIVE_COOKIE_KEY]: true } : {})
           };
 
-    return fetch(buildUrl(endpoint, finalParams, options.noCache), {
+    return fetchWithTimeout(buildUrl(endpoint, finalParams, options.noCache), {
       method,
       headers,
       body,

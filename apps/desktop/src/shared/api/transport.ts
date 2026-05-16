@@ -1,4 +1,5 @@
 import { invalidateApiToken, resolveApiToken } from "./env";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 import type { ApiEnvelope } from "./types";
 
 export type ParseApiEnvelope = (value: unknown) => ApiEnvelope;
@@ -13,7 +14,7 @@ export const requestJson = async (baseUrl: string, path: string, init?: RequestI
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
     }
-    return fetch(`${baseUrl}${path}`, {
+    return fetchWithTimeout(`${baseUrl}${path}`, {
       ...init,
       headers
     });
