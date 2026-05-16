@@ -32,6 +32,11 @@ pub(super) struct QueueEnqueueRequest {
 }
 
 #[derive(Deserialize)]
+pub(super) struct QueueEnqueueManyRequest {
+    pub(super) paths: Vec<String>,
+}
+
+#[derive(Deserialize)]
 pub(super) struct QueueReplaceRequest {
     pub(super) paths: Vec<String>,
 }

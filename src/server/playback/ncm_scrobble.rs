@@ -22,7 +22,7 @@ pub(super) fn begin_ncm_scrobble_session(
         }
     };
 
-    data.ncm_scrobble.lock().sessions.insert(
+    data.playback.ncm_scrobble.lock().sessions.insert(
         session_id,
         NcmScrobbleSession {
             source_path: source_path.to_string(),
@@ -34,7 +34,7 @@ pub(super) fn begin_ncm_scrobble_session(
 }
 
 pub(super) fn start_ncm_scrobble_segment(data: &web::Data<Arc<AppState>>, session_id: i64) {
-    let mut state = data.ncm_scrobble.lock();
+    let mut state = data.playback.ncm_scrobble.lock();
     if let Some(session) = state.sessions.get_mut(&session_id) {
         if session.segment_started_at.is_none() {
             session.segment_started_at = Some(Instant::now());
@@ -43,7 +43,7 @@ pub(super) fn start_ncm_scrobble_segment(data: &web::Data<Arc<AppState>>, sessio
 }
 
 pub(super) fn stop_ncm_scrobble_segment(data: &web::Data<Arc<AppState>>, session_id: i64) {
-    let mut state = data.ncm_scrobble.lock();
+    let mut state = data.playback.ncm_scrobble.lock();
     if let Some(session) = state.sessions.get_mut(&session_id) {
         stop_ncm_scrobble_segment_inner(session);
     }
@@ -53,7 +53,7 @@ pub(super) fn sync_ncm_scrobble_segment_from_shared(
     data: &web::Data<Arc<AppState>>,
     shared_state: &Arc<SharedState>,
 ) {
-    let Some(session_id) = *data.active_session_id.lock() else {
+    let Some(session_id) = *data.playback.active_session_id.lock() else {
         return;
     };
     let is_audible_playback = shared_state.state.load() == PlayerState::Playing
@@ -71,7 +71,7 @@ pub(super) fn finish_ncm_scrobble_session(
     reason: &str,
 ) {
     let finished = {
-        let mut state = data.ncm_scrobble.lock();
+        let mut state = data.playback.ncm_scrobble.lock();
         let Some(mut session) = state.sessions.remove(&session_id) else {
             return;
         };

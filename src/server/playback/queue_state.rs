@@ -123,7 +123,7 @@ pub(super) fn load_queue_entry_for_playback(
     }
     let snapshot = playback_runtime_snapshot_from_state(&state_response);
 
-    let previous_session = { data.active_session_id.lock().take() };
+    let previous_session = { data.playback.active_session_id.lock().take() };
     if let Some(session_id) = previous_session {
         finish_ncm_scrobble_session(data, session_id, "replaced");
         if let Err(e) = data
@@ -143,7 +143,7 @@ pub(super) fn load_queue_entry_for_playback(
         if autoplay { "playing" } else { "loaded" },
         &snapshot,
     )?;
-    *data.active_session_id.lock() = Some(session_id);
+    *data.playback.active_session_id.lock() = Some(session_id);
     begin_ncm_scrobble_session(
         data,
         session_id,
@@ -202,7 +202,7 @@ pub(crate) fn load_validated_path_for_playback(
     }
     let snapshot = playback_runtime_snapshot_from_state(&state_response);
 
-    let previous_session = { data.active_session_id.lock().take() };
+    let previous_session = { data.playback.active_session_id.lock().take() };
     if let Some(session_id) = previous_session {
         finish_ncm_scrobble_session(data, session_id, "replaced");
         if let Err(e) = data
@@ -223,7 +223,7 @@ pub(crate) fn load_validated_path_for_playback(
         &snapshot,
     ) {
         Ok(session_id) => {
-            *data.active_session_id.lock() = Some(session_id);
+            *data.playback.active_session_id.lock() = Some(session_id);
             begin_ncm_scrobble_session(
                 data,
                 session_id,
@@ -282,7 +282,7 @@ fn finish_active_session_on_natural_end(data: &web::Data<Arc<AppState>>) {
         mark_current_track_as_played(data, path);
     }
 
-    if let Some(session_id) = data.active_session_id.lock().take() {
+    if let Some(session_id) = data.playback.active_session_id.lock().take() {
         finish_ncm_scrobble_session(data, session_id, "ended");
         if let Err(e) = data
             .app_db
@@ -438,7 +438,14 @@ pub(crate) fn append_validated_path_to_persistent_queue(
     data: &web::Data<Arc<AppState>>,
     path: &str,
 ) -> Result<Vec<QueueEntryRecord>, String> {
-    data.app_db.append_queue_entry("active", path)?;
+    append_validated_paths_to_persistent_queue(data, &[path.to_string()])
+}
+
+pub(crate) fn append_validated_paths_to_persistent_queue(
+    data: &web::Data<Arc<AppState>>,
+    paths: &[String],
+) -> Result<Vec<QueueEntryRecord>, String> {
+    data.app_db.append_queue_entries("active", paths)?;
     emit_queue_updated(data);
     data.app_db.list_queue_entries("active")
 }

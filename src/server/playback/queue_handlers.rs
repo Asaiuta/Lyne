@@ -39,7 +39,7 @@ pub(super) async fn queue_next(
                 "queued_path": path,
                 "has_credentials_override": body.username.is_some() && body.password.is_some()
             });
-            if let Some(session_id) = *data.active_session_id.lock() {
+            if let Some(session_id) = *data.playback.active_session_id.lock() {
                 let source_path = current_path.as_deref().unwrap_or(&path);
                 let _ = append_playback_history_and_emit(
                     &data,
@@ -240,6 +240,31 @@ pub(super) async fn enqueue_persistent_queue(
     };
 
     match append_validated_path_to_persistent_queue(&data, &path) {
+        Ok(entries) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "queue": entries
+        })),
+        Err(e) => internal_server_error_response(e),
+    }
+}
+
+pub(super) async fn enqueue_persistent_queue_many(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<QueueEnqueueManyRequest>,
+) -> HttpResponse {
+    if body.paths.is_empty() {
+        return bad_request_response("paths cannot be empty");
+    }
+
+    let mut validated = Vec::with_capacity(body.paths.len());
+    for path in &body.paths {
+        match validate_path(path) {
+            Ok(value) => validated.push(value),
+            Err(e) => return bad_request_response(e),
+        }
+    }
+
+    match append_validated_paths_to_persistent_queue(&data, &validated) {
         Ok(entries) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "queue": entries

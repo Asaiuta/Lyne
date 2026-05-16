@@ -1,8 +1,9 @@
 use super::lyrics;
 use super::*;
 pub(crate) use queue_state::{
-    append_validated_path_to_persistent_queue, load_validated_path_for_playback,
-    mark_current_track_as_played, queue_next_from_persistent_queue,
+    append_validated_path_to_persistent_queue, append_validated_paths_to_persistent_queue,
+    load_validated_path_for_playback, mark_current_track_as_played,
+    queue_next_from_persistent_queue,
 };
 #[path = "playback/analysis.rs"]
 mod analysis;

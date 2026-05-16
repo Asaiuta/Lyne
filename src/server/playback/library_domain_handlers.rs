@@ -157,6 +157,34 @@ pub(super) async fn replace_queue_from_track_keys(
     }
 }
 
+pub(super) async fn enqueue_queue_from_track_keys(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<LibraryQueueTrackKeysRequest>,
+) -> HttpResponse {
+    if body.track_keys.is_empty() {
+        return bad_request_response("track_keys cannot be empty");
+    }
+    let rows = match data.app_db.source_paths_for_track_keys(&body.track_keys) {
+        Ok(rows) => rows,
+        Err(e) => return internal_server_error_response(e),
+    };
+    if rows.is_empty() {
+        return not_found_response("Library tracks not found");
+    }
+
+    let paths = rows
+        .into_iter()
+        .map(|(_, source_path)| source_path)
+        .collect::<Vec<_>>();
+    match append_validated_paths_to_persistent_queue(&data, &paths) {
+        Ok(entries) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "queue": entries
+        })),
+        Err(e) => internal_server_error_response(e),
+    }
+}
+
 pub(super) async fn delete_media_items(
     data: web::Data<Arc<AppState>>,
     body: web::Json<MediaItemsDeleteRequest>,
@@ -406,7 +434,11 @@ pub(super) async fn scan_library_root(
     body: web::Json<LibraryScanRequest>,
 ) -> HttpResponse {
     let started_at = now_epoch_secs();
-    let scan_task_id = data.scan_task_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    let scan_task_id = data
+        .analysis
+        .scan_task_counter
+        .fetch_add(1, Ordering::Relaxed)
+        + 1;
     let requested_path = body.path.trim();
     let is_remote = requested_path.starts_with("http://")
         || requested_path.starts_with("https://")

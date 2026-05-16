@@ -39,14 +39,31 @@ pub struct AppState {
     pub player: Mutex<AudioPlayer>,
     pub webdav_config: Mutex<WebDavConfig>,
     pub ncm_client: Arc<ncm_api_rs::ApiClient>,
-    /// FIX for LoudnessDatabase integration: Database for pre-computed loudness metadata
-    pub loudness_db: Mutex<Option<LoudnessDatabase>>,
-    /// SQLite-backed application domain state
     pub app_db: Arc<AppDatabase>,
     /// Persistent settings manager
     pub settings_manager: SharedSettingsManager,
-    /// Env-only server runtime settings
-    pub server_config: crate::config::RuntimeServerConfig,
+    /// Analysis and scan job state.
+    pub analysis: AnalysisState,
+    /// Playback-specific domain state.
+    pub playback: PlaybackDomainState,
+}
+
+/// Local control-plane state shared by auth, WebSocket upgrade, and shutdown.
+/// Kept separate from AppState so domain handlers do not carry server lifecycle
+/// fields they do not use.
+pub struct ServerControlState {
+    /// Per-run bearer token shared with the supervising Tauri host. Validated by
+    /// the auth middleware on every HTTP route and by the WebSocket handshake.
+    pub api_token: Arc<String>,
+    /// Local-only graceful shutdown handle
+    pub shutdown_handle: Mutex<Option<ServerHandle>>,
+}
+
+/// Analysis/runtime state grouped away from the rest of the application domain
+/// so handlers only touch the concerns they actually need.
+pub struct AnalysisState {
+    /// Database for pre-computed loudness metadata
+    pub loudness_db: Mutex<Option<LoudnessDatabase>>,
     /// Dedicated runtime for CPU/IO-heavy analysis jobs
     pub analysis_runtime: Arc<AnalysisRuntime>,
     /// Concurrency guard for analysis jobs to avoid starving playback/control plane
@@ -61,15 +78,14 @@ pub struct AppState {
     pub scan_task_ttl_secs: u64,
     /// Max time for one analysis job before timeout
     pub analysis_task_timeout_secs: u64,
-    /// Local-only graceful shutdown handle
-    pub shutdown_handle: Mutex<Option<ServerHandle>>,
+}
+
+/// Playback-domain state that is shared by handlers and the playback supervisor.
+pub struct PlaybackDomainState {
     /// Active playback session id in the domain database
     pub active_session_id: Mutex<Option<i64>>,
     /// Backend-owned NCM scrobble session accumulator
     pub ncm_scrobble: Mutex<NcmScrobbleState>,
-    /// Per-run bearer token shared with the supervising Tauri host. Validated by
-    /// the auth middleware on every HTTP route and by the WebSocket handshake.
-    pub api_token: Arc<String>,
 }
 
 #[derive(Default)]
@@ -144,18 +160,18 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
-    let permit = Arc::clone(&data.analysis_semaphore)
+    let permit = Arc::clone(&data.analysis.analysis_semaphore)
         .acquire_owned()
         .await
         .map_err(|e| format!("Analysis semaphore closed: {}", e))?;
 
-    let handle = data.analysis_runtime.handle();
+    let handle = data.analysis.analysis_runtime.handle();
     let join_handle = handle.spawn_blocking(move || {
         let _permit = permit;
         job()
     });
 
-    let timeout_secs = data.analysis_task_timeout_secs.max(1);
+    let timeout_secs = data.analysis.analysis_task_timeout_secs.max(1);
     let join_result = timeout(Duration::from_secs(timeout_secs), join_handle)
         .await
         .map_err(|_| format!("Analysis task timed out after {}s", timeout_secs))?;
@@ -163,10 +179,9 @@ where
     join_result.map_err(|e| format!("Analysis worker join error: {}", e))?
 }
 
-// ============ Path Security (Defect 44 fix, SEC-01 fix) ============
+// ============ Path Security ============
 
-/// FIX for Defect 44: Validate file paths to prevent path traversal attacks.
-/// FIX for SEC-01: Reject paths that fail canonicalization (file doesn't exist).
+/// Validate file paths to prevent traversal and probing.
 ///
 /// - HTTP(S) URLs are allowed (they have their own security model)
 /// - Local paths are validated to prevent directory traversal
@@ -242,8 +257,7 @@ pub(crate) fn validate_path(path: &str) -> Result<String, String> {
         }
     }
 
-    // FIX for SEC-01: Require canonicalization to succeed for local paths
-    // This prevents:
+    // Require canonicalization to succeed for local paths. This prevents:
     // 1. Path probing attacks (determining if arbitrary paths exist)
     // 2. Symlink attacks (following symlinks outside intended directories)
     // 3. Race conditions (TOCTOU)
@@ -253,8 +267,7 @@ pub(crate) fn validate_path(path: &str) -> Result<String, String> {
             Ok(canonical.to_string_lossy().to_string())
         }
         Err(e) => {
-            // FIX for SEC-01: Reject paths that don't exist or aren't accessible
-            // Previously this would return the original path, allowing path probing
+            // Reject paths that don't exist or aren't accessible.
             log::warn!("Path validation rejected: '{}' - {}", path.display(), e);
             Err(format!(
                 "File not found or inaccessible: {}",
@@ -907,7 +920,7 @@ fn build_runtime_snapshot(player: &AudioPlayer) -> PlaybackRuntimeSnapshot {
 fn restore_domain_state(state: &Arc<AppState>) {
     match state.app_db.latest_open_playback_session() {
         Ok(Some(session)) => {
-            *state.active_session_id.lock() = Some(session.session_id);
+            *state.playback.active_session_id.lock() = Some(session.session_id);
             log::info!(
                 "Recovered active playback session {} for '{}'",
                 session.session_id,
@@ -920,10 +933,10 @@ fn restore_domain_state(state: &Arc<AppState>) {
 
     match state
         .app_db
-        .recent_analysis_tasks(state.scan_task_max_entries)
+        .recent_analysis_tasks(state.analysis.scan_task_max_entries)
     {
         Ok(tasks) => {
-            let mut memory_tasks = state.scan_tasks.lock();
+            let mut memory_tasks = state.analysis.scan_tasks.lock();
             for task in tasks {
                 memory_tasks.insert(
                     task.task_id,
@@ -955,8 +968,8 @@ async fn cors_preflight() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-async fn shutdown_server(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let handle = data.shutdown_handle.lock().clone();
+async fn shutdown_server(control: web::Data<Arc<ServerControlState>>) -> HttpResponse {
+    let handle = control.shutdown_handle.lock().clone();
     if let Some(handle) = handle {
         actix_web::rt::spawn(async move {
             handle.stop(true).await;
@@ -988,6 +1001,10 @@ pub async fn run_server(
         ));
     }
     let api_token = Arc::new(api_token);
+    let server_control = Arc::new(ServerControlState {
+        api_token: Arc::clone(&api_token),
+        shutdown_handle: Mutex::new(None),
+    });
 
     let app_db = Arc::new(
         AppDatabase::open(&runtime_paths.app_db_path)
@@ -1009,7 +1026,7 @@ pub async fn run_server(
             .unwrap_or_default(),
     };
 
-    // FIX for LoudnessDatabase integration: Initialize loudness database
+    // Initialize loudness database.
     let loudness_db = match LoudnessDatabase::open(&runtime_paths.loudness_db_path) {
         Ok(db) => {
             log::info!(
@@ -1058,9 +1075,6 @@ pub async fn run_server(
         runtime_paths.app_db_path.display()
     );
 
-    let scan_task_max_entries = config.server.scan_task_max_entries;
-    let scan_task_ttl_secs = config.server.scan_task_ttl_secs;
-    let analysis_task_timeout_secs = config.server.analysis_task_timeout_secs;
     let allowed_origins = config.server.allowed_origins.clone();
     let ncm_client = Arc::new(ncm_api_rs::create_client(None));
 
@@ -1068,21 +1082,22 @@ pub async fn run_server(
         player: Mutex::new(player),
         webdav_config: Mutex::new(webdav_config),
         ncm_client: Arc::clone(&ncm_client),
-        loudness_db: Mutex::new(loudness_db),
         app_db,
         settings_manager,
-        server_config: config.server,
-        analysis_runtime: Arc::new(AnalysisRuntime::new(analysis_runtime)),
-        analysis_semaphore: Arc::new(Semaphore::new(analysis_parallelism)),
-        scan_tasks: Mutex::new(HashMap::new()),
-        scan_task_counter: AtomicU64::new(0),
-        scan_task_max_entries,
-        scan_task_ttl_secs,
-        analysis_task_timeout_secs,
-        shutdown_handle: Mutex::new(None),
-        active_session_id: Mutex::new(None),
-        ncm_scrobble: Mutex::new(NcmScrobbleState::default()),
-        api_token: Arc::clone(&api_token),
+        analysis: AnalysisState {
+            loudness_db: Mutex::new(loudness_db),
+            analysis_runtime: Arc::new(AnalysisRuntime::new(analysis_runtime)),
+            analysis_semaphore: Arc::new(Semaphore::new(analysis_parallelism)),
+            scan_tasks: Mutex::new(HashMap::new()),
+            scan_task_counter: AtomicU64::new(0),
+            scan_task_max_entries: config.server.scan_task_max_entries,
+            scan_task_ttl_secs: config.server.scan_task_ttl_secs,
+            analysis_task_timeout_secs: config.server.analysis_task_timeout_secs,
+        },
+        playback: PlaybackDomainState {
+            active_session_id: Mutex::new(None),
+            ncm_scrobble: Mutex::new(NcmScrobbleState::default()),
+        },
     });
 
     restore_domain_state(&state);
@@ -1100,12 +1115,14 @@ pub async fn run_server(
     println!("RUST_AUDIO_ENGINE_READY");
 
     let server_state = Arc::clone(&state);
+    let server_control_state = Arc::clone(&server_control);
     let cors_allowed_origins = allowed_origins.clone();
     let auth_token = Arc::clone(&api_token);
     let server = HttpServer::new(move || {
         let allowed_origins = cors_allowed_origins.clone();
         App::new()
             .app_data(web::Data::new(Arc::clone(&server_state)))
+            .app_data(web::Data::new(Arc::clone(&server_control_state)))
             // Inner-to-outer wrap order: BearerAuth runs first, then Logger sees the
             // resulting (possibly 401) response, then Cors handles preflight + headers.
             .wrap(auth::BearerAuth::new(Arc::clone(&auth_token)))
@@ -1147,12 +1164,13 @@ pub async fn run_server(
     .run();
 
     {
-        let mut shutdown_handle = state.shutdown_handle.lock();
+        let mut shutdown_handle = server_control.shutdown_handle.lock();
         *shutdown_handle = Some(server.handle());
     }
 
     let server_result = server.await;
     playback_supervisor.abort();
     drop(state);
+    drop(server_control);
     server_result
 }

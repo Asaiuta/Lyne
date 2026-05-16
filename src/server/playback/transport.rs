@@ -46,7 +46,7 @@ pub(super) async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
 
     match play_result {
         Ok((snapshot, current_path, state_response, shared_state)) => {
-            let active_session_id = { *data.active_session_id.lock() };
+            let active_session_id = { *data.playback.active_session_id.lock() };
             if let Some(session_id) = active_session_id {
                 sync_ncm_scrobble_segment_from_shared(&data, &shared_state);
                 if let Err(e) = data
@@ -90,7 +90,7 @@ pub(super) async fn pause(data: web::Data<Arc<AppState>>) -> HttpResponse {
 
     match pause_result {
         Ok((snapshot, current_path, state_response, shared_state)) => {
-            let active_session_id = { *data.active_session_id.lock() };
+            let active_session_id = { *data.playback.active_session_id.lock() };
             if let Some(session_id) = active_session_id {
                 sync_ncm_scrobble_segment_from_shared(&data, &shared_state);
                 if let Err(e) = data
@@ -134,7 +134,7 @@ pub(super) async fn stop(data: web::Data<Arc<AppState>>) -> HttpResponse {
             shared_state,
         )
     };
-    if let Some(session_id) = data.active_session_id.lock().take() {
+    if let Some(session_id) = data.playback.active_session_id.lock().take() {
         finish_ncm_scrobble_session(&data, session_id, "stopped");
         if let Err(e) =
             data.app_db
@@ -179,7 +179,7 @@ pub(super) async fn seek(
 
     match seek_result {
         Ok((snapshot, current_path, state_response, shared_state)) => {
-            if let Some(session_id) = *data.active_session_id.lock() {
+            if let Some(session_id) = *data.playback.active_session_id.lock() {
                 if let Err(e) = data
                     .app_db
                     .update_playback_session(session_id, "seeking", &snapshot)
@@ -302,7 +302,7 @@ pub(super) async fn set_volume(
     let mut player = data.player.lock();
     player.set_volume(body.volume as f64);
     let snapshot = build_runtime_snapshot(&player);
-    if let Some(session_id) = *data.active_session_id.lock() {
+    if let Some(session_id) = *data.playback.active_session_id.lock() {
         if let Err(e) = data
             .app_db
             .update_playback_session(session_id, "active", &snapshot)

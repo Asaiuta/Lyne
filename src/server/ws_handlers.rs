@@ -68,8 +68,9 @@ async fn websocket(
     req: HttpRequest,
     stream: web::Payload,
     data: web::Data<Arc<AppState>>,
+    control: web::Data<Arc<ServerControlState>>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    let expected_token = Arc::clone(&data.api_token);
+    let expected_token = Arc::clone(&control.api_token);
     let chosen_protocol = match authenticate_ws(&req, &expected_token) {
         Ok(protocol) => protocol,
         Err(_) => {

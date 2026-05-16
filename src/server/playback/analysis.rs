@@ -3,10 +3,10 @@ use actix_web::{web, HttpResponse};
 
 pub(super) fn cleanup_scan_tasks(data: &web::Data<Arc<AppState>>) {
     let now = now_epoch_secs();
-    let ttl = data.scan_task_ttl_secs;
-    let max_entries = data.scan_task_max_entries;
+    let ttl = data.analysis.scan_task_ttl_secs;
+    let max_entries = data.analysis.scan_task_max_entries;
 
-    let mut tasks = data.scan_tasks.lock();
+    let mut tasks = data.analysis.scan_tasks.lock();
 
     tasks.retain(|_, task| {
         let finished = task.status == "success" || task.status == "error";
@@ -82,7 +82,8 @@ pub(super) fn persist_library_scan_task(
 }
 
 pub(super) fn task_is_canceled(data: &web::Data<Arc<AppState>>, task_id: u64) -> bool {
-    data.scan_tasks
+    data.analysis
+        .scan_tasks
         .lock()
         .get(&task_id)
         .map(|task| task.status == "canceled")
@@ -143,7 +144,7 @@ pub(super) fn try_get_cached_loudness(
     data: &web::Data<Arc<AppState>>,
     path: &str,
 ) -> Option<crate::processor::TrackLoudness> {
-    let db_guard = data.loudness_db.lock();
+    let db_guard = data.analysis.loudness_db.lock();
     let db = db_guard.as_ref()?;
 
     match db.needs_scan(path) {
@@ -170,7 +171,7 @@ pub(super) fn try_store_loudness(
     data: &web::Data<Arc<AppState>>,
     track: &crate::processor::TrackLoudness,
 ) {
-    let db_guard = data.loudness_db.lock();
+    let db_guard = data.analysis.loudness_db.lock();
     if let Some(db) = db_guard.as_ref() {
         if let Err(e) = db.upsert(track) {
             log::warn!(

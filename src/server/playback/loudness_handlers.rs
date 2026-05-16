@@ -73,13 +73,17 @@ pub(super) async fn scan_loudness_background(
     };
     let store = body.store.unwrap_or(true);
 
-    if data.analysis_semaphore.available_permits() == 0 {
+    if data.analysis.analysis_semaphore.available_permits() == 0 {
         return too_many_requests_response("Too many scan tasks in progress, please retry later");
     }
 
     cleanup_scan_tasks(&data);
 
-    let task_id = data.scan_task_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    let task_id = data
+        .analysis
+        .scan_task_counter
+        .fetch_add(1, Ordering::Relaxed)
+        + 1;
     let now = now_epoch_secs();
     let initial_task = ScanTaskRecord {
         status: "queued".to_string(),
@@ -88,14 +92,17 @@ pub(super) async fn scan_loudness_background(
         result: None,
         error: None,
     };
-    data.scan_tasks.lock().insert(task_id, initial_task.clone());
+    data.analysis
+        .scan_tasks
+        .lock()
+        .insert(task_id, initial_task.clone());
     upsert_scan_task_record(&data, task_id, &path, &initial_task, store);
 
     let data_for_task = data.clone();
     let path_for_task = path.clone();
     actix_rt::spawn(async move {
         {
-            if let Some(task) = data_for_task.scan_tasks.lock().get_mut(&task_id) {
+            if let Some(task) = data_for_task.analysis.scan_tasks.lock().get_mut(&task_id) {
                 task.status = "running".to_string();
                 task.updated_at_epoch_secs = now_epoch_secs();
                 let snapshot = task.clone();
@@ -109,7 +116,7 @@ pub(super) async fn scan_loudness_background(
 
         if let Some(track_loudness) = try_get_cached_loudness(&data_for_task, &path_for_task) {
             if !task_is_canceled(&data_for_task, task_id) {
-                if let Some(task) = data_for_task.scan_tasks.lock().get_mut(&task_id) {
+                if let Some(task) = data_for_task.analysis.scan_tasks.lock().get_mut(&task_id) {
                     task.status = "success".to_string();
                     task.result = Some(track_loudness_to_json(&track_loudness));
                     task.updated_at_epoch_secs = now_epoch_secs();
@@ -138,7 +145,7 @@ pub(super) async fn scan_loudness_background(
                     try_store_loudness(&data_for_task, &track_loudness);
                 }
                 if !task_is_canceled(&data_for_task, task_id) {
-                    if let Some(task) = data_for_task.scan_tasks.lock().get_mut(&task_id) {
+                    if let Some(task) = data_for_task.analysis.scan_tasks.lock().get_mut(&task_id) {
                         task.status = "success".to_string();
                         task.result = Some(track_loudness_to_json(&track_loudness));
                         task.updated_at_epoch_secs = now_epoch_secs();
@@ -155,7 +162,7 @@ pub(super) async fn scan_loudness_background(
             }
             Err(e) => {
                 if !task_is_canceled(&data_for_task, task_id) {
-                    if let Some(task) = data_for_task.scan_tasks.lock().get_mut(&task_id) {
+                    if let Some(task) = data_for_task.analysis.scan_tasks.lock().get_mut(&task_id) {
                         task.status = "error".to_string();
                         task.error = Some(e);
                         task.updated_at_epoch_secs = now_epoch_secs();
@@ -189,7 +196,7 @@ pub(super) async fn get_scan_loudness_task(
     cleanup_scan_tasks(&data);
 
     let task_id = path.task_id;
-    let tasks = data.scan_tasks.lock();
+    let tasks = data.analysis.scan_tasks.lock();
     if let Some(task) = tasks.get(&task_id) {
         HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
@@ -217,7 +224,7 @@ pub(super) async fn cancel_scan_loudness_task(
     cleanup_scan_tasks(&data);
 
     let task_id = path.task_id;
-    let mut tasks = data.scan_tasks.lock();
+    let mut tasks = data.analysis.scan_tasks.lock();
     if let Some(task) = tasks.get_mut(&task_id) {
         match task.status.as_str() {
             "queued" | "running" => {

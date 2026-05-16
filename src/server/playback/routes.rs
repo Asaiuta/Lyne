@@ -80,6 +80,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(super::replace_queue_from_track_keys),
         )
         .route(
+            "/domain/library/queue_enqueue_from_track_keys",
+            web::post().to(super::enqueue_queue_from_track_keys),
+        )
+        .route(
             "/domain/media_items/delete",
             web::post().to(super::delete_media_items),
         )
@@ -155,6 +159,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/domain/queue/enqueue",
             web::post().to(super::enqueue_persistent_queue),
+        )
+        .route(
+            "/domain/queue/enqueue_many",
+            web::post().to(super::enqueue_persistent_queue_many),
         )
         .route(
             "/domain/queue/play",
