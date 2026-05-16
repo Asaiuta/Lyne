@@ -35,6 +35,8 @@ impl SidecarState {
 struct ApiToken(String);
 
 const ENV_AUDIO_ALLOWED_ORIGINS: &str = "AUDIO_ALLOWED_ORIGINS";
+const SIDECAR_PERMISSION_DENIED_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+const SIDECAR_PERMISSION_DENIED_RETRY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Environment variable carrying the per-run bearer token to the audio sidecar.
 /// Must stay in sync with `audio_engine::server::ENV_AUDIO_API_TOKEN`.
@@ -326,20 +328,37 @@ fn spawn_sidecar(app: &tauri::AppHandle, token: &str) -> Result<Child, String> {
       .stdout(Stdio::from(stdout.try_clone().map_err(|error| format!("Failed to clone stdout log handle: {error}"))?))
       .stderr(Stdio::from(stderr.try_clone().map_err(|error| format!("Failed to clone stderr log handle: {error}"))?));
 
+    let retry_deadline = Instant::now() + SIDECAR_PERMISSION_DENIED_RETRY_TIMEOUT;
     let mut last_error = None;
+    let mut permission_denied_attempts = 0;
     loop {
       match command.spawn() {
         Ok(child) => {
           if let Some(error) = last_error.take() {
             eprintln!(
-              "[audio-desktop] audio_server spawn hit transient permission denied before succeeding: {error}"
+              "[audio-desktop] audio_server spawn hit {permission_denied_attempts} transient permission denied error(s) before succeeding: {error}"
             );
           }
           return Ok(child);
         }
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+          permission_denied_attempts += 1;
+          if Instant::now() >= retry_deadline {
+            return Err(format!(
+              "Failed to launch audio server '{}' after retrying permission denied for {}ms ({} attempt(s)): {}",
+              path.display(),
+              SIDECAR_PERMISSION_DENIED_RETRY_TIMEOUT.as_millis(),
+              permission_denied_attempts,
+              error
+            ));
+          }
           last_error = Some(error);
-          std::thread::sleep(Duration::from_millis(250));
+          let retry_delay = retry_deadline
+            .saturating_duration_since(Instant::now())
+            .min(SIDECAR_PERMISSION_DENIED_RETRY_INTERVAL);
+          if !retry_delay.is_zero() {
+            std::thread::sleep(retry_delay);
+          }
         }
         Err(error) => {
           return Err(format!("Failed to launch audio server: {error}"));
