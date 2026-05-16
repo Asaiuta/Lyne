@@ -131,12 +131,8 @@ impl AnalysisRuntime {
         }
     }
 
-    fn handle(&self) -> tokio::runtime::Handle {
-        self.inner
-            .as_ref()
-            .expect("analysis runtime handle requested after shutdown")
-            .handle()
-            .clone()
+    fn handle(&self) -> Option<tokio::runtime::Handle> {
+        self.inner.as_ref().map(|rt| rt.handle().clone())
     }
 }
 
@@ -184,7 +180,11 @@ where
         .await
         .map_err(|e| format!("Analysis semaphore closed: {}", e))?;
 
-    let handle = data.analysis.analysis_runtime.handle();
+    let handle = data
+        .analysis
+        .analysis_runtime
+        .handle()
+        .ok_or_else(|| "Analysis runtime unavailable (shutdown in progress)".to_string())?;
     let join_handle = handle.spawn_blocking(move || {
         let _permit = permit;
         job()
@@ -1163,9 +1163,8 @@ pub async fn run_server(
     );
 
     // Load WebDAV config from domain database first, then env fallback.
-    let webdav_config = match app_db.load_primary_webdav_source() {
-        Ok(Some(cfg)) if cfg.is_configured() => cfg,
-        Ok(_) | Err(_) => config
+    let webdav_fallback_config = || -> WebDavConfig {
+        config
             .server
             .webdav_fallback
             .as_ref()
@@ -1174,7 +1173,18 @@ pub async fn run_server(
                 username: fallback.username.clone(),
                 password: fallback.password.clone(),
             })
-            .unwrap_or_default(),
+            .unwrap_or_default()
+    };
+    let webdav_config = match app_db.load_primary_webdav_source() {
+        Ok(Some(cfg)) if cfg.is_configured() => cfg,
+        Ok(_) => webdav_fallback_config(),
+        Err(e) => {
+            log::warn!(
+                "Failed to load primary WebDAV source from app db: {}. Using env fallback.",
+                e
+            );
+            webdav_fallback_config()
+        }
     };
 
     // Initialize loudness database.

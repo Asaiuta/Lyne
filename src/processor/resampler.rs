@@ -368,9 +368,20 @@ impl StreamingResampler {
                 self.output_scratch.resize(expected_output, 0.0);
             }
 
-            let processed = self.soxr_instances[ch]
+            let processed = match self.soxr_instances[ch]
                 .process(channel_data, &mut self.output_scratch)
-                .expect("Resampling failed");
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!(
+                        "Resampler process_chunk failed (ch={}, in_frames={}): {:?}",
+                        ch,
+                        channel_data.len(),
+                        e
+                    );
+                    return Vec::new();
+                }
+            };
 
             // Copy to channel output buffer (still one allocation per channel, unavoidable for Vec return)
             self.channel_outputs[ch]
@@ -439,9 +450,20 @@ impl StreamingResampler {
                 self.output_scratch.resize(expected_output, 0.0);
             }
 
-            let processed = self.soxr_instances[ch]
+            let processed = match self.soxr_instances[ch]
                 .process(channel_data, &mut self.output_scratch)
-                .expect("Resampling failed");
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!(
+                        "Resampler process_chunk_into failed (ch={}, in_frames={}): {:?}",
+                        ch,
+                        channel_data.len(),
+                        e
+                    );
+                    return 0;
+                }
+            };
 
             self.channel_outputs[ch]
                 .extend_from_slice(&self.output_scratch[..processed.output_frames]);

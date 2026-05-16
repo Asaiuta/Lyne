@@ -37,12 +37,14 @@ fn calculate_checksum(data: &[f64]) -> u32 {
     hasher.finalize()
 }
 
-fn read_u32_from_bytes(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+fn read_u32_from_bytes(bytes: &[u8], offset: usize) -> Option<u32> {
+    let arr: [u8; 4] = bytes.get(offset..offset + 4)?.try_into().ok()?;
+    Some(u32::from_le_bytes(arr))
 }
 
-fn read_u64_from_bytes(bytes: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+fn read_u64_from_bytes(bytes: &[u8], offset: usize) -> Option<u64> {
+    let arr: [u8; 8] = bytes.get(offset..offset + 8)?.try_into().ok()?;
+    Some(u64::from_le_bytes(arr))
 }
 
 /// Save samples to cache with header validation
@@ -118,11 +120,11 @@ pub fn load_cache_with_header(path: &Path, expected_sr: u32, expected_ch: u32) -
     file.read_exact(&mut header_bytes).ok()?;
 
     let magic = &header_bytes[0..4];
-    let version = read_u32_from_bytes(&header_bytes, 4);
-    let sample_rate = read_u32_from_bytes(&header_bytes, 8);
-    let channels = read_u32_from_bytes(&header_bytes, 12);
-    let frame_count = read_u64_from_bytes(&header_bytes, 16);
-    let stored_checksum = read_u32_from_bytes(&header_bytes, 24);
+    let version = read_u32_from_bytes(&header_bytes, 4)?;
+    let sample_rate = read_u32_from_bytes(&header_bytes, 8)?;
+    let channels = read_u32_from_bytes(&header_bytes, 12)?;
+    let frame_count = read_u64_from_bytes(&header_bytes, 16)?;
+    let stored_checksum = read_u32_from_bytes(&header_bytes, 24)?;
 
     if magic != CACHE_MAGIC {
         log::warn!("Invalid cache magic: {:?}", magic);
