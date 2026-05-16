@@ -20,7 +20,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
         apply_sql_migration(conn, 1, BASELINE_SQL)?;
     }
     if current < 2 {
-        apply_backfill_v1(conn)?;
+        apply_source_key_backfill_migration(conn)?;
     }
     if current < 3 {
         apply_sql_migration(conn, 3, INDEXES_SQL)?;
@@ -56,12 +56,14 @@ fn current_version(conn: &Connection) -> Result<i64, String> {
     .map_err(|e| format!("Failed to read app database schema version: {}", e))
 }
 
-fn apply_sql_migration(conn: &mut Connection, version: i64, sql: &str) -> Result<(), String> {
+fn apply_migration_tx<F>(conn: &mut Connection, version: i64, body: F) -> Result<(), String>
+where
+    F: FnOnce(&rusqlite::Transaction<'_>) -> Result<(), String>,
+{
     let tx = conn
         .transaction()
         .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
-    tx.execute_batch(sql)
-        .map_err(|e| format!("Failed to apply migration {}: {}", version, e))?;
+    body(&tx)?;
     record_version_tx(&tx, version)?;
     tx.commit()
         .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
@@ -69,202 +71,150 @@ fn apply_sql_migration(conn: &mut Connection, version: i64, sql: &str) -> Result
     Ok(())
 }
 
-fn apply_backfill_v1(conn: &mut Connection) -> Result<(), String> {
-    let version = 2;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
+fn apply_sql_migration(conn: &mut Connection, version: i64, sql: &str) -> Result<(), String> {
+    apply_migration_tx(conn, version, |tx| {
+        tx.execute_batch(sql)
+            .map_err(|e| format!("Failed to apply migration {}: {}", version, e))
+    })
+}
 
-    if !column_exists(&tx, "library_roots", "source_key")? {
-        tx.execute("ALTER TABLE library_roots ADD COLUMN source_key TEXT", [])
-            .map_err(|e| format!("Failed to backfill library_roots.source_key: {}", e))?;
-    }
-
-    record_version_tx(&tx, version)?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
-    log::info!("Applied app database migration {}", version);
-    Ok(())
+fn apply_source_key_backfill_migration(conn: &mut Connection) -> Result<(), String> {
+    apply_migration_tx(conn, 2, |tx| {
+        if !column_exists(tx, "library_roots", "source_key")? {
+            tx.execute("ALTER TABLE library_roots ADD COLUMN source_key TEXT", [])
+                .map_err(|e| format!("Failed to backfill library_roots.source_key: {}", e))?;
+        }
+        Ok(())
+    })
 }
 
 fn apply_shuffle_index_migration(conn: &mut Connection) -> Result<(), String> {
-    let version = 4;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
-
-    if !column_exists(&tx, "playback_queue_entries", "shuffle_index")? {
-        tx.execute(
-            "ALTER TABLE playback_queue_entries ADD COLUMN shuffle_index INTEGER",
-            [],
+    apply_migration_tx(conn, 4, |tx| {
+        if !column_exists(tx, "playback_queue_entries", "shuffle_index")? {
+            tx.execute(
+                "ALTER TABLE playback_queue_entries ADD COLUMN shuffle_index INTEGER",
+                [],
+            )
+            .map_err(|e| {
+                format!("Failed to add playback_queue_entries.shuffle_index: {}", e)
+            })?;
+        }
+        tx.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_playback_queue_entries_effective_order
+                ON playback_queue_entries(queue_id, status, shuffle_index, position_index, entry_id);
+            "#,
         )
-        .map_err(|e| format!("Failed to add playback_queue_entries.shuffle_index: {}", e))?;
-    }
-
-    tx.execute_batch(
-        r#"
-        CREATE INDEX IF NOT EXISTS idx_playback_queue_entries_effective_order
-            ON playback_queue_entries(queue_id, status, shuffle_index, position_index, entry_id);
-        "#,
-    )
-    .map_err(|e| format!("Failed to create shuffle queue indexes: {}", e))?;
-
-    record_version_tx(&tx, version)?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
-    log::info!("Applied app database migration {}", version);
-    Ok(())
+        .map_err(|e| format!("Failed to create shuffle queue indexes: {}", e))
+    })
 }
 
 fn apply_scan_incremental_migration(conn: &mut Connection) -> Result<(), String> {
-    let version = 5;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
-
-    if !column_exists(&tx, "media_items", "mtime")? {
-        tx.execute_batch("ALTER TABLE media_items ADD COLUMN mtime REAL")
-            .map_err(|e| format!("Failed to add media_items.mtime: {}", e))?;
-    }
-    if !column_exists(&tx, "media_items", "size_bytes")? {
-        tx.execute_batch("ALTER TABLE media_items ADD COLUMN size_bytes INTEGER")
-            .map_err(|e| format!("Failed to add media_items.size_bytes: {}", e))?;
-    }
-
-    record_version_tx(&tx, version)?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
-    log::info!("Applied app database migration {}", version);
-    Ok(())
+    apply_migration_tx(conn, 5, |tx| {
+        if !column_exists(tx, "media_items", "mtime")? {
+            tx.execute_batch("ALTER TABLE media_items ADD COLUMN mtime REAL")
+                .map_err(|e| format!("Failed to add media_items.mtime: {}", e))?;
+        }
+        if !column_exists(tx, "media_items", "size_bytes")? {
+            tx.execute_batch("ALTER TABLE media_items ADD COLUMN size_bytes INTEGER")
+                .map_err(|e| format!("Failed to add media_items.size_bytes: {}", e))?;
+        }
+        Ok(())
+    })
 }
 
 fn apply_external_artwork_url_migration(conn: &mut Connection) -> Result<(), String> {
-    let version = 6;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
-
-    if !column_exists(&tx, "media_items", "external_artwork_url")? {
-        tx.execute_batch("ALTER TABLE media_items ADD COLUMN external_artwork_url TEXT")
-            .map_err(|e| format!("Failed to add media_items.external_artwork_url: {}", e))?;
-    }
-
-    record_version_tx(&tx, version)?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
-    log::info!("Applied app database migration {}", version);
-    Ok(())
+    apply_migration_tx(conn, 6, |tx| {
+        if !column_exists(tx, "media_items", "external_artwork_url")? {
+            tx.execute_batch("ALTER TABLE media_items ADD COLUMN external_artwork_url TEXT")
+                .map_err(|e| format!("Failed to add media_items.external_artwork_url: {}", e))?;
+        }
+        Ok(())
+    })
 }
 
 fn apply_ncm_accounts_migration(conn: &mut Connection) -> Result<(), String> {
-    let version = 7;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
+    apply_migration_tx(conn, 7, |tx| {
+        tx.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS ncm_accounts (
+                user_id         INTEGER PRIMARY KEY,
+                nickname        TEXT,
+                avatar_url      TEXT,
+                cookie          TEXT NOT NULL,
+                vip_type        INTEGER,
+                level           INTEGER,
+                signin_at_ms    INTEGER,
+                added_at_ms     INTEGER NOT NULL,
+                refreshed_at_ms INTEGER NOT NULL
+            );
 
-    tx.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS ncm_accounts (
-            user_id         INTEGER PRIMARY KEY,
-            nickname        TEXT,
-            avatar_url      TEXT,
-            cookie          TEXT NOT NULL,
-            vip_type        INTEGER,
-            level           INTEGER,
-            signin_at_ms    INTEGER,
-            added_at_ms     INTEGER NOT NULL,
-            refreshed_at_ms INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS ncm_account_state (
-            state_key       TEXT PRIMARY KEY,
-            active_user_id  INTEGER,
-            updated_at_ms   INTEGER NOT NULL
-        );
-        "#,
-    )
-    .map_err(|e| format!("Failed to create NCM account tables: {}", e))?;
-
-    record_version_tx(&tx, version)?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
-    log::info!("Applied app database migration {}", version);
-    Ok(())
+            CREATE TABLE IF NOT EXISTS ncm_account_state (
+                state_key       TEXT PRIMARY KEY,
+                active_user_id  INTEGER,
+                updated_at_ms   INTEGER NOT NULL
+            );
+            "#,
+        )
+        .map_err(|e| format!("Failed to create NCM account tables: {}", e))
+    })
 }
 
 fn apply_ncm_track_sources_migration(conn: &mut Connection) -> Result<(), String> {
-    let version = 8;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
+    apply_migration_tx(conn, 8, |tx| {
+        tx.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS ncm_track_sources (
+                media_id        TEXT PRIMARY KEY,
+                source_path     TEXT NOT NULL,
+                song_id         INTEGER NOT NULL,
+                source_page_url TEXT,
+                resolved_at     INTEGER NOT NULL,
+                scrobbled_at    INTEGER,
+                scrobble_secs   INTEGER,
+                FOREIGN KEY(media_id) REFERENCES media_items(media_id) ON DELETE CASCADE
+            );
 
-    tx.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS ncm_track_sources (
-            media_id        TEXT PRIMARY KEY,
-            source_path     TEXT NOT NULL,
-            song_id         INTEGER NOT NULL,
-            source_page_url TEXT,
-            resolved_at     INTEGER NOT NULL,
-            scrobbled_at    INTEGER,
-            scrobble_secs   INTEGER,
-            FOREIGN KEY(media_id) REFERENCES media_items(media_id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_ncm_track_sources_song_id
-            ON ncm_track_sources(song_id);
-        "#,
-    )
-    .map_err(|e| format!("Failed to create NCM track source table: {}", e))?;
-
-    record_version_tx(&tx, version)?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
-    log::info!("Applied app database migration {}", version);
-    Ok(())
+            CREATE INDEX IF NOT EXISTS idx_ncm_track_sources_song_id
+                ON ncm_track_sources(song_id);
+            "#,
+        )
+        .map_err(|e| format!("Failed to create NCM track source table: {}", e))
+    })
 }
 
 fn apply_local_playlists_migration(conn: &mut Connection) -> Result<(), String> {
-    let version = 9;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("Failed to start migration {} transaction: {}", version, e))?;
+    apply_migration_tx(conn, 9, |tx| {
+        tx.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS local_playlists (
+                playlist_id    TEXT PRIMARY KEY,
+                name           TEXT NOT NULL,
+                description    TEXT,
+                cover_media_id TEXT,
+                created_at     INTEGER NOT NULL,
+                updated_at     INTEGER NOT NULL,
+                FOREIGN KEY(cover_media_id) REFERENCES media_items(media_id) ON DELETE SET NULL
+            );
 
-    tx.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS local_playlists (
-            playlist_id    TEXT PRIMARY KEY,
-            name           TEXT NOT NULL,
-            description    TEXT,
-            cover_media_id TEXT,
-            created_at     INTEGER NOT NULL,
-            updated_at     INTEGER NOT NULL,
-            FOREIGN KEY(cover_media_id) REFERENCES media_items(media_id) ON DELETE SET NULL
-        );
+            CREATE TABLE IF NOT EXISTS local_playlist_items (
+                playlist_id    TEXT NOT NULL,
+                media_id       TEXT NOT NULL,
+                position_index INTEGER NOT NULL,
+                added_at       INTEGER NOT NULL,
+                PRIMARY KEY(playlist_id, media_id),
+                FOREIGN KEY(playlist_id) REFERENCES local_playlists(playlist_id) ON DELETE CASCADE,
+                FOREIGN KEY(media_id) REFERENCES media_items(media_id) ON DELETE CASCADE
+            );
 
-        CREATE TABLE IF NOT EXISTS local_playlist_items (
-            playlist_id    TEXT NOT NULL,
-            media_id       TEXT NOT NULL,
-            position_index INTEGER NOT NULL,
-            added_at       INTEGER NOT NULL,
-            PRIMARY KEY(playlist_id, media_id),
-            FOREIGN KEY(playlist_id) REFERENCES local_playlists(playlist_id) ON DELETE CASCADE,
-            FOREIGN KEY(media_id) REFERENCES media_items(media_id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_local_playlists_updated_at
-            ON local_playlists(updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_local_playlist_items_order
-            ON local_playlist_items(playlist_id, position_index ASC, media_id ASC);
-        "#,
-    )
-    .map_err(|e| format!("Failed to create local playlist tables: {}", e))?;
-
-    record_version_tx(&tx, version)?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit migration {}: {}", version, e))?;
-    log::info!("Applied app database migration {}", version);
-    Ok(())
+            CREATE INDEX IF NOT EXISTS idx_local_playlists_updated_at
+                ON local_playlists(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_local_playlist_items_order
+                ON local_playlist_items(playlist_id, position_index ASC, media_id ASC);
+            "#,
+        )
+        .map_err(|e| format!("Failed to create local playlist tables: {}", e))
+    })
 }
 
 fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
@@ -324,7 +274,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_backfill_v1(&mut conn).unwrap();
+        apply_source_key_backfill_migration(&mut conn).unwrap();
 
         assert!(column_exists(&conn, "library_roots", "source_key").unwrap());
         let version: i64 = conn
@@ -361,7 +311,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_backfill_v1(&mut conn).unwrap();
+        apply_source_key_backfill_migration(&mut conn).unwrap();
 
         assert!(column_exists(&conn, "library_roots", "source_key").unwrap());
         let version: i64 = conn
