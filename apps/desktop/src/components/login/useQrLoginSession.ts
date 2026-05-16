@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
+import { toString as toQrSvgString } from "qrcode/lib/browser.js";
 import {
   checkLoginQr,
   createLoginQr,
@@ -31,6 +32,7 @@ export interface UseQrLoginSessionOptions {
 }
 
 const QR_POLL_INTERVAL_MS = 1000;
+const NETEASE_QR_LOGIN_URL = "https://music.163.com/login?codekey=";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -44,16 +46,64 @@ const readString = (value: unknown): string | null =>
 const readErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+export const buildNeteaseQrLoginUrl = (key: string): string =>
+  `${NETEASE_QR_LOGIN_URL}${encodeURIComponent(key)}`;
+
+export const createQrImageDataUrl = (value: string): Promise<string> =>
+  toQrSvgString(value, {
+    errorCorrectionLevel: "H",
+    margin: 1,
+    width: 180,
+    color: {
+      dark: "#000000",
+      light: "#ffffff"
+    }
+  }).then(
+    (svg) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`
+  );
+
+export const resolveLoginQrImageUrl = async (
+  key: string,
+  data: Record<string, unknown> | null
+): Promise<string> => {
+  const imageUrl = readString(data?.qrimg)?.trim();
+  if (imageUrl) {
+    return imageUrl;
+  }
+
+  const qrValue = readString(data?.qrurl)?.trim() || buildNeteaseQrLoginUrl(key);
+  return createQrImageDataUrl(qrValue);
+};
+
+export interface QrAutoStartState {
+  enabled: boolean;
+  session: QrLoginSession | null;
+  isCreating: boolean;
+  hasAttemptedStart: boolean;
+}
+
+export function shouldAutoStartQrSession(state: QrAutoStartState): boolean {
+  return (
+    state.enabled &&
+    !state.session &&
+    !state.isCreating &&
+    !state.hasAttemptedStart
+  );
+}
+
 export function useQrLoginSession(options: UseQrLoginSessionOptions) {
   const [session, setSession] = createSignal<QrLoginSession | null>(null);
   const [isCreating, setIsCreating] = createSignal<boolean>(false);
+  const [hasAttemptedStart, setHasAttemptedStart] = createSignal<boolean>(false);
 
   const reset = () => {
     setSession(null);
     setIsCreating(false);
+    setHasAttemptedStart(false);
   };
 
   const start = async () => {
+    setHasAttemptedStart(true);
     setIsCreating(true);
     try {
       const keyResponse = await getLoginQrKey();
@@ -66,7 +116,7 @@ export function useQrLoginSession(options: UseQrLoginSessionOptions) {
 
       const qrResponse = await createLoginQr(key, true);
       const data = isRecord(qrResponse.data) ? qrResponse.data : null;
-      const imageUrl = readString(data?.qrimg);
+      const imageUrl = await resolveLoginQrImageUrl(key, data);
       if (!imageUrl) {
         throw new Error(options.missingQrMessage);
       }
@@ -133,7 +183,16 @@ export function useQrLoginSession(options: UseQrLoginSessionOptions) {
   });
 
   createEffect(() => {
-    if (!options.enabled() || session() || isCreating()) return;
+    if (
+      !shouldAutoStartQrSession({
+        enabled: options.enabled(),
+        session: session(),
+        isCreating: isCreating(),
+        hasAttemptedStart: hasAttemptedStart()
+      })
+    ) {
+      return;
+    }
     void start();
   });
 

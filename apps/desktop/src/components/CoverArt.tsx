@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { useTranslation } from "../shared/i18n";
+import { DEFAULT_COVER_ART_URL } from "../shared/ui/artwork";
 
 interface CoverArtProps {
   coverUrl: string | null;
@@ -16,7 +17,7 @@ const CROSSFADE_MS = 350;
 function CoverPlaceholder() {
   return (
     <div class="cover-placeholder" aria-hidden="true">
-      <img src="/images/song.jpg" alt="" class="cover-placeholder-img" />
+      <img src={DEFAULT_COVER_ART_URL} alt="" class="cover-placeholder-img" />
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   mediaKeyForPath,
   readErrorMessage
 } from "./controllerHelpers";
+import { resolveCurrentCoverUrl } from "./ncmCoverResolution";
 
 export interface NcmTrackEnrichment {
   currentTrackRef: Accessor<NcmTrackReference | undefined>;
@@ -49,6 +50,10 @@ interface SupplementRequest {
   coverUrl: string | null;
 }
 
+type CurrentNcmSupplement = NcmTrackSupplement & {
+  requestKey: string;
+};
+
 const sameSupplementRequest = (
   previous: SupplementRequest | null,
   next: SupplementRequest | null
@@ -71,7 +76,7 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
 
   const [ncmTrackRefs, setNcmTrackRefs] = createSignal<Record<string, NcmTrackReference>>({});
   const [currentNcmSupplement, setCurrentNcmSupplement] =
-    createSignal<NcmTrackSupplement | null>(null);
+    createSignal<CurrentNcmSupplement | null>(null);
   const [likedSongIds, setLikedSongIds] = createSignal<Set<number>>(new Set());
 
   const currentPlayerPath = createMemo(() => player()?.file_path ?? null);
@@ -111,52 +116,6 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
     };
   });
   const currentNcmSongId = createMemo(() => currentTrackRef()?.songId ?? null);
-  const currentNcmCoverUrl = createMemo(
-    () => firstNonEmpty(currentNcmSupplement()?.coverUrl, currentTrackRef()?.coverUrl)
-  );
-  const resolvedCoverUrl = createMemo(() =>
-    firstNonEmpty(currentNcmCoverUrl(), currentPlayerCoverUrl(), coverUrl())
-  );
-  const currentLyricLines = createMemo(() => currentNcmSupplement()?.lyrics ?? []);
-  const currentInlineLyric = createMemo(() =>
-    findCurrentLyricLine(currentLyricLines(), livePosition() ?? currentPlayerTime())
-  );
-  const fullPlayerTitle = createMemo(
-    () =>
-      firstNonEmpty(
-        currentNcmSupplement()?.title,
-        currentTrackRef()?.title,
-        currentPlayerTitle()
-      ) ??
-      currentPlayerPath() ??
-      ""
-  );
-  const fullPlayerSubtitle = createMemo(() =>
-    [
-      firstNonEmpty(
-        currentNcmSupplement()?.artist,
-        currentTrackRef()?.artist,
-        currentPlayerArtist()
-      ),
-      firstNonEmpty(
-        currentNcmSupplement()?.album,
-        currentTrackRef()?.album,
-        currentPlayerAlbum()
-      )
-    ]
-      .filter(Boolean)
-      .join(" · ")
-  );
-  const fullPlayerDetail = createMemo(() =>
-    currentTrackRef() && currentNcmSongId() !== null ? `NCM · ID ${currentNcmSongId()}` : null
-  );
-  const lyricStatus = createMemo<"idle" | "loading" | "ready" | "error">(() => {
-    const supplement = currentNcmSupplement();
-    if (supplement === null) return "idle";
-    if (supplement.status === "loading") return "loading";
-    if (supplement.status === "error") return "error";
-    return "ready";
-  });
 
   const registerNcmPlayback = (track: NcmTrackReference) => {
     const normalizedKey = mediaKeyForPath(track.streamUrl);
@@ -203,6 +162,67 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
     null,
     { equals: sameSupplementRequest }
   );
+  const currentSupplementForRequest = createMemo(() => {
+    const supplement = currentNcmSupplement();
+    const request = supplementRequest();
+    return supplement?.requestKey === request?.key ? supplement : null;
+  });
+  const currentNcmCoverUrl = createMemo(() =>
+    resolveCurrentCoverUrl(
+      supplementRequest(),
+      currentNcmSupplement(),
+      currentPlayerCoverUrl(),
+      null
+    )
+  );
+  const resolvedCoverUrl = createMemo(() =>
+    resolveCurrentCoverUrl(
+      supplementRequest(),
+      currentNcmSupplement(),
+      currentPlayerCoverUrl(),
+      coverUrl()
+    )
+  );
+  const currentLyricLines = createMemo(() => currentSupplementForRequest()?.lyrics ?? []);
+  const currentInlineLyric = createMemo(() =>
+    findCurrentLyricLine(currentLyricLines(), livePosition() ?? currentPlayerTime())
+  );
+  const fullPlayerTitle = createMemo(
+    () =>
+      firstNonEmpty(
+        currentSupplementForRequest()?.title,
+        currentTrackRef()?.title,
+        currentPlayerTitle()
+      ) ??
+      currentPlayerPath() ??
+      ""
+  );
+  const fullPlayerSubtitle = createMemo(() =>
+    [
+      firstNonEmpty(
+        currentSupplementForRequest()?.artist,
+        currentTrackRef()?.artist,
+        currentPlayerArtist()
+      ),
+      firstNonEmpty(
+        currentSupplementForRequest()?.album,
+        currentTrackRef()?.album,
+        currentPlayerAlbum()
+      )
+    ]
+      .filter(Boolean)
+      .join(" · ")
+  );
+  const fullPlayerDetail = createMemo(() =>
+    currentTrackRef() && currentNcmSongId() !== null ? `NCM · ID ${currentNcmSongId()}` : null
+  );
+  const lyricStatus = createMemo<"idle" | "loading" | "ready" | "error">(() => {
+    const supplement = currentSupplementForRequest();
+    if (supplement === null) return "idle";
+    if (supplement.status === "loading") return "loading";
+    if (supplement.status === "error") return "error";
+    return "ready";
+  });
 
   createEffect(() => {
     const request = supplementRequest();
@@ -214,6 +234,7 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
     let cancelled = false;
 
     setCurrentNcmSupplement({
+      requestKey: request.key,
       status: "loading",
       title: request.title,
       artist: request.artist,
@@ -268,6 +289,7 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
           Boolean(resolvedSupplement?.coverUrl);
 
         setCurrentNcmSupplement({
+          requestKey: request.key,
           status: error && !hasRemoteSupplement && lyrics.length === 0 ? "error" : "success",
           title: resolvedSupplement?.title ?? request.trackRef.title,
           artist: resolvedSupplement?.artist ?? request.trackRef.artist,
@@ -291,6 +313,7 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
         localLyricResult.status === "rejected" ? readErrorMessage(localLyricResult.reason) : null;
 
       setCurrentNcmSupplement({
+        requestKey: request.key,
         status: error && localLyrics.length === 0 ? "error" : "success",
         title: request.title,
         artist: request.artist,

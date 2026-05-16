@@ -56,7 +56,7 @@ export interface NcmLoginCellphoneParams {
   countrycode?: string;
 }
 
-const QR_CHECK_TERMINAL_CODES = [800, 803] as const;
+export const QR_CHECK_ALLOWED_CODES = [800, 801, 802, 803] as const;
 
 const requestAnonymousLogin = <T = unknown>(
   endpoint: string,
@@ -84,7 +84,7 @@ export const createLoginQr = (key: string, qrimg = true) =>
 export const checkLoginQr = (key: string) =>
   requestAnonymousLogin("login/qr/check", {
     params: { key },
-    allowErrorCodes: QR_CHECK_TERMINAL_CODES
+    allowErrorCodes: QR_CHECK_ALLOWED_CODES
   });
 
 export const getLoginStatus = () =>

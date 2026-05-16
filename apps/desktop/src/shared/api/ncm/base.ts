@@ -65,6 +65,32 @@ export const parseNcmEnvelope = <T>(value: unknown): NcmResponseEnvelope<T> => {
   return value as NcmResponseEnvelope<T>;
 };
 
+export const readNcmHttpErrorMessage = async (response: Response): Promise<string> => {
+  const fallback = `NCM request failed: ${response.status}`;
+  const text = await response.text().catch(() => "");
+  if (!text.trim()) {
+    return fallback;
+  }
+
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (isRecord(value)) {
+      const msg = value.msg;
+      if (typeof msg === "string" && msg.trim()) {
+        return msg;
+      }
+      const message = value.message;
+      if (typeof message === "string" && message.trim()) {
+        return message;
+      }
+    }
+  } catch {
+    // Fall through to returning the upstream text when it is not JSON.
+  }
+
+  return text.trim();
+};
+
 export const requestNcm = async <T = unknown>(
   endpoint: string,
   options: NcmRequestOptions = {}
@@ -124,7 +150,7 @@ export const requestNcm = async <T = unknown>(
   }
 
   if (!response.ok) {
-    throw new Error(`NCM request failed: ${response.status}`);
+    throw new Error(await readNcmHttpErrorMessage(response));
   }
 
   const json = (await response.json()) as unknown;
