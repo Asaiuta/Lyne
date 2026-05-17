@@ -2,7 +2,7 @@ import { Show, createMemo, createSignal, onMount } from "solid-js";
 import { createApiClient } from "../../../shared/api/client";
 import type { TranslationKey } from "../../../shared/i18n";
 import { useTranslation } from "../../../shared/i18n";
-import { STORAGE_KEYS } from "../../../shared/state/useUISettings";
+import { readUISettingsSnapshot, STORAGE_KEYS } from "../../../shared/state/useUISettings";
 import {
   SettingItem,
   RangeInput,
@@ -10,7 +10,7 @@ import {
 } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
 import { SelectInput, type SelectOption } from "../components/SelectInput";
-import { commitPersistedSetting, readBool, readNumber, readString } from "../storage";
+import { commitPersistedSetting } from "../storage";
 
 const api = createApiClient();
 
@@ -31,28 +31,20 @@ const SONG_LEVELS: { value: string; i18nKey: TranslationKey }[] = [
 
 export function PlaybackSection(props: PlaybackSectionProps) {
   const { t } = useTranslation();
+  const initialSettings = readUISettingsSnapshot();
 
-  const [autoPlay, setAutoPlay] = createSignal<boolean>(readBool(STORAGE_KEYS.autoPlay, false));
+  const [autoPlay, setAutoPlay] = createSignal<boolean>(initialSettings.autoPlay);
   const [useNextPrefetch, setUseNextPrefetch] = createSignal<boolean>(true);
-  const [volumeFade, setVolumeFade] = createSignal<boolean>(readBool(STORAGE_KEYS.volumeFade, true));
-  const [volumeFadeTime, setVolumeFadeTime] = createSignal<number>(
-    readNumber(STORAGE_KEYS.volumeFadeTime, 300)
-  );
-  const [memoryLastSeek, setMemoryLastSeek] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.memoryLastSeek, true)
-  );
-  const [progressTooltipShow, setProgressTooltipShow] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.progressTooltipShow, true)
-  );
-  const [progressLyricShow, setProgressLyricShow] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.progressLyricShow, true)
-  );
-  const [progressAdjustLyric, setProgressAdjustLyric] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.progressAdjustLyric, false)
-  );
-  const [ncmSongLevel, setNcmSongLevel] = createSignal<string>(
-    readString(STORAGE_KEYS.ncmSongLevel, "exhigh")
-  );
+  const [volumeFade, setVolumeFade] = createSignal<boolean>(initialSettings.volumeFade);
+  const [volumeFadeTime, setVolumeFadeTime] = createSignal<number>(initialSettings.volumeFadeTime);
+  const [memoryLastSeek, setMemoryLastSeek] = createSignal<boolean>(initialSettings.memoryLastSeek);
+  const [progressTooltipShow, setProgressTooltipShow] =
+    createSignal<boolean>(initialSettings.progressTooltipShow);
+  const [progressLyricShow, setProgressLyricShow] =
+    createSignal<boolean>(initialSettings.progressLyricShow);
+  const [progressAdjustLyric, setProgressAdjustLyric] =
+    createSignal<boolean>(initialSettings.progressAdjustLyric);
+  const [ncmSongLevel, setNcmSongLevel] = createSignal<string>(initialSettings.ncmSongLevel);
 
   const songLevelOptions = createMemo<SelectOption[]>(() =>
     SONG_LEVELS.map((level) => ({

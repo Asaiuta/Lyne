@@ -1,7 +1,7 @@
 import { For, createSignal } from "solid-js";
 import { useTranslation } from "../../shared/i18n";
 import {
-  DEFAULT_HOME_SECTIONS,
+  readUISettingsSnapshot,
   STORAGE_KEYS,
   type HomeSectionConfig,
   type HomeSectionKey
@@ -33,28 +33,7 @@ const arrowButtonClass =
   "icon-btn inline-flex h-[28px] w-[28px] items-center justify-center rounded-sm border-0 bg-transparent text-text text-[14px] transition-background duration-150 ease-standard hover:bg-[var(--surface-pressed)] disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent";
 
 function readSections(): HomeSectionConfig[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.homeSections);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        const validKeys = new Set(DEFAULT_HOME_SECTIONS.map((s) => s.key));
-        const sections = parsed.filter(
-          (s): s is HomeSectionConfig =>
-            typeof s === "object" &&
-            s !== null &&
-            typeof s.key === "string" &&
-            validKeys.has(s.key as HomeSectionKey) &&
-            typeof s.order === "number" &&
-            typeof s.visible === "boolean"
-        );
-        if (sections.length > 0) return sections;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return DEFAULT_HOME_SECTIONS;
+  return readUISettingsSnapshot().homeSections;
 }
 
 const persistSections = (sections: HomeSectionConfig[]): boolean =>

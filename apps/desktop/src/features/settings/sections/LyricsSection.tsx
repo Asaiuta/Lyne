@@ -4,7 +4,7 @@ import type {
   LyricsBlendMode,
   LyricsPosition
 } from "../../../shared/state/useUISettings";
-import { STORAGE_KEYS } from "../../../shared/state/useUISettings";
+import { readUISettingsSnapshot, STORAGE_KEYS } from "../../../shared/state/useUISettings";
 import {
   SettingItem,
   RangeInput,
@@ -12,7 +12,7 @@ import {
 } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
 import { SelectInput, type SelectOption } from "../components/SelectInput";
-import { persist, readBool, readNumber, readString } from "../storage";
+import { persist } from "../storage";
 
 interface LyricsSectionProps {
   highlightId: string | null;
@@ -20,54 +20,33 @@ interface LyricsSectionProps {
 
 export function LyricsSection(props: LyricsSectionProps) {
   const { t } = useTranslation();
+  const initialSettings = readUISettingsSnapshot();
 
-  const [lyricFontSize, setLyricFontSize] = createSignal<number>(
-    readNumber(STORAGE_KEYS.lyricFontSize, 28)
-  );
-  const [lyricFontWeight, setLyricFontWeight] = createSignal<number>(
-    readNumber(STORAGE_KEYS.lyricFontWeight, 700)
-  );
-  const [lyricTranslationFontSize, setLyricTranslationFontSize] = createSignal<number>(
-    readNumber(STORAGE_KEYS.lyricTranslationFontSize, 22)
-  );
-  const [lyricRomanizationFontSize, setLyricRomanizationFontSize] = createSignal<number>(
-    readNumber(STORAGE_KEYS.lyricRomanizationFontSize, 18)
-  );
-  const [showLyricTranslation, setShowLyricTranslation] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showLyricTranslation, true)
-  );
-  const [showLyricRomanization, setShowLyricRomanization] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showLyricRomanization, true)
-  );
-  const [showWordLyrics, setShowWordLyrics] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showWordLyrics, true)
-  );
-  const [lyricsBlur, setLyricsBlur] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.lyricsBlur, false)
-  );
-  const [lyricsScrollOffset, setLyricsScrollOffset] = createSignal<number>(
-    readNumber(STORAGE_KEYS.lyricsScrollOffset, 0.25)
-  );
+  const [lyricFontSize, setLyricFontSize] = createSignal<number>(initialSettings.lyricFontSize);
+  const [lyricFontWeight, setLyricFontWeight] =
+    createSignal<number>(initialSettings.lyricFontWeight);
+  const [lyricTranslationFontSize, setLyricTranslationFontSize] =
+    createSignal<number>(initialSettings.lyricTranslationFontSize);
+  const [lyricRomanizationFontSize, setLyricRomanizationFontSize] =
+    createSignal<number>(initialSettings.lyricRomanizationFontSize);
+  const [showLyricTranslation, setShowLyricTranslation] =
+    createSignal<boolean>(initialSettings.showLyricTranslation);
+  const [showLyricRomanization, setShowLyricRomanization] =
+    createSignal<boolean>(initialSettings.showLyricRomanization);
+  const [showWordLyrics, setShowWordLyrics] = createSignal<boolean>(initialSettings.showWordLyrics);
+  const [lyricsBlur, setLyricsBlur] = createSignal<boolean>(initialSettings.lyricsBlur);
+  const [lyricsScrollOffset, setLyricsScrollOffset] =
+    createSignal<number>(initialSettings.lyricsScrollOffset);
   const [swapLyricTranslationRomanization, setSwapLyricTranslationRomanization] =
-    createSignal<boolean>(readBool(STORAGE_KEYS.swapLyricTranslationRomanization, false));
-  const [lyricsPosition, setLyricsPosition] = createSignal<LyricsPosition>(
-    (() => {
-      const raw = readString(STORAGE_KEYS.lyricsPosition, "flex-start");
-      return raw === "center" || raw === "flex-end" ? (raw as LyricsPosition) : "flex-start";
-    })()
-  );
-  const [lyricHorizontalOffset, setLyricHorizontalOffset] = createSignal<number>(
-    readNumber(STORAGE_KEYS.lyricHorizontalOffset, 10)
-  );
-  const [lyricAlignRight, setLyricAlignRight] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.lyricAlignRight, false)
-  );
-  const [lyricsBlendMode, setLyricsBlendMode] = createSignal<LyricsBlendMode>(
-    (() => {
-      const raw = readString(STORAGE_KEYS.lyricsBlendMode, "screen");
-      return raw === "plus-lighter" ? "plus-lighter" : "screen";
-    })()
-  );
+    createSignal<boolean>(initialSettings.swapLyricTranslationRomanization);
+  const [lyricsPosition, setLyricsPosition] =
+    createSignal<LyricsPosition>(initialSettings.lyricsPosition);
+  const [lyricHorizontalOffset, setLyricHorizontalOffset] =
+    createSignal<number>(initialSettings.lyricHorizontalOffset);
+  const [lyricAlignRight, setLyricAlignRight] =
+    createSignal<boolean>(initialSettings.lyricAlignRight);
+  const [lyricsBlendMode, setLyricsBlendMode] =
+    createSignal<LyricsBlendMode>(initialSettings.lyricsBlendMode);
 
   const lyricsPositionOptions = createMemo<SelectOption[]>(() => [
     { value: "flex-start", label: t("settings.lyric.position.left") },

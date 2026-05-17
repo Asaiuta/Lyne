@@ -13,19 +13,14 @@ import type {
   ThemeMode
 } from "../../../shared/state/useUISettings";
 import {
-  DEFAULT_CONTEXT_MENU_OPTIONS,
   DEFAULT_HIDDEN_COVERS,
-  DEFAULT_PLAYLIST_PAGE_ELEMENTS,
-  DEFAULT_SIDEBAR_HIDDEN_ITEMS,
-  STORAGE_KEYS
+  STORAGE_KEYS,
+  readUISettingsSnapshot
 } from "../../../shared/state/useUISettings";
 import {
   commitPersistedRecordSetting,
   commitPersistedSetting,
-  persist,
-  readBool,
-  readNumber,
-  readString
+  persist
 } from "../storage";
 import { COVER_DISPLAY_ITEMS } from "./appearanceConfig";
 
@@ -40,222 +35,90 @@ function applyTheme(mode: ThemeMode) {
   document.documentElement.dataset.theme = resolveTheme(mode);
 }
 
-const VALID_ROUTE_ANIMATIONS = new Set<string>([
-  "none",
-  "fade",
-  "zoom",
-  "slide",
-  "up",
-  "flow",
-  "mask-left",
-  "mask-top"
-]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readBoolRecord<T extends Record<string, boolean>>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return { ...fallback };
-    const parsed: unknown = JSON.parse(raw);
-    if (!isRecord(parsed)) return { ...fallback };
-    const next = { ...fallback };
-    (Object.keys(fallback) as Array<keyof T>).forEach((field) => {
-      const value = parsed[String(field)];
-      if (typeof value === "boolean") {
-        next[field] = value as T[typeof field];
-      }
-    });
-    return next;
-  } catch {
-    return { ...fallback };
-  }
-}
-
-function readThemeMode(): ThemeMode {
-  const raw = readString(STORAGE_KEYS.themeMode, "dark");
-  return raw === "light" || raw === "auto" ? raw : "dark";
-}
-
-function readRouteAnimation(): RouteAnimation {
-  const raw = readString(STORAGE_KEYS.routeAnimation, "slide");
-  return VALID_ROUTE_ANIMATIONS.has(raw) ? (raw as RouteAnimation) : "slide";
-}
-
-function readFullPlayerLayout(): "balanced" | "lyrics" {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.fullPlayerLayout);
-    return raw === "lyrics" || raw === "balanced" ? raw : "balanced";
-  } catch {
-    return "balanced";
-  }
-}
-
-function readFullPlayerCommentMode(): FullPlayerCommentMode {
-  const raw = readString(STORAGE_KEYS.fullPlayerCommentMode, "fullscreen");
-  return raw === "fullscreen" || raw === "half-left" || raw === "half-right"
-    ? (raw as FullPlayerCommentMode)
-    : "fullscreen";
-}
-
-function readPlayerType(): PlayerType {
-  const raw = readString(STORAGE_KEYS.playerType, "");
-  if (raw === "cover" || raw === "record" || raw === "fullscreen") {
-    return raw;
-  }
-  const legacyCoverMode = readString(STORAGE_KEYS.fullPlayerCoverMode, "normal");
-  return legacyCoverMode === "record" ? "record" : "cover";
-}
-
-function readPlayerBackgroundType(): PlayerBackgroundType {
-  const raw = readString(STORAGE_KEYS.playerBackgroundType, "blur");
-  return raw === "animation" || raw === "color" ? raw : "blur";
-}
-
-function readPlayerExpandAnimation(): PlayerExpandAnimation {
-  const raw = readString(STORAGE_KEYS.playerExpandAnimation, "up");
-  return raw === "flow" ? "flow" : "up";
-}
-
-function readTimeFormat(): PlayerTimeFormat {
-  const raw = readString(STORAGE_KEYS.timeFormat, "current-total");
-  return raw === "remaining-total" || raw === "current-remaining"
-    ? (raw as PlayerTimeFormat)
-    : "current-total";
-}
-
 export function useAppearanceSettings() {
-  const [themeMode, setThemeMode] = createSignal<ThemeMode>(readThemeMode());
-  const [bgEnabled, setBgEnabled] = createSignal<boolean>(readBool(STORAGE_KEYS.bgEnabled, false));
-  const [bgBlur, setBgBlur] = createSignal<number>(readNumber(STORAGE_KEYS.bgBlur, 32));
-  const [bgMask, setBgMask] = createSignal<number>(readNumber(STORAGE_KEYS.bgMask, 50));
-  const [customChrome, setCustomChrome] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.customChrome, true)
-  );
-  const [routeAnimation, setRouteAnimation] = createSignal<RouteAnimation>(readRouteAnimation());
+  const initialSettings = readUISettingsSnapshot();
+
+  const [themeMode, setThemeMode] = createSignal<ThemeMode>(initialSettings.themeMode);
+  const [bgEnabled, setBgEnabled] = createSignal<boolean>(initialSettings.bgEnabled);
+  const [bgBlur, setBgBlur] = createSignal<number>(initialSettings.bgBlur);
+  const [bgMask, setBgMask] = createSignal<number>(initialSettings.bgMask);
+  const [customChrome, setCustomChrome] = createSignal<boolean>(initialSettings.customChrome);
+  const [routeAnimation, setRouteAnimation] = createSignal<RouteAnimation>(initialSettings.routeAnimation);
   const [fullPlayerLayout, setFullPlayerLayout] =
-    createSignal<"balanced" | "lyrics">(readFullPlayerLayout());
-  const [fullPlayerAutoFocusLyrics, setFullPlayerAutoFocusLyrics] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerAutoFocusLyrics, true)
-  );
+    createSignal<"balanced" | "lyrics">(initialSettings.fullPlayerLayout);
+  const [fullPlayerAutoFocusLyrics, setFullPlayerAutoFocusLyrics] =
+    createSignal<boolean>(initialSettings.fullPlayerAutoFocusLyrics);
   const [fullPlayerCommentMode, setFullPlayerCommentMode] =
-    createSignal<FullPlayerCommentMode>(readFullPlayerCommentMode());
-  const [playerType, setPlayerType] = createSignal<PlayerType>(readPlayerType());
-  const [playerStyleRatio, setPlayerStyleRatio] = createSignal<number>(
-    Math.min(70, Math.max(30, readNumber(STORAGE_KEYS.playerStyleRatio, 50)))
-  );
-  const [playerFullscreenGradient, setPlayerFullscreenGradient] = createSignal<number>(
-    Math.min(100, Math.max(0, readNumber(STORAGE_KEYS.playerFullscreenGradient, 15)))
-  );
+    createSignal<FullPlayerCommentMode>(initialSettings.fullPlayerCommentMode);
+  const [playerType, setPlayerType] = createSignal<PlayerType>(initialSettings.playerType);
+  const [playerStyleRatio, setPlayerStyleRatio] = createSignal<number>(initialSettings.playerStyleRatio);
+  const [playerFullscreenGradient, setPlayerFullscreenGradient] =
+    createSignal<number>(initialSettings.playerFullscreenGradient);
   const [playerBackgroundType, setPlayerBackgroundType] =
-    createSignal<PlayerBackgroundType>(readPlayerBackgroundType());
-  const [playerBackgroundFps, setPlayerBackgroundFps] = createSignal<number>(
-    Math.min(256, Math.max(24, readNumber(STORAGE_KEYS.playerBackgroundFps, 30)))
-  );
-  const [playerBackgroundFlowSpeed, setPlayerBackgroundFlowSpeed] = createSignal<number>(
-    Math.min(10, Math.max(0.1, readNumber(STORAGE_KEYS.playerBackgroundFlowSpeed, 4)))
-  );
-  const [playerBackgroundRenderScale, setPlayerBackgroundRenderScale] = createSignal<number>(
-    Math.min(3, Math.max(0.1, readNumber(STORAGE_KEYS.playerBackgroundRenderScale, 0.5)))
-  );
-  const [playerBackgroundPause, setPlayerBackgroundPause] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.playerBackgroundPause, false)
-  );
-  const [playerBackgroundLowFreqVolume, setPlayerBackgroundLowFreqVolume] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.playerBackgroundLowFreqVolume, false)
-  );
+    createSignal<PlayerBackgroundType>(initialSettings.playerBackgroundType);
+  const [playerBackgroundFps, setPlayerBackgroundFps] =
+    createSignal<number>(initialSettings.playerBackgroundFps);
+  const [playerBackgroundFlowSpeed, setPlayerBackgroundFlowSpeed] =
+    createSignal<number>(initialSettings.playerBackgroundFlowSpeed);
+  const [playerBackgroundRenderScale, setPlayerBackgroundRenderScale] =
+    createSignal<number>(initialSettings.playerBackgroundRenderScale);
+  const [playerBackgroundPause, setPlayerBackgroundPause] =
+    createSignal<boolean>(initialSettings.playerBackgroundPause);
+  const [playerBackgroundLowFreqVolume, setPlayerBackgroundLowFreqVolume] =
+    createSignal<boolean>(initialSettings.playerBackgroundLowFreqVolume);
   const [playerExpandAnimation, setPlayerExpandAnimation] =
-    createSignal<PlayerExpandAnimation>(readPlayerExpandAnimation());
-  const [playerFollowCoverColor, setPlayerFollowCoverColor] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.playerFollowCoverColor, true)
-  );
-  const [sidebarHiddenItems, setSidebarHiddenItems] = createSignal<SidebarHiddenItems>(
-    readBoolRecord(STORAGE_KEYS.sidebarHiddenItems, DEFAULT_SIDEBAR_HIDDEN_ITEMS)
-  );
-  const [playlistPageElements, setPlaylistPageElements] = createSignal<PlaylistPageElements>(
-    readBoolRecord(STORAGE_KEYS.playlistPageElements, DEFAULT_PLAYLIST_PAGE_ELEMENTS)
-  );
-  const [contextMenuOptions, setContextMenuOptions] = createSignal<ContextMenuOptions>(
-    readBoolRecord(STORAGE_KEYS.contextMenuOptions, DEFAULT_CONTEXT_MENU_OPTIONS)
-  );
-  const [hiddenCovers, setHiddenCovers] = createSignal<HiddenCovers>(
-    readBoolRecord(STORAGE_KEYS.hiddenCovers, DEFAULT_HIDDEN_COVERS)
-  );
-  const [menuShowCover, setMenuShowCover] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.menuShowCover, true)
-  );
-  const [autoHidePlayerMeta, setAutoHidePlayerMeta] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.autoHidePlayerMeta, true)
-  );
-  const [showPlayMeta, setShowPlayMeta] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showPlayMeta, true)
-  );
-  const [countDownShow, setCountDownShow] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.countDownShow, true)
-  );
-  const [showSpectrums, setShowSpectrums] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSpectrums, false)
-  );
-  const [showPlaylistCount, setShowPlaylistCount] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showPlaylistCount, true)
-  );
-  const [barLyricShow, setBarLyricShow] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.barLyricShow, true)
-  );
-  const [showSongQuality, setShowSongQuality] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongQuality, true)
-  );
-  const [showSongPrivilegeTag, setShowSongPrivilegeTag] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongPrivilegeTag, true)
-  );
-  const [showSongExplicitTag, setShowSongExplicitTag] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongExplicitTag, true)
-  );
-  const [showSongOriginalTag, setShowSongOriginalTag] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongOriginalTag, true)
-  );
-  const [showSongAlbum, setShowSongAlbum] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongAlbum, true)
-  );
-  const [showSongDuration, setShowSongDuration] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongDuration, true)
-  );
-  const [showSongOperations, setShowSongOperations] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongOperations, true)
-  );
-  const [showSongArtist, setShowSongArtist] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showSongArtist, true)
-  );
-  const [hideBracketedContent, setHideBracketedContent] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.hideBracketedContent, false)
-  );
-  const [showPlayerQuality, setShowPlayerQuality] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.showPlayerQuality, true)
-  );
-  const [timeFormat, setTimeFormat] = createSignal<PlayerTimeFormat>(readTimeFormat());
-  const [fullPlayerShowLike, setFullPlayerShowLike] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerShowLike, true)
-  );
-  const [fullPlayerShowAddToPlaylist, setFullPlayerShowAddToPlaylist] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerShowAddToPlaylist, true)
-  );
-  const [fullPlayerShowDownload, setFullPlayerShowDownload] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerShowDownload, true)
-  );
-  const [fullPlayerShowComments, setFullPlayerShowComments] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerShowComments, true)
-  );
-  const [fullPlayerShowDesktopLyric, setFullPlayerShowDesktopLyric] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerShowDesktopLyric, true)
-  );
-  const [fullPlayerShowMoreSettings, setFullPlayerShowMoreSettings] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerShowMoreSettings, true)
-  );
-  const [fullPlayerShowCommentCount, setFullPlayerShowCommentCount] = createSignal<boolean>(
-    readBool(STORAGE_KEYS.fullPlayerShowCommentCount, false)
-  );
+    createSignal<PlayerExpandAnimation>(initialSettings.playerExpandAnimation);
+  const [playerFollowCoverColor, setPlayerFollowCoverColor] =
+    createSignal<boolean>(initialSettings.playerFollowCoverColor);
+  const [sidebarHiddenItems, setSidebarHiddenItems] =
+    createSignal<SidebarHiddenItems>(initialSettings.sidebarHiddenItems);
+  const [playlistPageElements, setPlaylistPageElements] =
+    createSignal<PlaylistPageElements>(initialSettings.playlistPageElements);
+  const [contextMenuOptions, setContextMenuOptions] =
+    createSignal<ContextMenuOptions>(initialSettings.contextMenuOptions);
+  const [hiddenCovers, setHiddenCovers] = createSignal<HiddenCovers>(initialSettings.hiddenCovers);
+  const [menuShowCover, setMenuShowCover] = createSignal<boolean>(initialSettings.menuShowCover);
+  const [autoHidePlayerMeta, setAutoHidePlayerMeta] =
+    createSignal<boolean>(initialSettings.autoHidePlayerMeta);
+  const [showPlayMeta, setShowPlayMeta] = createSignal<boolean>(initialSettings.showPlayMeta);
+  const [countDownShow, setCountDownShow] = createSignal<boolean>(initialSettings.countDownShow);
+  const [showSpectrums, setShowSpectrums] = createSignal<boolean>(initialSettings.showSpectrums);
+  const [showPlaylistCount, setShowPlaylistCount] =
+    createSignal<boolean>(initialSettings.showPlaylistCount);
+  const [barLyricShow, setBarLyricShow] = createSignal<boolean>(initialSettings.barLyricShow);
+  const [showSongQuality, setShowSongQuality] = createSignal<boolean>(initialSettings.showSongQuality);
+  const [showSongPrivilegeTag, setShowSongPrivilegeTag] =
+    createSignal<boolean>(initialSettings.showSongPrivilegeTag);
+  const [showSongExplicitTag, setShowSongExplicitTag] =
+    createSignal<boolean>(initialSettings.showSongExplicitTag);
+  const [showSongOriginalTag, setShowSongOriginalTag] =
+    createSignal<boolean>(initialSettings.showSongOriginalTag);
+  const [showSongAlbum, setShowSongAlbum] = createSignal<boolean>(initialSettings.showSongAlbum);
+  const [showSongDuration, setShowSongDuration] =
+    createSignal<boolean>(initialSettings.showSongDuration);
+  const [showSongOperations, setShowSongOperations] =
+    createSignal<boolean>(initialSettings.showSongOperations);
+  const [showSongArtist, setShowSongArtist] =
+    createSignal<boolean>(initialSettings.showSongArtist);
+  const [hideBracketedContent, setHideBracketedContent] =
+    createSignal<boolean>(initialSettings.hideBracketedContent);
+  const [showPlayerQuality, setShowPlayerQuality] =
+    createSignal<boolean>(initialSettings.showPlayerQuality);
+  const [timeFormat, setTimeFormat] = createSignal<PlayerTimeFormat>(initialSettings.timeFormat);
+  const [fullPlayerShowLike, setFullPlayerShowLike] =
+    createSignal<boolean>(initialSettings.fullPlayerShowLike);
+  const [fullPlayerShowAddToPlaylist, setFullPlayerShowAddToPlaylist] =
+    createSignal<boolean>(initialSettings.fullPlayerShowAddToPlaylist);
+  const [fullPlayerShowDownload, setFullPlayerShowDownload] =
+    createSignal<boolean>(initialSettings.fullPlayerShowDownload);
+  const [fullPlayerShowComments, setFullPlayerShowComments] =
+    createSignal<boolean>(initialSettings.fullPlayerShowComments);
+  const [fullPlayerShowDesktopLyric, setFullPlayerShowDesktopLyric] =
+    createSignal<boolean>(initialSettings.fullPlayerShowDesktopLyric);
+  const [fullPlayerShowMoreSettings, setFullPlayerShowMoreSettings] =
+    createSignal<boolean>(initialSettings.fullPlayerShowMoreSettings);
+  const [fullPlayerShowCommentCount, setFullPlayerShowCommentCount] =
+    createSignal<boolean>(initialSettings.fullPlayerShowCommentCount);
 
   const allCoversHidden = createMemo<boolean>(() =>
     COVER_DISPLAY_ITEMS.every((item) => hiddenCovers()[item.key])
