@@ -1,4 +1,4 @@
-import { Match, Switch, createSignal } from "solid-js";
+import { Match, Switch, createMemo, createSignal } from "solid-js";
 import { AppShell } from "../components/AppShell";
 import { BackgroundLayer } from "../components/BackgroundLayer";
 import { FullPlayer } from "../components/FullPlayer";
@@ -18,16 +18,34 @@ import { SettingsPage } from "../features/settings/SettingsPage";
 import { createApiClient } from "../shared/api/client";
 import { useTranslation } from "../shared/i18n";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
+import type { ActivePage } from "../shared/ui/navigation";
 import { UISearchProvider } from "../shared/state/UISearchContext";
 import { useAppController } from "./useAppController";
 
 const api = createApiClient();
+const NETEASE_PAGES = [
+  "recommend",
+  "discover",
+  "liked-songs",
+  "liked",
+  "created-playlists",
+  "collected-playlists"
+] as const satisfies readonly ActivePage[];
+
+type NeteasePageMode = (typeof NETEASE_PAGES)[number];
+
+const isNeteasePageMode = (page: ActivePage): page is NeteasePageMode =>
+  (NETEASE_PAGES as readonly ActivePage[]).includes(page);
 
 function AppContent() {
   const controller = useAppController(api);
   const { td } = useTranslation();
   const accountStore = useNcmAccount();
   const [isNcmLoginOpen, setIsNcmLoginOpen] = createSignal<boolean>(false);
+  const neteaseMode = createMemo<NeteasePageMode | null>(() => {
+    const page = controller.activePage();
+    return isNeteasePageMode(page) ? page : null;
+  });
   const refreshPlayback = async (expectedPath?: string | null) => {
     await Promise.all([
       controller.refreshState(expectedPath),
@@ -133,42 +151,27 @@ function AppContent() {
                     onPause={controller.handlePause}
                   />
                 </Match>
-                <Match
-                  when={
-                    displayedPage() === "recommend" ||
-                    displayedPage() === "discover" ||
-                    displayedPage() === "liked-songs" ||
-                    displayedPage() === "liked" ||
-                    displayedPage() === "created-playlists" ||
-                    displayedPage() === "collected-playlists"
-                  }
-                >
-                  <NeteasePage
-                    mode={
-                      displayedPage() as
-                        | "recommend"
-                        | "discover"
-                        | "liked-songs"
-                        | "liked"
-                        | "created-playlists"
-                        | "collected-playlists"
-                    }
-                    onStateRefresh={refreshPlayback}
-                    currentTrackPath={controller.currentTrackPath()}
-                    currentSongId={controller.currentNcmSongId()}
-                    isPlaying={Boolean(controller.player()?.is_playing)}
-                    onPlay={controller.handlePlay}
-                    onPause={controller.handlePause}
-                    onSkipNext={controller.handleSkipNext}
-                    onRegisterPlayback={controller.registerNcmPlayback}
-                    selectedPlaylistId={controller.selectedPlaylistId()}
-                    onSelectedPlaylistChange={controller.handleSelectedPlaylistChange}
-                    onNavigate={controller.handleActivePageChange}
-                    onNavigateToDiscover={controller.handleNavigateToDiscover}
-                    discoverTabRequest={controller.discoverTabRequest()}
-                    artistDetailRequest={controller.artistDetailRequest()}
-                    onRequireNcmLogin={requireNcmLogin}
-                  />
+                <Match when={neteaseMode()}>
+                  {(mode) => (
+                    <NeteasePage
+                      mode={mode()}
+                      onStateRefresh={refreshPlayback}
+                      currentTrackPath={controller.currentTrackPath()}
+                      currentSongId={controller.currentNcmSongId()}
+                      isPlaying={Boolean(controller.player()?.is_playing)}
+                      onPlay={controller.handlePlay}
+                      onPause={controller.handlePause}
+                      onSkipNext={controller.handleSkipNext}
+                      onRegisterPlayback={controller.registerNcmPlayback}
+                      selectedPlaylistId={controller.selectedPlaylistId()}
+                      onSelectedPlaylistChange={controller.handleSelectedPlaylistChange}
+                      onNavigate={controller.handleActivePageChange}
+                      onNavigateToDiscover={controller.handleNavigateToDiscover}
+                      discoverTabRequest={controller.discoverTabRequest()}
+                      artistDetailRequest={controller.artistDetailRequest()}
+                      onRequireNcmLogin={requireNcmLogin}
+                    />
+                  )}
                 </Match>
                 <Match when={displayedPage() === "recent"}>
                   <HistoryPage
@@ -194,7 +197,7 @@ function AppContent() {
                 <Match when={displayedPage() === "radio"}>
                   <NeteaseRadioPage />
                 </Match>
-                <Match when={controller.isPlaceholderPage(displayedPage() as any)}>
+                <Match when={controller.isPlaceholderPage(displayedPage())}>
                   <div class="panel panel-placeholder">
                     <div class="panel-header">
                       <h2>{td(`sidebar.nav.${displayedPage()}.label`)}</h2>

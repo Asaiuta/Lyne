@@ -1,49 +1,23 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 import { createApiClient, type ApiClient } from "../../shared/api/client";
-import type { LibraryRoot, LocalPlaylist, MediaItem } from "../../shared/api/types";
+import type { LibraryRoot, MediaItem } from "../../shared/api/types";
 import type { TranslationKey } from "../../shared/i18n";
-import {
-  ALL_FOLDERS_VALUE,
-  type LibraryFolderNode,
-  type LibraryGroup,
-  type LibraryListItem,
-  type LibrarySortField,
-  type LibrarySortOrder,
-  type LibrarySortState,
-  type LibraryTab
-} from "./libraryViewTypes";
-import type { LibraryWorkerFolderGroup, LibraryWorkerRow } from "./libraryWorkerProtocol";
-import {
-  LibraryWorkerClient,
-  createLibraryWorkerViewInput
-} from "./libraryWorkerClient";
+import { type LibraryListItem } from "./libraryViewTypes";
+import type { LibraryWorkerRow } from "./libraryWorkerProtocol";
+import { LibraryWorkerClient } from "./libraryWorkerClient";
 import {
   adaptMediaItemToListItem,
   adaptWorkerRowToListItem,
   LibraryTrackDetailResolver
 } from "./libraryDataBoundary";
-import {
-  buildFolderTreeFromFolders,
-  fallbackLabel,
-  folderNameFromPath,
-  groupByKey,
-  sortItems,
-  splitArtists
-} from "./libraryViewModel";
-import {
-  type ScanProgress,
-  scanProgressFromTask
-} from "./libraryScanState";
+import { scanProgressFromTask } from "./libraryScanState";
 import { createLibraryScanPoller } from "./libraryScanPoller";
 import { createLibraryFeedbackController } from "./libraryFeedback";
 import { createLibraryScanActions } from "./libraryScanActions";
-import { nextSortForField, nextSortForOrder } from "./librarySortModel";
 import { uniqueMediaIds } from "./librarySelectionModel";
 import { enqueueLibraryItem, enqueueLibraryItems } from "./libraryQueueActions";
-
-const DEFAULT_LIBRARY_RANGE = { start: 0, end: 80 };
-const LEGACY_LIBRARY_TABS: readonly LibraryTab[] = ["artists", "albums", "folders"];
+import { createLibraryControllerViewState } from "./libraryControllerViewState";
 
 export type LibraryDataControllerApi = Pick<
   ApiClient,
@@ -88,29 +62,6 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     adaptMediaItemToListItem(item, urlProvider);
   const adaptWorkerRow = (row: LibraryWorkerRow): LibraryListItem =>
     adaptWorkerRowToListItem(row, urlProvider);
-  const [roots, setRoots] = createSignal<LibraryRoot[]>([]);
-  const [libraryRevision, setLibraryRevision] = createSignal<string | null>(null);
-  const [libraryTotalCount, setLibraryTotalCount] = createSignal<number>(0);
-  const [virtualRows, setVirtualRows] = createSignal<LibraryListItem[]>([]);
-  const [legacyRows, setLegacyRows] = createSignal<LibraryListItem[]>([]);
-  const [virtualTotal, setVirtualTotal] = createSignal<number>(0);
-  const [virtualRange, setVirtualRange] =
-    createSignal<{ start: number; end: number }>(DEFAULT_LIBRARY_RANGE);
-  const [folderOptions, setFolderOptions] = createSignal<LibraryWorkerFolderGroup[]>([]);
-  const [workerReady, setWorkerReady] = createSignal<boolean>(false);
-  const [debouncedQueries, setDebouncedQueries] = createSignal<string[]>([]);
-  const [virtualSizeBytes, setVirtualSizeBytes] = createSignal<number>(0);
-  const [localPlaylists, setLocalPlaylists] = createSignal<LocalPlaylist[]>([]);
-  const [selectedPlaylistId, setSelectedPlaylistId] = createSignal<string | null>(null);
-  const [selectedPlaylistItems, setSelectedPlaylistItems] = createSignal<LibraryListItem[]>([]);
-  const [activeTab, setActiveTab] = createSignal<LibraryTab>("songs");
-  const [sort, setSort] = createSignal<LibrarySortState>({ field: "default", order: "default" });
-  const [localQuery, setLocalQuery] = createSignal("");
-  const [selectedFolder, setSelectedFolder] = createSignal(ALL_FOLDERS_VALUE);
-  const [manageOpen, setManageOpen] = createSignal(false);
-  const [isFetching, setIsFetching] = createSignal(false);
-  const [isScanning, setIsScanning] = createSignal(false);
-  const [scanProgress, setScanProgress] = createSignal<ScanProgress | null>(null);
   const {
     feedback,
     readErrorMessage,
@@ -128,93 +79,38 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
 
   const workerClient = new LibraryWorkerClient({
     onReady: (total) => {
-      setWorkerReady(true);
-      setVirtualTotal(total);
+      viewState.setWorkerReady(true);
+      viewState.setVirtualTotal(total);
     },
     onViewResult: (result) => {
-      setVirtualRows(result.rows.map(adaptWorkerRow));
-      setVirtualTotal(result.total);
-      setVirtualSizeBytes(result.totalSizeBytes);
-      setFolderOptions(result.folders);
+      viewState.setVirtualRows(result.rows.map(adaptWorkerRow));
+      viewState.setVirtualTotal(result.total);
+      viewState.setVirtualSizeBytes(result.totalSizeBytes);
+      viewState.setFolderOptions(result.folders);
     },
     onError: () => {
-      setWorkerReady(false);
+      viewState.setWorkerReady(false);
     }
+  });
+
+  const viewState = createLibraryControllerViewState({
+    t,
+    globalQuery,
+    workerClient,
+    adaptWorkerRow,
+    readErrorMessage,
+    setRawFeedback
   });
 
   const scanPoller = createLibraryScanPoller({
     getTask: (taskId) => api.getLibraryScanTask(taskId),
-    applyTask: (task) => setScanProgress(scanProgressFromTask(task)),
+    applyTask: (task) => viewState.setScanProgress(scanProgressFromTask(task)),
     scanTimeoutMessage: () => t("library.feedback.scanTimeout")
   });
 
   onCleanup(() => {
     scanPoller.dispose();
-    workerClient.dispose();
   });
-
-  const currentWorkerViewInput = () =>
-    createLibraryWorkerViewInput(
-      debouncedQueries(),
-      selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
-      sort()
-    );
-
-  const postWorkerView = () => {
-    if (!workerReady()) return;
-    workerClient.requestView(currentWorkerViewInput(), virtualRange());
-  };
-
-  const currentLibraryQueryInput = (startTrackKey?: number | null) => ({
-    search: debouncedQueries().join(" "),
-    folderPath: selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
-    sortField: sort().field,
-    sortOrder: sort().order,
-    startTrackKey: startTrackKey ?? null
-  });
-
-  const requestWorkerTrackKeys = async (startTrackKey?: number): Promise<number[]> => {
-    if (!workerReady()) {
-      throw new Error(t("common.error.requestFailed"));
-    }
-    const trackKeys = await workerClient.requestTrackKeys(currentWorkerViewInput());
-    if (trackKeys.length === 0) {
-      throw new Error(t("library.tracks.emptyFilter"));
-    }
-    if (startTrackKey !== undefined && !trackKeys.includes(startTrackKey)) {
-      return [startTrackKey, ...trackKeys];
-    }
-    return trackKeys;
-  };
-
-  const requestWorkerRows = async (): Promise<LibraryListItem[]> => {
-    if (!workerReady()) {
-      throw new Error(t("common.error.requestFailed"));
-    }
-    const rows = await workerClient.requestRows(currentWorkerViewInput());
-    return rows.map(adaptWorkerRow);
-  };
-
-  let legacyRowsRequestId = 0;
-
-  const refreshLegacyRows = async () => {
-    if (!workerReady()) {
-      setLegacyRows([]);
-      return;
-    }
-    const requestId = ++legacyRowsRequestId;
-    try {
-      const rows = await requestWorkerRows();
-      if (requestId === legacyRowsRequestId) {
-        setLegacyRows(rows);
-      }
-    } catch (error) {
-      if (requestId === legacyRowsRequestId) {
-        setLegacyRows([]);
-        setRawFeedback("error", readErrorMessage(error));
-      }
-    }
-  };
 
   const trackKeysForPlaybackContext = async (
     item: LibraryListItem,
@@ -223,14 +119,14 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     if (item.trackKey === undefined) {
       throw new Error(t("common.error.requestFailed"));
     }
-    if (activeTab() === "songs") {
-      return requestWorkerTrackKeys(item.trackKey);
+    if (viewState.activeTab() === "songs") {
+      return viewState.requestWorkerTrackKeys(item.trackKey);
     }
     const contextTrackKeys = contextItems
       .map((contextItem) => contextItem.trackKey)
       .filter((trackKey): trackKey is number => trackKey !== undefined);
     if (contextTrackKeys.length === 0) {
-      return requestWorkerTrackKeys(item.trackKey);
+      return viewState.requestWorkerTrackKeys(item.trackKey);
     }
     return contextTrackKeys.includes(item.trackKey)
       ? contextTrackKeys
@@ -241,11 +137,11 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     if (item.trackKey === undefined) {
       throw new Error(t("common.error.requestFailed"));
     }
-    await api.replaceQueueFromLibraryQuery(currentLibraryQueryInput(item.trackKey));
+    await api.replaceQueueFromLibraryQuery(viewState.currentLibraryQueryInput(item.trackKey));
   };
 
   const replaceQueueFromSelectedPlaylist = async (item: LibraryListItem) => {
-    const playlistId = selectedPlaylistId();
+    const playlistId = viewState.selectedPlaylistId();
     if (!playlistId || !item.media_id) {
       throw new Error(t("common.error.requestFailed"));
     }
@@ -255,56 +151,44 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     });
   };
 
-  const updateVirtualRange = (range: { start: number; end: number }) => {
-    setVirtualRange((current) =>
-      current.start === range.start && current.end === range.end ? current : range
-    );
-  };
-
   const ensureItemDetail = (item: LibraryListItem): Promise<MediaItem | null> =>
     detailResolver.resolve(item);
 
   const refreshRoots = async () => {
     try {
       const list = await api.getLibraryRoots();
-      setRoots(list);
+      viewState.setRoots(list);
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
     }
   };
 
   const refreshItems = async () => {
-    setIsFetching(true);
+    viewState.setIsFetching(true);
     try {
       const response = await api.getLibraryTrackSummaries();
       detailResolver.clear();
-      setLegacyRows([]);
-      setLibraryRevision(response.revision);
-      setLibraryTotalCount(response.total_count);
-      setVirtualTotal(response.total_count);
-      setVirtualSizeBytes(response.total_size_bytes);
-      setWorkerReady(false);
-      workerClient.init(response.tracks, response.folders);
+      viewState.applyTrackSummaries(response);
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
     } finally {
-      setIsFetching(false);
+      viewState.setIsFetching(false);
     }
   };
 
-  const refreshSelectedPlaylist = async (playlistId = selectedPlaylistId()) => {
+  const refreshSelectedPlaylist = async (playlistId = viewState.selectedPlaylistId()) => {
     if (!playlistId) {
-      setSelectedPlaylistItems([]);
+      viewState.setSelectedPlaylistItems([]);
       return;
     }
 
     try {
       const detail = await api.getLocalPlaylist(playlistId);
-      setSelectedPlaylistId(detail.playlist.playlist_id);
-      setSelectedPlaylistItems(detail.items.map(adaptItem));
+      viewState.setSelectedPlaylistId(detail.playlist.playlist_id);
+      viewState.setSelectedPlaylistItems(detail.items.map(adaptItem));
     } catch (error) {
-      setSelectedPlaylistId(null);
-      setSelectedPlaylistItems([]);
+      viewState.setSelectedPlaylistId(null);
+      viewState.setSelectedPlaylistItems([]);
       setRawFeedback("error", readErrorMessage(error));
     }
   };
@@ -312,11 +196,11 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const refreshPlaylists = async () => {
     try {
       const playlists = await api.listLocalPlaylists();
-      setLocalPlaylists(playlists);
-      const selected = selectedPlaylistId();
+      viewState.setLocalPlaylists(playlists);
+      const selected = viewState.selectedPlaylistId();
       const nextSelected =
         playlists.find((playlist) => playlist.playlist_id === selected)?.playlist_id ?? null;
-      setSelectedPlaylistId(nextSelected);
+      viewState.setSelectedPlaylistId(nextSelected);
       await refreshSelectedPlaylist(nextSelected);
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
@@ -329,72 +213,6 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     void refreshPlaylists();
   });
 
-  createEffect(() => {
-    const nextQueries = [globalQuery(), localQuery()]
-      .map((value) => value.trim().toLowerCase())
-      .filter((value) => value.length > 0);
-    const timer = window.setTimeout(() => {
-      setDebouncedQueries(nextQueries);
-      setVirtualRange(DEFAULT_LIBRARY_RANGE);
-    }, 180);
-    onCleanup(() => window.clearTimeout(timer));
-  });
-
-  createEffect(() => {
-    workerReady();
-    debouncedQueries();
-    selectedFolder();
-    sort();
-    virtualRange();
-    postWorkerView();
-  });
-
-  createEffect(() => {
-    const tab = activeTab();
-    workerReady();
-    debouncedQueries();
-    selectedFolder();
-    sort();
-    if (LEGACY_LIBRARY_TABS.includes(tab)) {
-      void refreshLegacyRows();
-    }
-  });
-
-  const folderGroups = createMemo<LibraryGroup[]>(() => {
-    const rootOptions = roots();
-    if (rootOptions.length > 0) {
-      return rootOptions.map((root) => ({
-        key: root.source_path,
-        label: folderNameFromPath(root.source_path),
-        songs: [],
-        artworkUrl: null,
-        detail: root.source_path
-      }));
-    }
-    return [];
-  });
-  const folderTree = createMemo<LibraryFolderNode[]>(() => buildFolderTreeFromFolders(folderOptions()));
-  const legacyFilteredItems = createMemo(() => legacyRows());
-  const filteredItems = createMemo(() =>
-    activeTab() === "songs" ? virtualRows() : legacyFilteredItems()
-  );
-  const artistGroups = createMemo<LibraryGroup[]>(() =>
-    groupByKey(legacyFilteredItems(), (item) => splitArtists(item.artist, t("library.group.unknownArtist")))
-  );
-  const albumGroups = createMemo<LibraryGroup[]>(() =>
-    groupByKey(legacyFilteredItems(), (item) => [fallbackLabel(item.album, t("library.group.unknownAlbum"))])
-  );
-  const selectedPlaylistSortedItems = createMemo(() =>
-    sortItems(selectedPlaylistItems(), sort())
-  );
-  const visibleSizeGb = createMemo<number>(() => {
-    if (activeTab() === "songs") {
-      return Number((virtualSizeBytes() / (1024 * 1024 * 1024)).toFixed(2));
-    }
-    const totalBytes = legacyFilteredItems().reduce((total, item) => total + (item.size_bytes ?? 0), 0);
-    return Number((totalBytes / (1024 * 1024 * 1024)).toFixed(2));
-  });
-
   const { handleScan, handleRescan } = createLibraryScanActions({
     api,
     t,
@@ -402,8 +220,8 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     readErrorMessage,
     setKeyedFeedback,
     setRawFeedback,
-    setIsScanning,
-    setScanProgress,
+    setIsScanning: viewState.setIsScanning,
+    setScanProgress: viewState.setScanProgress,
     refreshAfterScan: async () => {
       await Promise.all([refreshRoots(), refreshItems(), refreshPlaylists()]);
     }
@@ -420,12 +238,15 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     }
   };
 
-  const playItem = async (item: LibraryListItem, contextItems: readonly LibraryListItem[] = filteredItems()) => {
+  const playItem = async (
+    item: LibraryListItem,
+    contextItems: readonly LibraryListItem[] = viewState.filteredItems()
+  ) => {
     setKeyedFeedback("neutral", "library.feedback.initial");
     try {
-      if (activeTab() === "songs" || activeTab() === "folders") {
+      if (viewState.activeTab() === "songs" || viewState.activeTab() === "folders") {
         await replaceQueueFromCurrentLibraryQuery(item);
-      } else if (activeTab() === "playlists") {
+      } else if (viewState.activeTab() === "playlists") {
         await replaceQueueFromSelectedPlaylist(item);
       } else if (item.trackKey !== undefined) {
         const trackKeys = await trackKeysForPlaybackContext(item, contextItems);
@@ -459,7 +280,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const playCurrentSongView = async () => {
     setKeyedFeedback("neutral", "library.feedback.initial");
     try {
-      await api.replaceQueueFromLibraryQuery(currentLibraryQueryInput(null));
+      await api.replaceQueueFromLibraryQuery(viewState.currentLibraryQueryInput(null));
       setKeyedFeedback("neutral", "library.feedback.initial");
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
@@ -498,11 +319,11 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
 
   const selectLocalPlaylist = async (playlistId: string) => {
     if (!playlistId) {
-      setSelectedPlaylistId(null);
-      setSelectedPlaylistItems([]);
+      viewState.setSelectedPlaylistId(null);
+      viewState.setSelectedPlaylistItems([]);
       return;
     }
-    setSelectedPlaylistId(playlistId);
+    viewState.setSelectedPlaylistId(playlistId);
     await refreshSelectedPlaylist(playlistId);
   };
 
@@ -522,9 +343,9 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const deleteLocalPlaylist = async (playlistId: string) => {
     try {
       await api.deleteLocalPlaylist(playlistId);
-      if (selectedPlaylistId() === playlistId) {
-        setSelectedPlaylistId(null);
-        setSelectedPlaylistItems([]);
+      if (viewState.selectedPlaylistId() === playlistId) {
+        viewState.setSelectedPlaylistId(null);
+        viewState.setSelectedPlaylistItems([]);
       }
       await refreshPlaylists();
       setRawFeedback("success", t("library.playlists.feedback.deleted"));
@@ -541,7 +362,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     try {
       const addedCount = await api.addMediaToLocalPlaylist(playlistId, mediaIds);
       await refreshPlaylists();
-      if (selectedPlaylistId() === playlistId) {
+      if (viewState.selectedPlaylistId() === playlistId) {
         await refreshSelectedPlaylist(playlistId);
       }
       setRawFeedback("success", t("library.playlists.feedback.added", { count: addedCount }));
@@ -553,7 +374,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   };
 
   const removeItemsFromSelectedPlaylist = async (items: readonly LibraryListItem[]) => {
-    const playlistId = selectedPlaylistId();
+    const playlistId = viewState.selectedPlaylistId();
     if (!playlistId || items.length === 0) return 0;
     const details = await Promise.all(items.map(ensureItemDetail));
     const mediaIds = uniqueMediaIds(details);
@@ -586,18 +407,10 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   };
 
   const getCurrentBatchItems = async (): Promise<LibraryListItem[]> => {
-    if (activeTab() === "songs") {
-      return requestWorkerRows();
+    if (viewState.activeTab() === "songs") {
+      return viewState.requestWorkerRows();
     }
-    return legacyFilteredItems();
-  };
-
-  const updateSort = (field: LibrarySortField) => {
-    setSort((current) => nextSortForField(current, field));
-  };
-
-  const updateSortOrder = (order: LibrarySortOrder) => {
-    setSort((current) => nextSortForOrder(current, order));
+    return viewState.filteredItems();
   };
 
   const notifyCopyPath = () => {
@@ -626,37 +439,37 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   };
 
   return {
-    roots,
-    libraryRevision,
-    libraryTotalCount,
-    virtualTotal,
-    virtualRange,
-    setVirtualRange: updateVirtualRange,
-    localPlaylists,
-    selectedPlaylistId,
-    selectedPlaylistItems,
-    selectedPlaylistSortedItems,
-    filteredItems,
-    artistGroups,
-    albumGroups,
-    folderGroups,
-    folderTree,
-    activeTab,
-    setActiveTab,
-    sort,
-    updateSort,
-    updateSortOrder,
-    localQuery,
-    setLocalQuery,
-    selectedFolder,
-    setSelectedFolder,
-    manageOpen,
-    setManageOpen,
-    isFetching,
-    isScanning,
-    scanProgress,
+    roots: viewState.roots,
+    libraryRevision: viewState.libraryRevision,
+    libraryTotalCount: viewState.libraryTotalCount,
+    virtualTotal: viewState.virtualTotal,
+    virtualRange: viewState.virtualRange,
+    setVirtualRange: viewState.setVirtualRange,
+    localPlaylists: viewState.localPlaylists,
+    selectedPlaylistId: viewState.selectedPlaylistId,
+    selectedPlaylistItems: viewState.selectedPlaylistItems,
+    selectedPlaylistSortedItems: viewState.selectedPlaylistSortedItems,
+    filteredItems: viewState.filteredItems,
+    artistGroups: viewState.artistGroups,
+    albumGroups: viewState.albumGroups,
+    folderGroups: viewState.folderGroups,
+    folderTree: viewState.folderTree,
+    activeTab: viewState.activeTab,
+    setActiveTab: viewState.setActiveTab,
+    sort: viewState.sort,
+    updateSort: viewState.updateSort,
+    updateSortOrder: viewState.updateSortOrder,
+    localQuery: viewState.localQuery,
+    setLocalQuery: viewState.setLocalQuery,
+    selectedFolder: viewState.selectedFolder,
+    setSelectedFolder: viewState.setSelectedFolder,
+    manageOpen: viewState.manageOpen,
+    setManageOpen: viewState.setManageOpen,
+    isFetching: viewState.isFetching,
+    isScanning: viewState.isScanning,
+    scanProgress: viewState.scanProgress,
     feedback,
-    visibleSizeGb,
+    visibleSizeGb: viewState.visibleSizeGb,
     formatScanTimestamp,
     playItem,
     playCurrentSongView,

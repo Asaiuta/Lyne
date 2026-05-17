@@ -90,7 +90,7 @@ interface MediaListProps<T extends MediaListItem> {
 }
 
 const VIRTUALIZE_THRESHOLD = 120;
-const VIRTUAL_ROW_HEIGHT = 90;
+const VIRTUAL_ROW_HEIGHT_PX = 90;
 const VIRTUAL_OVERSCAN = 5;
 
 interface MenuState {
@@ -237,9 +237,9 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const useVirtualRows = createMemo<boolean>(() => totalItems() > VIRTUALIZE_THRESHOLD);
   const visibleRange = createMemo<{ start: number; end: number }>(() => {
     if (!useVirtualRows()) return { start: 0, end: totalItems() };
-    const measuredHeight = viewportHeight() || VIRTUAL_ROW_HEIGHT * 8;
-    const start = Math.max(0, Math.floor(scrollTop() / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
-    const count = Math.ceil(measuredHeight / VIRTUAL_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
+    const measuredHeight = viewportHeight() || VIRTUAL_ROW_HEIGHT_PX * 8;
+    const start = Math.max(0, Math.floor(scrollTop() / VIRTUAL_ROW_HEIGHT_PX) - VIRTUAL_OVERSCAN);
+    const count = Math.ceil(measuredHeight / VIRTUAL_ROW_HEIGHT_PX) + VIRTUAL_OVERSCAN * 2;
     return { start, end: Math.min(totalItems(), start + count) };
   });
   const renderedItems = createMemo<T[]>(() => {
@@ -250,11 +250,11 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     return props.items.slice(range.start, range.end);
   });
   const virtualHeight = createMemo<number>(() =>
-    useVirtualRows() ? totalItems() * VIRTUAL_ROW_HEIGHT : 0
+    useVirtualRows() ? totalItems() * VIRTUAL_ROW_HEIGHT_PX : 0
   );
   const virtualOffset = createMemo<number>(() =>
     useVirtualRows()
-      ? (remoteVirtualStart() ?? visibleRange().start) * VIRTUAL_ROW_HEIGHT
+      ? (remoteVirtualStart() ?? visibleRange().start) * VIRTUAL_ROW_HEIGHT_PX
       : 0
   );
 
@@ -267,7 +267,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     if (index < 0) return;
     const absoluteIndex = remoteVirtualStart() !== null ? (props.virtualStart ?? 0) + index : index;
     viewportRef?.scrollTo({
-      top: Math.max(0, absoluteIndex * VIRTUAL_ROW_HEIGHT),
+      top: Math.max(0, absoluteIndex * VIRTUAL_ROW_HEIGHT_PX),
       behavior: "smooth"
     });
   };

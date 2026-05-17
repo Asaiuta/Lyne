@@ -45,6 +45,14 @@ interface BooleanItemConfig {
   setValue: (settings: AppearanceSettings) => Setter<boolean>;
 }
 
+interface DirectBooleanItemConfig {
+  id: string;
+  labelKey: TranslationKey;
+  descriptionKey?: TranslationKey;
+  checked: () => boolean;
+  onChange: () => void;
+}
+
 const LAYOUT_BOOLEAN_ITEMS: readonly BooleanItemConfig[] = [
   {
     id: "menuShowCover",
@@ -203,6 +211,24 @@ function renderBooleanItem(
   );
 }
 
+function renderDirectBooleanItem(
+  config: DirectBooleanItemConfig,
+  props: AppearanceMainPanelProps,
+  t: (key: TranslationKey) => string
+) {
+  return (
+    <BooleanSettingItem
+      id={config.id}
+      label={t(config.labelKey)}
+      description={config.descriptionKey ? t(config.descriptionKey) : undefined}
+      highlighted={props.highlightId === config.id}
+      index={props.nextIndex()}
+      checked={config.checked()}
+      onChange={config.onChange}
+    />
+  );
+}
+
 export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
   const { t } = useTranslation();
 
@@ -251,6 +277,48 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
     { value: "current-total", label: t("settings.appearance.timeFormat.currentTotal") },
     { value: "remaining-total", label: t("settings.appearance.timeFormat.remainingTotal") },
     { value: "current-remaining", label: t("settings.appearance.timeFormat.currentRemaining") }
+  ]);
+
+  const animationBooleanItems = createMemo<readonly DirectBooleanItemConfig[]>(() => [
+    {
+      id: "playerBackgroundPause",
+      labelKey: "settings.appearance.playerBackgroundPause",
+      descriptionKey: "settings.appearance.playerBackgroundPause.desc",
+      checked: props.settings.playerBackgroundPause,
+      onChange: () =>
+        props.settings.toggleBool(
+          STORAGE_KEYS.playerBackgroundPause,
+          props.settings.playerBackgroundPause,
+          props.settings.setPlayerBackgroundPause
+        )
+    },
+    {
+      id: "playerBackgroundLowFreqVolume",
+      labelKey: "settings.appearance.playerBackgroundLowFreqVolume",
+      descriptionKey: "settings.appearance.playerBackgroundLowFreqVolume.desc",
+      checked: props.settings.playerBackgroundLowFreqVolume,
+      onChange: () =>
+        props.settings.toggleBool(
+          STORAGE_KEYS.playerBackgroundLowFreqVolume,
+          props.settings.playerBackgroundLowFreqVolume,
+          props.settings.setPlayerBackgroundLowFreqVolume
+        )
+    }
+  ]);
+
+  const playerDisplayBooleanItems = createMemo<readonly DirectBooleanItemConfig[]>(() => [
+    {
+      id: "showSpectrums",
+      labelKey: "settings.appearance.showSpectrums",
+      descriptionKey: "settings.appearance.showSpectrums.desc",
+      checked: props.settings.showSpectrums,
+      onChange: () =>
+        props.settings.toggleBool(
+          STORAGE_KEYS.showSpectrums,
+          props.settings.showSpectrums,
+          props.settings.setShowSpectrums
+        )
+    }
   ]);
 
   const renderManagerButton = (item: ManagerConfig) => (
@@ -482,36 +550,9 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             onCommit={props.settings.handlePlayerBackgroundRenderScale}
             formatSuffix="x"
           />
-          <BooleanSettingItem
-            id="playerBackgroundPause"
-            label={t("settings.appearance.playerBackgroundPause")}
-            description={t("settings.appearance.playerBackgroundPause.desc")}
-            highlighted={props.highlightId === "playerBackgroundPause"}
-            index={props.nextIndex()}
-            checked={props.settings.playerBackgroundPause()}
-            onChange={() =>
-              props.settings.toggleBool(
-                STORAGE_KEYS.playerBackgroundPause,
-                props.settings.playerBackgroundPause,
-                props.settings.setPlayerBackgroundPause
-              )
-            }
-          />
-          <BooleanSettingItem
-            id="playerBackgroundLowFreqVolume"
-            label={t("settings.appearance.playerBackgroundLowFreqVolume")}
-            description={t("settings.appearance.playerBackgroundLowFreqVolume.desc")}
-            highlighted={props.highlightId === "playerBackgroundLowFreqVolume"}
-            index={props.nextIndex()}
-            checked={props.settings.playerBackgroundLowFreqVolume()}
-            onChange={() =>
-              props.settings.toggleBool(
-                STORAGE_KEYS.playerBackgroundLowFreqVolume,
-                props.settings.playerBackgroundLowFreqVolume,
-                props.settings.setPlayerBackgroundLowFreqVolume
-              )
-            }
-          />
+          <For each={animationBooleanItems()}>
+            {(item) => renderDirectBooleanItem(item, props, t)}
+          </For>
         </Show>
 
         <SelectSettingItem
@@ -537,21 +578,9 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
           onChange={props.settings.handlePlayerFollowCoverColor}
         />
 
-        <BooleanSettingItem
-          id="showSpectrums"
-          label={t("settings.appearance.showSpectrums")}
-          description={t("settings.appearance.showSpectrums.desc")}
-          highlighted={props.highlightId === "showSpectrums"}
-          index={props.nextIndex()}
-          checked={props.settings.showSpectrums()}
-          onChange={() =>
-            props.settings.toggleBool(
-              STORAGE_KEYS.showSpectrums,
-              props.settings.showSpectrums,
-              props.settings.setShowSpectrums
-            )
-          }
-        />
+        <For each={playerDisplayBooleanItems()}>
+          {(item) => renderDirectBooleanItem(item, props, t)}
+        </For>
       </SettingGroup>
 
       <SettingGroup title={t("settings.appearance.playerElements")}>

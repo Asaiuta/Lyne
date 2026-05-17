@@ -96,7 +96,7 @@ const SECTIONS: ReadonlyArray<NavSection> = [
 
 const STORAGE_KEY = "ui.sidebar.collapsed";
 const SECTIONS_STORAGE_KEY = "ui.sidebar.collapsedSections";
-const NARROW_BREAKPOINT = 980;
+const NARROW_BREAKPOINT_PX = 980;
 const LOGIN_REQUIRED_PAGES = new Set<ActivePage>([
   "personal-fm",
   "liked-songs",
@@ -157,7 +157,7 @@ const readPersistedCollapsedSections = (): Set<string> => {
 
 const isNarrowViewport = (): boolean => {
   if (typeof window === "undefined") return false;
-  return window.innerWidth < NARROW_BREAKPOINT;
+  return window.innerWidth < NARROW_BREAKPOINT_PX;
 };
 
 interface SidebarProps {
