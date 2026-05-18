@@ -132,7 +132,7 @@ export function LibraryFoldersView(props: LibraryFoldersViewProps) {
             onContextAction={props.onContextAction}
             isLoading={props.isLoading}
             emptyState={t("library.tracks.emptyFilter")}
-            contextActions={["play", "enqueue", "add-to-playlist", "copy-path", "delete"]}
+            contextActions={["play", "enqueue", "add-to-playlist", "search", "copy-name", "show-in-folder", "delete-from-library"]}
             deleteActionLabel={t("library.action.deleteFromLibrary")}
             sort={props.sort}
             onSortChange={props.onSortChange}

@@ -28,6 +28,11 @@ interface MediaListRowProps<T extends MediaListItem> {
   onContextMenu: (event: MouseEvent, itemId: string) => void;
 }
 
+const qualityTagClass = (quality: string): string => {
+  const tone = quality === "Hi-Res" || quality === "SQ" ? "warning" : quality === "HQ" ? "info" : "primary";
+  return `media-row-tag media-row-quality-tag media-row-quality-tag-${tone}`;
+};
+
 export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T>) {
   const title = () => props.item.title ?? displayNameFromSourcePath(props.item.source_path ?? props.item.id);
   const displayTitle = () => props.displaySongText(title());
@@ -96,7 +101,7 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
             <span class="media-row-title" title={props.item.source_path ?? title()}>
               <span class="media-row-title-text">{displayTitle()}</span>
               <Show when={props.uiSettings.showSongQuality && props.item.qualityLabel}>
-                {(quality) => <span class="media-row-tag">{quality()}</span>}
+                {(quality) => <span class={qualityTagClass(quality())}>{quality()}</span>}
               </Show>
               <Show when={props.uiSettings.showSongPrivilegeTag && props.item.privilegeTag}>
                 {(tag) => <span class="media-row-tag media-row-tag-muted">{tag()}</span>}

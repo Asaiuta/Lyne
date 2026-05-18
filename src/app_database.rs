@@ -4,7 +4,7 @@
 //! process restarts: WebDAV sources, media metadata, playback sessions/history,
 //! active device/DSP snapshots, queue snapshot, and analysis task records.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, types::ValueRef, Connection};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -38,7 +38,11 @@ pub(super) fn media_item_from_row_with_offset(
     row: &rusqlite::Row<'_>,
     offset: usize,
 ) -> rusqlite::Result<MediaItemRecord> {
-    let stored_size: Option<i64> = row.get(offset + 16)?;
+    let stored_size: Option<i64> = row.get(offset + 18)?;
+    let bitrate_bps = match row.get_ref(offset + 13)? {
+        ValueRef::Null => None,
+        _ => Some(row.get(offset + 13)?),
+    };
     Ok(MediaItemRecord {
         media_id: row.get(offset)?,
         source_path: row.get(offset + 1)?,
@@ -53,10 +57,12 @@ pub(super) fn media_item_from_row_with_offset(
         duration_secs: row.get(offset + 10)?,
         sample_rate: row.get::<_, Option<i64>>(offset + 11)?.map(|v| v as u32),
         channels: row.get::<_, Option<i64>>(offset + 12)?.map(|v| v as u32),
-        has_cover_art: row.get::<_, i64>(offset + 14)? != 0,
-        external_artwork_url: row.get(offset + 15)?,
+        bitrate_bps,
+        bits_per_sample: row.get::<_, Option<i64>>(offset + 14)?.map(|v| v as u32),
+        has_cover_art: row.get::<_, i64>(offset + 16)? != 0,
+        external_artwork_url: row.get(offset + 17)?,
         size_bytes: stored_size.map(|v| v as u64),
-        updated_at_epoch_secs: row.get::<_, i64>(offset + 13)? as u64,
+        updated_at_epoch_secs: row.get::<_, i64>(offset + 15)? as u64,
     })
 }
 

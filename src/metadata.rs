@@ -28,6 +28,8 @@ pub struct LocalMetadata {
     pub duration_secs: Option<f64>,
     pub sample_rate: Option<u32>,
     pub channels: Option<usize>,
+    pub bitrate_bps: Option<f64>,
+    pub bits_per_sample: Option<u32>,
     pub has_lofty_title: bool,
 }
 
@@ -111,6 +113,7 @@ pub fn read_local_metadata(path: &str) -> Result<LocalMetadata, String> {
             result.duration_secs = info.duration_secs;
             result.sample_rate = Some(info.sample_rate);
             result.channels = Some(info.channels);
+            result.bits_per_sample = info.bits_per_sample;
         }
         Err(e) => {
             log::debug!("Symphonia metadata read failed for '{}': {}", path, e);
@@ -121,6 +124,9 @@ pub fn read_local_metadata(path: &str) -> Result<LocalMetadata, String> {
         result.has_lofty_title = lofty_meta.title.as_deref().is_some();
         if result.duration_secs.is_none() {
             result.duration_secs = lofty_meta.duration_secs;
+        }
+        if result.bitrate_bps.is_none() {
+            result.bitrate_bps = lofty_meta.bitrate_bps;
         }
         merge_lofty_into(&mut result.metadata, &lofty_meta);
     }

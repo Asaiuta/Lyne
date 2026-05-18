@@ -39,6 +39,8 @@ impl AppDatabase {
             channels,
             None,
             None,
+            None,
+            None,
         )
     }
 
@@ -49,6 +51,8 @@ impl AppDatabase {
         duration_secs: Option<f64>,
         sample_rate: Option<u32>,
         channels: Option<usize>,
+        bitrate_bps: Option<f64>,
+        bits_per_sample: Option<u32>,
         mtime: Option<f64>,
         size_bytes: Option<u64>,
     ) -> Result<String, String> {
@@ -68,9 +72,11 @@ impl AppDatabase {
                 duration_secs = COALESCE(?9, duration_secs),
                 sample_rate = COALESCE(?10, sample_rate),
                 channels = COALESCE(?11, channels),
-                mtime = COALESCE(?13, mtime),
-                size_bytes = COALESCE(?14, size_bytes),
-                updated_at = ?12
+                bitrate_bps = COALESCE(?12, bitrate_bps),
+                bits_per_sample = COALESCE(?13, bits_per_sample),
+                mtime = COALESCE(?15, mtime),
+                size_bytes = COALESCE(?16, size_bytes),
+                updated_at = ?14
             WHERE media_id = ?1
             "#,
             params![
@@ -85,6 +91,8 @@ impl AppDatabase {
                 duration_secs,
                 sample_rate.map(|v| v as i64),
                 channels.map(|v| v as i64),
+                bitrate_bps,
+                bits_per_sample.map(|v| v as i64),
                 now,
                 mtime,
                 size_bytes.map(|v| v as i64),
@@ -164,7 +172,8 @@ impl AppDatabase {
         conn.query_row(
             r#"
             SELECT media_id, source_path, source_kind, title, artist, album, track_number, disc_number,
-                   genre, year, duration_secs, sample_rate, channels, updated_at,
+                   genre, year, duration_secs, sample_rate, channels, bitrate_bps, bits_per_sample,
+                   updated_at,
                    EXISTS (
                        SELECT 1
                        FROM cover_art_cache
@@ -328,11 +337,13 @@ fn rename_media_identity(
         r#"
         INSERT INTO media_items (
             media_id, source_path, source_kind, title, artist, album, track_number, disc_number,
-            genre, year, duration_secs, sample_rate, channels, external_artwork_url, added_at,
+            genre, year, duration_secs, sample_rate, channels, bitrate_bps, bits_per_sample,
+            external_artwork_url, added_at,
             updated_at, mtime, size_bytes
         )
         SELECT ?1, ?2, ?3, title, artist, album, track_number, disc_number,
-               genre, year, duration_secs, sample_rate, channels, external_artwork_url, added_at,
+               genre, year, duration_secs, sample_rate, channels, bitrate_bps, bits_per_sample,
+               external_artwork_url, added_at,
                ?4, mtime, size_bytes
         FROM media_items
         WHERE media_id = ?5
@@ -378,6 +389,8 @@ fn merge_media_identity(
             duration_secs = COALESCE(duration_secs, (SELECT duration_secs FROM media_items WHERE media_id = ?2)),
             sample_rate = COALESCE(sample_rate, (SELECT sample_rate FROM media_items WHERE media_id = ?2)),
             channels = COALESCE(channels, (SELECT channels FROM media_items WHERE media_id = ?2)),
+            bitrate_bps = COALESCE(bitrate_bps, (SELECT bitrate_bps FROM media_items WHERE media_id = ?2)),
+            bits_per_sample = COALESCE(bits_per_sample, (SELECT bits_per_sample FROM media_items WHERE media_id = ?2)),
             external_artwork_url = COALESCE(NULLIF(external_artwork_url, ''), (SELECT NULLIF(external_artwork_url, '') FROM media_items WHERE media_id = ?2)),
             mtime = COALESCE(mtime, (SELECT mtime FROM media_items WHERE media_id = ?2)),
             size_bytes = COALESCE(size_bytes, (SELECT size_bytes FROM media_items WHERE media_id = ?2)),

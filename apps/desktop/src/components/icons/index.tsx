@@ -280,6 +280,64 @@ export function IconCopy(props: IconProps) {
   );
 }
 
+export function IconShare(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="5.5" cy="10" r="2.1" />
+      <circle cx="14.5" cy="5.2" r="2.1" />
+      <circle cx="14.5" cy="14.8" r="2.1" />
+      <path d="M7.4 9l5.2-2.8" />
+      <path d="M7.4 11l5.2 2.8" />
+    </svg>
+  );
+}
+
+export function IconLink(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M8.2 11.8a3 3 0 0 1 0-4.2l2.1-2.1a3 3 0 1 1 4.2 4.2l-1.2 1.2" />
+      <path d="M11.8 8.2a3 3 0 0 1 0 4.2l-2.1 2.1a3 3 0 1 1-4.2-4.2l1.2-1.2" />
+    </svg>
+  );
+}
+
+export function IconVideo(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <rect x="3.5" y="5.5" width="10" height="9" rx="1.6" />
+      <path d="M13.5 8.2l3-1.7v7l-3-1.7" />
+    </svg>
+  );
+}
+
+export function IconEye(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M2.8 10s2.6-5 7.2-5 7.2 5 7.2 5-2.6 5-7.2 5-7.2-5-7.2-5Z" />
+      <circle cx="10" cy="10" r="2.2" />
+    </svg>
+  );
+}
+
+export function IconChat(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v5A2.5 2.5 0 0 1 13.5 13H9l-4 3v-3.4a2.5 2.5 0 0 1-1-2.1Z" />
+      <path d="M7 7.5h6" />
+      <path d="M7 10h4" />
+    </svg>
+  );
+}
+
+export function IconClock(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 6.2v4.1l2.7 1.6" />
+    </svg>
+  );
+}
+
 export function IconPlayCircle(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>

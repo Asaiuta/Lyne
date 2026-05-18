@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use std::fs::OpenOptions;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,6 +69,62 @@ fn generate_api_token() -> String {
 #[tauri::command]
 fn get_api_token(token: tauri::State<'_, ApiToken>) -> String {
   token.0.clone()
+}
+
+#[tauri::command]
+fn reveal_path_in_folder(path: String) -> Result<(), String> {
+  let target = PathBuf::from(path);
+  let canonical_target = target
+    .canonicalize()
+    .map_err(|error| format!("Failed to resolve path: {error}"))?;
+
+  reveal_canonical_path_in_folder(&canonical_target)
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_canonical_path_in_folder(path: &Path) -> Result<(), String> {
+  let mut select_arg = std::ffi::OsString::from("/select,");
+  select_arg.push(path);
+  let status = Command::new("explorer")
+    .arg(select_arg)
+    .status()
+    .map_err(|error| format!("Failed to open Explorer: {error}"))?;
+
+  if status.success() {
+    Ok(())
+  } else {
+    Err(format!("Explorer exited with status: {status}"))
+  }
+}
+
+#[cfg(target_os = "macos")]
+fn reveal_canonical_path_in_folder(path: &Path) -> Result<(), String> {
+  let status = Command::new("open")
+    .arg("-R")
+    .arg(path)
+    .status()
+    .map_err(|error| format!("Failed to open Finder: {error}"))?;
+
+  if status.success() {
+    Ok(())
+  } else {
+    Err(format!("Finder exited with status: {status}"))
+  }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn reveal_canonical_path_in_folder(path: &Path) -> Result<(), String> {
+  let folder = path.parent().unwrap_or(path);
+  let status = Command::new("xdg-open")
+    .arg(folder)
+    .status()
+    .map_err(|error| format!("Failed to open folder: {error}"))?;
+
+  if status.success() {
+    Ok(())
+  } else {
+    Err(format!("xdg-open exited with status: {status}"))
+  }
 }
 
 fn sidecar_dev_fallback_path() -> PathBuf {
@@ -425,7 +481,7 @@ fn main() {
   let app = tauri::Builder::default()
     .manage(SidecarState::new())
     .manage(ApiToken(token_value.clone()))
-    .invoke_handler(tauri::generate_handler![get_api_token])
+    .invoke_handler(tauri::generate_handler![get_api_token, reveal_path_in_folder])
     .setup(move |app| {
       let app_handle = app.handle();
       let mut child = spawn_sidecar(&app_handle, &token_value)?;

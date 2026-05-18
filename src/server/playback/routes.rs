@@ -100,10 +100,6 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
             web::get().to(super::get_local_playlist),
         )
         .route(
-            "/domain/local_playlists/{playlist_id}/queue",
-            web::post().to(super::replace_queue_from_local_playlist),
-        )
-        .route(
             "/domain/local_playlists/{playlist_id}",
             web::patch().to(super::update_local_playlist),
         )

@@ -634,6 +634,8 @@ fn migrations_create_schema_version_and_expected_columns() {
     assert!(db
         .has_column("local_playlist_items", "position_index")
         .unwrap());
+    assert!(db.has_column("media_items", "bitrate_bps").unwrap());
+    assert!(db.has_column("media_items", "bits_per_sample").unwrap());
 
     let conn = db.conn.lock().unwrap();
     let versions = conn
@@ -643,7 +645,7 @@ fn migrations_create_schema_version_and_expected_columns() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
     let index_count: i64 = conn
             .query_row(
@@ -802,37 +804,6 @@ fn local_playlist_batch_add_filters_invalid_ids_across_lookup_chunks() {
             .chain(std::iter::once(media_ids[0].as_str()))
             .collect::<Vec<_>>()
     );
-}
-
-#[test]
-fn local_playlist_queue_paths_preserve_playlist_order() {
-    let db = AppDatabase::in_memory().unwrap();
-    let media_a = db.record_media_stub("D:/music/a.flac").unwrap();
-    let media_b = db.record_media_stub("D:/music/b.flac").unwrap();
-    let media_c = db.record_media_stub("D:/music/c.flac").unwrap();
-    let playlist = db.create_local_playlist("Road", Some("drive")).unwrap();
-
-    db.add_media_to_local_playlist(&playlist.playlist_id, &[media_a.clone(), media_b.clone()])
-        .unwrap();
-    db.add_media_to_local_playlist(&playlist.playlist_id, &[media_c.clone()])
-        .unwrap();
-
-    let rows = db
-        .source_paths_for_local_playlist(&playlist.playlist_id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        rows,
-        vec![
-            (media_c, "D:/music/c.flac".to_string()),
-            (media_a, "D:/music/a.flac".to_string()),
-            (media_b, "D:/music/b.flac".to_string())
-        ]
-    );
-    assert!(db
-        .source_paths_for_local_playlist("missing-playlist")
-        .unwrap()
-        .is_none());
 }
 
 #[test]

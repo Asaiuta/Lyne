@@ -39,6 +39,7 @@ interface LibraryPlaylistsViewProps {
   onPlay: (item: LibraryListItem, contextItems: readonly LibraryListItem[]) => void;
   onEnqueue: (item: LibraryListItem) => void;
   onContextAction: (action: MediaContextAction, item: LibraryListItem) => void;
+  onActiveItemsChange: (items: LibraryListItem[]) => void;
 }
 
 export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
@@ -87,6 +88,10 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
   createEffect(() => {
     void props.selectedPlaylistId;
     setIsScrolled(false);
+  });
+
+  createEffect(() => {
+    props.onActiveItemsChange(selectedPlaylistItems());
   });
 
   return (
@@ -212,23 +217,23 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
                   </div>
                 </div>
               </header>
-                <MediaList
-                  items={selectedPlaylistItems()}
-                  currentSourcePath={props.currentTrackPath}
-                  currentMediaId={props.currentMediaId}
-                  isPlayingNow={props.isPlaying}
-                  onPlay={(item) => props.onPlay(item, selectedPlaylistItems())}
-                  onEnqueue={props.onEnqueue}
-                  onContextAction={props.onContextAction}
-                  onScroll={handlePlaylistScroll}
-                  isLoading={props.isLoading}
-                  emptyState={t("library.playlists.emptyTracks")}
-                  contextActions={["play", "enqueue", "copy-path", "delete"]}
-                  deleteActionLabel={t("library.action.removeFromPlaylist")}
-                  sort={props.sort}
-                  onSortChange={props.onSortChange}
-                  onSortOrderChange={props.onSortOrderChange}
-                />
+              <MediaList
+                items={selectedPlaylistItems()}
+                currentSourcePath={props.currentTrackPath}
+                currentMediaId={props.currentMediaId}
+                isPlayingNow={props.isPlaying}
+                onPlay={(item) => props.onPlay(item, selectedPlaylistItems())}
+                onEnqueue={props.onEnqueue}
+                onContextAction={props.onContextAction}
+                onScroll={handlePlaylistScroll}
+                isLoading={props.isLoading}
+                emptyState={t("library.playlists.emptyTracks")}
+                  contextActions={["play", "enqueue", "search", "copy-name", "show-in-folder", "delete-from-playlist"]}
+                deleteActionLabel={t("library.action.removeFromPlaylist")}
+                sort={props.sort}
+                onSortChange={props.onSortChange}
+                onSortOrderChange={props.onSortOrderChange}
+              />
             </div>
           </section>
         )}

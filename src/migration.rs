@@ -43,6 +43,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
     if current < 9 {
         apply_local_playlists_migration(conn)?;
     }
+    if current < 10 {
+        apply_audio_quality_metadata_migration(conn)?;
+    }
 
     Ok(())
 }
@@ -95,9 +98,7 @@ fn apply_shuffle_index_migration(conn: &mut Connection) -> Result<(), String> {
                 "ALTER TABLE playback_queue_entries ADD COLUMN shuffle_index INTEGER",
                 [],
             )
-            .map_err(|e| {
-                format!("Failed to add playback_queue_entries.shuffle_index: {}", e)
-            })?;
+            .map_err(|e| format!("Failed to add playback_queue_entries.shuffle_index: {}", e))?;
         }
         tx.execute_batch(
             r#"
@@ -128,6 +129,20 @@ fn apply_external_artwork_url_migration(conn: &mut Connection) -> Result<(), Str
         if !column_exists(tx, "media_items", "external_artwork_url")? {
             tx.execute_batch("ALTER TABLE media_items ADD COLUMN external_artwork_url TEXT")
                 .map_err(|e| format!("Failed to add media_items.external_artwork_url: {}", e))?;
+        }
+        Ok(())
+    })
+}
+
+fn apply_audio_quality_metadata_migration(conn: &mut Connection) -> Result<(), String> {
+    apply_migration_tx(conn, 10, |tx| {
+        if !column_exists(tx, "media_items", "bitrate_bps")? {
+            tx.execute_batch("ALTER TABLE media_items ADD COLUMN bitrate_bps REAL")
+                .map_err(|e| format!("Failed to add media_items.bitrate_bps: {}", e))?;
+        }
+        if !column_exists(tx, "media_items", "bits_per_sample")? {
+            tx.execute_batch("ALTER TABLE media_items ADD COLUMN bits_per_sample INTEGER")
+                .map_err(|e| format!("Failed to add media_items.bits_per_sample: {}", e))?;
         }
         Ok(())
     })
@@ -532,5 +547,38 @@ mod tests {
             })
             .unwrap();
         assert_eq!(version, 9);
+    }
+
+    #[test]
+    fn audio_quality_metadata_migration_adds_media_columns() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE media_items (
+                media_id       TEXT PRIMARY KEY,
+                source_path    TEXT NOT NULL UNIQUE,
+                source_kind    TEXT NOT NULL,
+                added_at       INTEGER NOT NULL,
+                updated_at     INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (version, applied_at) VALUES (9, 100);
+            "#,
+        )
+        .unwrap();
+
+        apply_audio_quality_metadata_migration(&mut conn).unwrap();
+
+        assert!(column_exists(&conn, "media_items", "bitrate_bps").unwrap());
+        assert!(column_exists(&conn, "media_items", "bits_per_sample").unwrap());
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 10);
     }
 }

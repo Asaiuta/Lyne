@@ -14,12 +14,15 @@ export interface LibraryListItem {
   duration_secs: number | null;
   sample_rate?: number | null;
   channels?: number | null;
+  bitrate_bps?: number | null;
+  bits_per_sample?: number | null;
   has_cover_art?: boolean;
   external_artwork_url?: string | null;
   size_bytes?: number | null;
   updated_at_epoch_secs?: number | null;
   added_at_epoch_secs?: number | null;
   fileName?: string | null;
+  qualityLabel?: string | null;
   artworkUrl: string | null;
 }
 

@@ -25,6 +25,8 @@ struct ParsedTrack {
     duration_secs: Option<f64>,
     sample_rate: Option<u32>,
     channels: Option<usize>,
+    bitrate_bps: Option<f64>,
+    bits_per_sample: Option<u32>,
     mtime: f64,
     size: u64,
 }
@@ -192,6 +194,8 @@ pub(super) fn scan_local_library(
         let duration_secs = local_metadata.duration_secs;
         let sample_rate = local_metadata.sample_rate;
         let channels = local_metadata.channels;
+        let bitrate_bps = local_metadata.bitrate_bps;
+        let bits_per_sample = local_metadata.bits_per_sample;
 
         if !has_lofty_title && duration_secs.map_or(false, |d| d < 30.0) {
             return;
@@ -237,6 +241,8 @@ pub(super) fn scan_local_library(
                 duration_secs,
                 sample_rate,
                 channels,
+                bitrate_bps,
+                bits_per_sample,
                 mtime,
                 size,
             })
@@ -433,6 +439,8 @@ fn write_parsed_track_batch(
             track.duration_secs,
             track.sample_rate,
             track.channels,
+            track.bitrate_bps,
+            track.bits_per_sample,
             Some(track.mtime),
             Some(track.size),
         ) {

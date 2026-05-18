@@ -1362,6 +1362,7 @@
     display: inline-flex;
     flex: none;
     align-items: center;
+    justify-content: center;
     min-height: 17px;
     padding: 0 5px;
     border-radius: var(--radius-xs);
@@ -1371,6 +1372,32 @@
     font-weight: 700;
     line-height: 1;
     text-transform: uppercase;
+  }
+
+  .media-row-quality-tag {
+    min-width: 0;
+    min-height: 18px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 18px;
+    text-transform: none;
+  }
+
+  .media-row-quality-tag-warning {
+    color: var(--warning);
+    background: color-mix(in oklch, var(--warning) 16%, transparent);
+  }
+
+  .media-row-quality-tag-info {
+    color: var(--info);
+    background: color-mix(in oklch, var(--info) 16%, transparent);
+  }
+
+  .media-row-quality-tag-primary {
+    color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 13%, transparent);
   }
 
   .media-row-tag-muted {
@@ -2895,6 +2922,166 @@
 
   .ncm-daily-detail-hero .ncm-detail-hero-cover--round {
     border-radius: var(--radius-pill);
+  }
+
+  .ncm-video-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+
+  .ncm-video-player-shell {
+    width: 100%;
+    overflow: hidden;
+    border-radius: var(--radius-card);
+    background: #050505;
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+  }
+
+  .ncm-video-player {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: min(58vh, 620px);
+    background: #050505;
+    object-fit: contain;
+  }
+
+  .ncm-video-detail-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+
+  .ncm-video-detail-title {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ncm-video-detail-title h2 {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: clamp(22px, 3vw, 30px);
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .ncm-video-detail-meta,
+  .ncm-video-actions,
+  .ncm-video-tags {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ncm-video-detail-meta span,
+  .ncm-video-actions span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 24px;
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .ncm-video-detail-meta svg,
+  .ncm-video-actions svg {
+    width: 15px;
+    height: 15px;
+    color: var(--muted);
+  }
+
+  .ncm-video-artist {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 10px;
+    max-width: 100%;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    color: var(--text);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .ncm-video-artist:hover strong {
+    color: var(--accent);
+  }
+
+  .ncm-video-artist img {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: var(--radius-pill);
+    object-fit: cover;
+  }
+
+  .ncm-video-artist span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+
+  .ncm-video-artist strong {
+    max-width: min(420px, 70vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    font-weight: 600;
+    transition: color 0.18s var(--ease-standard);
+  }
+
+  .ncm-video-artist small {
+    color: var(--text-soft);
+    font-size: 12px;
+  }
+
+  .ncm-video-actions {
+    color: var(--text-soft);
+  }
+
+  .ncm-video-description {
+    max-width: 840px;
+    margin: 0;
+    color: var(--text-soft);
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+
+  .ncm-video-tags span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border-radius: var(--radius-pill);
+    color: var(--text-soft);
+    background: var(--surface-2, var(--border-faint));
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  @media (max-width: 720px) {
+    .ncm-video-detail-head {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .ncm-video-detail-head .ghost-button {
+      align-self: flex-start;
+    }
   }
 
   .cloud-page {

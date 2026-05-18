@@ -326,7 +326,8 @@ impl AppDatabase {
                        media_items.title, media_items.artist, media_items.album,
                        media_items.track_number, media_items.disc_number,
                        media_items.genre, media_items.year, media_items.duration_secs,
-                       media_items.sample_rate, media_items.channels, media_items.updated_at,
+                       media_items.sample_rate, media_items.channels, media_items.bitrate_bps,
+                       media_items.bits_per_sample, media_items.updated_at,
                        EXISTS (
                            SELECT 1
                            FROM cover_art_cache
@@ -353,41 +354,6 @@ impl AppDatabase {
             .map_err(|e| format!("Failed to decode local playlist items: {}", e))?;
 
         Ok(Some(LocalPlaylistDetailRecord { playlist, items }))
-    }
-
-    pub fn source_paths_for_local_playlist(
-        &self,
-        playlist_id: &str,
-    ) -> Result<Option<Vec<(String, String)>>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let exists = read_local_playlist_by_id(&conn, playlist_id)?.is_some();
-        if !exists {
-            return Ok(None);
-        }
-
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT media_items.media_id, media_items.source_path
-                FROM local_playlist_items
-                JOIN media_items ON media_items.media_id = local_playlist_items.media_id
-                WHERE local_playlist_items.playlist_id = ?1
-                ORDER BY local_playlist_items.position_index ASC,
-                         local_playlist_items.added_at DESC,
-                         local_playlist_items.media_id ASC
-                "#,
-            )
-            .map_err(|e| format!("Failed to prepare local playlist queue query: {}", e))?;
-        let rows = stmt
-            .query_map(params![playlist_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| format!("Failed to query local playlist queue: {}", e))?;
-        let paths = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to decode local playlist queue: {}", e))?;
-
-        Ok(Some(paths))
     }
 
     pub fn add_media_to_local_playlist(

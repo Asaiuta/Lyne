@@ -231,7 +231,9 @@ export function HistoryPage(props: HistoryPageProps) {
   };
 
   const handleContextAction = (action: MediaContextAction) => {
-    if (action === "copy-path") {
+    if (action === "copy-name") {
+      setKeyedFeedback("success", "media.copyName.success");
+    } else if (action === "copy-path") {
       setKeyedFeedback("success", "media.copy.success");
     }
   };

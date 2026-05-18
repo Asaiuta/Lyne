@@ -1,6 +1,7 @@
 import { onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 import { createApiClient, type ApiClient } from "../../shared/api/client";
+import { revealPathInFolder } from "../../shared/api/os";
 import type { LibraryRoot, MediaItem, PlayerState } from "../../shared/api/types";
 import type { TranslationKey } from "../../shared/i18n";
 import { type LibraryListItem } from "./libraryViewTypes";
@@ -424,12 +425,30 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     setRawFeedback("success", t("media.copy.success"));
   };
 
+  const notifyCopyName = () => {
+    setRawFeedback("success", t("media.copyName.success"));
+  };
+
   const copyItemPath = async (item: LibraryListItem) => {
     const detail = await ensureItemDetail(item);
     if (!detail || typeof navigator === "undefined" || !navigator.clipboard) {
       return;
     }
     await navigator.clipboard.writeText(detail.source_path);
+  };
+
+  const revealItemInFolder = async (item: LibraryListItem) => {
+    try {
+      const detail = await ensureItemDetail(item);
+      if (!detail) {
+        throw new Error(t("common.error.requestFailed"));
+      }
+      await revealPathInFolder(detail.source_path);
+      setRawFeedback("success", t("media.context.showInFolder.success"));
+    } catch (error) {
+      setRawFeedback("error", readErrorMessage(error));
+      throw error;
+    }
   };
 
   const handleRefresh = () => {
@@ -490,7 +509,9 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     deleteItemsFromLibrary,
     getCurrentBatchItems,
     notifyCopyPath,
+    notifyCopyName,
     copyItemPath,
+    revealItemInFolder,
     handleScan,
     handleRescan,
     deleteLibraryRoot,

@@ -68,7 +68,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
             onVisibleRangeChange={props.controller.setVirtualRange}
             isLoading={props.controller.isFetching()}
             emptyState={props.t("library.tracks.emptyAll")}
-            contextActions={["play", "enqueue", "add-to-playlist", "copy-path", "delete"]}
+            contextActions={["play", "enqueue", "add-to-playlist", "search", "copy-name", "show-in-folder", "delete-from-library"]}
             deleteActionLabel={props.t("library.action.deleteFromLibrary")}
             sort={props.controller.sort()}
             onSortChange={props.controller.updateSort}
@@ -88,7 +88,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
           onEnqueue={props.onEnqueue}
           onContextAction={props.onContextAction}
           isLoading={props.controller.isFetching()}
-          contextActions={["play", "enqueue", "add-to-playlist", "copy-path", "delete"]}
+          contextActions={["play", "enqueue", "add-to-playlist", "search", "copy-name", "show-in-folder", "delete-from-library"]}
           deleteActionLabel={props.t("library.action.deleteFromLibrary")}
           sort={props.controller.sort()}
           onSortChange={props.controller.updateSort}
@@ -107,7 +107,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
           onEnqueue={props.onEnqueue}
           onContextAction={props.onContextAction}
           isLoading={props.controller.isFetching()}
-          contextActions={["play", "enqueue", "add-to-playlist", "copy-path", "delete"]}
+          contextActions={["play", "enqueue", "add-to-playlist", "search", "copy-name", "show-in-folder", "delete-from-library"]}
           deleteActionLabel={props.t("library.action.deleteFromLibrary")}
           sort={props.controller.sort()}
           onSortChange={props.controller.updateSort}
@@ -133,6 +133,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
           onPlay={props.onPlay}
           onEnqueue={props.onEnqueue}
           onContextAction={props.onContextAction}
+          onActiveItemsChange={props.onActiveItemsChange}
         />
       </Show>
       <Show when={props.controller.activeTab() === "folders"}>

@@ -18,6 +18,9 @@ export interface LibraryWorkerRow {
   album: string | null;
   track_number: number | null;
   duration_secs: number | null;
+  sample_rate: number | null;
+  bitrate_bps: number | null;
+  bits_per_sample: number | null;
   size_bytes: number | null;
   added_at_epoch_secs: number | null;
   updated_at_epoch_secs: number | null;

@@ -164,6 +164,8 @@ export interface MediaItem {
   duration_secs: number | null;
   sample_rate: number | null;
   channels: number | null;
+  bitrate_bps: number | null;
+  bits_per_sample: number | null;
   has_cover_art: boolean;
   external_artwork_url: string | null;
   size_bytes: number | null;
@@ -181,6 +183,9 @@ export interface LibraryTrackSummary {
   folder_key: string;
   folder_label: string;
   duration_secs: number | null;
+  sample_rate: number | null;
+  bitrate_bps: number | null;
+  bits_per_sample: number | null;
   has_cover_art: boolean;
   external_artwork_url: string | null;
   size_bytes: number | null;

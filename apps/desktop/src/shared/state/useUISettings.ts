@@ -31,7 +31,17 @@ export type HomeSectionKey = "dailyPicks" | "playlists" | "radar" | "artists" | 
 
 export type ThemeMode = "dark" | "light" | "auto";
 
+export type GlobalFont = "default" | "system" | "serif" | "mono" | "custom";
+
 export type RouteAnimation = "none" | "fade" | "zoom" | "slide" | "up" | "flow" | "mask-left" | "mask-top";
+
+export type CloseAppMethod = "hide" | "exit";
+
+export type UpdateChannel = "stable" | "nightly";
+
+export type ShareUrlFormat = "web" | "mobile";
+
+export type SearchInputBehavior = "normal" | "clear" | "sync";
 
 export type FullPlayerCommentMode = "fullscreen" | "half-left" | "half-right";
 
@@ -86,7 +96,13 @@ export type ContextMenuOptionKey =
   | "play"
   | "playNext"
   | "addToPlaylist"
+  | "more"
+  | "search"
   | "copyName"
+  | "openFolder"
+  | "deleteFromPlaylist"
+  | "deleteFromCloud"
+  | "deleteFromLibrary"
   | "delete";
 
 export type HiddenCovers = Record<CoverHiddenKey, boolean>;
@@ -104,6 +120,17 @@ export interface HomeSectionConfig {
 }
 
 export interface UISettings {
+  useOnlineService: boolean;
+  closeAppMethod: CloseAppMethod;
+  showCloseAppTip: boolean;
+  showTaskbarProgress: boolean;
+  checkUpdateOnStart: boolean;
+  updateChannel: UpdateChannel;
+  showSearchHistory: boolean;
+  showHotSearch: boolean;
+  enableSearchKeyword: boolean;
+  searchInputBehavior: SearchInputBehavior;
+  shareUrlFormat: ShareUrlFormat;
   bgEnabled: boolean;
   bgBlur: number;
   bgMask: number;
@@ -122,18 +149,28 @@ export interface UISettings {
   playerBackgroundPause: boolean;
   playerBackgroundLowFreqVolume: boolean;
   playerExpandAnimation: PlayerExpandAnimation;
+  dynamicCover: boolean;
   playerFollowCoverColor: boolean;
   hiddenCovers: HiddenCovers;
   sidebarHiddenItems: SidebarHiddenItems;
   playlistPageElements: PlaylistPageElements;
   contextMenuOptions: ContextMenuOptions;
+  customAccentColor: string;
+  themeGlobalColor: boolean;
+  globalFont: GlobalFont;
+  customFontFamily: string;
+  customCss: string;
+  customJs: string;
   menuShowCover: boolean;
   fullPlayerShowAddToPlaylist: boolean;
   fullPlayerShowCommentCount: boolean;
   fullPlayerShowComments: boolean;
+  fullPlayerShowCopyLyric: boolean;
   fullPlayerShowDesktopLyric: boolean;
   fullPlayerShowDownload: boolean;
   fullPlayerShowLike: boolean;
+  fullPlayerShowLyricOffset: boolean;
+  fullPlayerShowLyricSettings: boolean;
   fullPlayerShowMoreSettings: boolean;
   autoHidePlayerMeta: boolean;
   showPlayMeta: boolean;
@@ -233,7 +270,13 @@ export const DEFAULT_CONTEXT_MENU_OPTIONS: ContextMenuOptions = {
   play: true,
   playNext: true,
   addToPlaylist: true,
+  more: true,
+  search: true,
   copyName: true,
+  openFolder: true,
+  deleteFromPlaylist: true,
+  deleteFromCloud: true,
+  deleteFromLibrary: true,
   delete: true
 };
 
@@ -277,10 +320,24 @@ const VALID_PLAYER_BACKGROUND_TYPES = new Set<PlayerBackgroundType>([
 
 const VALID_PLAYER_EXPAND_ANIMATIONS = new Set<PlayerExpandAnimation>(["up", "flow"]);
 
+const VALID_GLOBAL_FONTS = new Set<GlobalFont>(["default", "system", "serif", "mono", "custom"]);
+
 const VALID_TIME_FORMATS = new Set<PlayerTimeFormat>([
   "current-total",
   "remaining-total",
   "current-remaining"
+]);
+
+const VALID_CLOSE_APP_METHODS = new Set<CloseAppMethod>(["hide", "exit"]);
+
+const VALID_UPDATE_CHANNELS = new Set<UpdateChannel>(["stable", "nightly"]);
+
+const VALID_SHARE_URL_FORMATS = new Set<ShareUrlFormat>(["web", "mobile"]);
+
+const VALID_SEARCH_INPUT_BEHAVIORS = new Set<SearchInputBehavior>([
+  "normal",
+  "clear",
+  "sync"
 ]);
 
 const VALID_LYRICS_POSITIONS = new Set<LyricsPosition>(["flex-start", "center", "flex-end"]);
@@ -337,6 +394,10 @@ function createBoolField(key: string, defaultValue: boolean): UISettingField<boo
 
 function createNumberField(key: string, defaultValue: number): UISettingField<number> {
   return createField(key, defaultValue, (runtime) => readNumber(runtime, key, defaultValue));
+}
+
+function createStringField(key: string, defaultValue: string): UISettingField<string> {
+  return createField(key, defaultValue, (runtime) => readString(runtime, key, defaultValue));
 }
 
 function createClampedNumberField(
@@ -465,6 +526,21 @@ function createPlayerTypeField(
 }
 
 const UI_SETTINGS_SCHEMA: UISettingsSchema = {
+  useOnlineService: createBoolField("ui.general.useOnlineService", true),
+  closeAppMethod: createEnumField("ui.general.closeAppMethod", "hide", VALID_CLOSE_APP_METHODS),
+  showCloseAppTip: createBoolField("ui.general.showCloseAppTip", true),
+  showTaskbarProgress: createBoolField("ui.general.showTaskbarProgress", false),
+  checkUpdateOnStart: createBoolField("ui.general.checkUpdateOnStart", true),
+  updateChannel: createEnumField("ui.general.updateChannel", "stable", VALID_UPDATE_CHANNELS),
+  showSearchHistory: createBoolField("ui.search.showHistory", true),
+  showHotSearch: createBoolField("ui.search.showHotSearch", true),
+  enableSearchKeyword: createBoolField("ui.search.enableKeyword", true),
+  searchInputBehavior: createEnumField(
+    "ui.search.inputBehavior",
+    "normal",
+    VALID_SEARCH_INPUT_BEHAVIORS
+  ),
+  shareUrlFormat: createEnumField("ui.general.shareUrlFormat", "web", VALID_SHARE_URL_FORMATS),
   bgEnabled: createBoolField("ui.bg.enabled", false),
   bgBlur: createNumberField("ui.bg.blur", 32),
   bgMask: createNumberField("ui.bg.mask", 50),
@@ -510,6 +586,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
     "up",
     VALID_PLAYER_EXPAND_ANIMATIONS
   ),
+  dynamicCover: createBoolField("ui.player.dynamicCover", false),
   playerFollowCoverColor: createBoolField("ui.player.followCoverColor", true),
   hiddenCovers: createBoolRecordField("ui.cover.hiddenCovers", DEFAULT_HIDDEN_COVERS),
   sidebarHiddenItems: createBoolRecordField(
@@ -524,13 +601,22 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
     "ui.contextMenu.options",
     DEFAULT_CONTEXT_MENU_OPTIONS
   ),
+  customAccentColor: createStringField("ui.theme.customAccentColor", "#fe7971"),
+  themeGlobalColor: createBoolField("ui.theme.globalColor", false),
+  globalFont: createEnumField("ui.font.global", "default", VALID_GLOBAL_FONTS),
+  customFontFamily: createStringField("ui.font.customFamily", ""),
+  customCss: createStringField("ui.custom.css", ""),
+  customJs: createStringField("ui.custom.js", ""),
   menuShowCover: createBoolField("ui.sidebar.menuShowCover", true),
   fullPlayerShowAddToPlaylist: createBoolField("ui.fullPlayer.elements.addToPlaylist", true),
   fullPlayerShowCommentCount: createBoolField("ui.fullPlayer.elements.commentCount", false),
   fullPlayerShowComments: createBoolField("ui.fullPlayer.elements.comments", true),
+  fullPlayerShowCopyLyric: createBoolField("ui.fullPlayer.elements.copyLyric", true),
   fullPlayerShowDesktopLyric: createBoolField("ui.fullPlayer.elements.desktopLyric", true),
   fullPlayerShowDownload: createBoolField("ui.fullPlayer.elements.download", true),
   fullPlayerShowLike: createBoolField("ui.fullPlayer.elements.like", true),
+  fullPlayerShowLyricOffset: createBoolField("ui.fullPlayer.elements.lyricOffset", true),
+  fullPlayerShowLyricSettings: createBoolField("ui.fullPlayer.elements.lyricSettings", true),
   fullPlayerShowMoreSettings: createBoolField("ui.fullPlayer.elements.moreSettings", true),
   autoHidePlayerMeta: createBoolField("ui.fullPlayer.autoHideMeta", true),
   showPlayMeta: createBoolField("ui.player.showPlayMeta", true),

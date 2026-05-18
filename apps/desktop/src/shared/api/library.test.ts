@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLibraryApiClient } from "./library";
 
-test("replaceQueueFromLocalPlaylist posts a legacy playlist playback request", async () => {
+test("replaceQueueFromMediaIds posts displayed media ids and requested start media id", async () => {
   const calls: Array<{ path: string; body: unknown }> = [];
   const api = createLibraryApiClient({
     requestJson: async (path, init) => {
@@ -18,15 +18,18 @@ test("replaceQueueFromLocalPlaylist posts a legacy playlist playback request", a
     }
   });
 
-  const result = await api.replaceQueueFromLocalPlaylist({
-    playlistId: "playlist 1",
+  const result = await api.replaceQueueFromMediaIds({
+    mediaIds: ["media-a", "media-b", "media-c"],
     startMediaId: "media-b"
   });
 
   assert.deepEqual(calls, [
     {
-      path: "/domain/local_playlists/playlist%201/queue",
-      body: { start_media_id: "media-b" }
+      path: "/domain/library/queue_from_media_ids",
+      body: {
+        media_ids: ["media-a", "media-b", "media-c"],
+        start_media_id: "media-b"
+      }
     }
   ]);
   assert.equal(result.queuedCount, 3);

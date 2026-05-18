@@ -1,4 +1,5 @@
 use rusqlite::{params, params_from_iter, OptionalExtension};
+use rusqlite::types::ValueRef;
 use std::collections::{HashMap, HashSet};
 
 use super::{
@@ -13,10 +14,14 @@ fn library_track_summary_from_row(
 ) -> rusqlite::Result<LibraryTrackSummaryRecord> {
     let source_path: String = row.get(1)?;
     let (folder_path, folder_label, file_name) = split_source_path_for_library(&source_path);
-    let stored_size: Option<i64> = row.get(12)?;
+    let stored_size: Option<i64> = row.get(15)?;
+    let bitrate_bps = match row.get_ref(8)? {
+        ValueRef::Null => None,
+        _ => Some(row.get(8)?),
+    };
     Ok(LibraryTrackSummaryRecord {
         track_key: row.get(0)?,
-        media_id: row.get(7)?,
+        media_id: row.get(10)?,
         title: row.get(2)?,
         artist: row.get(3)?,
         album: row.get(4)?,
@@ -26,11 +31,14 @@ fn library_track_summary_from_row(
         folder_path,
         folder_label,
         duration_secs: row.get(6)?,
-        has_cover_art: row.get::<_, i64>(10)? != 0,
-        external_artwork_url: row.get(11)?,
+        sample_rate: row.get::<_, Option<i64>>(7)?.map(|value| value as u32),
+        bitrate_bps,
+        bits_per_sample: row.get::<_, Option<i64>>(9)?.map(|value| value as u32),
+        has_cover_art: row.get::<_, i64>(13)? != 0,
+        external_artwork_url: row.get(14)?,
         size_bytes: stored_size.map(|value| value as u64),
-        added_at_epoch_secs: row.get::<_, i64>(8)? as u64,
-        updated_at_epoch_secs: row.get::<_, i64>(9)? as u64,
+        added_at_epoch_secs: row.get::<_, i64>(11)? as u64,
+        updated_at_epoch_secs: row.get::<_, i64>(12)? as u64,
     })
 }
 
@@ -68,7 +76,8 @@ impl AppDatabase {
             .prepare(
                 r#"
                 SELECT media_id, source_path, source_kind, title, artist, album, track_number, disc_number,
-                       genre, year, duration_secs, sample_rate, channels, updated_at,
+                       genre, year, duration_secs, sample_rate, channels, bitrate_bps, bits_per_sample,
+                       updated_at,
                        EXISTS (
                            SELECT 1
                            FROM cover_art_cache
@@ -98,7 +107,8 @@ impl AppDatabase {
             .prepare(
                 r#"
                 SELECT media_id, source_path, source_kind, title, artist, album, track_number, disc_number,
-                       genre, year, duration_secs, sample_rate, channels, updated_at,
+                       genre, year, duration_secs, sample_rate, channels, bitrate_bps, bits_per_sample,
+                       updated_at,
                        EXISTS (
                            SELECT 1
                            FROM cover_art_cache
@@ -151,6 +161,7 @@ impl AppDatabase {
             .prepare(
                 r#"
                 SELECT rowid, source_path, title, artist, album, track_number, duration_secs,
+                       sample_rate, bitrate_bps, bits_per_sample,
                        media_id, added_at, updated_at,
                        EXISTS (
                            SELECT 1
@@ -212,7 +223,8 @@ impl AppDatabase {
         conn.query_row(
             r#"
             SELECT rowid, media_id, source_path, source_kind, title, artist, album, track_number, disc_number,
-                   genre, year, duration_secs, sample_rate, channels, updated_at,
+                   genre, year, duration_secs, sample_rate, channels, bitrate_bps, bits_per_sample,
+                   updated_at,
                    EXISTS (
                        SELECT 1
                        FROM cover_art_cache

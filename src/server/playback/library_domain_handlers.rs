@@ -311,30 +311,6 @@ pub(super) async fn get_local_playlist(
     }
 }
 
-pub(super) async fn replace_queue_from_local_playlist(
-    data: web::Data<Arc<AppState>>,
-    path: web::Path<LocalPlaylistPath>,
-    body: web::Json<LocalPlaylistQueueRequest>,
-) -> HttpResponse {
-    let rows = match data
-        .app_db
-        .source_paths_for_local_playlist(&path.playlist_id)
-    {
-        Ok(Some(rows)) => rows,
-        Ok(None) => return not_found_response("Local playlist not found"),
-        Err(e) => return internal_server_error_response(e),
-    };
-    match play_media_queue_rows(
-        &data,
-        &rows,
-        body.start_media_id.as_deref(),
-        "No tracks in the local playlist",
-    ) {
-        Ok(playback) => library_queue_playback_response(playback),
-        Err(error) => error.into_response(),
-    }
-}
-
 pub(super) async fn add_local_playlist_items(
     data: web::Data<Arc<AppState>>,
     path: web::Path<LocalPlaylistPath>,

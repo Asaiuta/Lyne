@@ -70,7 +70,7 @@ export function LibraryPage(props: LibraryPageProps) {
 
   const activePlaybackItems = createMemo<LibraryListItem[]>(() =>
     controller.activeTab() === "playlists"
-      ? controller.selectedPlaylistSortedItems()
+      ? groupPlaybackItems()
       : controller.activeTab() === "artists" || controller.activeTab() === "albums"
         ? groupPlaybackItems()
       : controller.filteredItems()
@@ -144,16 +144,18 @@ export function LibraryPage(props: LibraryPageProps) {
   };
 
   const handleContextAction = (action: MediaContextAction, item: LibraryListItem) => {
-    if (action === "copy-path") {
+    if (action === "copy-name") {
+      controller.notifyCopyName();
+    } else if (action === "copy-path") {
       controller.notifyCopyPath();
+    } else if (action === "show-in-folder") {
+      void controller.revealItemInFolder(item).catch(() => undefined);
     } else if (action === "add-to-playlist") {
       openAddToPlaylist([item]);
-    } else if (action === "delete") {
-      if (controller.activeTab() === "playlists") {
-        openRemoveFromPlaylist([item]);
-      } else {
-        openDeleteFromLibrary([item]);
-      }
+    } else if (action === "delete-from-playlist") {
+      openRemoveFromPlaylist([item]);
+    } else if (action === "delete-from-library" || action === "delete") {
+      openDeleteFromLibrary([item]);
     }
   };
 

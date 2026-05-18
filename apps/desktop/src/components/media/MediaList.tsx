@@ -2,21 +2,26 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import type { JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useTranslation } from "../../shared/i18n";
+import { ncmSongShareUrl } from "../../shared/api/ncm/urls";
 import { useUISettings } from "../../shared/state/useUISettings";
 import { useDismissibleOverlay } from "../../shared/ui/useDismissibleOverlay";
 import {
   IconChevronDown,
   IconCopy,
   IconDelete,
+  IconFolder,
   IconPlay,
   IconPlaylist,
-  IconQueueAdd
+  IconQueueAdd,
+  IconSearch,
+  IconShare
 } from "../icons";
+import { useUISearch } from "../../shared/state/UISearchContext";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { MediaListFloatTools } from "./MediaListFloatTools";
 import { MediaListRow } from "./MediaListRow";
 import { MediaSortPopover } from "./MediaSortPopover";
-import { stripBracketedContent } from "./mediaListFormatting";
+import { displayNameFromSourcePath, stripBracketedContent } from "./mediaListFormatting";
 import { isMediaListItemCurrent } from "../../shared/media/mediaIdentity";
 export { isMediaListItemCurrent, mediaKeyForPath } from "../../shared/media/mediaIdentity";
 export {
@@ -24,7 +29,20 @@ export {
   formatMediaDuration
 } from "./mediaListFormatting";
 
-export type MediaContextAction = "play" | "enqueue" | "copy-path" | "add-to-playlist" | "delete";
+export type MediaContextAction =
+  | "play"
+  | "enqueue"
+  | "copy-name"
+  | "copy-id"
+  | "share-link"
+  | "copy-path"
+  | "show-in-folder"
+  | "add-to-playlist"
+  | "search"
+  | "delete-from-playlist"
+  | "delete-from-cloud"
+  | "delete-from-library"
+  | "delete";
 export type MediaSortField =
   | "default"
   | "title"
@@ -122,6 +140,7 @@ const closedSortMenu: SortMenuState = {
 export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const search = useUISearch();
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [menu, setMenu] = createSignal<MenuState>(closedMenu);
   const [sortMenu, setSortMenu] = createSignal<SortMenuState>(closedSortMenu);
@@ -131,7 +150,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   let sortMenuRef: HTMLDivElement | undefined;
 
   const contextActionSet = createMemo<Set<MediaContextAction>>(
-    () => new Set(props.contextActions ?? ["play", "enqueue", "copy-path"])
+    () => new Set(props.contextActions ?? ["play", "enqueue", "search", "copy-name", "copy-id", "share-link"])
   );
   const contextActionEnabled = (action: MediaContextAction): boolean => {
     switch (action) {
@@ -141,8 +160,23 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
         return uiSettings.contextMenuOptions.playNext;
       case "add-to-playlist":
         return uiSettings.contextMenuOptions.addToPlaylist;
+      case "search":
+        return uiSettings.contextMenuOptions.search;
+      case "copy-name":
+        return uiSettings.contextMenuOptions.more && uiSettings.contextMenuOptions.copyName;
+      case "copy-id":
+      case "share-link":
+        return uiSettings.contextMenuOptions.more;
       case "copy-path":
-        return uiSettings.contextMenuOptions.copyName;
+        return true;
+      case "show-in-folder":
+        return uiSettings.contextMenuOptions.openFolder;
+      case "delete-from-playlist":
+        return uiSettings.contextMenuOptions.deleteFromPlaylist;
+      case "delete-from-cloud":
+        return uiSettings.contextMenuOptions.deleteFromCloud;
+      case "delete-from-library":
+        return uiSettings.contextMenuOptions.deleteFromLibrary;
       case "delete":
         return uiSettings.contextMenuOptions.delete;
       default: {
@@ -209,6 +243,65 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     props.onContextAction?.("copy-path", item);
   };
 
+  const displaySongText = (value: string): string =>
+    uiSettings.hideBracketedContent ? stripBracketedContent(value) : value;
+
+  const searchableTitle = (item: T): string =>
+    displaySongText(
+      item.title?.trim() ||
+        item.fileName?.trim() ||
+        (item.source_path ? displayNameFromSourcePath(item.source_path) : "")
+    );
+
+  const handleSearchItem = (item: T) => {
+    const keyword = searchableTitle(item).trim();
+    if (!keyword) {
+      return;
+    }
+    search.setQuery(keyword);
+    search.submitSearch();
+    props.onContextAction?.("search", item);
+  };
+
+  const handleCopyName = async (item: T) => {
+    const name = searchableTitle(item).trim();
+    if (!name) {
+      return;
+    }
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(name);
+      }
+    } catch (error) {
+      console.warn("[MediaList] copy name failed", error);
+    }
+    props.onContextAction?.("copy-name", item);
+  };
+
+  const handleCopyId = async (item: T) => {
+    if (typeof item.songId !== "number") return;
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(String(item.songId));
+      }
+    } catch (error) {
+      console.warn("[MediaList] copy song id failed", error);
+    }
+    props.onContextAction?.("copy-id", item);
+  };
+
+  const handleShareLink = async (item: T) => {
+    if (typeof item.songId !== "number") return;
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(ncmSongShareUrl(item.songId, uiSettings.shareUrlFormat));
+      }
+    } catch (error) {
+      console.warn("[MediaList] copy share link failed", error);
+    }
+    props.onContextAction?.("share-link", item);
+  };
+
   const handleMenuSelect = (key: string) => {
     const target = props.items.find((item) => item.id === menu().itemId);
     if (!target) return;
@@ -218,9 +311,25 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     } else if (key === "enqueue") {
       props.onEnqueue(target);
       props.onContextAction?.("enqueue", target);
+    } else if (key === "copy-name") {
+      void handleCopyName(target);
+    } else if (key === "copy-id") {
+      void handleCopyId(target);
+    } else if (key === "share-link") {
+      void handleShareLink(target);
     } else if (key === "copy-path") {
       void handleCopyPath(target);
-    } else if (key === "add-to-playlist" || key === "delete") {
+    } else if (key === "show-in-folder") {
+      props.onContextAction?.("show-in-folder", target);
+    } else if (key === "search") {
+      handleSearchItem(target);
+    } else if (
+      key === "add-to-playlist" ||
+      key === "delete" ||
+      key === "delete-from-playlist" ||
+      key === "delete-from-cloud" ||
+      key === "delete-from-library"
+    ) {
       props.onContextAction?.(key, target);
     }
   };
@@ -376,21 +485,30 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
 
   const menuItems = (): ContextMenuItem[] => {
     const actions = contextActionSet();
+    const target = props.items.find((item) => item.id === menu().itemId);
     const items: ContextMenuItem[] = [
       { key: "play", label: t("media.context.play"), icon: <IconPlay /> },
       { key: "enqueue", label: t("media.context.enqueue"), icon: <IconQueueAdd /> },
       { key: "add-to-playlist", label: t("media.context.addToPlaylist"), icon: <IconPlaylist /> },
+      { key: "search", label: t("media.context.search"), icon: <IconSearch /> },
+      { key: "copy-name", label: t("media.context.copyName"), icon: <IconCopy /> },
+      { key: "copy-id", label: t("media.context.copyId"), icon: <IconCopy /> },
+      { key: "share-link", label: t("media.context.shareLink"), icon: <IconShare /> },
       { key: "copy-path", label: t("media.context.copyPath"), icon: <IconCopy /> },
+      { key: "show-in-folder", label: t("media.context.showInFolder"), icon: <IconFolder /> },
+      { key: "delete-from-playlist", label: t("media.context.deleteFromPlaylist"), icon: <IconDelete /> },
+      { key: "delete-from-cloud", label: t("media.context.deleteFromCloud"), icon: <IconDelete /> },
+      { key: "delete-from-library", label: t("media.context.deleteFromLibrary"), icon: <IconDelete /> },
       { key: "delete", label: props.deleteActionLabel ?? t("media.context.delete"), icon: <IconDelete /> }
     ];
     return items.filter((item) => {
       const action = item.key as MediaContextAction;
+      if ((action === "copy-id" || action === "share-link") && typeof target?.songId !== "number") {
+        return false;
+      }
       return actions.has(action) && contextActionEnabled(action);
     });
   };
-
-  const displaySongText = (value: string): string =>
-    uiSettings.hideBracketedContent ? stripBracketedContent(value) : value;
 
   return (
     <Show

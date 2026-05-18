@@ -246,6 +246,7 @@ pub struct TrackMetadata {
 pub struct AudioInfo {
     pub sample_rate: u32,
     pub channels: usize,
+    pub bits_per_sample: Option<u32>,
     pub total_frames: Option<u64>,
     pub duration_secs: Option<f64>,
     /// Encoder delay: samples to skip at the start (for gapless playback)
@@ -1097,6 +1098,7 @@ impl StreamingDecoder {
 
         let sample_rate = codec_params.sample_rate.unwrap_or(44100);
         let channels = codec_params.channels.map(|c| c.count()).unwrap_or(2);
+        let bits_per_sample = codec_params.bits_per_sample;
         let total_frames = codec_params.n_frames;
         let duration_secs = total_frames.map(|f| f as f64 / sample_rate as f64);
 
@@ -1116,6 +1118,7 @@ impl StreamingDecoder {
         let info = AudioInfo {
             sample_rate,
             channels,
+            bits_per_sample,
             total_frames,
             duration_secs,
             encoder_delay,

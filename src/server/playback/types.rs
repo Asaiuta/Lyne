@@ -68,11 +68,6 @@ pub(super) struct LibraryQueueMediaIdsRequest {
     pub(super) start_media_id: Option<String>,
 }
 
-#[derive(Deserialize)]
-pub(super) struct LocalPlaylistQueueRequest {
-    pub(super) start_media_id: Option<String>,
-}
-
 pub(super) type MediaQueueRow = (String, String);
 
 pub(super) struct LibraryQueuePlayback {

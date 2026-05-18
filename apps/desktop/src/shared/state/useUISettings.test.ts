@@ -44,8 +44,14 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
       [STORAGE_KEYS.bgEnabled]: "true",
       [STORAGE_KEYS.bgBlur]: "18",
       [STORAGE_KEYS.themeMode]: "light",
+      [STORAGE_KEYS.closeAppMethod]: "exit",
+      [STORAGE_KEYS.searchInputBehavior]: "clear",
+      [STORAGE_KEYS.shareUrlFormat]: "mobile",
       [STORAGE_KEYS.routeAnimation]: "flow",
       [STORAGE_KEYS.fullPlayerLayout]: "lyrics",
+      [STORAGE_KEYS.dynamicCover]: "true",
+      [STORAGE_KEYS.fullPlayerShowCopyLyric]: "false",
+      [STORAGE_KEYS.contextMenuOptions]: JSON.stringify({ search: false }),
       [STORAGE_KEYS.homeSections]: JSON.stringify([
         { key: "artists", order: 0, visible: false }
       ])
@@ -55,8 +61,19 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
   assert.equal(settings.bgEnabled, true);
   assert.equal(settings.bgBlur, 18);
   assert.equal(settings.themeMode, "light");
+  assert.equal(settings.closeAppMethod, "exit");
+  assert.equal(settings.searchInputBehavior, "clear");
+  assert.equal(settings.shareUrlFormat, "mobile");
   assert.equal(settings.routeAnimation, "flow");
   assert.equal(settings.fullPlayerLayout, "lyrics");
+  assert.equal(settings.dynamicCover, true);
+  assert.equal(settings.fullPlayerShowCopyLyric, false);
+  assert.equal(settings.fullPlayerShowLyricOffset, true);
+  assert.equal(settings.contextMenuOptions.search, false);
+  assert.equal(settings.contextMenuOptions.play, true);
+  assert.equal(settings.contextMenuOptions.more, true);
+  assert.equal(settings.contextMenuOptions.openFolder, true);
+  assert.equal(settings.contextMenuOptions.deleteFromCloud, true);
   assert.deepEqual(settings.homeSections, [{ key: "artists", order: 0, visible: false }]);
 });
 
@@ -188,6 +205,42 @@ test("persistUISettingField serializes structured home sections through schema m
 
   assert.equal(persistUISettingField("homeSections", [...nextSections], runtime), true);
   assert.deepEqual(JSON.parse(values[STORAGE_KEYS.homeSections] ?? "null"), nextSections);
+});
+
+test("readUISettingsSnapshot reads custom appearance settings from schema", () => {
+  const settings = readUISettingsSnapshot(
+    runtimeFromValues({
+      [STORAGE_KEYS.customAccentColor]: "#57c785",
+      [STORAGE_KEYS.themeGlobalColor]: "true",
+      [STORAGE_KEYS.globalFont]: "custom",
+      [STORAGE_KEYS.customFontFamily]: '"LXGW WenKai", system-ui',
+      [STORAGE_KEYS.customCss]: ".app-body { letter-spacing: 0; }",
+      [STORAGE_KEYS.customJs]: "window.__custom = true;"
+    })
+  );
+
+  assert.equal(settings.customAccentColor, "#57c785");
+  assert.equal(settings.themeGlobalColor, true);
+  assert.equal(settings.globalFont, "custom");
+  assert.equal(settings.customFontFamily, '"LXGW WenKai", system-ui');
+  assert.equal(settings.customCss, ".app-body { letter-spacing: 0; }");
+  assert.equal(settings.customJs, "window.__custom = true;");
+});
+
+test("readUISettingsSnapshot rejects invalid SPlayer-aligned general enums", () => {
+  const settings = readUISettingsSnapshot(
+    runtimeFromValues({
+      [STORAGE_KEYS.closeAppMethod]: "quit",
+      [STORAGE_KEYS.updateChannel]: "dev",
+      [STORAGE_KEYS.searchInputBehavior]: "unknown",
+      [STORAGE_KEYS.shareUrlFormat]: "desktop"
+    })
+  );
+
+  assert.equal(settings.closeAppMethod, "hide");
+  assert.equal(settings.updateChannel, "stable");
+  assert.equal(settings.searchInputBehavior, "normal");
+  assert.equal(settings.shareUrlFormat, "web");
 });
 
 test("commitUISettingField rolls back local state when schema-managed persist fails", () => {

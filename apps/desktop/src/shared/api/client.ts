@@ -53,7 +53,6 @@ export type {
   LibraryApiClient,
   LibraryQueuePlaybackResult,
   LibraryQueueMediaIdsInput,
-  LocalPlaylistQueueInput,
   LocalPlaylistCreateInput,
   LocalPlaylistUpdateInput
 } from "./library";

@@ -18,11 +18,6 @@ export interface LibraryQueueMediaIdsInput {
   startMediaId?: string | null;
 }
 
-export interface LocalPlaylistQueueInput {
-  playlistId: string;
-  startMediaId?: string | null;
-}
-
 export interface LibraryQueuePlaybackResult {
   state: PlayerState;
   queuedCount: number;
@@ -56,7 +51,6 @@ export interface LibraryApiClient {
   getLibraryTrackSummaries: () => Promise<LibraryTrackSummariesResponse>;
   getLibraryTrackDetail: (trackKey: number) => Promise<LibraryTrackDetail>;
   replaceQueueFromMediaIds: (input: LibraryQueueMediaIdsInput) => Promise<LibraryQueuePlaybackResult>;
-  replaceQueueFromLocalPlaylist: (input: LocalPlaylistQueueInput) => Promise<LibraryQueuePlaybackResult>;
   enqueueQueueFromMediaIds: (input: LibraryQueueMediaIdsInput) => Promise<QueueEntry[]>;
   deleteMediaItems: (mediaIds: string[]) => Promise<number>;
   listLocalPlaylists: () => Promise<LocalPlaylist[]>;
@@ -150,6 +144,9 @@ const parseLibraryTrackSummary = (value: unknown): LibraryTrackSummary | null =>
     !isString(value.folder_key) ||
     !isString(value.folder_label) ||
     !isNullableNumber(value.duration_secs) ||
+    !isNullableInteger(value.sample_rate) ||
+    !isNullableNumber(value.bitrate_bps) ||
+    !isNullableInteger(value.bits_per_sample) ||
     !isBoolean(value.has_cover_art) ||
     !isNullableString(value.external_artwork_url) ||
     !isNullableInteger(value.size_bytes) ||
@@ -368,15 +365,6 @@ export const createLibraryApiClient = (transport: LibraryApiTransport): LibraryA
         "/domain/library/queue_from_media_ids",
         postJson({
           media_ids: input.mediaIds,
-          start_media_id: input.startMediaId ?? null
-        })
-      )
-    ),
-  replaceQueueFromLocalPlaylist: async (input) =>
-    parseLibraryQueuePlaybackResponse(
-      await transport.requestJson(
-        `/domain/local_playlists/${encodeURIComponent(input.playlistId)}/queue`,
-        postJson({
           start_media_id: input.startMediaId ?? null
         })
       )
