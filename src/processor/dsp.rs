@@ -370,7 +370,15 @@ impl NoiseShaper {
 
         // 2. Get error history and compute feedback
         let e = &mut self.error_history[ch];
-        let feedback: f64 = self.coeffs.iter().zip(e.iter()).map(|(c, ei)| c * ei).sum();
+        let feedback = self.coeffs[0] * e[0]
+            + self.coeffs[1] * e[1]
+            + self.coeffs[2] * e[2]
+            + self.coeffs[3] * e[3]
+            + self.coeffs[4] * e[4]
+            + self.coeffs[5] * e[5]
+            + self.coeffs[6] * e[6]
+            + self.coeffs[7] * e[7]
+            + self.coeffs[8] * e[8];
 
         // 3. Quantize
         //    x is in the integer domain (sample * scale shifts to integer range)
@@ -385,7 +393,14 @@ impl NoiseShaper {
         let clamped_error = raw_error.clamp(-2.0, 2.0);
 
         // Shift history and insert new error
-        e.copy_within(0..8, 1);
+        e[8] = e[7];
+        e[7] = e[6];
+        e[6] = e[5];
+        e[5] = e[4];
+        e[4] = e[3];
+        e[3] = e[2];
+        e[2] = e[1];
+        e[1] = e[0];
         e[0] = clamped_error;
 
         quantized * self.cached_lsb
@@ -419,6 +434,32 @@ impl NoiseShaper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn legacy_process_sample(ns: &mut NoiseShaper, sample: f64, ch: usize) -> f64 {
+        if !ns.enabled || ch >= ns.error_history.len() {
+            return sample;
+        }
+
+        const SILENCE_THRESHOLD: f64 = 1e-6;
+
+        if sample.abs() < SILENCE_THRESHOLD {
+            ns.error_history[ch] = [0.0; 9];
+            return sample;
+        }
+
+        let dither = ns.tpdf();
+        let e = &mut ns.error_history[ch];
+        let feedback: f64 = ns.coeffs.iter().zip(e.iter()).map(|(c, ei)| c * ei).sum();
+        let x = sample * ns.cached_scale + feedback;
+        let quantized = (x + dither).round();
+        let raw_error = x - quantized;
+        let clamped_error = raw_error.clamp(-2.0, 2.0);
+
+        e.copy_within(0..8, 1);
+        e[0] = clamped_error;
+
+        quantized * ns.cached_lsb
+    }
 
     #[test]
     fn test_tpdf_distribution() {
@@ -560,6 +601,61 @@ mod tests {
         for &e in ns.error_history[0].iter() {
             assert_eq!(e, 0.0, "Error history should be cleared after silence");
         }
+    }
+
+    #[test]
+    fn test_noise_shaper_unrolled_history_matches_legacy_update() {
+        for curve in [
+            NoiseShaperCurve::Lipshitz5,
+            NoiseShaperCurve::FWeighted9,
+            NoiseShaperCurve::ModifiedE9,
+            NoiseShaperCurve::ImprovedE9,
+            NoiseShaperCurve::TpdfOnly,
+        ] {
+            let mut optimized = NoiseShaper::new(2, 44100, 16);
+            let mut legacy = NoiseShaper::new(2, 44100, 16);
+            optimized.set_curve(curve);
+            legacy.set_curve(curve);
+
+            for frame in 0..256 {
+                for ch in 0..2 {
+                    let sample = ((frame * 2 + ch + 1) as f64 * 0.037).sin() * 0.4;
+                    let optimized_out = optimized.process_sample(sample, ch);
+                    let legacy_out = legacy_process_sample(&mut legacy, sample, ch);
+
+                    assert_eq!(
+                        optimized_out.to_bits(),
+                        legacy_out.to_bits(),
+                        "curve {:?}, frame {}, channel {} output mismatch",
+                        curve,
+                        frame,
+                        ch
+                    );
+                    assert_eq!(
+                        optimized.error_history[ch], legacy.error_history[ch],
+                        "curve {:?}, frame {}, channel {} history mismatch",
+                        curve, frame, ch
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_noise_shaper_silence_reset_is_channel_local() {
+        let mut ns = NoiseShaper::new(2, 44100, 24);
+
+        for _ in 0..16 {
+            ns.process_sample(0.25, 0);
+            ns.process_sample(-0.25, 1);
+        }
+        assert!(ns.error_history[0].iter().any(|&e| e != 0.0));
+        assert!(ns.error_history[1].iter().any(|&e| e != 0.0));
+
+        ns.process_sample(0.0, 0);
+
+        assert!(ns.error_history[0].iter().all(|&e| e == 0.0));
+        assert!(ns.error_history[1].iter().any(|&e| e != 0.0));
     }
 
     #[test]
