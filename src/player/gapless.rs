@@ -14,6 +14,8 @@ use crate::config::NormalizationMode;
 use crate::decoder::StreamingDecoder;
 use crate::processor::StreamingResampler;
 
+use super::estimated_output_sample_capacity;
+
 /// Gapless playback methods
 pub struct GaplessManager;
 
@@ -198,14 +200,13 @@ fn decode_to_buffer_with_cancel(
     // Extract metadata before decoding
     let metadata = decoder.info.metadata.clone();
 
-    let estimated_frames = decoder.info.total_frames.unwrap_or(0) as usize;
-    let estimated_output_frames = if need_resample {
-        (estimated_frames as f64 * target_sr as f64 / original_sr as f64).ceil() as usize
-    } else {
-        estimated_frames
-    };
-
-    let mut samples: Vec<f64> = Vec::with_capacity(estimated_output_frames * decoded_channels);
+    let mut samples: Vec<f64> = Vec::with_capacity(estimated_output_sample_capacity(
+        decoder.info.total_frames.unwrap_or(0),
+        original_sr,
+        target_sr,
+        decoded_channels,
+        need_resample,
+    ));
     let mut resampler = if need_resample {
         Some(
             StreamingResampler::with_phase(
@@ -263,9 +264,26 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
+    use super::estimated_output_sample_capacity;
     use super::GaplessManager;
     use crate::decoder::TrackMetadata;
     use crate::player::SharedState;
+
+    #[test]
+    fn preload_capacity_estimate_accounts_for_resampler_tail() {
+        assert_eq!(
+            estimated_output_sample_capacity(48_000, 48_000, 96_000, 2, true),
+            (96_000 + 64) * 2
+        );
+        assert_eq!(
+            estimated_output_sample_capacity(48_000, 48_000, 48_000, 2, false),
+            48_000 * 2
+        );
+        assert_eq!(
+            estimated_output_sample_capacity(0, 48_000, 96_000, 2, true),
+            0
+        );
+    }
 
     #[test]
     fn cancel_preload_invalidates_and_clears_pending_state() {

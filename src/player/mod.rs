@@ -54,6 +54,30 @@ use audio_thread::{audio_thread_main, AudioThreadStartup};
 use spectrum::spectrum_thread_main;
 use state::{load_cache_with_header, save_cache_with_header};
 
+const RESAMPLER_OUTPUT_FRAME_RESERVE: usize = 64;
+
+fn estimated_output_sample_capacity(
+    input_frames: u64,
+    input_sample_rate: u32,
+    output_sample_rate: u32,
+    channels: usize,
+    needs_resample: bool,
+) -> usize {
+    if input_frames == 0 || channels == 0 {
+        return 0;
+    }
+
+    let output_frames = if needs_resample && input_sample_rate > 0 {
+        ((input_frames as f64 * output_sample_rate as f64 / input_sample_rate as f64).ceil()
+            as usize)
+            .saturating_add(RESAMPLER_OUTPUT_FRAME_RESERVE)
+    } else {
+        input_frames as usize
+    };
+
+    output_frames.saturating_mul(channels)
+}
+
 /// The main audio player - thread-safe wrapper
 pub struct AudioPlayer {
     shared_state: Arc<SharedState>,
@@ -578,13 +602,13 @@ impl AudioPlayer {
             );
         }
 
-        let estimated_output_frames = if final_need_resample {
-            (estimated_input_frames as f64 * final_target_sr as f64 / original_sr as f64).ceil()
-                as usize
-        } else {
-            estimated_input_frames
-        };
-        let mut samples = Vec::with_capacity(estimated_output_frames * channels);
+        let mut samples = Vec::with_capacity(estimated_output_sample_capacity(
+            info.total_frames.unwrap_or(0),
+            original_sr,
+            final_target_sr,
+            channels,
+            final_need_resample,
+        ));
 
         let mut resampler = if final_need_resample {
             match StreamingResampler::with_phase(
