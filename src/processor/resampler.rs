@@ -55,6 +55,101 @@ fn make_quality_spec(recipe: QualityRecipe, phase: PhaseResponse) -> QualitySpec
         .with_phase_response(phase.to_soxr_value())
 }
 
+fn deinterleave_frame_major(
+    input: &[f64],
+    channels: usize,
+    frames: usize,
+    channel_inputs: &mut [Vec<f64>],
+) {
+    for frame in input[..frames * channels].chunks_exact(channels) {
+        for (ch, &sample) in frame.iter().enumerate() {
+            channel_inputs[ch].push(sample);
+        }
+    }
+}
+
+fn channel_outputs_have_frames(
+    channel_outputs: &[Vec<f64>],
+    channels: usize,
+    frames: usize,
+) -> bool {
+    channel_outputs
+        .iter()
+        .take(channels)
+        .all(|channel| channel.len() >= frames)
+}
+
+fn interleave_channel_outputs_to_vec(
+    channel_outputs: &[Vec<f64>],
+    channels: usize,
+    output: &mut Vec<f64>,
+) -> usize {
+    if channel_outputs.is_empty() || channel_outputs[0].is_empty() {
+        output.clear();
+        return 0;
+    }
+
+    let out_frames = channel_outputs[0].len();
+    output.clear();
+    output.reserve(out_frames * channels);
+
+    if channel_outputs_have_frames(channel_outputs, channels, out_frames) {
+        for frame in 0..out_frames {
+            for channel in channel_outputs.iter().take(channels) {
+                output.push(channel[frame]);
+            }
+        }
+    } else {
+        for frame in 0..out_frames {
+            for channel in channel_outputs.iter().take(channels) {
+                output.push(channel.get(frame).copied().unwrap_or(0.0));
+            }
+        }
+    }
+
+    out_frames
+}
+
+fn interleave_channel_outputs_to_slice(
+    channel_outputs: &[Vec<f64>],
+    channels: usize,
+    output: &mut [f64],
+) -> usize {
+    if channel_outputs.is_empty() || channel_outputs[0].is_empty() {
+        return 0;
+    }
+
+    let out_frames = channel_outputs[0].len();
+
+    if output.len() >= out_frames * channels
+        && channel_outputs_have_frames(channel_outputs, channels, out_frames)
+    {
+        for (frame, out_frame) in output
+            .chunks_exact_mut(channels)
+            .take(out_frames)
+            .enumerate()
+        {
+            for (dst, channel) in out_frame
+                .iter_mut()
+                .zip(channel_outputs.iter().take(channels))
+            {
+                *dst = channel[frame];
+            }
+        }
+    } else {
+        for frame in 0..out_frames {
+            for (ch, channel) in channel_outputs.iter().take(channels).enumerate() {
+                let idx = frame * channels + ch;
+                if idx < output.len() {
+                    output[idx] = channel.get(frame).copied().unwrap_or(0.0);
+                }
+            }
+        }
+    }
+
+    out_frames
+}
+
 impl Resampler {
     pub fn new(channels: usize, from_rate: u32, to_rate: u32) -> Self {
         Self {
@@ -96,9 +191,7 @@ impl Resampler {
         // 1. De-interleave
         let frames = input.len() / self.channels;
         let mut plan_channels: Vec<Vec<f64>> = vec![Vec::with_capacity(frames); self.channels];
-        for (i, sample) in input.iter().enumerate() {
-            plan_channels[i % self.channels].push(*sample);
-        }
+        deinterleave_frame_major(input, self.channels, frames, &mut plan_channels);
 
         // 2. Process channels in parallel
         let resampled_channels: Result<Vec<Vec<f64>>, ResamplerError> = plan_channels
@@ -182,18 +275,8 @@ impl Resampler {
             return Ok(Vec::new());
         }
 
-        let out_frames = resampled_channels[0].len();
-        let mut final_output = Vec::with_capacity(out_frames * self.channels);
-
-        for f in 0..out_frames {
-            for ch in 0..self.channels {
-                if f < resampled_channels[ch].len() {
-                    final_output.push(resampled_channels[ch][f]);
-                } else {
-                    final_output.push(0.0);
-                }
-            }
-        }
+        let mut final_output = Vec::with_capacity(resampled_channels[0].len() * self.channels);
+        interleave_channel_outputs_to_vec(&resampled_channels, self.channels, &mut final_output);
 
         Ok(final_output)
     }
@@ -347,10 +430,9 @@ impl StreamingResampler {
             ch_buf.clear();
         }
 
-        // De-interleave input into pre-allocated buffers
-        for (i, &sample) in input.iter().enumerate() {
-            self.channel_inputs[i % self.channels].push(sample);
-        }
+        // De-interleave input into pre-allocated buffers. Trailing incomplete
+        // frames are intentionally ignored, matching `input.len() / channels`.
+        deinterleave_frame_major(input, self.channels, input_frames, &mut self.channel_inputs);
 
         // Clear and reuse pre-allocated channel output buffers (Defect 33 fix)
         for ch_buf in &mut self.channel_outputs {
@@ -368,40 +450,32 @@ impl StreamingResampler {
                 self.output_scratch.resize(expected_output, 0.0);
             }
 
-            let processed = match self.soxr_instances[ch]
-                .process(channel_data, &mut self.output_scratch)
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    log::error!(
-                        "Resampler process_chunk failed (ch={}, in_frames={}): {:?}",
-                        ch,
-                        channel_data.len(),
-                        e
-                    );
-                    return Vec::new();
-                }
-            };
+            let processed =
+                match self.soxr_instances[ch].process(channel_data, &mut self.output_scratch) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        log::error!(
+                            "Resampler process_chunk failed (ch={}, in_frames={}): {:?}",
+                            ch,
+                            channel_data.len(),
+                            e
+                        );
+                        return Vec::new();
+                    }
+                };
 
             // Copy to channel output buffer (still one allocation per channel, unavoidable for Vec return)
             self.channel_outputs[ch]
                 .extend_from_slice(&self.output_scratch[..processed.output_frames]);
         }
 
-        // Re-interleave into pre-allocated buffer (Defect 33 fix)
-        if self.channel_outputs.is_empty() || self.channel_outputs[0].is_empty() {
+        if interleave_channel_outputs_to_vec(
+            &self.channel_outputs,
+            self.channels,
+            &mut self.interleaved_output,
+        ) == 0
+        {
             return Vec::new();
-        }
-
-        let out_frames = self.channel_outputs[0].len();
-        self.interleaved_output.clear();
-        self.interleaved_output.reserve(out_frames * self.channels);
-
-        for f in 0..out_frames {
-            for ch in 0..self.channels {
-                self.interleaved_output
-                    .push(self.channel_outputs[ch].get(f).copied().unwrap_or(0.0));
-            }
         }
 
         // Return a clone of the interleaved data (API compatibility)
@@ -430,10 +504,9 @@ impl StreamingResampler {
             ch_buf.clear();
         }
 
-        // De-interleave
-        for (i, &sample) in input.iter().enumerate() {
-            self.channel_inputs[i % self.channels].push(sample);
-        }
+        // De-interleave complete frames only, preserving truncation semantics
+        // for `input.len() % channels != 0`.
+        deinterleave_frame_major(input, self.channels, input_frames, &mut self.channel_inputs);
 
         // Clear output buffers
         for ch_buf in &mut self.channel_outputs {
@@ -450,41 +523,25 @@ impl StreamingResampler {
                 self.output_scratch.resize(expected_output, 0.0);
             }
 
-            let processed = match self.soxr_instances[ch]
-                .process(channel_data, &mut self.output_scratch)
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    log::error!(
-                        "Resampler process_chunk_into failed (ch={}, in_frames={}): {:?}",
-                        ch,
-                        channel_data.len(),
-                        e
-                    );
-                    return 0;
-                }
-            };
+            let processed =
+                match self.soxr_instances[ch].process(channel_data, &mut self.output_scratch) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        log::error!(
+                            "Resampler process_chunk_into failed (ch={}, in_frames={}): {:?}",
+                            ch,
+                            channel_data.len(),
+                            e
+                        );
+                        return 0;
+                    }
+                };
 
             self.channel_outputs[ch]
                 .extend_from_slice(&self.output_scratch[..processed.output_frames]);
         }
 
-        // Re-interleave directly into output buffer
-        if self.channel_outputs.is_empty() || self.channel_outputs[0].is_empty() {
-            return 0;
-        }
-
-        let out_frames = self.channel_outputs[0].len();
-        for f in 0..out_frames {
-            for ch in 0..self.channels {
-                let idx = f * self.channels + ch;
-                if idx < output.len() {
-                    output[idx] = self.channel_outputs[ch].get(f).copied().unwrap_or(0.0);
-                }
-            }
-        }
-
-        out_frames
+        interleave_channel_outputs_to_slice(&self.channel_outputs, self.channels, output)
     }
 
     pub fn reset(&mut self) {
@@ -533,5 +590,66 @@ impl StreamingResampler {
         }
 
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deinterleave_frame_major_preserves_order_and_truncates_partial_frame() {
+        let input = vec![1.0, 2.0, 3.0, 4.0, 5.0, 99.0];
+        let mut channels = vec![Vec::new(), Vec::new()];
+
+        deinterleave_frame_major(&input, 2, input.len() / 2, &mut channels);
+
+        assert_eq!(channels[0], vec![1.0, 3.0, 5.0]);
+        assert_eq!(channels[1], vec![2.0, 4.0, 99.0]);
+
+        let input = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let mut channels = vec![Vec::new(), Vec::new()];
+
+        deinterleave_frame_major(&input, 2, input.len() / 2, &mut channels);
+
+        assert_eq!(channels[0], vec![1.0, 3.0]);
+        assert_eq!(channels[1], vec![2.0, 4.0]);
+    }
+
+    #[test]
+    fn interleave_channel_outputs_fast_path_preserves_multichannel_order() {
+        let channel_outputs = vec![
+            vec![1.0, 4.0, 7.0],
+            vec![2.0, 5.0, 8.0],
+            vec![3.0, 6.0, 9.0],
+        ];
+        let mut output = Vec::new();
+
+        let frames = interleave_channel_outputs_to_vec(&channel_outputs, 3, &mut output);
+
+        assert_eq!(frames, 3);
+        assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    }
+
+    #[test]
+    fn interleave_channel_outputs_pads_short_channels() {
+        let channel_outputs = vec![vec![1.0, 3.0, 5.0], vec![2.0]];
+        let mut output = Vec::new();
+
+        let frames = interleave_channel_outputs_to_vec(&channel_outputs, 2, &mut output);
+
+        assert_eq!(frames, 3);
+        assert_eq!(output, vec![1.0, 2.0, 3.0, 0.0, 5.0, 0.0]);
+    }
+
+    #[test]
+    fn interleave_channel_outputs_to_slice_preserves_tail_when_output_is_longer() {
+        let channel_outputs = vec![vec![1.0, 3.0], vec![2.0, 4.0]];
+        let mut output = vec![42.0; 6];
+
+        let frames = interleave_channel_outputs_to_slice(&channel_outputs, 2, &mut output);
+
+        assert_eq!(frames, 2);
+        assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0, 42.0, 42.0]);
     }
 }
