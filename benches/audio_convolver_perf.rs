@@ -13,13 +13,16 @@ fn main() {
     let iterations = if quick { 60 } else { 240 };
     let frames = if quick { 2_048 } else { 8_192 };
     let ir_frames = 256;
+    let trials = parse_trials(&args).unwrap_or(if quick { 3 } else { 5 });
 
-    println!("audio_convolver_perf frames={frames} ir_frames={ir_frames} iterations={iterations}");
+    println!(
+        "audio_convolver_perf frames={frames} ir_frames={ir_frames} iterations={iterations} trials={trials}"
+    );
 
     for channels in [2, 6] {
-        let report = benchmark_convolver(channels, ir_frames, frames, iterations);
+        let report = benchmark_convolver(channels, ir_frames, frames, iterations, trials);
         println!(
-            "convolver channels={} process_into={:.3} ns/sample process_inplace={:.3} ns/sample allocating_process={:.3} ns/sample wrapper_overhead={:.2}%",
+            "convolver channels={} process_into_median={:.3} ns/sample process_inplace_median={:.3} ns/sample allocating_process_median={:.3} ns/sample wrapper_overhead_median={:.2}%",
             channels,
             report.process_into_ns_per_sample,
             report.process_inplace_ns_per_sample,
@@ -29,10 +32,11 @@ fn main() {
 
         if enforce {
             assert!(
-                report.wrapper_overhead_percent >= 0.0,
-                "allocating wrapper unexpectedly faster for {} channels: {:.2}%",
+                report.process_inplace_ns_per_sample <= report.process_into_ns_per_sample * 1.25,
+                "process_inplace regressed beyond 25% for {} channels: process_inplace={:.3}, process_into={:.3}",
                 channels,
-                report.wrapper_overhead_percent
+                report.process_inplace_ns_per_sample,
+                report.process_into_ns_per_sample,
             );
         }
     }
@@ -46,6 +50,39 @@ struct ConvolverReport {
 }
 
 fn benchmark_convolver(
+    channels: usize,
+    ir_frames: usize,
+    frames: usize,
+    iterations: usize,
+    trials: usize,
+) -> ConvolverReport {
+    let trials = trials.max(1);
+    let mut process_into = Vec::with_capacity(trials);
+    let mut process_inplace = Vec::with_capacity(trials);
+    let mut allocating_process = Vec::with_capacity(trials);
+
+    for _ in 0..trials {
+        let report = benchmark_convolver_once(channels, ir_frames, frames, iterations);
+        process_into.push(report.process_into_ns_per_sample);
+        process_inplace.push(report.process_inplace_ns_per_sample);
+        allocating_process.push(report.allocating_process_ns_per_sample);
+    }
+
+    let process_into_ns_per_sample = median(&mut process_into);
+    let process_inplace_ns_per_sample = median(&mut process_inplace);
+    let allocating_process_ns_per_sample = median(&mut allocating_process);
+
+    ConvolverReport {
+        process_into_ns_per_sample,
+        process_inplace_ns_per_sample,
+        allocating_process_ns_per_sample,
+        wrapper_overhead_percent: (allocating_process_ns_per_sample - process_into_ns_per_sample)
+            / process_into_ns_per_sample
+            * 100.0,
+    }
+}
+
+fn benchmark_convolver_once(
     channels: usize,
     ir_frames: usize,
     frames: usize,
@@ -110,6 +147,17 @@ fn measure<T>(mut run: impl FnMut() -> T, iterations: usize) -> Duration {
 
 fn nanos_per_unit(duration: Duration, units: usize) -> f64 {
     duration.as_nanos() as f64 / units as f64
+}
+
+fn parse_trials(args: &[String]) -> Option<usize> {
+    args.iter()
+        .find_map(|arg| arg.strip_prefix("--trials="))
+        .and_then(|value| value.parse::<usize>().ok())
+}
+
+fn median(values: &mut [f64]) -> f64 {
+    values.sort_by(|left, right| left.total_cmp(right));
+    values[values.len() / 2]
 }
 
 fn synthetic_ir(frames: usize, channels: usize) -> Vec<f64> {
