@@ -473,4 +473,16 @@ mod tests {
         assert!(limiter.peak_queue.current_peak().is_finite());
         assert_eq!(limiter.peak_queue.current_peak(), 0.25);
     }
+
+    #[test]
+    fn process_is_steady_state_no_alloc() {
+        let mut limiter = PeakLimiter::new(2, 48_000, -1.0, 10.0, 100.0);
+        let mut samples = deterministic_transient_corpus(64, 2);
+
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..1_000 {
+                limiter.process(&mut samples);
+            }
+        });
+    }
 }
