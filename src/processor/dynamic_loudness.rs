@@ -425,7 +425,7 @@ impl DynamicLoudness {
         Self {
             filters,
             smoothers,
-            last_applied_gains: [0.0; LOUDNESS_BANDS_N],
+            last_applied_gains: [f64::NAN; LOUDNESS_BANDS_N],
             active_bands: [false; LOUDNESS_BANDS_N],
             max_gains,
             ref_volume_db: -15.0, // Reference: ~50% perceived loudness
@@ -465,7 +465,10 @@ impl DynamicLoudness {
     }
 
     fn apply_band_gain_if_changed(&mut self, band: usize, gain_db: f64) {
-        if (gain_db - self.last_applied_gains[band]).abs() < GAIN_UPDATE_EPSILON_DB {
+        let should_be_active = gain_db.abs() >= BAND_ACTIVE_EPSILON_DB;
+        if (gain_db - self.last_applied_gains[band]).abs() < GAIN_UPDATE_EPSILON_DB
+            && self.active_bands[band] == should_be_active
+        {
             return;
         }
 
@@ -474,7 +477,23 @@ impl DynamicLoudness {
             ch_filters[band].coeffs = coeffs;
         }
         self.last_applied_gains[band] = gain_db;
-        self.active_bands[band] = gain_db.abs() >= BAND_ACTIVE_EPSILON_DB;
+        self.active_bands[band] = should_be_active;
+    }
+
+    fn refresh_smoother_targets(&mut self) {
+        for (i, smoother) in self.smoothers.iter_mut().enumerate() {
+            let target_gain = self.max_gains[i] * self.current_loudness_factor * self.strength;
+            smoother.set_target(target_gain);
+        }
+    }
+
+    fn can_bypass_for_zero_strength(&self) -> bool {
+        self.strength < 0.0001
+            && self.active_bands.iter().all(|&active| !active)
+            && self
+                .smoothers
+                .iter()
+                .all(|smoother| smoother.samples_remaining == 0)
     }
 
     /// Set user volume as linear value (0.0 - 1.0)
@@ -511,12 +530,7 @@ impl DynamicLoudness {
         // Update if changed significantly
         if (self.current_loudness_factor - factor).abs() > 0.0001 {
             self.current_loudness_factor = factor;
-
-            // Update target gains for each band
-            for (i, smoother) in self.smoothers.iter_mut().enumerate() {
-                let target_gain = self.max_gains[i] * factor * self.strength;
-                smoother.set_target(target_gain);
-            }
+            self.refresh_smoother_targets();
         }
     }
 
@@ -525,12 +539,7 @@ impl DynamicLoudness {
         let strength = strength.clamp(0.0, 1.0);
         if (self.strength - strength).abs() > 0.0001 {
             self.strength = strength;
-            // Recalculate targets
-            self.update_loudness_factor(if self.current_loudness_factor > 0.0 {
-                self.ref_volume_db - self.current_loudness_factor * self.transition_db
-            } else {
-                self.ref_volume_db
-            });
+            self.refresh_smoother_targets();
         }
     }
 
@@ -573,7 +582,7 @@ impl DynamicLoudness {
                     filter.set_sample_rate(sample_rate);
                 }
             }
-            self.last_applied_gains = [0.0; LOUDNESS_BANDS_N];
+            self.last_applied_gains = [f64::NAN; LOUDNESS_BANDS_N];
             self.active_bands = [false; LOUDNESS_BANDS_N];
 
             // Update smoothers
@@ -585,7 +594,7 @@ impl DynamicLoudness {
 
     /// Process interleaved audio buffer
     pub fn process(&mut self, buffer: &mut [f64]) {
-        if !self.enabled || self.strength < 0.0001 {
+        if !self.enabled || self.can_bypass_for_zero_strength() {
             return;
         }
 
@@ -887,11 +896,14 @@ mod tests {
     fn test_band_gain_update_uses_last_applied_epsilon() {
         let mut dl = DynamicLoudness::new(2, 48_000.0);
 
-        dl.apply_band_gain_if_changed(0, GAIN_UPDATE_EPSILON_DB * 0.5);
-        assert_eq!(dl.last_applied_gains[0], 0.0);
+        dl.apply_band_gain_if_changed(0, GAIN_UPDATE_EPSILON_DB * 2.0);
+        assert_eq!(dl.last_applied_gains[0], GAIN_UPDATE_EPSILON_DB * 2.0);
 
-        dl.apply_band_gain_if_changed(0, GAIN_UPDATE_EPSILON_DB * 1.5);
-        assert_eq!(dl.last_applied_gains[0], GAIN_UPDATE_EPSILON_DB * 1.5);
+        dl.apply_band_gain_if_changed(0, GAIN_UPDATE_EPSILON_DB * 2.5);
+        assert_eq!(dl.last_applied_gains[0], GAIN_UPDATE_EPSILON_DB * 2.0);
+
+        dl.apply_band_gain_if_changed(0, GAIN_UPDATE_EPSILON_DB * 3.5);
+        assert_eq!(dl.last_applied_gains[0], GAIN_UPDATE_EPSILON_DB * 3.5);
     }
 
     #[test]
@@ -918,6 +930,47 @@ mod tests {
         assert_eq!(dl.filters[0][3].state.z2, 0.0);
         assert_eq!(dl.filters[1][3].state.z1, 0.0);
         assert_eq!(dl.filters[1][3].state.z2, 0.0);
+    }
+
+    #[test]
+    fn test_first_process_applies_band_activity_state() {
+        let mut dl = DynamicLoudness::new(2, 48_000.0);
+        dl.set_volume_db(-40.0);
+        let mut buffer = vec![0.25; BLOCK_SIZE * 2];
+
+        dl.process(&mut buffer);
+
+        assert!(dl.last_applied_gains.iter().all(|gain| gain.is_finite()));
+        assert_eq!(dl.active_bands[3], false);
+        assert!(dl
+            .active_bands
+            .iter()
+            .enumerate()
+            .any(|(band, &active)| band != 3 && active));
+    }
+
+    #[test]
+    fn test_strength_zero_lets_active_bands_decay_to_inactive() {
+        let mut dl = DynamicLoudness::new(2, 48_000.0);
+        dl.set_volume_db(-40.0);
+        let mut buffer = vec![0.25; BLOCK_SIZE * 2];
+
+        dl.process(&mut buffer);
+        assert!(dl.active_bands[0]);
+
+        dl.set_strength(0.0);
+        dl.process(&mut buffer);
+        assert!(
+            dl.active_bands[0],
+            "strength changes should not clear active filters before smoothing catches up"
+        );
+
+        for _ in 0..512 {
+            dl.process(&mut buffer);
+        }
+
+        assert!(dl.active_bands.iter().all(|&active| !active));
+        assert!(dl.get_band_gains().iter().all(|gain| gain.abs() < 0.0001));
     }
 
     #[test]
