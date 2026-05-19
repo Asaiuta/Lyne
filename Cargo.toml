@@ -12,6 +12,10 @@ crate-type = ["cdylib", "rlib"]
 name = "audio_server"
 path = "src/main.rs"
 
+[[bench]]
+name = "audio_convolver_perf"
+harness = false
+
 [dependencies]
 audio-runtime-paths = { path = "crates/audio-runtime-paths" }
 # --- Core Audio ---
