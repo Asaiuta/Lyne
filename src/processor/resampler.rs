@@ -777,6 +777,53 @@ mod tests {
     }
 
     #[test]
+    fn process_chunk_into_reuses_internal_capacity_after_warmup() {
+        let input = (0..4096)
+            .map(|sample| sample as f64 / 4096.0)
+            .collect::<Vec<_>>();
+        let mut resampler = StreamingResampler::new(2, 44_100, 48_000).unwrap();
+        let mut output = vec![0.0; resampler.max_output_len_for_input(input.len())];
+
+        let _ = resampler.process_chunk_into(&input, &mut output);
+        let warmed_input_caps = resampler
+            .channel_inputs
+            .iter()
+            .map(Vec::capacity)
+            .collect::<Vec<_>>();
+        let warmed_output_caps = resampler
+            .channel_outputs
+            .iter()
+            .map(Vec::capacity)
+            .collect::<Vec<_>>();
+        let warmed_interleaved_cap = resampler.interleaved_output.capacity();
+        let warmed_scratch_len = resampler.output_scratch.len();
+
+        let _ = resampler.process_chunk_into(&input, &mut output);
+
+        assert_eq!(
+            resampler
+                .channel_inputs
+                .iter()
+                .map(Vec::capacity)
+                .collect::<Vec<_>>(),
+            warmed_input_caps
+        );
+        assert_eq!(
+            resampler
+                .channel_outputs
+                .iter()
+                .map(Vec::capacity)
+                .collect::<Vec<_>>(),
+            warmed_output_caps
+        );
+        assert_eq!(
+            resampler.interleaved_output.capacity(),
+            warmed_interleaved_cap
+        );
+        assert_eq!(resampler.output_scratch.len(), warmed_scratch_len);
+    }
+
+    #[test]
     fn flush_into_matches_vec_wrapper_and_preserves_prefix() {
         let input = (0..2048)
             .map(|sample| sample as f64 / 2048.0)
