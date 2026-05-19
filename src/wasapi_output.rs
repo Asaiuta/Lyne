@@ -84,6 +84,45 @@ pub mod wasapi_exclusive {
         }
     }
 
+    fn write_f32_samples_to_wasapi_bytes(
+        src: &[f32],
+        dst: &mut [u8],
+        bits_per_sample: u16,
+        is_float: bool,
+    ) {
+        if is_float && bits_per_sample == 32 {
+            copy_f32_slice_to_le_bytes(src, dst);
+        } else if bits_per_sample == 32 {
+            for (i, sample) in src.iter().enumerate() {
+                let sample_i32 =
+                    (*sample as f64 * 2147483647.0).clamp(-2147483647.0, 2147483647.0) as i32;
+                let bytes = sample_i32.to_le_bytes();
+                let offset = i * 4;
+                if offset + 4 <= dst.len() {
+                    dst[offset..offset + 4].copy_from_slice(&bytes);
+                }
+            }
+        } else if bits_per_sample == 24 {
+            for (i, sample) in src.iter().enumerate() {
+                let sample_i32 = (*sample as f64 * 8388607.0).clamp(-8388607.0, 8388607.0) as i32;
+                let bytes = sample_i32.to_le_bytes();
+                let offset = i * 3;
+                if offset + 3 <= dst.len() {
+                    dst[offset..offset + 3].copy_from_slice(&bytes[0..3]);
+                }
+            }
+        } else if bits_per_sample == 16 {
+            for (i, sample) in src.iter().enumerate() {
+                let sample_i16 = (*sample as f64 * 32767.0).clamp(-32767.0, 32767.0) as i16;
+                let bytes = sample_i16.to_le_bytes();
+                let offset = i * 2;
+                if offset + 2 <= dst.len() {
+                    dst[offset..offset + 2].copy_from_slice(&bytes);
+                }
+            }
+        }
+    }
+
     const COMMON_WASAPI_SAMPLE_RATES: [usize; 6] = [192000, 176400, 96000, 88200, 48000, 44100];
     const MAX_WASAPI_SAMPLE_RATE_CANDIDATES: usize = COMMON_WASAPI_SAMPLE_RATES.len() + 1;
 
@@ -684,43 +723,14 @@ pub mod wasapi_exclusive {
             byte_buffer[..data_len].fill(0);
             let data = &mut byte_buffer[..data_len];
 
-            // P1-9 fix: Only convert the actual samples needed (samples_to_write), not the entire pre-allocated buffer
-            if is_float && bits_per_sample == 32 {
-                // 32-bit float
-                copy_f32_slice_to_le_bytes(&output_f32_buffer[..samples_to_write], data);
-            } else if bits_per_sample == 32 {
-                // 32-bit integer
-                for (i, sample) in output_f32_buffer[..samples_to_write].iter().enumerate() {
-                    let sample_i32 =
-                        (*sample as f64 * 2147483647.0).clamp(-2147483647.0, 2147483647.0) as i32;
-                    let bytes = sample_i32.to_le_bytes();
-                    let offset = i * 4;
-                    if offset + 4 <= data.len() {
-                        data[offset..offset + 4].copy_from_slice(&bytes);
-                    }
-                }
-            } else if bits_per_sample == 24 {
-                // 24-bit integer
-                for (i, sample) in output_f32_buffer[..samples_to_write].iter().enumerate() {
-                    let sample_i32 =
-                        (*sample as f64 * 8388607.0).clamp(-8388607.0, 8388607.0) as i32;
-                    let bytes = sample_i32.to_le_bytes();
-                    let offset = i * 3;
-                    if offset + 3 <= data.len() {
-                        data[offset..offset + 3].copy_from_slice(&bytes[0..3]);
-                    }
-                }
-            } else if bits_per_sample == 16 {
-                // 16-bit integer
-                for (i, sample) in output_f32_buffer[..samples_to_write].iter().enumerate() {
-                    let sample_i16 = (*sample as f64 * 32767.0).clamp(-32767.0, 32767.0) as i16;
-                    let bytes = sample_i16.to_le_bytes();
-                    let offset = i * 2;
-                    if offset + 2 <= data.len() {
-                        data[offset..offset + 2].copy_from_slice(&bytes);
-                    }
-                }
-            }
+            // P1-9 fix: Only convert the actual samples needed (samples_to_write),
+            // not the entire pre-allocated buffer.
+            write_f32_samples_to_wasapi_bytes(
+                &output_f32_buffer[..samples_to_write],
+                data,
+                bits_per_sample,
+                is_float,
+            );
 
             // Write to device
             if let Err(e) = render_client.write_to_device(actual_frames, data, None) {
@@ -757,6 +767,65 @@ pub mod wasapi_exclusive {
                 &rates[..len],
                 &[384000, 192000, 176400, 96000, 88200, 48000, 44100]
             );
+        }
+
+        #[test]
+        fn write_output_samples_uses_bulk_32_float_bytes() {
+            let samples = [0.0f32, 0.5, -1.0, 1.0];
+            let mut bytes = vec![0u8; samples.len() * 4];
+
+            write_f32_samples_to_wasapi_bytes(&samples, &mut bytes, 32, true);
+
+            let expected = samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(bytes, expected);
+        }
+
+        #[test]
+        fn write_output_samples_supports_32_bit_integer() {
+            let samples = [0.0f32, 1.0, -1.0, 0.5];
+            let mut bytes = vec![0u8; samples.len() * 4];
+
+            write_f32_samples_to_wasapi_bytes(&samples, &mut bytes, 32, false);
+
+            let expected_values = [0i32, 2147483647, -2147483647, 1073741823];
+            let expected = expected_values
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(bytes, expected);
+        }
+
+        #[test]
+        fn write_output_samples_preserves_24_bit_integer_layout() {
+            let samples = [0.0f32, 1.0, -1.0, 0.5];
+            let mut bytes = vec![0u8; samples.len() * 3];
+
+            write_f32_samples_to_wasapi_bytes(&samples, &mut bytes, 24, false);
+
+            let expected_values = [0i32, 8388607, -8388607, 4194303];
+            let expected = expected_values
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes()[0..3].to_vec())
+                .collect::<Vec<_>>();
+            assert_eq!(bytes, expected);
+        }
+
+        #[test]
+        fn write_output_samples_preserves_16_bit_integer_layout() {
+            let samples = [0.0f32, 1.0, -1.0, 0.5];
+            let mut bytes = vec![0u8; samples.len() * 2];
+
+            write_f32_samples_to_wasapi_bytes(&samples, &mut bytes, 16, false);
+
+            let expected_values = [0i16, 32767, -32767, 16383];
+            let expected = expected_values
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(bytes, expected);
         }
     }
 }
