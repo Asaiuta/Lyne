@@ -84,6 +84,28 @@ pub mod wasapi_exclusive {
         }
     }
 
+    const COMMON_WASAPI_SAMPLE_RATES: [usize; 6] = [192000, 176400, 96000, 88200, 48000, 44100];
+    const MAX_WASAPI_SAMPLE_RATE_CANDIDATES: usize = COMMON_WASAPI_SAMPLE_RATES.len() + 1;
+
+    fn build_candidate_sample_rates(
+        requested_sample_rate: usize,
+    ) -> ([usize; MAX_WASAPI_SAMPLE_RATE_CANDIDATES], usize) {
+        let mut rates = [0usize; MAX_WASAPI_SAMPLE_RATE_CANDIDATES];
+        let mut len = 0usize;
+
+        rates[len] = requested_sample_rate;
+        len += 1;
+
+        for rate in COMMON_WASAPI_SAMPLE_RATES {
+            if !rates[..len].contains(&rate) {
+                rates[len] = rate;
+                len += 1;
+            }
+        }
+
+        (rates, len)
+    }
+
     pub struct WasapiExclusivePlayer {
         shared_state: Arc<WasapiSharedState>,
         cmd_tx: Sender<WasapiCommand>,
@@ -307,23 +329,16 @@ pub mod wasapi_exclusive {
             .get_iaudioclient()
             .map_err(|e| format!("Failed to get audio client: {:?}", e))?;
 
-        // Sample rates to try, in order of preference (highest quality first)
-        // Start with the requested rate, then fall back to common high-quality rates
-        let candidate_sample_rates: Vec<usize> = {
-            let mut rates = vec![sample_rate];
-            for &rate in &[192000, 176400, 96000, 88200, 48000, 44100] {
-                if rate != sample_rate && !rates.contains(&rate) {
-                    rates.push(rate);
-                }
-            }
-            rates
-        };
+        // Sample rates to try, in order of preference (highest quality first).
+        // Start with the requested rate, then fall back to common high-quality rates.
+        let (candidate_sample_rates, candidate_sample_rate_count) =
+            build_candidate_sample_rates(sample_rate);
 
         // Try to find a supported format across all sample rates
         let mut desired_format: Option<WaveFormat> = None;
         let mut actual_sample_rate = sample_rate;
 
-        'outer: for &try_rate in &candidate_sample_rates {
+        'outer: for &try_rate in &candidate_sample_rates[..candidate_sample_rate_count] {
             // Need to get a fresh audio client for each rate attempt
             if try_rate != sample_rate {
                 audio_client = device
@@ -721,6 +736,28 @@ pub mod wasapi_exclusive {
 
         shared_state.is_active.store(false, Ordering::Relaxed);
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn candidate_sample_rates_keep_requested_first_and_deduplicate() {
+            let (rates, len) = build_candidate_sample_rates(48000);
+
+            assert_eq!(&rates[..len], &[48000, 192000, 176400, 96000, 88200, 44100]);
+        }
+
+        #[test]
+        fn candidate_sample_rates_include_non_common_requested_rate() {
+            let (rates, len) = build_candidate_sample_rates(384000);
+
+            assert_eq!(
+                &rates[..len],
+                &[384000, 192000, 176400, 96000, 88200, 48000, 44100]
+            );
+        }
     }
 }
 
