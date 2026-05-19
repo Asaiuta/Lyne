@@ -136,8 +136,6 @@ impl AudioPlayer {
 
         let thread_state = Arc::clone(&shared_state);
 
-        let spectrum_analyzer = Arc::new(SpectrumAnalyzer::new(2048, 64));
-
         let loudness_normalizer = Arc::new(Mutex::new(LoudnessNormalizer::new(
             2,
             44100,
@@ -148,7 +146,7 @@ impl AudioPlayer {
         let (spectrum_tx, spectrum_rx) = crossbeam::channel::bounded::<f64>(4096);
 
         let spec_state = Arc::clone(&shared_state);
-        let spec_analyzer = Arc::clone(&spectrum_analyzer);
+        let spec_analyzer = SpectrumAnalyzer::new(2048, 64);
         thread::spawn(move || {
             spectrum_thread_main(spectrum_rx, spec_state, spec_analyzer);
         });

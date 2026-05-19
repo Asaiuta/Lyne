@@ -3,13 +3,12 @@
 //! Receives audio samples via channel and performs FFT analysis
 //! for visualization purposes.
 
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-
 use crossbeam::channel::Receiver;
+use std::sync::atomic::Ordering;
 
 use super::state::SharedState;
 use crate::processor::SpectrumAnalyzer;
+use std::sync::Arc;
 
 /// Spectrum analysis thread entry point
 ///
@@ -19,7 +18,7 @@ use crate::processor::SpectrumAnalyzer;
 pub fn spectrum_thread_main(
     rx: Receiver<f64>,
     shared: Arc<SharedState>,
-    analyzer: Arc<SpectrumAnalyzer>,
+    mut analyzer: SpectrumAnalyzer,
 ) {
     let window_size = 2048;
     let mut buffer = Vec::with_capacity(window_size);
@@ -31,7 +30,9 @@ pub fn spectrum_thread_main(
                 if buffer.len() >= window_size {
                     let sr = shared.sample_rate.load(Ordering::Relaxed) as u32;
                     let spectrum_data = analyzer.analyze(&buffer, sr);
-                    *shared.spectrum_data.lock() = spectrum_data;
+                    let mut shared_spectrum = shared.spectrum_data.lock();
+                    shared_spectrum.clear();
+                    shared_spectrum.extend_from_slice(spectrum_data);
                     buffer.clear();
                 }
             }
