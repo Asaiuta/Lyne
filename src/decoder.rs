@@ -95,6 +95,28 @@ impl std::fmt::Display for NetworkError {
     }
 }
 
+fn checked_download_capacity(
+    content_length: Option<u64>,
+    max_download_bytes: usize,
+) -> Result<Option<usize>, DecoderError> {
+    let Some(len) = content_length else {
+        return Ok(None);
+    };
+
+    if len > max_download_bytes as u64 {
+        let len_mb = len / BYTES_PER_MIB as u64;
+        return Err(DecoderError::Network(NetworkError::Other(format!(
+            "File too large for non-Range download: {} MB (limit: {} MB). \
+             Server must support Range requests for files this size. \
+             Increase DECODE_MAX_MEMORY_MB env var if needed.",
+            len_mb,
+            bytes_to_mib(max_download_bytes)
+        ))));
+    }
+
+    Ok(Some(len as usize))
+}
+
 const NETWORK_MAX_ATTEMPTS: usize = 3;
 const NETWORK_BACKOFF_DELAYS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -924,18 +946,8 @@ impl StreamingDecoder {
                     })
                     .map_err(network_error_to_decoder_error)?;
 
-                    // Check if file is too large
                     if let Some(len) = content_length {
-                        if len as usize > max_download_bytes {
-                            let len_mb = len / BYTES_PER_MIB as u64;
-                            return Err(DecoderError::Network(NetworkError::Other(format!(
-                                "File too large for non-Range download: {} MB (limit: {} MB). \
-                                 Server must support Range requests for files this size. \
-                                 Increase DECODE_MAX_MEMORY_MB env var if needed.",
-                                len_mb,
-                                bytes_to_mib(max_download_bytes)
-                            ))));
-                        }
+                        checked_download_capacity(Some(len), max_download_bytes)?;
                         log::info!(
                             "Downloading {} MB file (server does not support Range)",
                             len / BYTES_PER_MIB as u64
@@ -963,80 +975,30 @@ impl StreamingDecoder {
                     })
                     .map_err(network_error_to_decoder_error)?;
 
-                    // Known-size responses can be copied into a single pre-allocated
-                    // buffer, avoiding a second full-size allocation during fallback.
-                    let download_size = content_length.unwrap_or(0) as usize;
-
-                    let cursor = if download_size > 0 {
-                        // Known size: pre-allocate exact buffer and copy directly
-                        let mut buffer = vec![0u8; download_size];
-                        let mut pos = 0;
-                        let mut stream = response;
-
-                        while pos < download_size {
-                            if cancel_token
-                                .as_ref()
-                                .is_some_and(DecodeCancelToken::is_cancelled)
-                            {
-                                return Err(DecoderError::Canceled);
-                            }
-                            let remaining = &mut buffer[pos..];
-                            let n = stream
-                                .read(remaining)
-                                .map_err(|e| DecoderError::Network(NetworkError::from_io(e)))?;
-                            if n == 0 {
-                                // Early EOF - truncate buffer
-                                buffer.truncate(pos);
-                                break;
-                            }
-                            pos += n;
-
-                            // Check size limit during streaming download
-                            if pos > max_download_bytes {
-                                let actual_mb = bytes_to_mib(pos);
-                                return Err(DecoderError::Network(NetworkError::Other(format!(
-                                    "Downloaded file exceeds memory limit: {} MB (limit: {} MB)",
-                                    actual_mb,
-                                    bytes_to_mib(max_download_bytes)
-                                ))));
-                            }
+                    let download_capacity = checked_download_capacity(
+                        content_length.or(response.content_length()),
+                        max_download_bytes,
+                    )?;
+                    let mut stream = response;
+                    let mut buffer =
+                        Vec::with_capacity(download_capacity.unwrap_or(RANGE_PREFETCH));
+                    let mut chunk = [0_u8; 64 * 1024];
+                    loop {
+                        if cancel_token
+                            .as_ref()
+                            .is_some_and(DecodeCancelToken::is_cancelled)
+                        {
+                            return Err(DecoderError::Canceled);
                         }
 
-                        log::debug!(
-                            "Downloaded {} bytes directly into pre-allocated buffer",
-                            pos
-                        );
-                        Cursor::new(buffer)
-                    } else {
-                        // Unknown size: use bytes() and convert efficiently
-                        let mut stream = response;
-                        let mut buffer = Vec::new();
-                        let mut chunk = [0_u8; 64 * 1024];
-                        loop {
-                            if cancel_token
-                                .as_ref()
-                                .is_some_and(DecodeCancelToken::is_cancelled)
-                            {
-                                return Err(DecoderError::Canceled);
-                            }
-                            let n = stream
-                                .read(&mut chunk)
-                                .map_err(|e| DecoderError::Network(NetworkError::from_io(e)))?;
-                            if n == 0 {
-                                break;
-                            }
-                            buffer.extend_from_slice(&chunk[..n]);
-                            if buffer.len() > max_download_bytes {
-                                let actual_mb = bytes_to_mib(buffer.len());
-                                return Err(DecoderError::Network(NetworkError::Other(format!(
-                                    "Downloaded file exceeds memory limit: {} MB (limit: {} MB)",
-                                    actual_mb,
-                                    bytes_to_mib(max_download_bytes)
-                                ))));
-                            }
+                        let n = stream
+                            .read(&mut chunk)
+                            .map_err(|e| DecoderError::Network(NetworkError::from_io(e)))?;
+                        if n == 0 {
+                            break;
                         }
 
-                        // Check actual download size
+                        buffer.extend_from_slice(&chunk[..n]);
                         if buffer.len() > max_download_bytes {
                             let actual_mb = bytes_to_mib(buffer.len());
                             return Err(DecoderError::Network(NetworkError::Other(format!(
@@ -1045,9 +1007,14 @@ impl StreamingDecoder {
                                 bytes_to_mib(max_download_bytes)
                             ))));
                         }
+                    }
 
-                        Cursor::new(buffer)
-                    };
+                    log::debug!(
+                        "Downloaded {} bytes into buffer with initial capacity {}",
+                        buffer.len(),
+                        download_capacity.unwrap_or(RANGE_PREFETCH)
+                    );
+                    let cursor = Cursor::new(buffer);
 
                     let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
                     let mut hint = Hint::new();
