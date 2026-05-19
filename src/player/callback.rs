@@ -113,13 +113,20 @@ pub fn normalize_channels(samples: Vec<f64>, from: usize, to: usize) -> Vec<f64>
 /// Main Thread                    Audio Thread
 ///     |                              |
 ///     v                              v
+/// LoudnessState.process_gain()
+///                    |
+///                    v
 /// AtomicParams ───> DspChain.process() (owned &mut, no Mutex)
 /// (non-blocking)     |
 ///                    v
-///               [EQ → Saturation → Crossfeed → Limiter → Volume → DynamicLoudness]
+///               [EQ → Saturation → Crossfeed → PeakLimiter → Volume → DynamicLoudness → NoiseShaper]
 ///                    |
 ///                    v
-///               ArcSwapOption<FFTConvolver> ───> convolver.process_inplace()
+///               ArcSwapOption<FFTConvolver>
+///               (external IR and/or FIR EQ) ───> convolver.process_inplace()
+///                    |
+///                    v
+///               resampler/output
 /// ```
 pub struct LockfreeDspContext {
     /// Lock-free parameter references (shared with main thread, read atomically)

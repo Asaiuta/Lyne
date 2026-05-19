@@ -14,7 +14,12 @@
 //! # DSP Chain Position
 //!
 //! ```text
-//! Decoder → Loudness Normalizer → Dynamic Loudness → User EQ → Volume → Output
+//! Source buffer
+//!   → Loudness normalizer gain
+//!   → DspChain: EQ → Saturation → Crossfeed → PeakLimiter → Volume
+//!              → DynamicLoudness → NoiseShaper
+//!   → merged FFT convolver (external IR and/or FIR EQ)
+//!   → resampler/output
 //! ```
 
 use atomic_float::AtomicF32;
