@@ -608,8 +608,13 @@ impl AudioPlayer {
         let total_estimated = estimated_input_frames.max(1);
         let mut chunk_count = 0;
         let mut decoded_frames = 0_u64;
+        let mut decoded_chunk = Vec::new();
 
-        while let Some(decoded_chunk) = decoder.decode_next().map_err(|e| e.to_string())? {
+        while decoder
+            .decode_next_into(&mut decoded_chunk)
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
             if load_cancel.load(Ordering::Acquire) {
                 return Err("Load cancelled".to_string());
             }
@@ -617,8 +622,9 @@ impl AudioPlayer {
             if let Some(ref mut rs) = resampler {
                 rs.process_chunk_append(&decoded_chunk, &mut samples);
             } else {
-                samples.extend(decoded_chunk);
+                samples.extend_from_slice(&decoded_chunk);
             }
+            decoded_chunk.clear();
             chunk_count += 1;
 
             // Update progress

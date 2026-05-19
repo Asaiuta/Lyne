@@ -220,7 +220,12 @@ fn decode_to_buffer_with_cancel(
         None
     };
 
-    while let Some(chunk) = decoder.decode_next().map_err(|e| e.to_string())? {
+    let mut chunk = Vec::new();
+    while decoder
+        .decode_next_into(&mut chunk)
+        .map_err(|e| e.to_string())?
+        .is_some()
+    {
         // Check for cancellation every chunk (Defect 31 fix)
         if cancel_signal.load(Ordering::Acquire) {
             return Err("Preload cancelled".to_string());
@@ -229,8 +234,9 @@ fn decode_to_buffer_with_cancel(
         if let Some(ref mut rs) = resampler {
             rs.process_chunk_append(&chunk, &mut samples);
         } else {
-            samples.extend(chunk);
+            samples.extend_from_slice(&chunk);
         }
+        chunk.clear();
     }
 
     if let Some(ref mut rs) = resampler {
