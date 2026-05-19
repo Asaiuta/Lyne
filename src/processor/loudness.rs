@@ -27,7 +27,6 @@ pub use ramp::GainRamp;
 
 #[cfg(test)]
 mod tests {
-    use super::meter::cubic_interpolate;
     use super::*;
     use crate::processor::dsp::{db_to_linear, linear_to_db};
 
@@ -113,15 +112,4 @@ mod tests {
         assert!(detector.max_true_peak() >= max_sample * 0.99);
     }
 
-    #[test]
-    fn test_cubic_interpolation() {
-        // Simple test: interpolation at integer points should return original values
-        let y0 = 0.0;
-        let y1 = 1.0;
-        let y2 = 0.0;
-        let y3 = -1.0;
-
-        // At t=0, should return y1
-        assert!((cubic_interpolate(y0, y1, y2, y3, 0.0) - y1).abs() < 1e-10);
-    }
 }

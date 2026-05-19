@@ -1,6 +1,15 @@
-//! EBU R128 loudness meter and ITU-R BS.1770-4 true peak detector.
+//! EBU R128 loudness meter and 4x FIR true peak detector.
 
 use crate::processor::dsp::linear_to_db;
+use std::sync::OnceLock;
+
+const TRUE_PEAK_PHASES: usize = 4;
+const TRUE_PEAK_FIR_TAPS: usize = 64;
+const TRUE_PEAK_FIR_MASK: usize = TRUE_PEAK_FIR_TAPS - 1;
+const TRUE_PEAK_FIR_BETA: f64 = 8.6;
+const TRUE_PEAK_FIR_CUTOFF: f64 = 0.5;
+
+static TRUE_PEAK_FIR: OnceLock<[[f32; TRUE_PEAK_FIR_TAPS]; TRUE_PEAK_PHASES]> = OnceLock::new();
 
 /// EBU R128 loudness meter using the ebur128 crate
 /// Measures integrated, short-term, momentary loudness and loudness range
@@ -15,7 +24,7 @@ pub struct LoudnessMeter {
     loudness_range: f64,
     true_peak: f64,
     samples_processed: u64,
-    // ITU-R BS.1770-4 compliant true peak detector (per channel)
+    // 4x FIR true peak detector (per channel).
     true_peak_detectors: Vec<TruePeakDetector>,
 }
 
@@ -95,7 +104,7 @@ impl LoudnessMeter {
             self.loudness_range = lra;
         }
 
-        // True peak using ITU-R BS.1770-4 compliant 4x oversampling
+        // True peak using 4x polyphase FIR oversampling.
         // Process each channel through its dedicated TruePeakDetector
         for (ch, detector) in self.true_peak_detectors.iter_mut().enumerate() {
             detector.process_strided(samples, ch, self.channels);
@@ -139,22 +148,29 @@ impl LoudnessMeter {
     }
 }
 
-/// True Peak detector using 4x oversampling interpolation.
-/// Implements ITU-R BS.1770-4 compliant true peak detection.
+/// True peak detector using 4x polyphase FIR oversampling.
+///
+/// The FIR is a fixed-size Kaiser-windowed sinc table generated on first use.
+/// It replaces the older cubic interpolation estimate with a bounded, no-heap
+/// process path. Formal BS.1770 conformance still depends on validating the tap
+/// table against reference corpus data.
 ///
 /// This is used for measurement, not limiting. The limiter above
 /// handles peak limiting without oversampling (acceptable for most use cases).
 pub struct TruePeakDetector {
-    /// 4x oversampling interpolation state
-    prev_samples: [f64; 4],
+    /// Causal FIR history. Power-of-two length keeps wrap indexing cheap.
+    ring_buffer: [f64; TRUE_PEAK_FIR_TAPS],
+    write_pos: usize,
     /// Maximum true peak detected
     max_true_peak: f64,
 }
 
 impl TruePeakDetector {
     pub fn new() -> Self {
+        let _ = true_peak_fir();
         Self {
-            prev_samples: [0.0; 4],
+            ring_buffer: [0.0; TRUE_PEAK_FIR_TAPS],
+            write_pos: 0,
             max_true_peak: 0.0,
         }
     }
@@ -177,26 +193,22 @@ impl TruePeakDetector {
 
     #[inline]
     fn process_sample(&mut self, sample: f64) {
-        // Shift previous samples
-        self.prev_samples[0] = self.prev_samples[1];
-        self.prev_samples[1] = self.prev_samples[2];
-        self.prev_samples[2] = self.prev_samples[3];
-        self.prev_samples[3] = sample;
-
-        // Check interpolated peaks at 4x positions
-        for t in [0.25, 0.5, 0.75] {
-            let interp = cubic_interpolate(
-                self.prev_samples[0],
-                self.prev_samples[1],
-                self.prev_samples[2],
-                self.prev_samples[3],
-                t,
-            );
-            self.max_true_peak = self.max_true_peak.max(interp.abs());
-        }
-
-        // Also check the actual sample
         self.max_true_peak = self.max_true_peak.max(sample.abs());
+
+        self.ring_buffer[self.write_pos] = sample;
+        self.write_pos = (self.write_pos + 1) & TRUE_PEAK_FIR_MASK;
+
+        for phase in true_peak_fir() {
+            let mut acc = 0.0;
+            let mut ring_index = self.write_pos.wrapping_sub(1) & TRUE_PEAK_FIR_MASK;
+
+            for &tap in phase {
+                acc += self.ring_buffer[ring_index] * tap as f64;
+                ring_index = ring_index.wrapping_sub(1) & TRUE_PEAK_FIR_MASK;
+            }
+
+            self.max_true_peak = self.max_true_peak.max(acc.abs());
+        }
     }
 
     /// Get maximum true peak detected (linear)
@@ -211,7 +223,8 @@ impl TruePeakDetector {
 
     /// Reset detector state
     pub fn reset(&mut self) {
-        self.prev_samples = [0.0; 4];
+        self.ring_buffer.fill(0.0);
+        self.write_pos = 0;
         self.max_true_peak = 0.0;
     }
 }
@@ -222,16 +235,68 @@ impl Default for TruePeakDetector {
     }
 }
 
-/// Cubic interpolation for true peak estimation
-/// Uses 4-point, 3rd-order Hermite interpolation
-pub(super) fn cubic_interpolate(y0: f64, y1: f64, y2: f64, y3: f64, t: f64) -> f64 {
-    // Hermite interpolation coefficients
-    let a = y1;
-    let b = 0.5 * (y2 - y0);
-    let c = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
-    let d = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+fn true_peak_fir() -> &'static [[f32; TRUE_PEAK_FIR_TAPS]; TRUE_PEAK_PHASES] {
+    TRUE_PEAK_FIR.get_or_init(generate_true_peak_fir)
+}
 
-    a + b * t + c * t * t + d * t * t * t
+fn generate_true_peak_fir() -> [[f32; TRUE_PEAK_FIR_TAPS]; TRUE_PEAK_PHASES] {
+    let mut phases = [[0.0_f32; TRUE_PEAK_FIR_TAPS]; TRUE_PEAK_PHASES];
+    let center = (TRUE_PEAK_FIR_TAPS as f64 - 1.0) * 0.5;
+    let window_denominator = modified_bessel_i0(TRUE_PEAK_FIR_BETA);
+
+    for (phase_index, phase) in phases.iter_mut().enumerate() {
+        let fractional_delay = phase_index as f64 / TRUE_PEAK_PHASES as f64;
+        let mut sum = 0.0;
+
+        for (tap_index, tap) in phase.iter_mut().enumerate() {
+            let position = tap_index as f64 - center - fractional_delay;
+            let normalized = (2.0 * tap_index as f64) / (TRUE_PEAK_FIR_TAPS as f64 - 1.0) - 1.0;
+            let window = modified_bessel_i0(
+                TRUE_PEAK_FIR_BETA * (1.0 - normalized * normalized).max(0.0).sqrt(),
+            ) / window_denominator;
+            let value = 2.0
+                * TRUE_PEAK_FIR_CUTOFF
+                * sinc(2.0 * TRUE_PEAK_FIR_CUTOFF * position)
+                * window;
+
+            *tap = value as f32;
+            sum += value;
+        }
+
+        for tap in phase {
+            *tap = (*tap as f64 / sum) as f32;
+        }
+    }
+
+    phases
+}
+
+#[inline]
+fn sinc(x: f64) -> f64 {
+    if x.abs() < 1.0e-12 {
+        1.0
+    } else {
+        let pix = std::f64::consts::PI * x;
+        pix.sin() / pix
+    }
+}
+
+fn modified_bessel_i0(x: f64) -> f64 {
+    let half_x = x * 0.5;
+    let mut sum = 1.0;
+    let mut term = 1.0;
+
+    for k in 1..=32 {
+        let k = k as f64;
+        term *= (half_x * half_x) / (k * k);
+        sum += term;
+
+        if term < sum * 1.0e-15 {
+            break;
+        }
+    }
+
+    sum
 }
 
 #[cfg(test)]
@@ -305,5 +370,57 @@ mod tests {
             assert_eq!(meter.samples_processed(), 256);
             assert!(meter.true_peak().is_finite());
         }
+    }
+
+    #[test]
+    fn true_peak_fir_taps_are_normalized() {
+        for phase in true_peak_fir() {
+            let sum: f64 = phase.iter().map(|&tap| tap as f64).sum();
+            assert!(
+                (sum - 1.0).abs() < 1.0e-6,
+                "phase sum should preserve DC gain: {sum}"
+            );
+        }
+    }
+
+    #[test]
+    fn true_peak_reset_clears_ring_history() {
+        let mut detector = TruePeakDetector::new();
+        detector.process(&[1.0; TRUE_PEAK_FIR_TAPS]);
+        assert!(detector.max_true_peak() > 0.0);
+
+        detector.reset();
+        detector.process(&[0.0; TRUE_PEAK_FIR_TAPS]);
+
+        assert_eq!(detector.max_true_peak(), 0.0);
+    }
+
+    #[test]
+    fn true_peak_cross_buffer_continuity_matches_single_process() {
+        let samples: Vec<f64> = (0..1024).map(|i| (i as f64 * 0.071).sin()).collect();
+        let mut single = TruePeakDetector::new();
+        let mut chunked = TruePeakDetector::new();
+
+        single.process(&samples);
+        for chunk in samples.chunks(17) {
+            chunked.process(chunk);
+        }
+
+        assert_eq!(
+            single.max_true_peak().to_bits(),
+            chunked.max_true_peak().to_bits()
+        );
+    }
+
+    #[test]
+    fn true_peak_impulse_reaches_sample_peak_without_cubic_overshoot() {
+        let mut detector = TruePeakDetector::new();
+        let mut samples = vec![0.0; TRUE_PEAK_FIR_TAPS * 2];
+        samples[TRUE_PEAK_FIR_TAPS / 2] = 1.0;
+
+        detector.process(&samples);
+
+        assert!(detector.max_true_peak() >= 1.0);
+        assert!(detector.max_true_peak() < 1.1);
     }
 }
