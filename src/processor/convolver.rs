@@ -105,6 +105,78 @@ impl FFTConvolver {
         }
     }
 
+    fn prepare_channel_chunk(
+        scratch: &mut [Complex<f64>],
+        overlap: &[f64],
+        input: &[f64],
+        channels: usize,
+        channel: usize,
+        processed_frames: usize,
+        chunk_len: usize,
+        ir_len: usize,
+    ) {
+        for i in 0..ir_len - 1 {
+            scratch[i] = Complex::new(overlap[i], 0.0);
+        }
+
+        for i in 0..chunk_len {
+            scratch[i + ir_len - 1] =
+                Complex::new(input[(processed_frames + i) * channels + channel], 0.0);
+        }
+        scratch[ir_len - 1 + chunk_len..].fill(Complex::new(0.0, 0.0));
+    }
+
+    fn update_channel_overlap(
+        overlap: &mut [f64],
+        input: &[f64],
+        channels: usize,
+        channel: usize,
+        processed_frames: usize,
+        chunk_len: usize,
+        ir_len: usize,
+    ) {
+        if chunk_len >= ir_len - 1 {
+            for i in 0..ir_len - 1 {
+                overlap[i] =
+                    input[(processed_frames + chunk_len - (ir_len - 1) + i) * channels + channel];
+            }
+        } else {
+            let shift = chunk_len;
+            let keep = ir_len - 1 - shift;
+            overlap.copy_within(shift..shift + keep, 0);
+            for i in 0..shift {
+                overlap[keep + i] = input[(processed_frames + i) * channels + channel];
+            }
+        }
+    }
+
+    fn write_channel_output(
+        scratch: &[Complex<f64>],
+        output: &mut [f64],
+        channels: usize,
+        channel: usize,
+        processed_frames: usize,
+        chunk_len: usize,
+        ir_len: usize,
+        inv_n: f64,
+    ) {
+        for i in 0..chunk_len {
+            output[(processed_frames + i) * channels + channel] =
+                scratch[i + ir_len - 1].re * inv_n;
+        }
+    }
+
+    fn process_channel_chunk_fft(&mut self, channel: usize) {
+        self.fft_forward.process(&mut self.scratch_complex);
+
+        let ir_fft = &self.impulse_response_fft[channel];
+        for (sample, ir) in self.scratch_complex.iter_mut().zip(ir_fft) {
+            *sample *= *ir;
+        }
+
+        self.fft_inverse.process(&mut self.scratch_complex);
+    }
+
     /// Process audio block with zero allocation
     ///
     /// # Arguments
@@ -134,56 +206,37 @@ impl FFTConvolver {
             while processed_frames < total_frames {
                 let chunk_len = std::cmp::min(step_size, total_frames - processed_frames);
 
-                // Use pre-allocated scratch buffer
-                let scratch = &mut self.scratch_complex;
+                Self::prepare_channel_chunk(
+                    &mut self.scratch_complex,
+                    &self.overlap_buffers[ch],
+                    input,
+                    channels,
+                    ch,
+                    processed_frames,
+                    chunk_len,
+                    ir_len,
+                );
+                self.process_channel_chunk_fft(ch);
+                Self::write_channel_output(
+                    &self.scratch_complex,
+                    output,
+                    channels,
+                    ch,
+                    processed_frames,
+                    chunk_len,
+                    ir_len,
+                    inv_n,
+                );
 
-                // 1. 填充重叠部分 (来自上一个块的末尾)
-                for i in 0..ir_len - 1 {
-                    scratch[i] = Complex::new(self.overlap_buffers[ch][i], 0.0);
-                }
-
-                // 2. 填充当前块数据
-                for i in 0..chunk_len {
-                    scratch[i + ir_len - 1] =
-                        Complex::new(input[(processed_frames + i) * channels + ch], 0.0);
-                }
-                scratch[ir_len - 1 + chunk_len..].fill(Complex::new(0.0, 0.0));
-
-                // 3. FFT (using cached plan)
-                self.fft_forward.process(scratch);
-
-                // 4. 频域相乘
-                let ir_fft = &self.impulse_response_fft[ch];
-                for i in 0..fft_size {
-                    scratch[i] *= ir_fft[i];
-                }
-
-                // 5. IFFT (using cached plan)
-                self.fft_inverse.process(scratch);
-
-                // 6. 提取有效部分并写入输出
-                for i in 0..chunk_len {
-                    output[(processed_frames + i) * channels + ch] =
-                        scratch[i + ir_len - 1].re * inv_n;
-                }
-
-                // 7. 更新重叠缓冲区
-                let overlap = &mut self.overlap_buffers[ch];
-                if chunk_len >= ir_len - 1 {
-                    for i in 0..ir_len - 1 {
-                        overlap[i] = input
-                            [(processed_frames + chunk_len - (ir_len - 1) + i) * channels + ch];
-                    }
-                } else {
-                    let shift = chunk_len;
-                    let keep = ir_len - 1 - shift;
-                    // Shift left
-                    overlap.copy_within(shift..shift + keep, 0);
-                    // Append new
-                    for i in 0..shift {
-                        overlap[keep + i] = input[(processed_frames + i) * channels + ch];
-                    }
-                }
+                Self::update_channel_overlap(
+                    &mut self.overlap_buffers[ch],
+                    input,
+                    channels,
+                    ch,
+                    processed_frames,
+                    chunk_len,
+                    ir_len,
+                );
 
                 processed_frames += chunk_len;
             }
@@ -229,56 +282,42 @@ impl FFTConvolver {
             while processed_frames < total_frames {
                 let chunk_len = std::cmp::min(step_size, total_frames - processed_frames);
 
-                // Use pre-allocated scratch buffer
-                let scratch = &mut self.scratch_complex;
-
-                // 1. 填充重叠部分 (来自上一个块的末尾)
-                for i in 0..ir_len - 1 {
-                    scratch[i] = Complex::new(self.overlap_buffers[ch][i], 0.0);
-                }
-
-                // 2. 填充当前块数据
-                for i in 0..chunk_len {
-                    scratch[i + ir_len - 1] =
-                        Complex::new(buf[(processed_frames + i) * channels + ch], 0.0);
-                }
-                scratch[ir_len - 1 + chunk_len..].fill(Complex::new(0.0, 0.0));
-
-                // 3. FFT (using cached plan)
-                self.fft_forward.process(scratch);
-
-                // 4. 频域相乘
-                let ir_fft = &self.impulse_response_fft[ch];
-                for i in 0..fft_size {
-                    scratch[i] *= ir_fft[i];
-                }
-
-                // 5. IFFT (using cached plan)
-                self.fft_inverse.process(scratch);
+                Self::prepare_channel_chunk(
+                    &mut self.scratch_complex,
+                    &self.overlap_buffers[ch],
+                    buf,
+                    channels,
+                    ch,
+                    processed_frames,
+                    chunk_len,
+                    ir_len,
+                );
+                self.process_channel_chunk_fft(ch);
 
                 // 6. Save original input for overlap BEFORE writing output
                 // (This is critical for inplace processing - we need the original input,
                 // not the processed output, for the next chunk's overlap)
-                let overlap = &mut self.overlap_buffers[ch];
-                if chunk_len >= ir_len - 1 {
-                    for i in 0..ir_len - 1 {
-                        overlap[i] =
-                            buf[(processed_frames + chunk_len - (ir_len - 1) + i) * channels + ch];
-                    }
-                } else {
-                    let shift = chunk_len;
-                    let keep = ir_len - 1 - shift;
-                    overlap.copy_within(shift..shift + keep, 0);
-                    for i in 0..shift {
-                        overlap[keep + i] = buf[(processed_frames + i) * channels + ch];
-                    }
-                }
+                Self::update_channel_overlap(
+                    &mut self.overlap_buffers[ch],
+                    buf,
+                    channels,
+                    ch,
+                    processed_frames,
+                    chunk_len,
+                    ir_len,
+                );
 
                 // 7. Write processed output to buffer
-                for i in 0..chunk_len {
-                    buf[(processed_frames + i) * channels + ch] =
-                        scratch[i + ir_len - 1].re * inv_n;
-                }
+                Self::write_channel_output(
+                    &self.scratch_complex,
+                    buf,
+                    channels,
+                    ch,
+                    processed_frames,
+                    chunk_len,
+                    ir_len,
+                    inv_n,
+                );
 
                 processed_frames += chunk_len;
             }
