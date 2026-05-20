@@ -2,14 +2,15 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use audio_engine::processor::{
-    AtomicVolumeParams, AudioProcessor, GainRamp, NoiseShaper, Saturation, SaturationType,
-    TrackLoudness, VolumeController, VolumeProcessor,
+    AtomicVolumeParams, AudioProcessor, GainRamp, NoiseShaper, NoiseShaperCurve, Saturation,
+    SaturationType, TrackLoudness, VolumeController, VolumeProcessor,
 };
 
 const SAMPLE_RATE: u32 = 48_000;
 const SAMPLE_RATE_F64: f64 = SAMPLE_RATE as f64;
 const CHANNELS: usize = 2;
 const CALLBACK_FRAMES: usize = 64;
+const BENCH_INV_U64_MAX: f64 = 1.0 / u64::MAX as f64;
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let quick = args.iter().any(|arg| arg == "--quick");
@@ -22,6 +23,12 @@ fn main() {
 
     let noise_report = benchmark_noise_shaper(&corpus, iterations);
     print_report("noise_shaper_cached_scale_tpdf", &noise_report);
+
+    let noise_ring_report = benchmark_noise_shaper_9tap_duplicated_ring(&corpus, iterations);
+    print_report(
+        "candidate_noise_shaper_9tap_duplicated_ring",
+        &noise_ring_report,
+    );
 
     let volume_controller_report = benchmark_volume_controller(&corpus, iterations);
     print_report(
@@ -78,7 +85,10 @@ fn main() {
 struct BenchReport {
     current_ns_per_unit: f64,
     legacy_ns_per_unit: f64,
+    original_ns_per_unit: f64,
+    first_pass_ns_per_unit: Option<f64>,
     improvement_percent: f64,
+    original_improvement_percent: f64,
 }
 
 fn benchmark_noise_shaper(corpus: &[f64], iterations: usize) -> BenchReport {
@@ -117,6 +127,47 @@ fn benchmark_noise_shaper(corpus: &[f64], iterations: usize) -> BenchReport {
     );
 
     report(current_duration, legacy_duration, corpus.len() * iterations)
+}
+
+fn benchmark_noise_shaper_9tap_duplicated_ring(corpus: &[f64], iterations: usize) -> BenchReport {
+    assert_noise_9tap_duplicated_ring_outputs_match(corpus);
+
+    let coeffs = NoiseShaperCurve::FWeighted9.coeffs();
+    let candidate_duration = measure(
+        || {
+            let mut shaper = DuplicatedRing9TapNoiseShaper::new(CHANNELS, coeffs, 24);
+            let mut sum = 0.0;
+            for frame in 0..(corpus.len() / CHANNELS) {
+                for ch in 0..CHANNELS {
+                    let idx = frame * CHANNELS + ch;
+                    sum += shaper.process_sample(black_box(corpus[idx]), ch);
+                }
+            }
+            black_box(sum)
+        },
+        iterations,
+    );
+
+    let current_shift_duration = measure(
+        || {
+            let mut shaper = Current9TapShiftNoiseShaper::new(CHANNELS, coeffs, 24);
+            let mut sum = 0.0;
+            for frame in 0..(corpus.len() / CHANNELS) {
+                for ch in 0..CHANNELS {
+                    let idx = frame * CHANNELS + ch;
+                    sum += shaper.process_sample(black_box(corpus[idx]), ch);
+                }
+            }
+            black_box(sum)
+        },
+        iterations,
+    );
+
+    report(
+        candidate_duration,
+        current_shift_duration,
+        corpus.len() * iterations,
+    )
 }
 
 fn benchmark_volume_controller(corpus: &[f64], iterations: usize) -> BenchReport {
@@ -283,6 +334,7 @@ fn benchmark_gain_ramp_block_apply(corpus: &[f64], iterations: usize) -> BenchRe
     assert_gain_ramp_block_apply_matches_next_gain_loop(corpus);
     let mut current_buffer = corpus.to_vec();
     let mut legacy_buffer = corpus.to_vec();
+    let mut original_buffer = corpus.to_vec();
 
     let current_duration = measure(
         || {
@@ -308,7 +360,24 @@ fn benchmark_gain_ramp_block_apply(corpus: &[f64], iterations: usize) -> BenchRe
         iterations,
     );
 
-    report(current_duration, legacy_duration, corpus.len() * iterations)
+    let original_duration = measure(
+        || {
+            let mut ramp = LegacyGainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
+            original_buffer.copy_from_slice(corpus);
+            for sample in &mut original_buffer {
+                *sample *= ramp.next_gain();
+            }
+            black_box(original_buffer[original_buffer.len() / 2])
+        },
+        iterations,
+    );
+
+    report_with_first_pass(
+        current_duration,
+        legacy_duration,
+        original_duration,
+        corpus.len() * iterations,
+    )
 }
 
 fn benchmark_saturation_outer_dispatch(corpus: &[f64], iterations: usize) -> BenchReport {
@@ -374,7 +443,22 @@ fn benchmark_volume_lazy_settle(corpus: &[f64], iterations: usize) -> BenchRepor
         iterations,
     );
 
-    report(current_duration, legacy_duration, corpus.len() * iterations)
+    let original_duration = measure(
+        || {
+            let mut volume = OriginalExactVolumeKernel::new(SAMPLE_RATE_F64, 0.25);
+            let mut buffer = corpus.to_vec();
+            volume.process(black_box(&mut buffer), CHANNELS);
+            black_box(buffer[buffer.len() - 1])
+        },
+        iterations,
+    );
+
+    report_with_first_pass(
+        current_duration,
+        legacy_duration,
+        original_duration,
+        corpus.len() * iterations,
+    )
 }
 
 fn configured_saturation() -> Saturation {
@@ -402,16 +486,55 @@ fn report(current: Duration, legacy: Duration, units: usize) -> BenchReport {
     BenchReport {
         current_ns_per_unit,
         legacy_ns_per_unit,
+        original_ns_per_unit: legacy_ns_per_unit,
+        first_pass_ns_per_unit: None,
         improvement_percent: (legacy_ns_per_unit - current_ns_per_unit) / legacy_ns_per_unit
+            * 100.0,
+        original_improvement_percent: (legacy_ns_per_unit - current_ns_per_unit)
+            / legacy_ns_per_unit
+            * 100.0,
+    }
+}
+
+fn report_with_first_pass(
+    current: Duration,
+    first_pass: Duration,
+    original: Duration,
+    units: usize,
+) -> BenchReport {
+    let current_ns_per_unit = nanos_per_unit(current, units);
+    let first_pass_ns_per_unit = nanos_per_unit(first_pass, units);
+    let original_ns_per_unit = nanos_per_unit(original, units);
+    BenchReport {
+        current_ns_per_unit,
+        legacy_ns_per_unit: first_pass_ns_per_unit,
+        original_ns_per_unit,
+        first_pass_ns_per_unit: Some(first_pass_ns_per_unit),
+        improvement_percent: (first_pass_ns_per_unit - current_ns_per_unit)
+            / first_pass_ns_per_unit
+            * 100.0,
+        original_improvement_percent: (original_ns_per_unit - current_ns_per_unit)
+            / original_ns_per_unit
             * 100.0,
     }
 }
 
 fn print_report(name: &str, report: &BenchReport) {
-    println!(
-        "{name} current={:.3} ns/unit legacy={:.3} ns/unit improvement={:.2}%",
-        report.current_ns_per_unit, report.legacy_ns_per_unit, report.improvement_percent
-    );
+    if let Some(first_pass) = report.first_pass_ns_per_unit {
+        println!(
+            "{name} current={:.3} ns/unit first_pass={:.3} ns/unit original={:.3} ns/unit incremental_improvement={:.2}% original_improvement={:.2}%",
+            report.current_ns_per_unit,
+            first_pass,
+            report.original_ns_per_unit,
+            report.improvement_percent,
+            report.original_improvement_percent
+        );
+    } else {
+        println!(
+            "{name} current={:.3} ns/unit legacy={:.3} ns/unit improvement={:.2}%",
+            report.current_ns_per_unit, report.legacy_ns_per_unit, report.improvement_percent
+        );
+    }
 }
 
 fn nanos_per_unit(duration: Duration, units: usize) -> f64 {
@@ -466,6 +589,32 @@ fn assert_noise_outputs_match(
             let current_out = current.process_sample(corpus[idx], ch);
             let legacy_out = legacy.process_sample(corpus[idx], ch);
             assert_eq!(current_out.to_bits(), legacy_out.to_bits());
+        }
+    }
+}
+
+fn assert_noise_9tap_duplicated_ring_outputs_match(corpus: &[f64]) {
+    for curve in [
+        NoiseShaperCurve::FWeighted9,
+        NoiseShaperCurve::ModifiedE9,
+        NoiseShaperCurve::ImprovedE9,
+    ] {
+        let coeffs = curve.coeffs();
+        let mut current = Current9TapShiftNoiseShaper::new(CHANNELS, coeffs, 24);
+        let mut candidate = DuplicatedRing9TapNoiseShaper::new(CHANNELS, coeffs, 24);
+
+        for frame in 0..(corpus.len() / CHANNELS) {
+            for ch in 0..CHANNELS {
+                let idx = frame * CHANNELS + ch;
+                let current_out = current.process_sample(corpus[idx], ch);
+                let candidate_out = candidate.process_sample(corpus[idx], ch);
+                assert_eq!(
+                    candidate_out.to_bits(),
+                    current_out.to_bits(),
+                    "duplicated ring mismatch for {:?} frame {frame} channel {ch}",
+                    curve
+                );
+            }
         }
     }
 }
@@ -533,8 +682,10 @@ fn assert_loudness_gain_outputs_match() {
 fn assert_gain_ramp_block_apply_matches_next_gain_loop(corpus: &[f64]) {
     let mut current = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
     let mut legacy = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
+    let mut original = LegacyGainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
     let mut current_buffer = corpus.to_vec();
     let mut legacy_buffer = corpus.to_vec();
+    let mut original_buffer = corpus.to_vec();
 
     for block in current_buffer.chunks_mut(CALLBACK_FRAMES * CHANNELS) {
         current.apply(block);
@@ -542,11 +693,20 @@ fn assert_gain_ramp_block_apply_matches_next_gain_loop(corpus: &[f64]) {
     for sample in &mut legacy_buffer {
         *sample *= legacy.next_gain();
     }
+    for sample in &mut original_buffer {
+        *sample *= original.next_gain();
+    }
 
     assert_max_abs_diff(
         "GainRampBlockApply",
         &current_buffer,
         &legacy_buffer,
+        1.0e-12,
+    );
+    assert_max_abs_diff(
+        "GainRampBlockApplyOriginal",
+        &current_buffer,
+        &original_buffer,
         1.0e-12,
     );
 }
@@ -569,14 +729,23 @@ fn assert_saturation_outer_dispatch_outputs_match(corpus: &[f64]) {
 fn assert_volume_lazy_settle_close(corpus: &[f64]) {
     let mut current = CurrentVolumeKernel::new(SAMPLE_RATE_F64, 0.25);
     let mut legacy = LegacyExactVolumeKernel::new(SAMPLE_RATE_F64, 0.25);
+    let mut original = OriginalExactVolumeKernel::new(SAMPLE_RATE_F64, 0.25);
     let mut current_buffer = corpus.to_vec();
     let mut legacy_buffer = corpus.to_vec();
+    let mut original_buffer = corpus.to_vec();
     current.process(&mut current_buffer, CHANNELS);
     legacy.process(&mut legacy_buffer, CHANNELS);
+    original.process(&mut original_buffer, CHANNELS);
     assert_max_abs_diff(
         "VolumeLazySettleKernel",
         &current_buffer,
         &legacy_buffer,
+        1.0e-6,
+    );
+    assert_max_abs_diff(
+        "VolumeLazySettleOriginalKernel",
+        &current_buffer,
+        &original_buffer,
         1.0e-6,
     );
 }
@@ -670,6 +839,157 @@ impl LegacyNoiseShaper {
         e[0] = clamped_error;
 
         quantized * (1.0 / scale)
+    }
+}
+
+struct Current9TapShiftNoiseShaper {
+    error_history: Vec<[f64; 9]>,
+    coeffs: [f64; 9],
+    scale: f64,
+    lsb: f64,
+    rng_state: u64,
+}
+
+impl Current9TapShiftNoiseShaper {
+    fn new(channels: usize, coeffs: [f64; 9], bits: u32) -> Self {
+        let scale = 2.0_f64.powi(bits.clamp(8, 32) as i32 - 1);
+        Self {
+            error_history: vec![[0.0; 9]; channels],
+            coeffs,
+            scale,
+            lsb: 1.0 / scale,
+            rng_state: 0x1234_5678_9ABC_DEF0,
+        }
+    }
+
+    #[inline(always)]
+    fn next_u64(&mut self) -> u64 {
+        self.rng_state ^= self.rng_state << 13;
+        self.rng_state ^= self.rng_state >> 7;
+        self.rng_state ^= self.rng_state << 17;
+        self.rng_state
+    }
+
+    #[inline(always)]
+    fn tpdf(&mut self) -> f64 {
+        let r1 = self.next_u64() as f64 * BENCH_INV_U64_MAX;
+        let r2 = self.next_u64() as f64 * BENCH_INV_U64_MAX;
+        r1 - r2
+    }
+
+    #[inline(always)]
+    fn process_sample(&mut self, sample: f64, ch: usize) -> f64 {
+        if ch >= self.error_history.len() {
+            return sample;
+        }
+
+        const SILENCE_THRESHOLD: f64 = 1e-6;
+        if sample.abs() < SILENCE_THRESHOLD {
+            self.error_history[ch] = [0.0; 9];
+            return sample;
+        }
+
+        let dither = self.tpdf();
+        let e = &mut self.error_history[ch];
+        let feedback = self.coeffs[0] * e[0]
+            + self.coeffs[1] * e[1]
+            + self.coeffs[2] * e[2]
+            + self.coeffs[3] * e[3]
+            + self.coeffs[4] * e[4]
+            + self.coeffs[5] * e[5]
+            + self.coeffs[6] * e[6]
+            + self.coeffs[7] * e[7]
+            + self.coeffs[8] * e[8];
+        let x = sample * self.scale + feedback;
+        let quantized = (x + dither).round();
+        let clamped_error = (x - quantized).clamp(-2.0, 2.0);
+
+        e[8] = e[7];
+        e[7] = e[6];
+        e[6] = e[5];
+        e[5] = e[4];
+        e[4] = e[3];
+        e[3] = e[2];
+        e[2] = e[1];
+        e[1] = e[0];
+        e[0] = clamped_error;
+
+        quantized * self.lsb
+    }
+}
+
+struct DuplicatedRing9TapNoiseShaper {
+    history: Vec<[f64; 18]>,
+    heads: Vec<usize>,
+    coeffs: [f64; 9],
+    scale: f64,
+    lsb: f64,
+    rng_state: u64,
+}
+
+impl DuplicatedRing9TapNoiseShaper {
+    fn new(channels: usize, coeffs: [f64; 9], bits: u32) -> Self {
+        let scale = 2.0_f64.powi(bits.clamp(8, 32) as i32 - 1);
+        Self {
+            history: vec![[0.0; 18]; channels],
+            heads: vec![0; channels],
+            coeffs,
+            scale,
+            lsb: 1.0 / scale,
+            rng_state: 0x1234_5678_9ABC_DEF0,
+        }
+    }
+
+    #[inline(always)]
+    fn next_u64(&mut self) -> u64 {
+        self.rng_state ^= self.rng_state << 13;
+        self.rng_state ^= self.rng_state >> 7;
+        self.rng_state ^= self.rng_state << 17;
+        self.rng_state
+    }
+
+    #[inline(always)]
+    fn tpdf(&mut self) -> f64 {
+        let r1 = self.next_u64() as f64 * BENCH_INV_U64_MAX;
+        let r2 = self.next_u64() as f64 * BENCH_INV_U64_MAX;
+        r1 - r2
+    }
+
+    #[inline(always)]
+    fn process_sample(&mut self, sample: f64, ch: usize) -> f64 {
+        if ch >= self.history.len() {
+            return sample;
+        }
+
+        const SILENCE_THRESHOLD: f64 = 1e-6;
+        if sample.abs() < SILENCE_THRESHOLD {
+            self.history[ch] = [0.0; 18];
+            self.heads[ch] = 0;
+            return sample;
+        }
+
+        let dither = self.tpdf();
+        let head = self.heads[ch];
+        let e = &mut self.history[ch];
+        let feedback = e[head] * self.coeffs[0]
+            + e[head + 1] * self.coeffs[1]
+            + e[head + 2] * self.coeffs[2]
+            + e[head + 3] * self.coeffs[3]
+            + e[head + 4] * self.coeffs[4]
+            + e[head + 5] * self.coeffs[5]
+            + e[head + 6] * self.coeffs[6]
+            + e[head + 7] * self.coeffs[7]
+            + e[head + 8] * self.coeffs[8];
+        let x = sample * self.scale + feedback;
+        let quantized = (x + dither).round();
+        let clamped_error = (x - quantized).clamp(-2.0, 2.0);
+
+        let next_head = if head == 0 { 8 } else { head - 1 };
+        e[next_head] = clamped_error;
+        e[next_head + 9] = clamped_error;
+        self.heads[ch] = next_head;
+
+        quantized * self.lsb
     }
 }
 
@@ -943,6 +1263,36 @@ impl LegacyExactVolumeKernel {
             }
         }
         self.current_volume = current_volume;
+    }
+}
+
+struct OriginalExactVolumeKernel {
+    current_volume: f64,
+    target: f64,
+    smoothing_coeff: f64,
+}
+
+impl OriginalExactVolumeKernel {
+    fn new(sample_rate: f64, target: f64) -> Self {
+        let smoothing_coeff = (-1.0 / (0.005 * sample_rate)).exp();
+        Self {
+            current_volume: 1.0,
+            target,
+            smoothing_coeff,
+        }
+    }
+
+    fn process(&mut self, buffer: &mut [f64], channels: usize) {
+        let target = self.target;
+        let smoothing_coeff = self.smoothing_coeff;
+        let frames = buffer.len() / channels;
+
+        for frame in 0..frames {
+            self.current_volume += (target - self.current_volume) * (1.0 - smoothing_coeff);
+            for ch in 0..channels {
+                buffer[frame * channels + ch] *= self.current_volume;
+            }
+        }
     }
 }
 

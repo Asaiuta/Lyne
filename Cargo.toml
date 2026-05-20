@@ -28,6 +28,26 @@ harness = false
 name = "audio_lockfree_params_perf"
 harness = false
 
+[[bench]]
+name = "audio_overall_perf"
+harness = false
+
+[[bench]]
+name = "audio_callback_chain_perf"
+harness = false
+
+[[bench]]
+name = "audio_resampler_streaming_perf"
+harness = false
+
+[[bench]]
+name = "audio_spectrum_handoff_perf"
+harness = false
+
+[[bench]]
+name = "audio_decode_preload_perf"
+harness = false
+
 [dependencies]
 audio-runtime-paths = { path = "crates/audio-runtime-paths" }
 # --- Core Audio ---

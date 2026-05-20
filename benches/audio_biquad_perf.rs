@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -38,6 +36,12 @@ fn main() {
         eq_report.legacy_ns_per_sample,
         eq_report.improvement_percent
     );
+    println!(
+        "eq_settled_stereo_fast_delta current={:.3} ns/sample previous_flat={:.3} ns/sample improvement={:.2}%",
+        eq_report.current_ns_per_sample,
+        eq_report.previous_flat_ns_per_sample,
+        eq_report.previous_flat_improvement_percent
+    );
     if enforce {
         assert!(
             eq_report.improvement_percent >= 10.0,
@@ -70,6 +74,12 @@ fn main() {
         dl_transitioning_report.legacy_ns_per_sample,
         dl_transitioning_report.improvement_percent
     );
+    println!(
+        "dynamic_loudness_active_index_transitioning candidate={:.3} ns/sample current={:.3} ns/sample improvement={:.2}%",
+        dl_transitioning_report.candidate_ns_per_sample,
+        dl_transitioning_report.current_ns_per_sample,
+        dl_transitioning_report.candidate_improvement_percent
+    );
 
     let dl_max_active_report = benchmark_dynamic_loudness(
         &corpus,
@@ -82,6 +92,12 @@ fn main() {
         dl_max_active_report.legacy_ns_per_sample,
         dl_max_active_report.improvement_percent
     );
+    println!(
+        "dynamic_loudness_active_index_max_active candidate={:.3} ns/sample current={:.3} ns/sample improvement={:.2}%",
+        dl_max_active_report.candidate_ns_per_sample,
+        dl_max_active_report.current_ns_per_sample,
+        dl_max_active_report.candidate_improvement_percent
+    );
 
     let dl_identity_report = benchmark_dynamic_loudness(
         &corpus,
@@ -93,6 +109,12 @@ fn main() {
         dl_identity_report.current_ns_per_sample,
         dl_identity_report.legacy_ns_per_sample,
         dl_identity_report.improvement_percent
+    );
+    println!(
+        "dynamic_loudness_active_index_identity candidate={:.3} ns/sample current={:.3} ns/sample improvement={:.2}%",
+        dl_identity_report.candidate_ns_per_sample,
+        dl_identity_report.current_ns_per_sample,
+        dl_identity_report.candidate_improvement_percent
     );
     if enforce {
         assert!(
@@ -107,7 +129,9 @@ fn main() {
 struct EqReport {
     current_ns_per_sample: f64,
     legacy_ns_per_sample: f64,
+    previous_flat_ns_per_sample: f64,
     improvement_percent: f64,
+    previous_flat_improvement_percent: f64,
 }
 
 #[derive(Debug)]
@@ -121,7 +145,9 @@ struct CoeffReport {
 struct ProcessReport {
     current_ns_per_sample: f64,
     legacy_ns_per_sample: f64,
+    candidate_ns_per_sample: f64,
     improvement_percent: f64,
+    candidate_improvement_percent: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -134,22 +160,35 @@ enum DynamicLoudnessScenario {
 fn benchmark_eq(corpus: &[f64], iterations: usize) -> EqReport {
     let gains = [12.0, 9.0, 6.0, 3.0, -3.0, -6.0, -9.0, -12.0, 6.0, -6.0];
 
-    let mut current = FlatEqualizer::new(CHANNELS, SAMPLE_RATE);
-    current.set_enabled(true);
-    current.set_all_bands(&gains, SAMPLE_RATE);
-    settle_current_eq(&mut current);
+    let mut current_check = prepared_flat_eq(&gains);
+    let mut legacy_check = prepared_legacy_eq(&gains);
+    assert_eq_outputs_match(&mut current_check, &mut legacy_check, corpus);
 
-    let mut legacy = LegacyEqualizer::new(CHANNELS, SAMPLE_RATE);
-    legacy.set_enabled(true);
-    legacy.set_all_bands(&gains, SAMPLE_RATE);
-    legacy.settle();
+    let mut current_previous_check = prepared_flat_eq(&gains);
+    let mut previous_flat_check = prepared_flat_eq(&gains);
+    assert_eq_previous_outputs_match(
+        &mut current_previous_check,
+        &mut previous_flat_check,
+        corpus,
+    );
 
-    assert_eq_outputs_match(&mut current, &mut legacy, corpus);
+    let mut current = prepared_flat_eq(&gains);
+    let mut legacy = prepared_legacy_eq(&gains);
+    let mut previous_flat = prepared_flat_eq(&gains);
 
     let current_duration = measure(
         || {
             let mut buffer = corpus.to_vec();
             current.process(black_box(&mut buffer));
+            black_box(buffer[0])
+        },
+        iterations,
+    );
+
+    let previous_flat_duration = measure(
+        || {
+            let mut buffer = corpus.to_vec();
+            previous_flat.process_without_fast_path(black_box(&mut buffer));
             black_box(buffer[0])
         },
         iterations,
@@ -165,7 +204,19 @@ fn benchmark_eq(corpus: &[f64], iterations: usize) -> EqReport {
     );
 
     let samples = corpus.len() * iterations;
-    report_process(current_duration, legacy_duration, samples).into_eq_report()
+    let current_ns_per_sample = nanos_per_unit(current_duration, samples);
+    let legacy_ns_per_sample = nanos_per_unit(legacy_duration, samples);
+    let previous_flat_ns_per_sample = nanos_per_unit(previous_flat_duration, samples);
+    EqReport {
+        current_ns_per_sample,
+        legacy_ns_per_sample,
+        previous_flat_ns_per_sample,
+        improvement_percent: (legacy_ns_per_sample - current_ns_per_sample) / legacy_ns_per_sample
+            * 100.0,
+        previous_flat_improvement_percent: (previous_flat_ns_per_sample - current_ns_per_sample)
+            / previous_flat_ns_per_sample
+            * 100.0,
+    }
 }
 
 fn benchmark_coefficients(iterations: usize) -> CoeffReport {
@@ -214,14 +265,36 @@ fn benchmark_dynamic_loudness(
     configure_dynamic_scenario(&mut current_check, &mut legacy_check, scenario);
     assert_dynamic_outputs_match(&mut current_check, &mut legacy_check, corpus);
 
+    let mut current_candidate_check = CachedDynamicLoudness::new(CHANNELS, SAMPLE_RATE);
+    configure_cached_dynamic_scenario(&mut current_candidate_check, scenario);
+    let mut candidate_check = CachedDynamicLoudness::new(CHANNELS, SAMPLE_RATE);
+    configure_cached_dynamic_scenario(&mut candidate_check, scenario);
+    assert_dynamic_candidate_outputs_match(
+        &mut current_candidate_check,
+        &mut candidate_check,
+        corpus,
+    );
+
     let mut current = CachedDynamicLoudness::new(CHANNELS, SAMPLE_RATE);
+    configure_cached_dynamic_scenario(&mut current, scenario);
     let mut legacy = LegacyDynamicLoudness::new(CHANNELS, SAMPLE_RATE);
-    configure_dynamic_scenario(&mut current, &mut legacy, scenario);
+    configure_legacy_dynamic_scenario(&mut legacy, scenario);
+    let mut candidate = CachedDynamicLoudness::new(CHANNELS, SAMPLE_RATE);
+    configure_cached_dynamic_scenario(&mut candidate, scenario);
 
     let current_duration = measure(
         || {
             let mut buffer = corpus.to_vec();
             current.process(black_box(&mut buffer));
+            black_box(buffer[0])
+        },
+        iterations,
+    );
+
+    let candidate_duration = measure(
+        || {
+            let mut buffer = corpus.to_vec();
+            candidate.process_active_index_candidate(black_box(&mut buffer));
             black_box(buffer[0])
         },
         iterations,
@@ -236,7 +309,12 @@ fn benchmark_dynamic_loudness(
         iterations,
     );
 
-    report_process(current_duration, legacy_duration, corpus.len() * iterations)
+    report_process_with_candidate(
+        current_duration,
+        legacy_duration,
+        candidate_duration,
+        corpus.len() * iterations,
+    )
 }
 
 fn configure_dynamic_scenario(
@@ -244,32 +322,66 @@ fn configure_dynamic_scenario(
     legacy: &mut LegacyDynamicLoudness,
     scenario: DynamicLoudnessScenario,
 ) {
+    configure_cached_dynamic_scenario(current, scenario);
+    configure_legacy_dynamic_scenario(legacy, scenario);
+}
+
+fn configure_cached_dynamic_scenario(
+    current: &mut CachedDynamicLoudness,
+    scenario: DynamicLoudnessScenario,
+) {
     match scenario {
         DynamicLoudnessScenario::TransitioningLowVolume => {
             current.set_volume_db(-40.0);
-            legacy.set_volume_db(-40.0);
         }
         DynamicLoudnessScenario::MaxActiveSettled => {
             current.set_volume_db(-40.0);
-            legacy.set_volume_db(-40.0);
-            settle_dynamic_loudness(current, legacy);
+            settle_cached_dynamic_loudness(current);
             assert_eq!(current.active_band_count(), LOUDNESS_BANDS_N - 1);
         }
         DynamicLoudnessScenario::IdentitySettled => {
             current.set_volume_db(-15.0);
-            legacy.set_volume_db(-15.0);
-            settle_dynamic_loudness(current, legacy);
+            settle_cached_dynamic_loudness(current);
             assert_eq!(current.active_band_count(), 0);
         }
     }
 }
 
+fn configure_legacy_dynamic_scenario(
+    legacy: &mut LegacyDynamicLoudness,
+    scenario: DynamicLoudnessScenario,
+) {
+    match scenario {
+        DynamicLoudnessScenario::TransitioningLowVolume => {
+            legacy.set_volume_db(-40.0);
+        }
+        DynamicLoudnessScenario::MaxActiveSettled => {
+            legacy.set_volume_db(-40.0);
+            settle_legacy_dynamic_loudness(legacy);
+        }
+        DynamicLoudnessScenario::IdentitySettled => {
+            legacy.set_volume_db(-15.0);
+            settle_legacy_dynamic_loudness(legacy);
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn settle_dynamic_loudness(
     current: &mut CachedDynamicLoudness,
     legacy: &mut LegacyDynamicLoudness,
 ) {
+    settle_cached_dynamic_loudness(current);
+    settle_legacy_dynamic_loudness(legacy);
+}
+
+fn settle_cached_dynamic_loudness(current: &mut CachedDynamicLoudness) {
     let mut silence = vec![0.0; CHANNELS * 48_000];
     current.process(&mut silence);
+}
+
+fn settle_legacy_dynamic_loudness(legacy: &mut LegacyDynamicLoudness) {
+    let mut silence = vec![0.0; CHANNELS * 48_000];
     legacy.process(&mut silence);
 }
 
@@ -281,24 +393,29 @@ fn measure<T>(mut run: impl FnMut() -> T, iterations: usize) -> Duration {
     start.elapsed()
 }
 
+#[allow(dead_code)]
 fn report_process(current: Duration, legacy: Duration, samples: usize) -> ProcessReport {
+    report_process_with_candidate(current, legacy, current, samples)
+}
+
+fn report_process_with_candidate(
+    current: Duration,
+    legacy: Duration,
+    candidate: Duration,
+    samples: usize,
+) -> ProcessReport {
     let current_ns_per_sample = nanos_per_unit(current, samples);
     let legacy_ns_per_sample = nanos_per_unit(legacy, samples);
+    let candidate_ns_per_sample = nanos_per_unit(candidate, samples);
     ProcessReport {
         current_ns_per_sample,
         legacy_ns_per_sample,
+        candidate_ns_per_sample,
         improvement_percent: (legacy_ns_per_sample - current_ns_per_sample) / legacy_ns_per_sample
             * 100.0,
-    }
-}
-
-impl ProcessReport {
-    fn into_eq_report(self) -> EqReport {
-        EqReport {
-            current_ns_per_sample: self.current_ns_per_sample,
-            legacy_ns_per_sample: self.legacy_ns_per_sample,
-            improvement_percent: self.improvement_percent,
-        }
+        candidate_improvement_percent: (current_ns_per_sample - candidate_ns_per_sample)
+            / current_ns_per_sample
+            * 100.0,
     }
 }
 
@@ -332,6 +449,22 @@ fn settle_current_eq(eq: &mut FlatEqualizer) {
     eq.process(&mut silence);
 }
 
+fn prepared_flat_eq(gains: &[f64; EQ_BANDS]) -> FlatEqualizer {
+    let mut eq = FlatEqualizer::new(CHANNELS, SAMPLE_RATE);
+    eq.set_enabled(true);
+    eq.set_all_bands(gains, SAMPLE_RATE);
+    settle_current_eq(&mut eq);
+    eq
+}
+
+fn prepared_legacy_eq(gains: &[f64; EQ_BANDS]) -> LegacyEqualizer {
+    let mut eq = LegacyEqualizer::new(CHANNELS, SAMPLE_RATE);
+    eq.set_enabled(true);
+    eq.set_all_bands(gains, SAMPLE_RATE);
+    eq.settle();
+    eq
+}
+
 fn assert_eq_outputs_match(
     current: &mut FlatEqualizer,
     legacy: &mut LegacyEqualizer,
@@ -350,6 +483,24 @@ fn assert_eq_outputs_match(
     );
 }
 
+fn assert_eq_previous_outputs_match(
+    current: &mut FlatEqualizer,
+    previous_flat: &mut FlatEqualizer,
+    corpus: &[f64],
+) {
+    let mut current_buffer = corpus.to_vec();
+    let mut previous_flat_buffer = corpus.to_vec();
+    current.process(&mut current_buffer);
+    previous_flat.process_without_fast_path(&mut previous_flat_buffer);
+
+    let max_abs = max_abs_diff(&current_buffer, &previous_flat_buffer);
+    assert!(
+        max_abs <= 1e-12,
+        "EQ previous-flat corpus mismatch max_abs={:.3e}",
+        max_abs,
+    );
+}
+
 fn assert_dynamic_outputs_match(
     current: &mut CachedDynamicLoudness,
     legacy: &mut LegacyDynamicLoudness,
@@ -364,6 +515,24 @@ fn assert_dynamic_outputs_match(
     assert!(
         max_abs <= 1.0e-3,
         "DynamicLoudness synthetic corpus mismatch max_abs={:.3e}",
+        max_abs,
+    );
+}
+
+fn assert_dynamic_candidate_outputs_match(
+    current: &mut CachedDynamicLoudness,
+    candidate: &mut CachedDynamicLoudness,
+    corpus: &[f64],
+) {
+    let mut current_buffer = corpus.to_vec();
+    let mut candidate_buffer = corpus.to_vec();
+    current.process(&mut current_buffer);
+    candidate.process_active_index_candidate(&mut candidate_buffer);
+
+    let max_abs = max_abs_diff(&current_buffer, &candidate_buffer);
+    assert!(
+        max_abs <= 1e-12,
+        "DynamicLoudness candidate corpus mismatch max_abs={:.3e}",
         max_abs,
     );
 }
@@ -495,6 +664,15 @@ impl FlatEqualizer {
         if !self.enabled {
             return;
         }
+        if self.channels == 2 && self.smooth_counter.iter().all(|&counter| counter == 0) {
+            self.process_settled_stereo_fast(buffer);
+            return;
+        }
+
+        self.process_without_fast_path(buffer);
+    }
+
+    fn process_without_fast_path(&mut self, buffer: &mut [f64]) {
         let frames = buffer.len() / self.channels;
         for frame in 0..frames {
             for ch in 0..self.channels {
@@ -511,6 +689,34 @@ impl FlatEqualizer {
                     }
                 }
             }
+        }
+    }
+
+    fn process_settled_stereo_fast(&mut self, buffer: &mut [f64]) {
+        if !self.enabled {
+            return;
+        }
+        if self.channels != 2 || self.smooth_counter.iter().any(|&counter| counter > 0) {
+            self.process(buffer);
+            return;
+        }
+
+        let (left_banks, right_banks) = self.bands.split_at_mut(1);
+        let left_bands = &mut left_banks[0];
+        let right_bands = &mut right_banks[0];
+
+        for frame in buffer.chunks_exact_mut(2) {
+            let mut left = frame[0];
+            for band in left_bands.iter_mut() {
+                left = band.process(left);
+            }
+            frame[0] = left;
+
+            let mut right = frame[1];
+            for band in right_bands.iter_mut() {
+                right = band.process(right);
+            }
+            frame[1] = right;
         }
     }
 
@@ -643,6 +849,7 @@ struct DynState {
     z2: f64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 struct CachedGeometry {
     freq: f64,
@@ -1038,6 +1245,13 @@ impl CachedDynamicLoudness {
             }
         }
 
+        if self.active_bands.iter().all(|&active| !active) {
+            for sample in buffer.iter_mut().take(frames * self.channels) {
+                *sample *= self.pre_gain_linear;
+            }
+            return;
+        }
+
         for frame in 0..frames {
             for ch in 0..self.channels {
                 let idx = frame * self.channels + ch;
@@ -1046,6 +1260,55 @@ impl CachedDynamicLoudness {
                     if self.active_bands[band] {
                         sample = self.filters[ch][band].process(sample);
                     }
+                }
+                buffer[idx] = sample;
+            }
+        }
+    }
+
+    fn process_active_index_candidate(&mut self, buffer: &mut [f64]) {
+        if !self.enabled || self.strength < 0.0001 {
+            return;
+        }
+
+        let frames = buffer.len() / self.channels;
+        if frames == 0 {
+            return;
+        }
+
+        for chunk_start in (0..frames).step_by(BLOCK_SIZE) {
+            let chunk_end = (chunk_start + BLOCK_SIZE).min(frames);
+            let chunk_frames = chunk_end - chunk_start;
+
+            for i in 0..self.smoothers.len() {
+                let gain = self.smoothers[i].next_block(chunk_frames);
+                self.apply_band_gain_if_changed(i, gain);
+            }
+        }
+
+        let mut active_indices = [0usize; LOUDNESS_BANDS_N];
+        let mut active_len = 0usize;
+        for (band, &active) in self.active_bands.iter().enumerate() {
+            if active {
+                active_indices[active_len] = band;
+                active_len += 1;
+            }
+        }
+
+        if active_len == 0 {
+            for sample in buffer.iter_mut().take(frames * self.channels) {
+                *sample *= self.pre_gain_linear;
+            }
+            return;
+        }
+
+        for frame in 0..frames {
+            for ch in 0..self.channels {
+                let idx = frame * self.channels + ch;
+                let mut sample = buffer[idx] * self.pre_gain_linear;
+                let ch_filters = &mut self.filters[ch];
+                for &band in active_indices[..active_len].iter() {
+                    sample = ch_filters[band].process(sample);
                 }
                 buffer[idx] = sample;
             }
