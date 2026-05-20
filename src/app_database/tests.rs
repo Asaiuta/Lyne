@@ -746,7 +746,9 @@ fn deleting_library_root_removes_local_media_and_playlist_refs() {
     assert!(db.source_path_for_media_id(&media_a).unwrap().is_none());
     assert!(db.source_path_for_media_id(&media_b).unwrap().is_none());
     assert_eq!(
-        db.source_path_for_media_id(&outside_media).unwrap().as_deref(),
+        db.source_path_for_media_id(&outside_media)
+            .unwrap()
+            .as_deref(),
         Some("D:/other/c.flac")
     );
     assert!(db.list_library_roots().unwrap().is_empty());
@@ -930,6 +932,14 @@ fn media_id_normalizes_paths_for_state_exposure() {
     assert_eq!(
         media_id_for_path(r"\\?\D:\Music\Artist\Track.FLAC"),
         "d:/music/artist/track.flac"
+    );
+    assert_eq!(
+        media_id_for_path("//?/D:/Music/Artist/Track.FLAC"),
+        "d:/music/artist/track.flac"
+    );
+    assert_eq!(
+        media_id_for_path("//?/UNC/Server/Share/Artist/Track.FLAC"),
+        "server/share/artist/track.flac"
     );
 }
 

@@ -26,8 +26,11 @@ fn media_queue_start_index(
     let Some(media_id) = start_media_id else {
         return Ok(0);
     };
+    let normalized_media_id = crate::app_database::media_id_for_path(media_id);
     rows.iter()
-        .position(|(row_media_id, _)| row_media_id == media_id)
+        .position(|(row_media_id, _)| {
+            crate::app_database::media_id_for_path(row_media_id) == normalized_media_id
+        })
         .ok_or_else(|| {
             LibraryQueueFailure::NotFound(format!(
                 "Library queue start media '{}' is no longer in the resolved view",
@@ -100,6 +103,22 @@ mod tests {
         ];
 
         let start_index = media_queue_start_index(&rows, Some("media-b")).unwrap();
+
+        assert_eq!(start_index, 1);
+    }
+
+    #[test]
+    fn media_queue_start_index_matches_forward_slash_extended_windows_media_id() {
+        let rows = vec![
+            ("d:/music/a.flac".to_string(), "D:/music/a.flac".to_string()),
+            (
+                "d:/music/artist/track.flac".to_string(),
+                "D:/Music/Artist/Track.flac".to_string(),
+            ),
+        ];
+
+        let start_index =
+            media_queue_start_index(&rows, Some("//?/D:/Music/Artist/Track.FLAC")).unwrap();
 
         assert_eq!(start_index, 1);
     }

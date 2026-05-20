@@ -201,11 +201,20 @@ pub(crate) fn media_id_for_path(path: &str) -> String {
         .to_lowercase()
 }
 
-fn normalize_media_path_for_id(path: &str) -> &str {
+pub(crate) fn normalize_media_path_for_id(path: &str) -> &str {
     path.strip_prefix(r"\\?\UNC\")
-        .map(|rest| rest.strip_prefix('\\').unwrap_or(rest))
+        .map(strip_leading_separator)
+        .or_else(|| path.strip_prefix("//?/UNC/").map(strip_leading_separator))
         .or_else(|| path.strip_prefix(r"\\?\"))
+        .or_else(|| path.strip_prefix("//?/"))
         .unwrap_or(path)
+}
+
+fn strip_leading_separator(value: &str) -> &str {
+    value
+        .strip_prefix('\\')
+        .or_else(|| value.strip_prefix('/'))
+        .unwrap_or(value)
 }
 
 fn prepare_connection(conn: Connection, enable_wal: bool) -> Result<Connection, String> {

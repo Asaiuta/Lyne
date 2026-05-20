@@ -7,6 +7,14 @@ test("mediaKeyForPath mirrors backend canonical media ids", () => {
     mediaKeyForPath(String.raw`\\?\D:\Music\Artist\Track.FLAC`),
     "d:/music/artist/track.flac"
   );
+  assert.equal(
+    mediaKeyForPath("//?/D:/Music/Artist/Track.FLAC"),
+    "d:/music/artist/track.flac"
+  );
+  assert.equal(
+    mediaKeyForPath("//?/UNC/Server/Share/Artist/Track.FLAC"),
+    "server/share/artist/track.flac"
+  );
 });
 
 test("isMediaListItemCurrent derives media identity from current source path first", () => {

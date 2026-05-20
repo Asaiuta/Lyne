@@ -15,6 +15,8 @@ export const mediaKeyForPath = (path: string | null | undefined): string | null 
   return path
     .replace(/^\\\\\?\\UNC\\/i, "\\\\")
     .replace(/^\\\\\?\\/i, "")
+    .replace(/^\/\/\?\/UNC\//i, "")
+    .replace(/^\/\/\?\//i, "")
     .replace(/\\/g, "/")
     .toLowerCase();
 };
