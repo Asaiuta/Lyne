@@ -5,11 +5,9 @@ import { revealPathInFolder } from "../../shared/api/os";
 import type { LibraryRoot, MediaItem, PlayerState } from "../../shared/api/types";
 import type { TranslationKey } from "../../shared/i18n";
 import { type LibraryListItem } from "./libraryViewTypes";
-import type { LibraryWorkerRow } from "./libraryWorkerProtocol";
-import { LibraryWorkerClient } from "./libraryWorkerClient";
 import {
+  adaptTrackSummaryToListItem,
   adaptMediaItemToListItem,
-  adaptWorkerRowToListItem,
   LibraryTrackDetailResolver
 } from "./libraryDataBoundary";
 import { scanProgressFromTask } from "./libraryScanState";
@@ -38,7 +36,8 @@ export type LibraryDataControllerApi = Pick<
   | "getLibraryScanTask"
   | "getLibraryTrackCoverArtUrl"
   | "getLibraryTrackDetail"
-  | "getLibraryTrackSummaries"
+  | "getLibraryTrackGroups"
+  | "getLibraryTrackView"
   | "getLocalPlaylist"
   | "listLocalPlaylists"
   | "playFromQueue"
@@ -63,8 +62,16 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   };
   const adaptItem = (item: MediaItem): LibraryListItem =>
     adaptMediaItemToListItem(item, urlProvider);
-  const adaptWorkerRow = (row: LibraryWorkerRow): LibraryListItem =>
-    adaptWorkerRowToListItem(row, urlProvider);
+  const adaptTrackSummary = (
+    row: Parameters<typeof adaptTrackSummaryToListItem>[0]
+  ): LibraryListItem => adaptTrackSummaryToListItem(row, urlProvider);
+  const resolveGroupArtworkUrl = (
+    group: Awaited<ReturnType<LibraryDataControllerApi["getLibraryTrackGroups"]>>["groups"][number]
+  ) =>
+    group.external_artwork_url ??
+    (group.artwork_track_key && group.has_cover_art
+      ? api.getLibraryTrackCoverArtUrl(group.artwork_track_key)
+      : null);
   const {
     feedback,
     readErrorMessage,
@@ -80,27 +87,13 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     return detail.item;
   });
 
-  const workerClient = new LibraryWorkerClient({
-    onReady: (total) => {
-      viewState.setWorkerReady(true);
-      viewState.setVirtualTotal(total);
-    },
-    onViewResult: (result) => {
-      viewState.setVirtualRows(result.rows.map(adaptWorkerRow));
-      viewState.setVirtualTotal(result.total);
-      viewState.setVirtualSizeBytes(result.totalSizeBytes);
-      viewState.setFolderOptions(result.folders);
-    },
-    onError: () => {
-      viewState.setWorkerReady(false);
-    }
-  });
-
   const viewState = createLibraryControllerViewState({
     t,
     globalQuery,
-    workerClient,
-    adaptWorkerRow,
+    requestTrackView: (input) => api.getLibraryTrackView(input),
+    requestTrackGroups: (input) => api.getLibraryTrackGroups(input),
+    adaptTrackSummary,
+    resolveGroupArtworkUrl,
     readErrorMessage,
     setRawFeedback
   });
@@ -123,11 +116,11 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
       throw new Error(t("common.error.requestFailed"));
     }
     if (viewState.activeTab() === "songs") {
-      return viewState.requestWorkerMediaIds(item.media_id);
+      return viewState.requestViewMediaIds(item.media_id);
     }
     const contextMediaIds = mediaIdsForPlaybackContext(item, contextItems);
     if (contextMediaIds.length === 0) {
-      return viewState.requestWorkerMediaIds(item.media_id);
+      return viewState.requestViewMediaIds(item.media_id);
     }
     return contextMediaIds;
   };
@@ -166,9 +159,8 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const refreshItems = async () => {
     viewState.setIsFetching(true);
     try {
-      const response = await api.getLibraryTrackSummaries();
       detailResolver.clear();
-      viewState.applyTrackSummaries(response);
+      await viewState.reloadLibraryView();
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
     } finally {
@@ -286,7 +278,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const playCurrentSongView = async (): Promise<PlayerState> => {
     setKeyedFeedback("neutral", "library.feedback.initial");
     try {
-      const mediaIds = await viewState.requestWorkerMediaIds();
+      const mediaIds = await viewState.requestViewMediaIds();
       const playback = await api.replaceQueueFromMediaIds({ mediaIds, startMediaId: null });
       setKeyedFeedback("neutral", "library.feedback.initial");
       return playback.state;
@@ -416,7 +408,10 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
 
   const getCurrentBatchItems = async (): Promise<LibraryListItem[]> => {
     if (viewState.activeTab() === "songs") {
-      return viewState.requestWorkerRows();
+      return viewState.requestViewRows();
+    }
+    if (viewState.activeTab() === "artists" || viewState.activeTab() === "albums") {
+      return viewState.activeGroupedItems();
     }
     return viewState.filteredItems();
   };
@@ -476,8 +471,13 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     selectedPlaylistItems: viewState.selectedPlaylistItems,
     selectedPlaylistSortedItems: viewState.selectedPlaylistSortedItems,
     filteredItems: viewState.filteredItems,
+    activeGroupedItems: viewState.activeGroupedItems,
     artistGroups: viewState.artistGroups,
     albumGroups: viewState.albumGroups,
+    selectedArtistGroupKey: viewState.selectedArtistGroupKey,
+    selectArtistGroup: viewState.selectArtistGroup,
+    selectedAlbumGroupKey: viewState.selectedAlbumGroupKey,
+    selectAlbumGroup: viewState.selectAlbumGroup,
     folderGroups: viewState.folderGroups,
     folderTree: viewState.folderTree,
     activeTab: viewState.activeTab,

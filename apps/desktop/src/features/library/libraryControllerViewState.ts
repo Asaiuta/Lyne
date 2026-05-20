@@ -1,9 +1,11 @@
-import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { Accessor } from "solid-js";
 import type {
   LibraryFolderSummary,
+  LibraryTrackGroupsResponse,
+  LibraryTrackGroupSummary,
   LibraryRoot,
-  LibraryTrackSummary,
+  LibraryTrackViewResponse,
   LocalPlaylist
 } from "../../shared/api/types";
 import type { TranslationKey } from "../../shared/i18n";
@@ -17,18 +19,10 @@ import {
   type LibrarySortState,
   type LibraryTab
 } from "./libraryViewTypes";
-import type { LibraryWorkerFolderGroup, LibraryWorkerRow } from "./libraryWorkerProtocol";
-import {
-  LibraryWorkerClient,
-  createLibraryWorkerViewInput
-} from "./libraryWorkerClient";
 import {
   buildFolderTreeFromFolders,
-  fallbackLabel,
   folderNameFromPath,
-  groupByKey,
-  sortItems,
-  splitArtists
+  sortItems
 } from "./libraryViewModel";
 import type { ScanProgress } from "./libraryScanState";
 import { nextSortForField, nextSortForOrder } from "./librarySortModel";
@@ -36,36 +30,57 @@ import { nextSortForField, nextSortForOrder } from "./librarySortModel";
 const DEFAULT_LIBRARY_RANGE = { start: 0, end: 80 };
 const LEGACY_LIBRARY_TABS: readonly LibraryTab[] = ["artists", "albums", "folders"];
 
-interface LibraryTrackSummariesPayload {
-  revision: string;
-  total_count: number;
-  total_size_bytes: number;
-  tracks: LibraryTrackSummary[];
-  folders: LibraryFolderSummary[];
-}
-
 interface LibraryControllerViewStateOptions {
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
   globalQuery: Accessor<string>;
-  workerClient: LibraryWorkerClient;
-  adaptWorkerRow: (row: LibraryWorkerRow) => LibraryListItem;
+  requestTrackView: (input: {
+    queries: string[];
+    folderPath: string | null;
+    sort: LibrarySortState;
+    range?: { start: number; end: number };
+    includeMediaIds?: boolean;
+  }) => Promise<LibraryTrackViewResponse>;
+  requestTrackGroups: (input: {
+    kind: "artists" | "albums";
+    queries: string[];
+    folderPath: string | null;
+    sort: LibrarySortState;
+    selectedGroupKey?: string | null;
+  }) => Promise<LibraryTrackGroupsResponse>;
+  adaptTrackSummary: (row: LibraryTrackViewResponse["rows"][number]) => LibraryListItem;
+  resolveGroupArtworkUrl: (group: LibraryTrackGroupSummary) => string | null;
   readErrorMessage: (error: unknown) => string;
   setRawFeedback: (tone: "neutral" | "success" | "error", message: string) => void;
 }
 
 export function createLibraryControllerViewState(options: LibraryControllerViewStateOptions) {
-  const { t, globalQuery, workerClient, adaptWorkerRow, readErrorMessage, setRawFeedback } = options;
+  const {
+    t,
+    globalQuery,
+    requestTrackView,
+    requestTrackGroups,
+    adaptTrackSummary,
+    resolveGroupArtworkUrl,
+    readErrorMessage,
+    setRawFeedback
+  } = options;
 
   const [roots, setRoots] = createSignal<LibraryRoot[]>([]);
   const [libraryRevision, setLibraryRevision] = createSignal<string | null>(null);
   const [libraryTotalCount, setLibraryTotalCount] = createSignal<number>(0);
   const [virtualRows, setVirtualRows] = createSignal<LibraryListItem[]>([]);
   const [legacyRows, setLegacyRows] = createSignal<LibraryListItem[]>([]);
+  const [artistGroupOptions, setArtistGroupOptions] = createSignal<LibraryTrackGroupSummary[]>([]);
+  const [albumGroupOptions, setAlbumGroupOptions] = createSignal<LibraryTrackGroupSummary[]>([]);
+  const [selectedArtistGroupKey, setSelectedArtistGroupKey] = createSignal<string | null>(null);
+  const [selectedAlbumGroupKey, setSelectedAlbumGroupKey] = createSignal<string | null>(null);
+  const [artistGroupRows, setArtistGroupRows] = createSignal<LibraryListItem[]>([]);
+  const [albumGroupRows, setAlbumGroupRows] = createSignal<LibraryListItem[]>([]);
   const [virtualTotal, setVirtualTotal] = createSignal<number>(0);
   const [virtualRange, setVirtualRange] =
     createSignal<{ start: number; end: number }>(DEFAULT_LIBRARY_RANGE);
-  const [folderOptions, setFolderOptions] = createSignal<LibraryWorkerFolderGroup[]>([]);
-  const [workerReady, setWorkerReady] = createSignal<boolean>(false);
+  const [folderOptions, setFolderOptions] = createSignal<LibraryFolderSummary[]>([]);
+  const [viewReady, setViewReady] = createSignal<boolean>(false);
   const [debouncedQueries, setDebouncedQueries] = createSignal<string[]>([]);
   const [virtualSizeBytes, setVirtualSizeBytes] = createSignal<number>(0);
   const [localPlaylists, setLocalPlaylists] = createSignal<LocalPlaylist[]>([]);
@@ -80,27 +95,48 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   const [isScanning, setIsScanning] = createSignal(false);
   const [scanProgress, setScanProgress] = createSignal<ScanProgress | null>(null);
 
-  onCleanup(() => {
-    workerClient.dispose();
+  let latestViewRequestId = 0;
+  let latestGroupRequestId = 0;
+
+  const currentTrackViewInput = (options?: {
+    range?: { start: number; end: number };
+    includeMediaIds?: boolean;
+  }) => ({
+    queries: debouncedQueries(),
+    folderPath: selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
+    sort: sort(),
+    range: options?.range,
+    includeMediaIds: options?.includeMediaIds
   });
 
-  const currentWorkerViewInput = () =>
-    createLibraryWorkerViewInput(
-      debouncedQueries(),
-      selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
-      sort()
-    );
-
-  const postWorkerView = () => {
-    if (!workerReady()) return;
-    workerClient.requestView(currentWorkerViewInput(), virtualRange());
+  const applyTrackView = (payload: LibraryTrackViewResponse) => {
+    setLibraryRevision(payload.revision);
+    setLibraryTotalCount(payload.library_total_count);
+    setVirtualRows(payload.rows.map(adaptTrackSummary));
+    setVirtualTotal(payload.total_count);
+    setVirtualSizeBytes(payload.total_size_bytes);
+    setFolderOptions(payload.folders);
+    setViewReady(true);
   };
 
-  const requestWorkerMediaIds = async (startMediaId?: string | null): Promise<string[]> => {
-    if (!workerReady()) {
-      throw new Error(t("common.error.requestFailed"));
-    }
-    const mediaIds = await workerClient.requestMediaIds(currentWorkerViewInput());
+  const requestVisibleTrackView = () => {
+    const requestId = latestViewRequestId + 1;
+    latestViewRequestId = requestId;
+    void requestTrackView(currentTrackViewInput({ range: virtualRange() }))
+      .then((payload) => {
+        if (requestId !== latestViewRequestId) return;
+        applyTrackView(payload);
+      })
+      .catch((error) => {
+        if (requestId !== latestViewRequestId) return;
+        setViewReady(false);
+        setRawFeedback("error", readErrorMessage(error));
+      });
+  };
+
+  const requestViewMediaIds = async (startMediaId?: string | null): Promise<string[]> => {
+    const response = await requestTrackView(currentTrackViewInput({ includeMediaIds: true }));
+    const mediaIds = response.media_ids ?? [];
     if (mediaIds.length === 0) {
       throw new Error(t("library.tracks.emptyFilter"));
     }
@@ -110,18 +146,50 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     return mediaIds;
   };
 
-  const requestWorkerRows = async (): Promise<LibraryListItem[]> => {
-    if (!workerReady()) {
-      throw new Error(t("common.error.requestFailed"));
-    }
-    const rows = await workerClient.requestRows(currentWorkerViewInput());
-    return rows.map(adaptWorkerRow);
+  const requestViewRows = async (): Promise<LibraryListItem[]> => {
+    const response = await requestTrackView(currentTrackViewInput());
+    return response.rows.map(adaptTrackSummary);
+  };
+
+  const requestGroupedView = (
+    kind: "artists" | "albums",
+    selectedGroupKey?: string | null
+  ) => {
+    const requestId = latestGroupRequestId + 1;
+    latestGroupRequestId = requestId;
+    void requestTrackGroups({
+      kind,
+      ...currentTrackViewInput(),
+      selectedGroupKey
+    })
+      .then((payload) => {
+        if (requestId !== latestGroupRequestId) return;
+        setLibraryRevision(payload.revision);
+        setLibraryTotalCount(payload.library_total_count);
+        setVirtualTotal(payload.total_count);
+        setVirtualSizeBytes(payload.total_size_bytes);
+        setFolderOptions(payload.folders);
+        const rows = payload.rows.map(adaptTrackSummary);
+        if (kind === "artists") {
+          setArtistGroupOptions(payload.groups);
+          setSelectedArtistGroupKey(payload.selected_group_key);
+          setArtistGroupRows(rows);
+        } else {
+          setAlbumGroupOptions(payload.groups);
+          setSelectedAlbumGroupKey(payload.selected_group_key);
+          setAlbumGroupRows(rows);
+        }
+      })
+      .catch((error) => {
+        if (requestId !== latestGroupRequestId) return;
+        setRawFeedback("error", readErrorMessage(error));
+      });
   };
 
   let legacyRowsAbortController: AbortController | null = null;
 
   const refreshLegacyRows = async () => {
-    if (!workerReady()) {
+    if (!viewReady()) {
       setLegacyRows([]);
       return;
     }
@@ -129,7 +197,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     const abortController = new AbortController();
     legacyRowsAbortController = abortController;
     try {
-      const rows = await requestWorkerRows();
+      const rows = await requestViewRows();
       if (!abortController.signal.aborted) {
         setLegacyRows(rows);
       }
@@ -145,14 +213,21 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     legacyRowsAbortController?.abort();
   });
 
-  const applyTrackSummaries = (payload: LibraryTrackSummariesPayload) => {
+  const reloadLibraryView = async () => {
+    const requestId = latestViewRequestId + 1;
+    latestViewRequestId = requestId;
+    latestGroupRequestId += 1;
     setLegacyRows([]);
-    setLibraryRevision(payload.revision);
-    setLibraryTotalCount(payload.total_count);
-    setVirtualTotal(payload.total_count);
-    setVirtualSizeBytes(payload.total_size_bytes);
-    setWorkerReady(false);
-    workerClient.init(payload.tracks, payload.folders);
+    setArtistGroupOptions([]);
+    setAlbumGroupOptions([]);
+    setSelectedArtistGroupKey(null);
+    setSelectedAlbumGroupKey(null);
+    setArtistGroupRows([]);
+    setAlbumGroupRows([]);
+    setViewReady(false);
+    const payload = await requestTrackView(currentTrackViewInput({ range: virtualRange() }));
+    if (requestId !== latestViewRequestId) return;
+    applyTrackView(payload);
   };
 
   const updateVirtualRange = (range: { start: number; end: number }) => {
@@ -180,25 +255,38 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     onCleanup(() => window.clearTimeout(timer));
   });
 
-  createEffect(() => {
-    workerReady();
-    debouncedQueries();
-    selectedFolder();
-    sort();
-    virtualRange();
-    postWorkerView();
-  });
+  createEffect(on([debouncedQueries, selectedFolder, sort, virtualRange], () => {
+    if (viewReady()) requestVisibleTrackView();
+  }));
 
   createEffect(() => {
     const tab = activeTab();
-    workerReady();
+    viewReady();
     debouncedQueries();
     selectedFolder();
     sort();
+    if (tab === "artists") {
+      requestGroupedView("artists", untrack(selectedArtistGroupKey));
+      return;
+    }
+    if (tab === "albums") {
+      requestGroupedView("albums", untrack(selectedAlbumGroupKey));
+      return;
+    }
     if (LEGACY_LIBRARY_TABS.includes(tab)) {
       void refreshLegacyRows();
     }
   });
+
+  const selectArtistGroup = (key: string | null) => {
+    setSelectedArtistGroupKey(key);
+    requestGroupedView("artists", key);
+  };
+
+  const selectAlbumGroup = (key: string | null) => {
+    setSelectedAlbumGroupKey(key);
+    requestGroupedView("albums", key);
+  };
 
   const folderGroups = createMemo<LibraryGroup[]>(() => {
     const rootOptions = roots();
@@ -218,11 +306,31 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   const filteredItems = createMemo(() =>
     activeTab() === "songs" ? virtualRows() : legacyFilteredItems()
   );
+  const activeGroupedItems = createMemo(() => {
+    const tab = activeTab();
+    if (tab === "artists") return artistGroupRows();
+    if (tab === "albums") return albumGroupRows();
+    return legacyFilteredItems();
+  });
   const artistGroups = createMemo<LibraryGroup[]>(() =>
-    groupByKey(legacyFilteredItems(), (item) => splitArtists(item.artist, t("library.group.unknownArtist")))
+    artistGroupOptions().map((group) => ({
+      key: group.key,
+      label: group.label ?? t("library.group.unknownArtist"),
+      songs: selectedArtistGroupKey() === group.key ? artistGroupRows() : [],
+      count: group.count,
+      artworkUrl: null,
+      detail: undefined
+    }))
   );
   const albumGroups = createMemo<LibraryGroup[]>(() =>
-    groupByKey(legacyFilteredItems(), (item) => [fallbackLabel(item.album, t("library.group.unknownAlbum"))])
+    albumGroupOptions().map((group) => ({
+      key: group.key,
+      label: group.label ?? t("library.group.unknownAlbum"),
+      songs: selectedAlbumGroupKey() === group.key ? albumGroupRows() : [],
+      count: group.count,
+      artworkUrl: resolveGroupArtworkUrl(group),
+      detail: undefined
+    }))
   );
   const selectedPlaylistSortedItems = createMemo(() =>
     sortItems(selectedPlaylistItems(), sort())
@@ -230,6 +338,12 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   const visibleSizeGb = createMemo<number>(() => {
     if (activeTab() === "songs") {
       return Number((virtualSizeBytes() / (1024 * 1024 * 1024)).toFixed(2));
+    }
+    if (activeTab() === "artists" || activeTab() === "albums") {
+      return Number(
+        (activeGroupedItems().reduce((total, item) => total + (item.size_bytes ?? 0), 0) /
+          (1024 * 1024 * 1024)).toFixed(2)
+      );
     }
     const totalBytes = legacyFilteredItems().reduce((total, item) => total + (item.size_bytes ?? 0), 0);
     return Number((totalBytes / (1024 * 1024 * 1024)).toFixed(2));
@@ -252,8 +366,8 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     setVirtualRange: updateVirtualRange,
     folderOptions,
     setFolderOptions,
-    workerReady,
-    setWorkerReady,
+    viewReady,
+    setViewReady,
     debouncedQueries,
     setDebouncedQueries,
     virtualSizeBytes,
@@ -281,9 +395,14 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     setIsScanning,
     scanProgress,
     setScanProgress,
-    requestWorkerMediaIds,
-    requestWorkerRows,
-    applyTrackSummaries,
+    requestViewMediaIds,
+    requestViewRows,
+    reloadLibraryView,
+    selectedArtistGroupKey,
+    selectArtistGroup,
+    selectedAlbumGroupKey,
+    selectAlbumGroup,
+    activeGroupedItems,
     filteredItems,
     artistGroups,
     albumGroups,

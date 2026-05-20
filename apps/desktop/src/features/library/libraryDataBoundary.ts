@@ -1,8 +1,7 @@
-import type { MediaItem } from "../../shared/api/types";
+import type { LibraryTrackSummary, MediaItem } from "../../shared/api/types";
 import { audioQualityLabelFromMetadata } from "../../shared/media/audioQuality";
 import { resolveArtworkUrl } from "../../shared/ui/artwork";
 import type { LibraryListItem } from "./libraryViewTypes";
-import type { LibraryWorkerRow } from "./libraryWorkerProtocol";
 
 export interface LibraryItemUrlProvider {
   getCoverArtUrl: (mediaId: string) => string;
@@ -29,14 +28,14 @@ export const adaptMediaItemToListItem = (
   })
 });
 
-export const adaptWorkerRowToListItem = (
-  row: LibraryWorkerRow,
+export const adaptTrackSummaryToListItem = (
+  row: LibraryTrackSummary,
   urls: LibraryItemUrlProvider
 ): LibraryListItem => ({
-  id: row.id,
-  trackKey: row.trackKey,
+  id: String(row.track_key),
+  trackKey: row.track_key,
   media_id: row.media_id,
-  title: row.title,
+  title: row.title ?? row.file_name,
   artist: row.artist,
   album: row.album,
   track_number: row.track_number,
@@ -47,17 +46,17 @@ export const adaptWorkerRowToListItem = (
   size_bytes: row.size_bytes,
   added_at_epoch_secs: row.added_at_epoch_secs,
   updated_at_epoch_secs: row.updated_at_epoch_secs,
-  fileName: row.fileName,
+  fileName: row.file_name,
   qualityLabel: audioQualityLabelFromMetadata({
-    fileName: row.fileName,
+    fileName: row.file_name,
     sampleRate: row.sample_rate,
     bitsPerSample: row.bits_per_sample,
     bitrateBps: row.bitrate_bps
   }),
   artworkUrl: resolveArtworkUrl({
-    externalArtworkUrl: row.externalArtworkUrl,
-    mediaId: String(row.trackKey),
-    hasCoverArt: row.hasCoverArt,
+    externalArtworkUrl: row.external_artwork_url,
+    mediaId: String(row.track_key),
+    hasCoverArt: row.has_cover_art,
     urls: {
       getCoverArtUrl: (trackKey) => urls.getLibraryTrackCoverArtUrl(Number(trackKey))
     }

@@ -81,9 +81,11 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
         <LibraryGroupedView
           kind="artists"
           groups={props.controller.artistGroups()}
+          selectedGroupKey={props.controller.selectedArtistGroupKey()}
           currentTrackPath={props.currentTrackPath}
           currentMediaId={props.currentMediaId}
           isPlaying={props.isPlaying}
+          onSelectGroup={props.controller.selectArtistGroup}
           onPlay={props.onPlay}
           onEnqueue={props.onEnqueue}
           onContextAction={props.onContextAction}
@@ -100,9 +102,11 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
         <LibraryGroupedView
           kind="albums"
           groups={props.controller.albumGroups()}
+          selectedGroupKey={props.controller.selectedAlbumGroupKey()}
           currentTrackPath={props.currentTrackPath}
           currentMediaId={props.currentMediaId}
           isPlaying={props.isPlaying}
+          onSelectGroup={props.controller.selectAlbumGroup}
           onPlay={props.onPlay}
           onEnqueue={props.onEnqueue}
           onContextAction={props.onContextAction}

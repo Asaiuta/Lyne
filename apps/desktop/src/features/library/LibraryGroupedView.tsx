@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo } from "solid-js";
 import {
   IconAlbum,
   IconArtist,
@@ -16,6 +16,7 @@ type LibraryGroupedKind = "artists" | "albums" | "folders";
 interface LibraryGroupedViewProps {
   kind: LibraryGroupedKind;
   groups: LibraryGroup[];
+  selectedGroupKey: string | null;
   currentTrackPath: string | null;
   currentMediaId: string | null;
   isPlaying: boolean;
@@ -26,6 +27,7 @@ interface LibraryGroupedViewProps {
   onSortChange?: (field: MediaSortField) => void;
   onSortOrderChange?: (order: MediaSortOrder) => void;
   onActiveItemsChange?: (items: LibraryListItem[]) => void;
+  onSelectGroup: (key: string | null) => void;
   onPlay: (item: LibraryListItem, contextItems: readonly LibraryListItem[]) => void;
   onEnqueue: (item: LibraryListItem) => void;
   onContextAction: (action: MediaContextAction, item: LibraryListItem) => void;
@@ -49,10 +51,9 @@ const iconForKind = (kind: LibraryGroupedKind) => {
 export function LibraryGroupedView(props: LibraryGroupedViewProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
-  const [selectedKey, setSelectedKey] = createSignal<string | null>(props.groups[0]?.key ?? null);
 
   const selectedGroup = createMemo<LibraryGroup | null>(() => {
-    const selected = selectedKey();
+    const selected = props.selectedGroupKey;
     const first = props.groups[0] ?? null;
     if (!selected) return first;
     return props.groups.find((group) => group.key === selected) ?? first;
@@ -96,7 +97,7 @@ export function LibraryGroupedView(props: LibraryGroupedViewProps) {
                   type="button"
                   class="local-browser-card"
                   classList={{ "is-active": active(), "is-cover-hidden": !coverVisible() }}
-                  onClick={() => setSelectedKey(group.key)}
+                  onClick={() => props.onSelectGroup(group.key)}
                 >
                   <Show when={coverVisible()}>
                     <span class="local-browser-cover" aria-hidden="true">
@@ -109,7 +110,7 @@ export function LibraryGroupedView(props: LibraryGroupedViewProps) {
                     <span class="local-browser-name" title={group.label}>{group.label}</span>
                     <span class="local-browser-count">
                       <IconMusic />
-                      {t("library.group.songCount", { count: group.songs.length })}
+                      {t("library.group.songCount", { count: group.count ?? group.songs.length })}
                     </span>
                     <Show when={group.detail}>
                       {(detail) => <span class="local-browser-detail" title={detail()}>{detail()}</span>}

@@ -72,7 +72,7 @@ export function LibraryPage(props: LibraryPageProps) {
     controller.activeTab() === "playlists"
       ? groupPlaybackItems()
       : controller.activeTab() === "artists" || controller.activeTab() === "albums"
-        ? groupPlaybackItems()
+        ? controller.activeGroupedItems()
       : controller.filteredItems()
   );
   const activePlaybackCount = createMemo<number>(() =>

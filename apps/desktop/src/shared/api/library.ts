@@ -3,8 +3,11 @@ import type {
   LibraryRoot,
   LibraryScanTask,
   LibraryTrackDetail,
-  LibraryTrackSummariesResponse,
+  LibraryTrackGroupsResponse,
+  LibraryTrackGroupSummary,
   LibraryTrackSummary,
+  LibraryTrackViewResponse,
+  LibraryTrackSummariesResponse,
   LocalPlaylist,
   LocalPlaylistDetail,
   MediaItem,
@@ -21,6 +24,31 @@ export interface LibraryQueueMediaIdsInput {
 export interface LibraryQueuePlaybackResult {
   state: PlayerState;
   queuedCount: number;
+}
+
+export interface LibraryTrackViewInput {
+  queries: string[];
+  folderPath: string | null;
+  sort: {
+    field: string;
+    order: string;
+  };
+  range?: {
+    start: number;
+    end: number;
+  };
+  includeMediaIds?: boolean;
+}
+
+export interface LibraryTrackGroupsInput {
+  kind: "artists" | "albums";
+  queries: string[];
+  folderPath: string | null;
+  sort: {
+    field: string;
+    order: string;
+  };
+  selectedGroupKey?: string | null;
 }
 
 export interface ExternalMediaMetadataInput {
@@ -49,6 +77,8 @@ export interface LibraryApiClient {
   getLibraryScanTask: (taskId: number) => Promise<LibraryScanTask>;
   getMediaItems: (limit?: number, all?: boolean) => Promise<MediaItem[]>;
   getLibraryTrackSummaries: () => Promise<LibraryTrackSummariesResponse>;
+  getLibraryTrackView: (input: LibraryTrackViewInput) => Promise<LibraryTrackViewResponse>;
+  getLibraryTrackGroups: (input: LibraryTrackGroupsInput) => Promise<LibraryTrackGroupsResponse>;
   getLibraryTrackDetail: (trackKey: number) => Promise<LibraryTrackDetail>;
   replaceQueueFromMediaIds: (input: LibraryQueueMediaIdsInput) => Promise<LibraryQueuePlaybackResult>;
   enqueueQueueFromMediaIds: (input: LibraryQueueMediaIdsInput) => Promise<QueueEntry[]>;
@@ -171,6 +201,21 @@ const parseLibraryFolderSummary = (value: unknown): LibraryFolderSummary | null 
   return value as unknown as LibraryFolderSummary;
 };
 
+const parseLibraryTrackGroupSummary = (value: unknown): LibraryTrackGroupSummary | null => {
+  if (!isRecord(value)) return null;
+  if (
+    !isString(value.key) ||
+    !isNullableString(value.label) ||
+    !isInteger(value.count) ||
+    !isNullableInteger(value.artwork_track_key) ||
+    !isBoolean(value.has_cover_art) ||
+    !isNullableString(value.external_artwork_url)
+  ) {
+    return null;
+  }
+  return value as unknown as LibraryTrackGroupSummary;
+};
+
 const parseLibraryTrackSummariesResponse = (value: unknown): LibraryTrackSummariesResponse => {
   if (!isRecord(value)) {
     throw new Error("Invalid library track summaries response shape");
@@ -199,6 +244,100 @@ const parseLibraryTrackSummariesResponse = (value: unknown): LibraryTrackSummari
     total_size_bytes: value.total_size_bytes,
     folders: folders as LibraryFolderSummary[],
     tracks: tracks as LibraryTrackSummary[]
+  };
+};
+
+const parseLibraryTrackViewResponse = (value: unknown): LibraryTrackViewResponse => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid library track view response shape");
+  }
+  const status = parseStatus(value.status);
+  if (status === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Failed to load library view");
+  }
+  if (
+    !isString(value.revision) ||
+    !isInteger(value.library_total_count) ||
+    !isInteger(value.library_total_size_bytes) ||
+    !isInteger(value.total_count) ||
+    !isInteger(value.total_size_bytes) ||
+    !Array.isArray(value.folders) ||
+    !Array.isArray(value.rows) ||
+    (value.media_ids !== null &&
+      value.media_ids !== undefined &&
+      !Array.isArray(value.media_ids))
+  ) {
+    throw new Error("Invalid library track view payload");
+  }
+  const folders = value.folders.map(parseLibraryFolderSummary);
+  const rows = value.rows.map(parseLibraryTrackSummary);
+  const rawMediaIds = value.media_ids;
+  const mediaIds: string[] | null = Array.isArray(rawMediaIds)
+    ? rawMediaIds.filter(isString)
+    : null;
+  const hasInvalidMediaIds = Array.isArray(rawMediaIds)
+    ? mediaIds === null || mediaIds.length !== rawMediaIds.length
+    : false;
+  if (
+    folders.some((folder) => folder === null) ||
+    rows.some((track) => track === null) ||
+    hasInvalidMediaIds
+  ) {
+    throw new Error("Invalid library track view payload");
+  }
+  return {
+    revision: value.revision,
+    library_total_count: value.library_total_count,
+    library_total_size_bytes: value.library_total_size_bytes,
+    total_count: value.total_count,
+    total_size_bytes: value.total_size_bytes,
+    folders: folders as LibraryFolderSummary[],
+    rows: rows as LibraryTrackViewResponse["rows"],
+    media_ids: mediaIds
+  };
+};
+
+const parseLibraryTrackGroupsResponse = (value: unknown): LibraryTrackGroupsResponse => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid library track groups response shape");
+  }
+  const status = parseStatus(value.status);
+  if (status === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Failed to load library groups");
+  }
+  if (
+    !isString(value.revision) ||
+    !isInteger(value.library_total_count) ||
+    !isInteger(value.library_total_size_bytes) ||
+    !isInteger(value.total_count) ||
+    !isInteger(value.total_size_bytes) ||
+    !Array.isArray(value.folders) ||
+    !Array.isArray(value.groups) ||
+    !isNullableString(value.selected_group_key) ||
+    !Array.isArray(value.rows)
+  ) {
+    throw new Error("Invalid library track groups payload");
+  }
+  const folders = value.folders.map(parseLibraryFolderSummary);
+  const groups = value.groups.map(parseLibraryTrackGroupSummary);
+  const rows = value.rows.map(parseLibraryTrackSummary);
+  if (
+    folders.some((folder) => folder === null) ||
+    groups.some((group) => group === null) ||
+    rows.some((track) => track === null)
+  ) {
+    throw new Error("Invalid library track groups payload");
+  }
+  return {
+    revision: value.revision,
+    library_total_count: value.library_total_count,
+    library_total_size_bytes: value.library_total_size_bytes,
+    total_count: value.total_count,
+    total_size_bytes: value.total_size_bytes,
+    folders: folders as LibraryFolderSummary[],
+    groups: groups as LibraryTrackGroupSummary[],
+    selected_group_key: value.selected_group_key,
+    rows: rows as LibraryTrackGroupsResponse["rows"]
   };
 };
 
@@ -355,6 +494,32 @@ export const createLibraryApiClient = (transport: LibraryApiTransport): LibraryA
   },
   getLibraryTrackSummaries: async () =>
     parseLibraryTrackSummariesResponse(await transport.requestJson("/domain/library/track_summaries")),
+  getLibraryTrackView: async (input) =>
+    parseLibraryTrackViewResponse(
+      await transport.requestJson(
+        "/domain/library/view",
+        postJson({
+          queries: input.queries,
+          folder_path: input.folderPath,
+          sort: input.sort,
+          range: input.range ?? null,
+          include_media_ids: input.includeMediaIds === true
+        })
+      )
+    ),
+  getLibraryTrackGroups: async (input) =>
+    parseLibraryTrackGroupsResponse(
+      await transport.requestJson(
+        "/domain/library/groups",
+        postJson({
+          kind: input.kind,
+          queries: input.queries,
+          folder_path: input.folderPath,
+          sort: input.sort,
+          selected_group_key: input.selectedGroupKey ?? null
+        })
+      )
+    ),
   getLibraryTrackDetail: async (trackKey) =>
     parseLibraryTrackDetailResponse(
       await transport.requestJson(`/domain/library/tracks/${encodeURIComponent(String(trackKey))}`)

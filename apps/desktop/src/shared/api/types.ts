@@ -208,6 +208,38 @@ export interface LibraryTrackSummariesResponse {
   tracks: LibraryTrackSummary[];
 }
 
+export interface LibraryTrackViewResponse {
+  revision: string;
+  library_total_count: number;
+  library_total_size_bytes: number;
+  total_count: number;
+  total_size_bytes: number;
+  folders: LibraryFolderSummary[];
+  rows: LibraryTrackSummary[];
+  media_ids: string[] | null;
+}
+
+export interface LibraryTrackGroupSummary {
+  key: string;
+  label: string | null;
+  count: number;
+  artwork_track_key: number | null;
+  has_cover_art: boolean;
+  external_artwork_url: string | null;
+}
+
+export interface LibraryTrackGroupsResponse {
+  revision: string;
+  library_total_count: number;
+  library_total_size_bytes: number;
+  total_count: number;
+  total_size_bytes: number;
+  folders: LibraryFolderSummary[];
+  groups: LibraryTrackGroupSummary[];
+  selected_group_key: string | null;
+  rows: LibraryTrackSummary[];
+}
+
 export interface LibraryTrackDetail {
   track_key: number;
   item: MediaItem;

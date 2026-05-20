@@ -30,6 +30,7 @@ export interface LibraryGroup {
   key: string;
   label: string;
   songs: LibraryListItem[];
+  count?: number;
   artworkUrl: string | null;
   detail?: string | undefined;
 }
