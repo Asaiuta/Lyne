@@ -79,6 +79,7 @@ const createDeps = (state: RequestState<PlayerState>) => {
     refreshes: [] as Array<string | null | undefined>,
     queueRefreshCount: 0,
     historyCount: 0,
+    acceptSpectrum: true,
     suppressRemotePosition: false
   };
 
@@ -110,7 +111,9 @@ const createDeps = (state: RequestState<PlayerState>) => {
       setLivePosition: setter<number | null>(null, (value) =>
         calls.livePosition.push(value)
       ),
+      shouldAcceptSpectrum: () => calls.acceptSpectrum,
       shouldSuppressRemotePosition: () => calls.suppressRemotePosition,
+      noteSocketActivity: () => undefined,
       scheduleRefresh: (expectedPath?: string | null) => calls.refreshes.push(expectedPath),
       refreshQueueForCurrentSurface: () => {
         calls.queueRefreshCount += 1;
@@ -214,6 +217,18 @@ test("position events are ignored while local seek suppression is active", () =>
 
   assert.equal(calls.patches.length, 0);
   assert.deepEqual(calls.livePosition, []);
+});
+
+test("spectrum_data only writes when the spectrum surface is visible", () => {
+  const { calls, deps } = createDeps({ status: "idle" });
+
+  calls.acceptSpectrum = false;
+  applyPlaybackSocketEvent({ type: "spectrum_data", data: [0.1, 0.2] }, deps);
+
+  calls.acceptSpectrum = true;
+  applyPlaybackSocketEvent({ type: "spectrum_data", data: [0.3, 0.4] }, deps);
+
+  assert.deepEqual(calls.spectrum, [[0.3, 0.4]]);
 });
 
 test("playback_history_updated notifies history consumers", () => {

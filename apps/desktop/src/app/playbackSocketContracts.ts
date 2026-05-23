@@ -13,7 +13,9 @@ export interface PlaybackSocketDeps {
   setWsStatus: Setter<WsStatus>;
   setPreloadRequested: Setter<boolean>;
   setLivePosition: Setter<number | null>;
+  shouldAcceptSpectrum: () => boolean;
   shouldSuppressRemotePosition: () => boolean;
+  noteSocketActivity: () => void;
   scheduleRefresh: (expectedPath?: string | null) => void;
   refreshQueueForCurrentSurface: () => void;
   notifyPlaybackHistoryChanged: () => void;

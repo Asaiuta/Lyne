@@ -21,6 +21,37 @@ import { usePlaybackSocket } from "./usePlaybackSocket";
 const TRACK_STATE_SETTLE_TIMEOUT_MS = 2500;
 const TRACK_STATE_POLL_INTERVAL_MS = 120;
 const PLAYER_STATE_POLL_MS = 1500;
+const SOCKET_STALE_FALLBACK_MS = 5000;
+
+type PlaybackPollMode =
+  | { kind: "off" }
+  | { kind: "wait-for-stale"; delayMs: number }
+  | { kind: "interval" };
+
+interface PlaybackPollingInput {
+  isPlaying: boolean;
+  isLoading: boolean;
+  wsStatus: WsStatus;
+  lastSocketActivityAt: number;
+  now: number;
+}
+
+export const getPlaybackPollingMode = (input: PlaybackPollingInput): PlaybackPollMode => {
+  if (!input.isPlaying && !input.isLoading) {
+    return { kind: "off" };
+  }
+
+  if (input.wsStatus !== "connected") {
+    return { kind: "interval" };
+  }
+
+  const staleAt = input.lastSocketActivityAt + SOCKET_STALE_FALLBACK_MS;
+  if (input.now >= staleAt) {
+    return { kind: "interval" };
+  }
+
+  return { kind: "wait-for-stale", delayMs: staleAt - input.now };
+};
 
 export interface PlaybackController {
   state: Accessor<RequestState<PlayerState>>;
@@ -53,6 +84,7 @@ export interface PlaybackController {
 
 interface PlaybackControllerDeps {
   api: ApiClient;
+  isSpectrumVisible: Accessor<boolean>;
   refreshQueueForCurrentSurface: () => void;
   notifyPlaybackHistoryChanged: () => void;
 }
@@ -67,6 +99,8 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
   const [preloadRequested, setPreloadRequested] = createSignal<boolean>(false);
   const [commandError, setCommandError] = createSignal<string | null>(null);
   const [livePosition, setLivePosition] = createSignal<number | null>(null);
+  const [lastSocketActivityAt, setLastSocketActivityAt] = createSignal<number>(Date.now());
+  const [pollClock, setPollClock] = createSignal<number>(0);
   let lastRefreshAt = 0;
 
   const applyPlayerState = (next: PlayerState) => {
@@ -181,7 +215,9 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
     setWsStatus,
     setPreloadRequested,
     setLivePosition,
+    shouldAcceptSpectrum: deps.isSpectrumVisible,
     shouldSuppressRemotePosition: commands.shouldSuppressRemotePosition,
+    noteSocketActivity: () => setLastSocketActivityAt(Date.now()),
     scheduleRefresh,
     refreshQueueForCurrentSurface,
     notifyPlaybackHistoryChanged,
@@ -191,8 +227,35 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
   });
 
   createEffect(() => {
-    const shouldPoll = Boolean(player()?.is_playing || player()?.is_loading);
-    if (!shouldPoll) {
+    if (deps.isSpectrumVisible()) {
+      return;
+    }
+    setSpectrum((current) => (current.length === 0 ? current : []));
+  });
+
+  createEffect(() => {
+    pollClock();
+    const currentPlayer = player();
+    const pollMode = getPlaybackPollingMode({
+      isPlaying: Boolean(currentPlayer?.is_playing),
+      isLoading: Boolean(currentPlayer?.is_loading),
+      wsStatus: wsStatus(),
+      lastSocketActivityAt: lastSocketActivityAt(),
+      now: Date.now()
+    });
+
+    if (pollMode.kind === "off") {
+      return;
+    }
+
+    if (pollMode.kind === "wait-for-stale") {
+      const timer = window.setTimeout(() => {
+        setPollClock((clock) => clock + 1);
+      }, pollMode.delayMs);
+
+      onCleanup(() => {
+        window.clearTimeout(timer);
+      });
       return;
     }
 

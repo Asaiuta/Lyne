@@ -157,6 +157,7 @@ export function useAppController(api: ApiClient): AppController {
 
   const playback = usePlaybackController({
     api,
+    isSpectrumVisible: () => fullPlayerOpen() && uiSettings.showSpectrums,
     notifyPlaybackHistoryChanged,
     refreshQueueForCurrentSurface: queue.refreshQueueForCurrentSurface
   });

@@ -9,7 +9,9 @@ export const applyPlaybackSocketEvent = (event: WsEvent, deps: PlaybackSocketDep
       deps.setLoadingProgress(event.progress);
       break;
     case "spectrum_data":
-      deps.setSpectrum(event.data);
+      if (deps.shouldAcceptSpectrum()) {
+        deps.setSpectrum(event.data);
+      }
       break;
     case "load_complete":
       deps.patchPlayerState((currentPlayer) => ({
@@ -133,6 +135,7 @@ export const usePlaybackSocket = (deps: PlaybackSocketDeps) => {
 
   useEngineSocket({
     onOpen: () => {
+      deps.noteSocketActivity();
       deps.setWsStatus("connected");
       deps.scheduleRefresh();
       deps.refreshQueueForCurrentSurface();
@@ -140,7 +143,10 @@ export const usePlaybackSocket = (deps: PlaybackSocketDeps) => {
     onClose: () => deps.setWsStatus("disconnected"),
     onError: () => deps.setWsStatus("disconnected"),
     onReconnect: () => deps.setWsStatus("connecting"),
-    onEvent: (event) => applyPlaybackSocketEvent(event, deps),
+    onEvent: (event) => {
+      deps.noteSocketActivity();
+      applyPlaybackSocketEvent(event, deps);
+    },
     onProtocolError: handleProtocolError
   });
 };
