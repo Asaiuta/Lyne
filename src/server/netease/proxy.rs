@@ -98,6 +98,7 @@ pub(super) enum ProxyRouteGroup {
     Catalog,
     Playlist,
     User,
+    Cloud,
     Recommend,
     Dj,
     Mv,
@@ -160,15 +161,23 @@ proxy_route_group!(SEARCH_PROXY_METHODS, dispatch_search_route, |client, query| 
 proxy_route_group!(CATALOG_PROXY_METHODS, dispatch_catalog_route, |client, query| {
     "song_detail" => client.song_detail(query).await,
     "song_music_detail" => client.song_music_detail(query).await,
+    "song_wiki_summary" => client.song_wiki_summary(query).await,
+    "sheet_list" => client.sheet_list(query).await,
+    "sheet_preview" => client.sheet_preview(query).await,
+    "music_first_listen_info" => client.music_first_listen_info(query).await,
     "check_music" => client.check_music(query).await,
     "lyric" => client.lyric(query).await,
     "lyric_new" => client.lyric_new(query).await,
     "album" => client.album(query).await,
     "album_detail" => client.album_detail(query).await,
+    "album_detail_dynamic" => client.album_detail_dynamic(query).await,
     "album_newest" => client.album_newest(query).await,
     "album_new" => client.album_new(query).await,
     "artist_detail" => client.artist_detail(query).await,
     "artists" => client.artists(query).await,
+    "artist_songs" => client.artist_songs(query).await,
+    "artist_album" => client.artist_album(query).await,
+    "artist_mv" => client.artist_mv(query).await,
     "artist_list" => client.artist_list(query).await,
     "top_artists" => client.top_artists(query).await,
     "top_song" => client.top_song(query).await,
@@ -215,13 +224,34 @@ proxy_route_group!(USER_PROXY_METHODS, dispatch_user_route, |client, query| {
     "user_account" => client.user_account(query).await,
     "user_cloud" => client.user_cloud(query).await,
     "user_cloud_del" => client.user_cloud_del(query).await,
+    "user_cloud_detail" => client.user_cloud_detail(query).await,
     "user_detail" => client.user_detail(query).await,
     "user_subcount" => client.user_subcount(query).await,
     "user_level" => client.user_level(query).await,
+    "album_sub" => client.album_sub(query).await,
+    "album_sublist" => client.album_sublist(query).await,
+    "artist_sub" => client.artist_sub(query).await,
+    "artist_sublist" => client.artist_sublist(query).await,
+    "mv_sublist" => client.mv_sublist(query).await,
+    "dj_sublist" => client.dj_sublist(query).await,
     "likelist" => client.likelist(query).await,
     "like" => client.like(query).await,
     "daily_signin" => client.daily_signin(query).await,
     "scrobble" => client.scrobble(query).await,
+});
+
+proxy_route_group!(CLOUD_PROXY_METHODS, dispatch_cloud_route, |client, query| {
+    "cloud_match" => client.cloud_match(query).await,
+    "cloud_import_check" => client.cloud_import_check(query).await,
+    "cloud_import" => client.cloud_import(query).await,
+    "cloud_upload_check" => client.cloud_upload_check(query).await,
+    "cloud_upload_info" => client.cloud_upload_info(query).await,
+    "cloud_publish" => client.cloud_publish(query).await,
+    "cloud_upload_token_check" => client.cloud_upload_token_check(query).await,
+    "cloud_upload_token_alloc" => client.cloud_upload_token_alloc(query).await,
+    "cloud_upload_complete_info" => client.cloud_upload_complete_info(query).await,
+    "cloud_upload_complete_pub" => client.cloud_upload_complete_pub(query).await,
+    "cloud_lyric_get" => client.cloud_lyric_get(query).await,
 });
 
 proxy_route_group!(RECOMMEND_PROXY_METHODS, dispatch_recommend_route, |client, query| {
@@ -231,6 +261,7 @@ proxy_route_group!(RECOMMEND_PROXY_METHODS, dispatch_recommend_route, |client, q
     "personalized_djprogram" => client.personalized_djprogram(query).await,
     "recommend_resource" => client.recommend_resource(query).await,
     "recommend_songs" => client.recommend_songs(query).await,
+    "recommend_songs_dislike" => client.recommend_songs_dislike(query).await,
     "fm_trash" => client.fm_trash(query).await,
     "personal_fm" => client.personal_fm(query).await,
 });
@@ -241,6 +272,7 @@ proxy_route_group!(DJ_PROXY_METHODS, dispatch_dj_route, |client, query| {
     "dj_category_recommend" => client.dj_category_recommend(query).await,
     "dj_detail" => client.dj_detail(query).await,
     "dj_program" => client.dj_program(query).await,
+    "dj_program_detail" => client.dj_program_detail(query).await,
     "dj_radio_hot" => client.dj_radio_hot(query).await,
     "dj_recommend" => client.dj_recommend(query).await,
     "dj_recommend_type" => client.dj_recommend_type(query).await,
@@ -250,15 +282,22 @@ proxy_route_group!(DJ_PROXY_METHODS, dispatch_dj_route, |client, query| {
 
 proxy_route_group!(MV_PROXY_METHODS, dispatch_mv_route, |client, query| {
     "mv_first" => client.mv_first(query).await,
+    "mv_all" => client.mv_all(query).await,
     "mv_detail" => client.mv_detail(query).await,
     "mv_detail_info" => client.mv_detail_info(query).await,
     "mv_url" => client.mv_url(query).await,
+    "video_detail" => client.video_detail(query).await,
+    "video_detail_info" => client.video_detail_info(query).await,
+    "video_url" => client.video_url(query).await,
 });
 
 proxy_route_group!(COMMENT_PROXY_METHODS, dispatch_comment_route, |client, query| {
     "comment_music" => client.comment_music(query).await,
     "comment_new" => client.comment_new(query).await,
     "comment_hot" => client.comment_hot(query).await,
+    "comment_like" => client.comment_like(query).await,
+    "hug_comment" => client.hug_comment(query).await,
+    "comment_hug_list" => client.comment_hug_list(query).await,
 });
 
 const PROXY_METHOD_REGISTRY: &[(ProxyRouteGroup, &[&str])] = &[
@@ -267,6 +306,7 @@ const PROXY_METHOD_REGISTRY: &[(ProxyRouteGroup, &[&str])] = &[
     (ProxyRouteGroup::Catalog, CATALOG_PROXY_METHODS),
     (ProxyRouteGroup::Playlist, PLAYLIST_PROXY_METHODS),
     (ProxyRouteGroup::User, USER_PROXY_METHODS),
+    (ProxyRouteGroup::Cloud, CLOUD_PROXY_METHODS),
     (ProxyRouteGroup::Recommend, RECOMMEND_PROXY_METHODS),
     (ProxyRouteGroup::Dj, DJ_PROXY_METHODS),
     (ProxyRouteGroup::Mv, MV_PROXY_METHODS),
@@ -299,6 +339,7 @@ async fn dispatch(
         ProxyRouteGroup::Catalog => dispatch_catalog_route(client, method, query).await,
         ProxyRouteGroup::Playlist => dispatch_playlist_route(client, method, query).await,
         ProxyRouteGroup::User => dispatch_user_route(client, method, query).await,
+        ProxyRouteGroup::Cloud => dispatch_cloud_route(client, method, query).await,
         ProxyRouteGroup::Recommend => dispatch_recommend_route(client, method, query).await,
         ProxyRouteGroup::Dj => dispatch_dj_route(client, method, query).await,
         ProxyRouteGroup::Mv => dispatch_mv_route(client, method, query).await,
@@ -326,6 +367,7 @@ pub(super) fn proxy_handler_method_names() -> Vec<&'static str> {
     methods.extend_from_slice(CATALOG_PROXY_METHODS);
     methods.extend_from_slice(PLAYLIST_PROXY_METHODS);
     methods.extend_from_slice(USER_PROXY_METHODS);
+    methods.extend_from_slice(CLOUD_PROXY_METHODS);
     methods.extend_from_slice(RECOMMEND_PROXY_METHODS);
     methods.extend_from_slice(DJ_PROXY_METHODS);
     methods.extend_from_slice(MV_PROXY_METHODS);

@@ -19,11 +19,13 @@ mod tracks;
 mod types;
 
 use accounts::{
-    daily_signin_active_ncm_account, delete_ncm_account, list_ncm_accounts,
-    logout_active_ncm_account, refresh_active_ncm_account, set_active_ncm_account,
-    upsert_ncm_account,
+    clear_active_ncm_account, daily_signin_active_ncm_account, delete_ncm_account,
+    list_ncm_accounts, logout_active_ncm_account, refresh_active_ncm_account,
+    set_active_ncm_account, upsert_ncm_account,
 };
-use cloud::{delete_ncm_cloud_track, list_ncm_cloud_tracks, list_ncm_likelist_ids};
+use cloud::{
+    delete_ncm_cloud_track, list_ncm_cloud_tracks, list_ncm_likelist_ids, match_ncm_cloud_track,
+};
 use discover::{
     get_ncm_discover_playlist_categories, get_ncm_home_feed, list_ncm_discover_albums,
     list_ncm_discover_artists, list_ncm_discover_playlists, list_ncm_discover_songs,
@@ -31,11 +33,12 @@ use discover::{
 };
 use parsers::{
     discover_initial_param, filter_playlist_summaries, personal_fm_preview, read_artist_tracks,
-    read_cloud_tracks_page, read_daily_song_tracks, read_discover_album_cards,
-    read_discover_artist_cards, read_discover_playlist_cards, read_discover_playlist_categories,
-    read_discover_toplists, read_likelist_ids, read_newest_album_cards, read_non_empty_string,
-    read_page_has_more, read_personal_fm_tracks, read_personalized_dj_cards,
-    read_personalized_mv_cards, read_personalized_playlist_cards, read_playlist_tracks,
+    read_cloud_tracks_page, read_daily_dislike_replacement, read_daily_song_tracks,
+    read_discover_album_cards, read_discover_artist_cards, read_discover_playlist_cards,
+    read_discover_playlist_categories, read_discover_toplists, read_heartbeat_tracks,
+    read_likelist_ids, read_newest_album_cards, read_non_empty_string, read_page_has_more,
+    read_personal_fm_tracks, read_personalized_dj_cards, read_personalized_mv_cards,
+    read_personalized_playlist_cards, read_playlist_summary, read_playlist_tracks,
     read_radar_playlist_card, read_recommend_resource_cards, read_search_playlists,
     read_search_tracks, read_song_detail, read_song_detail_tracks, read_song_dynamic_cover_url,
     read_song_url, read_top_artist_cards, read_top_song_tracks, read_user_playlists, track_covers,
@@ -43,22 +46,27 @@ use parsers::{
 use playback_actions::{
     enqueue_ncm_track, play_ncm_track, resolve_ncm_track, resolve_ncm_track_supplement,
 };
-use playlists::{list_ncm_playlist_tracks, list_ncm_user_playlists};
+use playlists::{
+    get_ncm_playlist_detail, list_ncm_playlist_tracks, list_ncm_user_playlists,
+    update_ncm_playlist_tracks,
+};
 use proxy::{handle_request, parse_bool};
 use search::{search_ncm_playlists, search_ncm_tracks};
 use tracks::{
-    list_ncm_album_tracks, list_ncm_artist_tracks, list_ncm_daily_song_tracks,
-    list_ncm_personal_fm_tracks, list_ncm_song_detail_tracks, trash_ncm_personal_fm_track,
+    dislike_ncm_daily_song, list_ncm_album_tracks, list_ncm_artist_tracks,
+    list_ncm_daily_song_tracks, list_ncm_heartbeat_tracks, list_ncm_personal_fm_tracks,
+    list_ncm_song_detail_tracks, trash_ncm_personal_fm_track,
 };
 use types::NcmProfileSnapshot;
 use types::{
-    ActiveNcmAccountRequest, CloudDeleteRequest, CloudTracksRequest, DiscoverAlbumsRequest,
-    DiscoverArtistsRequest, DiscoverPlaylistsRequest, DiscoverSongsRequest, EntityTracksRequest,
+    ActiveNcmAccountRequest, CloudDeleteRequest, CloudMatchRequest, CloudTracksRequest,
+    DailySongDislikeRequest, DiscoverAlbumsRequest, DiscoverArtistsRequest,
+    DiscoverPlaylistsRequest, DiscoverSongsRequest, EntityTracksRequest, HeartbeatTracksRequest,
     HomeFeedRequest, LikelistRequest, NcmAccountPath, NcmAccountStateResponse, NcmHomeFeed,
-    NcmHomeFeedError, NcmTrackResolveError, PersonalFmTrashRequest, PlaylistTracksRequest,
-    ResolveNcmTrackRequest, ResolveNcmTrackSupplementRequest, ResolvedNcmTrack,
-    ResolvedNcmTrackSupplement, SearchTracksRequest, SongDetailTracksRequest,
-    UpsertNcmAccountRequest, UserPlaylistsRequest,
+    NcmHomeFeedError, NcmTrackResolveError, PersonalFmTrashRequest, PlaylistDetailRequest,
+    PlaylistTrackUpdateRequest, PlaylistTracksRequest, ResolveNcmTrackRequest,
+    ResolveNcmTrackSupplementRequest, ResolvedNcmTrack, ResolvedNcmTrackSupplement,
+    SearchTracksRequest, SongDetailTracksRequest, UpsertNcmAccountRequest, UserPlaylistsRequest,
 };
 
 #[cfg(test)]
@@ -208,6 +216,12 @@ mod tests {
             ("/user/detail", "user_detail"),
             ("/user/subcount", "user_subcount"),
             ("/user/level", "user_level"),
+            ("/album/sub", "album_sub"),
+            ("/album/sublist", "album_sublist"),
+            ("/artist/sub", "artist_sub"),
+            ("/artist/sublist", "artist_sublist"),
+            ("/mv/sublist", "mv_sublist"),
+            ("/dj/sublist", "dj_sublist"),
             ("/likelist", "likelist"),
             ("/daily_signin", "daily_signin"),
             ("/scrobble", "scrobble"),
@@ -234,6 +248,7 @@ mod tests {
             ("/personalized/djprogram", "personalized_djprogram"),
             ("/recommend/resource", "recommend_resource"),
             ("/recommend/songs", "recommend_songs"),
+            ("/recommend/songs/dislike", "recommend_songs_dislike"),
             ("/fm_trash", "fm_trash"),
             ("/personal_fm", "personal_fm"),
             ("/top/artists", "top_artists"),
@@ -243,18 +258,26 @@ mod tests {
             ("/dj/category/recommend", "dj_category_recommend"),
             ("/dj/detail", "dj_detail"),
             ("/dj/program", "dj_program"),
+            ("/dj/program/detail", "dj_program_detail"),
             ("/dj/radio/hot", "dj_radio_hot"),
             ("/dj/recommend", "dj_recommend"),
             ("/dj/recommend/type", "dj_recommend_type"),
             ("/dj/sub", "dj_sub"),
             ("/dj/toplist", "dj_toplist"),
             ("/mv/first", "mv_first"),
+            ("/mv/all", "mv_all"),
             ("/mv/detail", "mv_detail"),
             ("/mv/detail/info", "mv_detail_info"),
             ("/mv/url", "mv_url"),
+            ("/video/detail", "video_detail"),
+            ("/video/detail/info", "video_detail_info"),
+            ("/video/url", "video_url"),
             ("/comment/music", "comment_music"),
             ("/comment/new", "comment_new"),
             ("/comment/hot", "comment_hot"),
+            ("/comment/like", "comment_like"),
+            ("/hug/comment", "hug_comment"),
+            ("/comment/hug/list", "comment_hug_list"),
         ];
         for (path, expected) in cases {
             let normalized = normalize_route(path);
@@ -276,7 +299,11 @@ mod tests {
             ("/top/playlist/highquality", "top_playlist_highquality"),
             ("/toplist/detail", "toplist_detail"),
             ("/artist/list", "artist_list"),
+            ("/artist/album", "artist_album"),
+            ("/artist/mv", "artist_mv"),
+            ("/album/detail/dynamic", "album_detail_dynamic"),
             ("/album/new", "album_new"),
+            ("/artist/songs", "artist_songs"),
             ("/top/song", "top_song"),
         ];
         for (path, expected) in cases {
@@ -320,9 +347,16 @@ mod tests {
             ("song/url/v1", proxy::ProxyRouteGroup::Catalog),
             ("top/playlist/highquality", proxy::ProxyRouteGroup::Playlist),
             ("user/cloud/del", proxy::ProxyRouteGroup::User),
+            ("user/cloud/detail", proxy::ProxyRouteGroup::User),
+            ("cloud/match", proxy::ProxyRouteGroup::Cloud),
+            ("cloud/import", proxy::ProxyRouteGroup::Cloud),
+            ("cloud/upload/token/alloc", proxy::ProxyRouteGroup::Cloud),
+            ("cloud/upload/complete/pub", proxy::ProxyRouteGroup::Cloud),
             ("recommend/songs", proxy::ProxyRouteGroup::Recommend),
             ("dj/category/recommend", proxy::ProxyRouteGroup::Dj),
             ("mv/first", proxy::ProxyRouteGroup::Mv),
+            ("video/detail", proxy::ProxyRouteGroup::Mv),
+            ("comment/like", proxy::ProxyRouteGroup::Comment),
         ] {
             let method = route_to_method(&normalize_route(route));
             assert_eq!(
@@ -503,15 +537,23 @@ mod tests {
                 {
                     "id": 1,
                     "name": "Created",
-                    "creator": { "nickname": "Ada" },
+                    "userId": 42,
+                    "creator": { "userId": 42, "nickname": "Ada" },
                     "coverImgUrl": "cover-a.jpg",
                     "trackCount": 12,
+                    "playCount": 345,
+                    "description": "Created desc",
+                    "tags": ["rock", "night"],
+                    "createTime": 1710000000000i64,
+                    "updateTime": 1710000001000i64,
+                    "privacy": 0,
                     "subscribed": false
                 },
                 {
                     "id": 2,
                     "name": "Collected",
-                    "creator": { "nickname": "Grace" },
+                    "userId": 7,
+                    "creator": { "userId": 7, "nickname": "Grace" },
                     "coverImgUrl": "cover-b.jpg",
                     "trackCount": 34,
                     "subscribed": true
@@ -522,16 +564,35 @@ mod tests {
         let playlists = read_user_playlists(&payload);
         assert_eq!(playlists.len(), 2);
         assert_eq!(playlists[0].name, "Created");
+        assert_eq!(playlists[0].user_id, Some(42));
+        assert_eq!(playlists[0].play_count, Some(345.0));
+        assert_eq!(playlists[0].description.as_deref(), Some("Created desc"));
         assert_eq!(
-            filter_playlist_summaries(playlists.clone(), Some("collected-playlists")),
+            playlists[0].tags,
+            vec!["rock".to_string(), "night".to_string()]
+        );
+        assert_eq!(
+            filter_playlist_summaries(playlists.clone(), 42, Some("collected-playlists")),
             vec![NcmPlaylistSummary {
                 id: 2,
                 name: "Collected".to_string(),
+                user_id: Some(7),
+                creator_id: Some(7),
                 creator: Some("Grace".to_string()),
                 cover_url: Some("cover-b.jpg".to_string()),
                 track_count: Some(34),
+                play_count: None,
+                description: None,
+                tags: Vec::new(),
+                create_time: None,
+                update_time: None,
+                privacy: None,
                 subscribed: true,
             }]
+        );
+        assert_eq!(
+            filter_playlist_summaries(playlists, 42, Some("created-playlists")),
+            Vec::<NcmPlaylistSummary>::new()
         );
     }
 
@@ -545,7 +606,12 @@ mod tests {
                         "name": "Needle",
                         "ar": [{ "name": "A" }, { "name": "B" }],
                         "al": { "name": "Album", "picUrl": "cover.jpg" },
-                        "dt": 180000
+                        "dt": 180000,
+                        "level": "lossless",
+                        "fee": 1,
+                        "mark": 1048576,
+                        "originCoverType": 1,
+                        "mv": 123
                     },
                     { "id": 43 }
                 ]
@@ -564,8 +630,48 @@ mod tests {
                 duration_secs: Some(180.0),
                 artwork_url: Some("cover.jpg".to_string()),
                 size_bytes: None,
+                quality_label: Some("SQ".to_string()),
+                privilege_tag: Some("VIP".to_string()),
+                explicit: true,
+                original_tag: Some("原".to_string()),
+                mv_id: Some(123),
+                is_cloud: false,
             }]
         );
+    }
+
+    #[test]
+    fn read_search_tracks_prefers_extended_quality_fields() {
+        let payload = json!({
+            "result": {
+                "songs": [
+                    {
+                        "id": 44,
+                        "name": "Hi Res Needle",
+                        "ar": [{ "name": "A" }],
+                        "al": { "name": "Album" },
+                        "dt": 120000,
+                        "level": "lossless",
+                        "hrMusic": { "br": 1920000 },
+                        "sqMusic": { "br": 999000 }
+                    },
+                    {
+                        "id": 45,
+                        "name": "Privilege Needle",
+                        "ar": [{ "name": "B" }],
+                        "al": { "name": "Album" },
+                        "dt": 120000,
+                        "privilege": { "maxBrLevel": "hires", "plLevel": "lossless" },
+                        "sq": { "br": 999000 }
+                    }
+                ]
+            }
+        });
+
+        let tracks = read_search_tracks(&payload);
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].quality_label.as_deref(), Some("Hi-Res"));
+        assert_eq!(tracks[1].quality_label.as_deref(), Some("Hi-Res"));
     }
 
     #[test]
@@ -576,9 +682,11 @@ mod tests {
                     {
                         "id": 100,
                         "name": "Mix",
-                        "creator": { "nickname": "Ada" },
+                        "userId": 42,
+                        "creator": { "userId": 42, "nickname": "Ada" },
                         "coverImgUrl": "cover.jpg",
-                        "trackCount": 12
+                        "trackCount": 12,
+                        "description": "Search desc"
                     },
                     { "id": 101 }
                 ]
@@ -590,9 +698,17 @@ mod tests {
             vec![NcmPlaylistSummary {
                 id: 100,
                 name: "Mix".to_string(),
+                user_id: Some(42),
+                creator_id: Some(42),
                 creator: Some("Ada".to_string()),
                 cover_url: Some("cover.jpg".to_string()),
                 track_count: Some(12),
+                play_count: None,
+                description: Some("Search desc".to_string()),
+                tags: Vec::new(),
+                create_time: None,
+                update_time: None,
+                privacy: None,
                 subscribed: false,
             }]
         );
@@ -624,6 +740,12 @@ mod tests {
                 duration_secs: Some(90.0),
                 artwork_url: Some("legacy.jpg".to_string()),
                 size_bytes: None,
+                quality_label: None,
+                privilege_tag: None,
+                explicit: false,
+                original_tag: None,
+                mv_id: None,
+                is_cloud: false,
             }]
         );
     }
@@ -731,6 +853,12 @@ mod tests {
                 duration_secs: Some(210.0),
                 artwork_url: Some("song.jpg".to_string()),
                 size_bytes: None,
+                quality_label: None,
+                privilege_tag: None,
+                explicit: false,
+                original_tag: None,
+                mv_id: None,
+                is_cloud: false,
             }]
         );
     }
@@ -840,6 +968,12 @@ mod tests {
             duration_secs: Some(30.0),
             artwork_url: Some("fm.jpg".to_string()),
             size_bytes: None,
+            quality_label: None,
+            privilege_tag: None,
+            explicit: false,
+            original_tag: None,
+            mv_id: None,
+            is_cloud: false,
         };
 
         let card = read_radar_playlist_card(&radar).expect("radar card");

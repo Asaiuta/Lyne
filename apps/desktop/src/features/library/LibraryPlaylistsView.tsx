@@ -123,7 +123,7 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
         when={selectedPlaylist()}
         fallback={
           <div class="local-playlist-grid-view">
-            <div class="album-grid local-playlist-grid">
+            <div class="album-grid local-playlist-grid content-fade-in">
               <For each={props.playlists}>
                 {(playlist) => (
                   <AlbumCard

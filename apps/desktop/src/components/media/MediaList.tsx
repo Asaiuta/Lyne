@@ -13,15 +13,18 @@ import { useDismissibleOverlay } from "../../shared/ui/useDismissibleOverlay";
 import { Modal } from "../Modal";
 import {
   IconChevronDown,
+  IconCloud,
   IconCopy,
   IconDelete,
   IconFolder,
+  IconBookOpen,
   IconMessage,
   IconPlay,
   IconPlaylist,
   IconQueueAdd,
   IconSearch,
-  IconShare
+  IconShare,
+  IconThumbDown
 } from "../icons";
 import { useUISearch } from "../../shared/state/UISearchContext";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -42,13 +45,16 @@ export type MediaContextAction =
   | "copy-name"
   | "copy-id"
   | "share-link"
+  | "song-wiki"
   | "view-comments"
   | "copy-path"
   | "show-in-folder"
   | "add-to-playlist"
   | "search"
+  | "daily-dislike"
   | "delete-from-playlist"
   | "delete-from-cloud"
+  | "cloud-match"
   | "delete-from-library"
   | "delete";
 export type MediaSortField =
@@ -88,6 +94,8 @@ export interface MediaListItem {
   privilegeTag?: string | null;
   explicit?: boolean;
   originalTag?: string | null;
+  mvId?: number | null;
+  isCloud?: boolean;
 }
 
 interface MediaListProps<T extends MediaListItem> {
@@ -100,6 +108,7 @@ interface MediaListProps<T extends MediaListItem> {
   isPlayingNow?: boolean;
   onPlay: (item: T) => void;
   onEnqueue: (item: T) => void;
+  onDoubleClick?: (item: T) => void;
   onCopyPath?: (item: T) => void;
   onVisibleRangeChange?: (range: { start: number; end: number }) => void;
   onScroll?: (event: Event) => void;
@@ -113,6 +122,9 @@ interface MediaListProps<T extends MediaListItem> {
   sort?: MediaSortState;
   onSortChange?: (field: MediaSortField) => void;
   onSortOrderChange?: (order: MediaSortOrder) => void;
+  sortDisabled?: boolean;
+  draggable?: boolean;
+  onReorder?: (fromIndex: number, toIndex: number) => void;
 }
 
 const VIRTUALIZE_THRESHOLD = 120;
@@ -174,6 +186,8 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const [sortMenu, setSortMenu] = createSignal<SortMenuState>(closedSortMenu);
   const [commentsModal, setCommentsModal] = createSignal<CommentsModalState>(closedCommentsModal);
   const [scrollTop, setScrollTop] = createSignal<number>(0);
+  const [draggedIndex, setDraggedIndex] = createSignal<number | null>(null);
+  const [dropIndex, setDropIndex] = createSignal<number | null>(null);
   const [viewportHeight, setViewportHeight] = createSignal<number>(0);
   let viewportRef: HTMLDivElement | undefined;
   let sortMenuRef: HTMLDivElement | undefined;
@@ -188,6 +202,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
           "copy-name",
           "copy-id",
           "share-link",
+          "song-wiki",
           "view-comments"
         ]
       )
@@ -202,10 +217,13 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
         return uiSettings.contextMenuOptions.addToPlaylist;
       case "search":
         return uiSettings.contextMenuOptions.search;
+      case "daily-dislike":
+        return uiSettings.contextMenuOptions.dislike;
       case "copy-name":
         return uiSettings.contextMenuOptions.more && uiSettings.contextMenuOptions.copyName;
       case "copy-id":
       case "share-link":
+      case "song-wiki":
         return uiSettings.contextMenuOptions.more;
       case "view-comments":
         return uiSettings.useOnlineService;
@@ -217,6 +235,8 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
         return uiSettings.contextMenuOptions.deleteFromPlaylist;
       case "delete-from-cloud":
         return uiSettings.contextMenuOptions.deleteFromCloud;
+      case "cloud-match":
+        return uiSettings.contextMenuOptions.cloudMatch;
       case "delete-from-library":
         return uiSettings.contextMenuOptions.deleteFromLibrary;
       case "delete":
@@ -392,6 +412,8 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
       void handleCopyId(target);
     } else if (key === "share-link") {
       void handleShareLink(target);
+    } else if (key === "song-wiki") {
+      props.onContextAction?.("song-wiki", target);
     } else if (key === "view-comments") {
       void handleViewComments(target);
     } else if (key === "copy-path") {
@@ -402,13 +424,44 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
       handleSearchItem(target);
     } else if (
       key === "add-to-playlist" ||
+      key === "daily-dislike" ||
       key === "delete" ||
       key === "delete-from-playlist" ||
       key === "delete-from-cloud" ||
+      key === "cloud-match" ||
       key === "delete-from-library"
     ) {
       props.onContextAction?.(key, target);
     }
+  };
+  const handleDragStart = (event: DragEvent, _item: T, index: number) => {
+    if (!props.draggable) return;
+    setDraggedIndex(index);
+    event.dataTransfer?.setData("text/plain", String(index));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  };
+  const handleDragOver = (event: DragEvent, index: number) => {
+    if (!props.draggable || draggedIndex() === null) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    setDropIndex(index);
+  };
+  const handleDrop = (event: DragEvent, index: number) => {
+    if (!props.draggable) return;
+    event.preventDefault();
+    const from = draggedIndex();
+    setDraggedIndex(null);
+    setDropIndex(null);
+    if (from === null || from === index) return;
+    props.onReorder?.(from, index);
+  };
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDropIndex(null);
   };
 
   onMount(() => {
@@ -532,7 +585,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   };
 
   const titleSortHeader = () => {
-    if (!props.onSortChange) {
+    if (props.sortDisabled === true || !props.onSortChange) {
       return <span>{t("media.column.title")}</span>;
     }
     const activeField = props.sort?.field ?? "default";
@@ -567,22 +620,29 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
       { key: "play", label: t("media.context.play"), icon: <IconPlay /> },
       { key: "enqueue", label: t("media.context.enqueue"), icon: <IconQueueAdd /> },
       { key: "add-to-playlist", label: t("media.context.addToPlaylist"), icon: <IconPlaylist /> },
+      { key: "daily-dislike", label: t("media.context.dailyDislike"), icon: <IconThumbDown /> },
       { key: "search", label: t("media.context.search"), icon: <IconSearch /> },
       { key: "copy-name", label: t("media.context.copyName"), icon: <IconCopy /> },
       { key: "copy-id", label: t("media.context.copyId"), icon: <IconCopy /> },
       { key: "share-link", label: t("media.context.shareLink"), icon: <IconShare /> },
+      { key: "song-wiki", label: t("media.context.songWiki"), icon: <IconBookOpen /> },
       { key: "view-comments", label: t("media.context.viewComments"), icon: <IconMessage /> },
       { key: "copy-path", label: t("media.context.copyPath"), icon: <IconCopy /> },
       { key: "show-in-folder", label: t("media.context.showInFolder"), icon: <IconFolder /> },
       { key: "delete-from-playlist", label: t("media.context.deleteFromPlaylist"), icon: <IconDelete /> },
       { key: "delete-from-cloud", label: t("media.context.deleteFromCloud"), icon: <IconDelete /> },
+      { key: "cloud-match", label: t("media.context.cloudMatch"), icon: <IconCloud /> },
       { key: "delete-from-library", label: t("media.context.deleteFromLibrary"), icon: <IconDelete /> },
       { key: "delete", label: props.deleteActionLabel ?? t("media.context.delete"), icon: <IconDelete /> }
     ];
     return items.filter((item) => {
       const action = item.key as MediaContextAction;
       if (
-        (action === "copy-id" || action === "share-link" || action === "view-comments") &&
+        (action === "copy-id" ||
+          action === "share-link" ||
+          action === "song-wiki" ||
+          action === "view-comments" ||
+          action === "cloud-match") &&
         typeof target?.songId !== "number"
       ) {
         return false;
@@ -595,13 +655,13 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     <Show
       when={totalItems() > 0}
       fallback={
-        <div class="media-list-table" data-state="empty">
+        <div class="media-list-table content-fade-in" data-state="empty">
           <div class="media-list-empty">{props.emptyState ?? null}</div>
         </div>
       }
     >
       <div
-        class="media-list-table"
+        class="media-list-table content-fade-in"
         classList={{
           "is-album-hidden": !uiSettings.showSongAlbum,
           "is-actions-hidden": !uiSettings.showSongOperations,
@@ -674,6 +734,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                   absoluteIndex={absoluteIndex()}
                   isCurrent={isCurrent()}
                   isSelected={isSelected()}
+                  isDropTarget={dropIndex() === absoluteIndex()}
                   isPlayingNow={props.isPlayingNow}
                   showArtwork={showArtwork()}
                   hideSize={props.hideSize}
@@ -685,8 +746,14 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
                   displaySongText={displaySongText}
                   onSelect={setSelectedId}
                   onPlay={props.onPlay}
+                  onDoubleClick={props.onDoubleClick}
                   onEnqueue={props.onEnqueue}
                   onContextMenu={handleRowContextMenu}
+                  draggable={props.draggable}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onDragEnd={handleDragEnd}
                 />
               );
             }}

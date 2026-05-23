@@ -74,6 +74,7 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
   assert.equal(settings.contextMenuOptions.more, true);
   assert.equal(settings.contextMenuOptions.openFolder, true);
   assert.equal(settings.contextMenuOptions.deleteFromCloud, true);
+  assert.equal(settings.contextMenuOptions.cloudMatch, true);
   assert.deepEqual(settings.homeSections, [{ key: "artists", order: 0, visible: false }]);
 });
 

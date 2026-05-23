@@ -60,6 +60,7 @@ export type {
 } from "./library";
 export type {
   GetNcmHomeFeedInput,
+  ListNcmArtistTracksInput,
   ListNcmCloudTracksInput,
   ListNcmDiscoverAlbumsInput,
   ListNcmDiscoverArtistsInput,
@@ -67,11 +68,14 @@ export type {
   ListNcmDiscoverSongsInput,
   ListNcmPlaylistTracksInput,
   ListNcmUserPlaylistsInput,
+  MatchNcmCloudTrackInput,
   NcmAccountState,
   NcmAccountSummary,
   NcmAccountUpsertInput,
   NcmArtistSummary,
   NcmCloudTracksPage,
+  NcmDailySongDislikeResult,
+  NcmDailySongsResult,
   NcmDiscoverAlbumArea,
   NcmDiscoverCard,
   NcmDiscoverCardsPage,
@@ -87,14 +91,17 @@ export type {
   NcmHomePersonalFmPreview,
   NcmHomeTrackCover,
   NcmPlaylistSummary,
+  NcmPlaylistTracksUpdateResult,
   NcmTrackPlaybackResult,
   NcmTrackQueueResult,
+  NcmTracksPage,
   NcmTrackSummary,
   NcmUserPlaylistMode,
   ResolveNcmTrackInput,
   ResolvedNcmTrack,
   ResolvedNcmTrackSupplement,
-  SearchNcmTracksInput
+  SearchNcmTracksInput,
+  UpdateNcmPlaylistTracksInput
 } from "./ncmDomainTypes";
 export type {
   ConfigureOptimizationsInput,

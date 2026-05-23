@@ -277,7 +277,6 @@
 
   .queue-drawer-icon-button svg,
   .queue-drawer-remove svg,
-  .queue-drawer-play svg,
   .queue-drawer-index svg,
   .queue-drawer-footer-button svg {
     width: 20px;
@@ -300,7 +299,8 @@
   .queue-drawer-list > li {
     position: absolute;
     inset-inline: 0;
-    height: 72px;
+    height: 80px;
+    padding: 8px 0;
     will-change: transform;
   }
 
@@ -309,6 +309,7 @@
     grid-template-columns: minmax(0, 1fr) 36px;
     align-items: center;
     min-height: 64px;
+    height: 64px;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     background: var(--accent-a08);
@@ -319,22 +320,22 @@
   }
 
   .queue-drawer-item:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--accent);
   }
 
   .queue-drawer-item.is-current {
-    border-color: var(--accent-a58);
+    border-color: var(--accent);
     background: var(--accent-a28);
   }
 
   .queue-drawer-item-main {
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr) max-content 24px;
+    grid-template-columns: 36px minmax(0, 1fr);
     align-items: center;
     gap: 8px;
     min-width: 0;
     min-height: 62px;
-    padding: 0 4px 0 12px;
+    padding: 0 12px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -345,8 +346,7 @@
     cursor: default;
   }
 
-  .queue-drawer-index,
-  .queue-drawer-play {
+  .queue-drawer-index {
     display: grid;
     place-items: center;
     color: var(--muted);
@@ -377,12 +377,6 @@
     color: var(--text);
     font-size: 14px;
     font-weight: 650;
-  }
-
-  .queue-drawer-duration {
-    color: var(--muted);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
   }
 
   .queue-drawer-footer {
@@ -462,7 +456,7 @@
     place-items: center;
     width: 60px;
     height: 60px;
-    margin: 20px auto 18px;
+    margin: 20px auto 30px;
     border-radius: 50%;
     color: var(--accent-foreground);
     background: var(--accent);
@@ -501,13 +495,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-3);
+    gap: 12px;
   }
 
   .login-modal-qr-frame,
   .login-modal-qr-placeholder {
     width: 180px;
     aspect-ratio: 1 / 1;
+    margin: 8px 0;
     border-radius: 12px;
     overflow: hidden;
   }
@@ -622,7 +617,7 @@
     align-items: center;
     justify-content: center;
     gap: var(--space-3);
-    margin: 8px 0 2px;
+    margin: 20px 0;
   }
 
   .login-modal-link-button {
@@ -875,15 +870,6 @@
   }
 
   @media (max-width: 1180px) and (min-width: 861px) {
-    .player-bar {
-      grid-template-columns: minmax(0, 1fr) auto auto;
-      gap: 12px;
-    }
-
-    .player-bar-right {
-      justify-content: flex-end;
-    }
-
     .online-playlist-layout {
       grid-template-columns: 1fr;
     }
@@ -1085,28 +1071,6 @@
     }
   }
 
-  @media (max-width: 1024px) {
-    .player-time-stack {
-      display: none !important;
-    }
-  }
-
-  @media (max-width: 810px) {
-    .player-bar {
-      grid-template-columns: minmax(0, 1fr) auto auto;
-    }
-
-    .player-bar-transport {
-      margin: 0 0 0 12px;
-    }
-
-    .player-bar-transport .transport-button:not(.transport-primary),
-    .player-utility-hidden,
-    .player-time-stack {
-      display: none;
-    }
-  }
-
   @media (max-width: 720px) {
     .app-main {
       padding: 0;
@@ -1173,29 +1137,6 @@
 
     .login-modal-row {
       grid-template-columns: 1fr;
-    }
-    .player-bar {
-      margin: 0;
-      padding-inline: var(--space-3);
-      grid-template-columns: 1fr auto auto;
-      gap: 12px;
-    }
-
-    .player-bar-center {
-      justify-content: flex-start;
-    }
-
-    .player-inline-tag,
-
-
-    .player-inline-menu {
-      display: none;
-    }
-
-    .player-bar-transport .mode-button,
-    .player-time-stack .player-right-tag,
-    .player-utility-group .player-right-tag {
-      display: none;
     }
     .volume-slider {
       width: 88px;

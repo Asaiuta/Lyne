@@ -1,6 +1,6 @@
 import { Show } from "solid-js";
 import type { UISettings } from "../../shared/state/useUISettings";
-import { IconPause, IconPlay, IconQueueAdd } from "../icons";
+import { IconCloud, IconPause, IconPlay, IconQueueAdd } from "../icons";
 import type { MediaListItem } from "./MediaList";
 import {
   displayNameFromSourcePath,
@@ -13,6 +13,7 @@ interface MediaListRowProps<T extends MediaListItem> {
   absoluteIndex: number;
   isCurrent: boolean;
   isSelected: boolean;
+  isDropTarget?: boolean;
   isPlayingNow?: boolean;
   showArtwork: boolean;
   hideSize?: boolean;
@@ -24,14 +25,23 @@ interface MediaListRowProps<T extends MediaListItem> {
   displaySongText: (value: string) => string;
   onSelect: (id: string) => void;
   onPlay: (item: T) => void;
+  onDoubleClick?: (item: T) => void;
   onEnqueue: (item: T) => void;
   onContextMenu: (event: MouseEvent, itemId: string) => void;
+  draggable?: boolean;
+  onDragStart?: (event: DragEvent, item: T, index: number) => void;
+  onDragOver?: (event: DragEvent, index: number) => void;
+  onDrop?: (event: DragEvent, index: number) => void;
+  onDragEnd?: () => void;
 }
 
 const qualityTagClass = (quality: string): string => {
   const tone = quality === "Hi-Res" || quality === "SQ" ? "warning" : quality === "HQ" ? "info" : "primary";
   return `media-row-tag media-row-quality-tag media-row-quality-tag-${tone}`;
 };
+
+const originalTagClass = (tag: string): string =>
+  tag === "翻唱" ? "media-row-tag media-row-tag-info" : "media-row-tag media-row-tag-primary";
 
 export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T>) {
   const title = () => props.item.title ?? displayNameFromSourcePath(props.item.source_path ?? props.item.id);
@@ -40,7 +50,12 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
     props.item.artist ? props.displaySongText(props.item.artist) : props.emptyCreditsLabel;
   const artworkInitial = () => (title().trim().slice(0, 1) || "#").toUpperCase();
   const className = () =>
-    ["media-row", props.isCurrent ? "is-current" : "", props.isSelected ? "is-selected" : ""]
+    [
+      "media-row",
+      props.isCurrent ? "is-current" : "",
+      props.isSelected ? "is-selected" : "",
+      props.isDropTarget ? "is-drop-target" : ""
+    ]
       .filter(Boolean)
       .join(" ");
 
@@ -48,9 +63,14 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
     <li
       class={className()}
       role="row"
+      draggable={props.draggable}
       onClick={() => props.onSelect(props.item.id)}
-      onDblClick={() => props.onPlay(props.item)}
+      onDblClick={() => (props.onDoubleClick ?? props.onPlay)(props.item)}
       onContextMenu={(event) => props.onContextMenu(event, props.item.id)}
+      onDragStart={(event) => props.onDragStart?.(event, props.item, props.absoluteIndex)}
+      onDragOver={(event) => props.onDragOver?.(event, props.absoluteIndex)}
+      onDrop={(event) => props.onDrop?.(event, props.absoluteIndex)}
+      onDragEnd={() => props.onDragEnd?.()}
     >
       <span class="media-cell media-cell-index" role="cell">
         <Show when={props.isCurrent} fallback={<span class="media-row-index">{props.absoluteIndex + 1}</span>}>
@@ -100,24 +120,34 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
           <span class="media-row-copy">
             <span class="media-row-title" title={props.item.source_path ?? title()}>
               <span class="media-row-title-text">{displayTitle()}</span>
+            </span>
+            <span class="media-row-desc">
               <Show when={props.uiSettings.showSongQuality && props.item.qualityLabel}>
                 {(quality) => <span class={qualityTagClass(quality())}>{quality()}</span>}
               </Show>
+              <Show when={props.uiSettings.showSongOriginalTag && props.item.originalTag}>
+                {(tag) => <span class={originalTagClass(tag())}>{tag()}</span>}
+              </Show>
               <Show when={props.uiSettings.showSongPrivilegeTag && props.item.privilegeTag}>
-                {(tag) => <span class="media-row-tag media-row-tag-muted">{tag()}</span>}
+                {(tag) => <span class="media-row-tag media-row-tag-error">{tag()}</span>}
+              </Show>
+              <Show when={props.uiSettings.showSongPrivilegeTag && props.item.isCloud}>
+                <span class="media-row-tag media-row-tag-info media-row-tag-icon" aria-label="Cloud">
+                  <IconCloud />
+                </span>
+              </Show>
+              <Show when={props.item.mvId}>
+                <span class="media-row-tag media-row-tag-warning">MV</span>
               </Show>
               <Show when={props.uiSettings.showSongExplicitTag && props.item.explicit}>
-                <span class="media-row-tag media-row-tag-muted">E</span>
+                <span class="media-row-tag media-row-tag-error" title="Explicit Content">E</span>
               </Show>
-              <Show when={props.uiSettings.showSongOriginalTag && props.item.originalTag}>
-                {(tag) => <span class="media-row-tag media-row-tag-muted">{tag()}</span>}
+              <Show when={props.uiSettings.showSongArtist}>
+                <span class="media-row-credits">
+                  {credits() || props.emptyCreditsLabel}
+                </span>
               </Show>
             </span>
-            <Show when={props.uiSettings.showSongArtist}>
-              <span class="media-row-credits">
-                {credits() || props.emptyCreditsLabel}
-              </span>
-            </Show>
           </span>
         </span>
       </span>

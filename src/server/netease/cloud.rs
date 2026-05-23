@@ -69,3 +69,37 @@ pub(super) async fn delete_ncm_cloud_track(
         Err(err) => ncm_upstream_error_response(err),
     }
 }
+
+pub(super) async fn match_ncm_cloud_track(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<CloudMatchRequest>,
+) -> HttpResponse {
+    let request = body.into_inner();
+    if request.user_id <= 0 {
+        return bad_request_response("NCM user id must be positive");
+    }
+    if request.song_id <= 0 {
+        return bad_request_response("NCM cloud song id must be positive");
+    }
+    if request.adjust_song_id <= 0 {
+        return bad_request_response("NCM target song id must be positive");
+    }
+    if request.song_id == request.adjust_song_id {
+        return bad_request_response(
+            "NCM cloud target song id must differ from the source song id",
+        );
+    }
+
+    let mut query = Query::new()
+        .param("uid", &request.user_id.to_string())
+        .param("sid", &request.song_id.to_string())
+        .param("asid", &request.adjust_song_id.to_string());
+    inject_active_ncm_cookie(&data, &mut query);
+
+    match data.ncm_client.cloud_match(&query).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success"
+        })),
+        Err(err) => ncm_upstream_error_response(err),
+    }
+}

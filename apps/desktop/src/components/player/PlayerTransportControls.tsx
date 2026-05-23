@@ -15,6 +15,7 @@ interface PlayerTransportControlsProps {
   canSkipPrev: boolean;
   canSkipNext: boolean;
   shuffleActive: boolean;
+  shuffleIcon?: Component;
   repeatActive: boolean;
   repeatIcon: Component;
   playPauseLabel: string;
@@ -34,9 +35,10 @@ interface PlayerTransportControlsProps {
 
 export function PlayerTransportControls(props: PlayerTransportControlsProps) {
   const RepeatIcon = () => props.repeatIcon;
+  const ShuffleIcon = () => props.shuffleIcon ?? IconShuffle;
 
   return (
-    <div class="player-bar-transport inline-flex items-center gap-2" role="group" aria-label={props.transportLabel}>
+    <div class="player-bar-transport" role="group" aria-label={props.transportLabel}>
       <button
         type="button"
         class={`transport-button mode-button${props.shuffleActive ? " is-active" : ""}`}
@@ -45,7 +47,10 @@ export function PlayerTransportControls(props: PlayerTransportControlsProps) {
         aria-pressed={props.shuffleActive}
         title={props.shuffleLabel}
       >
-        <IconShuffle />
+        {(() => {
+          const Icon = ShuffleIcon();
+          return <Icon />;
+        })()}
       </button>
       <button
         type="button"

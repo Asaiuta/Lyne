@@ -10,6 +10,12 @@ export interface RadioCategorySection extends RadioCategory {
   radios: FeedCardItem[];
 }
 
+export interface RadioDetailInfo extends FeedCardItem {
+  programCount: number | null;
+  subscriberCount: number | null;
+  subscribed: boolean | null;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -27,6 +33,12 @@ const readString = (value: unknown): string | null =>
 
 const readArray = (value: unknown): unknown[] =>
   Array.isArray(value) ? value : [];
+
+const readBoolean = (value: unknown): boolean | null => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && (value === 0 || value === 1)) return value === 1;
+  return null;
+};
 
 const readNestedCreator = (value: unknown): string | null => {
   if (!isRecord(value)) return null;
@@ -69,6 +81,23 @@ export const parseRadioCard = (value: unknown): FeedCardItem | null => {
 export const parseRadioDetailCard = (payload: unknown): FeedCardItem | null => {
   if (!isRecord(payload)) return null;
   return parseRadioCard(payload.data ?? payload.djRadio ?? payload.radio ?? payload);
+};
+
+export const parseRadioDetailInfo = (payload: unknown, fallback: FeedCardItem): RadioDetailInfo => {
+  const source = isRecord(payload)
+    ? (isRecord(payload.data) ? payload.data : isRecord(payload.djRadio) ? payload.djRadio : isRecord(payload.radio) ? payload.radio : payload)
+    : null;
+  const card = source === null ? null : parseRadioCard(source);
+  return {
+    ...fallback,
+    ...(card ?? {}),
+    programCount: readNumber(source?.programCount ?? source?.programCnt ?? source?.count) ?? null,
+    subscriberCount: readNumber(source?.subCount ?? source?.subedCount ?? source?.subscribedCount) ?? card?.playCount ?? null,
+    subscribed:
+      readBoolean(source?.subed) ??
+      readBoolean(source?.subscribed) ??
+      readBoolean(source?.isSub)
+  };
 };
 
 const parseProgramTrack = (value: unknown): OnlineTrackItem | null => {

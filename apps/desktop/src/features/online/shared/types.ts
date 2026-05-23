@@ -8,8 +8,8 @@ export type NeteasePageMode =
   | "liked"
   | "created-playlists"
   | "collected-playlists";
-export type SearchTab = "songs" | "playlists";
-export type DiscoverTab = "playlists" | "toplists" | "artists" | "new";
+export type SearchTab = "songs" | "playlists" | "artists" | "albums" | "videos" | "radios";
+export type DiscoverTab = "playlists" | "toplists" | "artists" | "new" | "mvs";
 export type DiscoverPlaylistKind = "normal" | "hq";
 export type DiscoverNewKind = "albums" | "songs";
 
@@ -28,6 +28,11 @@ export interface DiscoverNewArea {
   labelKey: TranslationKey;
   albumArea: "ALL" | "ZH" | "EA" | "KR" | "JP";
   songType: 0 | 7 | 96 | 16 | 8;
+}
+
+export interface DiscoverMvFilter<T extends string = string> {
+  labelKey: TranslationKey;
+  value: T;
 }
 
 export interface NcmProfile {
@@ -66,9 +71,17 @@ export interface DiscoverToplistItem extends DiscoverCardItem {
 
 export interface FeedCardItem {
   id: number;
+  videoId?: string | null;
+  videoKind?: "mv" | "video";
   title: string;
   subtitle: string | null;
   coverUrl: string | null;
   playCount: number | null;
   description: string | null;
+}
+
+export interface RadioSubscribeEvent {
+  radio: FeedCardItem;
+  subscribed: boolean;
+  version: number;
 }

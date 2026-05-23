@@ -135,7 +135,7 @@ export interface PlayerState {
 }
 
 export type RepeatMode = "off" | "one" | "all";
-export type ShuffleMode = "off" | "on";
+export type ShuffleMode = "off" | "on" | "heartbeat";
 
 export interface LibraryRoot {
   root_id: number;

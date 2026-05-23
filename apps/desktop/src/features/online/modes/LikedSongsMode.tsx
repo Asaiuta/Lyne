@@ -12,7 +12,7 @@ import {
   type FeedbackSetter
 } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
-import type { NcmProfile } from "../shared/types";
+import type { NcmProfile, OnlineTrackItem } from "../shared/types";
 import { useDetailNavigation } from "../shared/useDetailNavigation";
 
 const api = createApiClient();
@@ -22,6 +22,7 @@ export interface LikedSongsModeProps {
   isCheckingLogin: Accessor<boolean>;
   isLoginBusy: Accessor<boolean>;
   onBeginLogin: () => void;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
   currentTrackPath: string | null;
@@ -136,6 +137,7 @@ export function LikedSongsMode(props: LikedSongsModeProps) {
         >
           <PlaylistDetail
             playlist={detailNav.selectedPlaylist()}
+            detail={detailNav.playlistDetailInfo()}
             tracks={detailNav.filteredPlaylistTracks()}
             trackCount={detailNav.playlistTrackCount()}
             metaText={detailNav.playlistMetaText()}
@@ -143,17 +145,35 @@ export function LikedSongsMode(props: LikedSongsModeProps) {
               name: props.loginProfile()?.nickname ?? props.loginProfile()?.userId ?? ""
             })}
             isLoadingTracks={detailNav.isLoadingPlaylistTracks()}
+            isLoadingDetail={detailNav.isLoadingPlaylistDetail()}
+            isTogglingSubscribe={detailNav.isTogglingPlaylistSubscribe()}
             isScrolled={detailNav.isPlaylistDetailScrolled()}
             filter={detailNav.playlistFilter()}
             detailTab={detailNav.playlistDetailTab()}
             setFilter={detailNav.setPlaylistFilter}
             setDetailTab={detailNav.setPlaylistDetailTab}
             onBack={() => undefined}
+            onRefresh={() => {
+              const playlist = detailNav.selectedPlaylist();
+              if (playlist) {
+                void detailNav.loadPlaylistTracks(playlist, { limit: likedTrackLimit(playlist) });
+              }
+            }}
             onPlayAll={detailNav.playAllPlaylistTracks}
+            onToggleSubscribe={detailNav.togglePlaylistSubscribe}
+            onRemoveTracks={detailNav.removePlaylistTracks}
+            onTracksRemovedLocally={detailNav.removePlaylistTracksLocally}
+            onPlaylistUpdated={detailNav.updateSelectedPlaylist}
+            onReorderTracks={detailNav.reorderPlaylistTracks}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             onScroll={detailNav.handlePlaylistTrackScroll}
             showBackButton={false}
             showCommentsTab={false}
             emptyStateText={t("ncm.liked.empty")}
+            sourcePlaylistId={detailNav.selectedPlaylist()?.id}
+            lockPlaylistName={true}
+            loginProfile={props.loginProfile()}
+            setFeedback={props.setFeedback}
             playback={props.playback}
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}

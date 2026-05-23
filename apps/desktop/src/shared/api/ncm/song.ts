@@ -55,3 +55,31 @@ export const songUrlMatch = (id: number): Promise<NcmResponseEnvelope> =>
     data: { id },
     noCache: true
   });
+
+export const songWikiSummary = (id: number): Promise<NcmResponseEnvelope> =>
+  requestNcm("song/wiki/summary", {
+    method: "POST",
+    data: { id },
+    noCache: true
+  });
+
+export const songSheetList = (id: number): Promise<NcmResponseEnvelope> =>
+  requestNcm("sheet/list", {
+    method: "POST",
+    data: { id },
+    noCache: true
+  });
+
+export const songSheetPreview = (id: number): Promise<NcmResponseEnvelope> =>
+  requestNcm("sheet/preview", {
+    method: "POST",
+    data: { id },
+    noCache: true
+  });
+
+export const songFirstListenInfo = (id: number): Promise<NcmResponseEnvelope> =>
+  requestNcm("music/first/listen/info", {
+    method: "POST",
+    data: { id },
+    noCache: true
+  });

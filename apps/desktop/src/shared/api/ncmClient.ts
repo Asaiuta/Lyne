@@ -5,36 +5,49 @@ import type {
   ListNcmDiscoverArtistsInput,
   ListNcmDiscoverPlaylistsInput,
   ListNcmDiscoverSongsInput,
+  ListNcmArtistTracksInput,
+  ListNcmHeartbeatTracksInput,
   ListNcmPlaylistTracksInput,
   ListNcmUserPlaylistsInput,
+  MatchNcmCloudTrackInput,
   NcmAccountState,
   NcmAccountUpsertInput,
   NcmCloudTracksPage,
+  NcmDailySongDislikeResult,
+  NcmDailySongsResult,
   NcmDiscoverCard,
   NcmDiscoverCardsPage,
   NcmDiscoverPlaylistCategories,
   NcmDiscoverToplist,
   NcmHomeFeed,
   NcmPlaylistSummary,
+  NcmPlaylistTracksUpdateResult,
   NcmTrackPlaybackResult,
   NcmTrackQueueResult,
+  NcmTracksPage,
   NcmTrackSummary,
   ResolveNcmTrackInput,
   ResolvedNcmTrack,
   ResolvedNcmTrackSupplement,
-  SearchNcmTracksInput
+  SearchNcmTracksInput,
+  UpdateNcmPlaylistTracksInput
 } from "./ncmDomainTypes";
 import {
   parseNcmAccountStateResponse,
   parseNcmCloudTracksResponse,
+  parseNcmDailySongDislikeResponse,
+  parseNcmDailySongsResponse,
   parseNcmDiscoverCardsPageResponse,
   parseNcmDiscoverCardsResponse,
   parseNcmDiscoverPlaylistCategoriesResponse,
   parseNcmDiscoverToplistsResponse,
   parseNcmHomeFeedResponse,
   parseNcmLikelistIdsResponse,
+  parseNcmPlaylistDetailResponse,
+  parseNcmPlaylistTracksUpdateResponse,
   parseNcmTrackPlaybackResponse,
   parseNcmTrackQueueResponse,
+  parseNcmTracksPageResponse,
   parseNcmTracksResponse,
   parseNcmUserPlaylistsResponse,
   parseResolvedNcmTrackResponse,
@@ -57,21 +70,28 @@ export interface NcmApiClient {
   setActiveNcmAccount: (userId: number) => Promise<NcmAccountState>;
   refreshActiveNcmAccount: () => Promise<NcmAccountState>;
   logoutActiveNcmAccount: () => Promise<NcmAccountState>;
+  clearActiveNcmAccount: () => Promise<NcmAccountState>;
   dailySigninActiveNcmAccount: () => Promise<NcmAccountState>;
   deleteNcmAccount: (userId: number) => Promise<NcmAccountState>;
   listNcmUserPlaylists: (input: ListNcmUserPlaylistsInput) => Promise<NcmPlaylistSummary[]>;
   searchNcmTracks: (input: SearchNcmTracksInput) => Promise<NcmTrackSummary[]>;
   searchNcmPlaylists: (input: SearchNcmTracksInput) => Promise<NcmPlaylistSummary[]>;
+  getNcmPlaylistDetail: (id: number) => Promise<NcmPlaylistSummary>;
   listNcmPlaylistTracks: (input: ListNcmPlaylistTracksInput) => Promise<NcmTrackSummary[]>;
+  updateNcmPlaylistTracks: (input: UpdateNcmPlaylistTracksInput) => Promise<NcmPlaylistTracksUpdateResult>;
+  getNcmDailySongs: () => Promise<NcmDailySongsResult>;
   listNcmDailySongTracks: () => Promise<NcmTrackSummary[]>;
+  dislikeNcmDailySong: (songId: number) => Promise<NcmDailySongDislikeResult>;
   listNcmSongDetailTracks: (ids: number[]) => Promise<NcmTrackSummary[]>;
   listNcmPersonalFmTracks: () => Promise<NcmTrackSummary[]>;
   trashNcmPersonalFmTrack: (songId: number) => Promise<void>;
+  listNcmHeartbeatTracks: (input: ListNcmHeartbeatTracksInput) => Promise<NcmTrackSummary[]>;
   listNcmAlbumTracks: (id: number) => Promise<NcmTrackSummary[]>;
-  listNcmArtistTracks: (id: number) => Promise<NcmTrackSummary[]>;
+  listNcmArtistTracks: (input: ListNcmArtistTracksInput) => Promise<NcmTracksPage>;
   getNcmLikelistIds: (uid: number) => Promise<number[]>;
   listNcmCloudTracks: (input: ListNcmCloudTracksInput) => Promise<NcmCloudTracksPage>;
   deleteNcmCloudTrack: (songId: number) => Promise<void>;
+  matchNcmCloudTrack: (input: MatchNcmCloudTrackInput) => Promise<void>;
   getNcmHomeFeed: (input?: GetNcmHomeFeedInput) => Promise<NcmHomeFeed>;
   listNcmDiscoverPlaylists: (input: ListNcmDiscoverPlaylistsInput) => Promise<NcmDiscoverCardsPage>;
   listNcmDiscoverAlbums: (input: ListNcmDiscoverAlbumsInput) => Promise<NcmDiscoverCardsPage>;
@@ -133,6 +153,8 @@ export const createNcmApiClient = (transport: NcmApiTransport): NcmApiClient => 
     parseNcmAccountStateResponse(await transport.requestJson("/domain/ncm/accounts/refresh", postJson())),
   logoutActiveNcmAccount: async () =>
     parseNcmAccountStateResponse(await transport.requestJson("/domain/ncm/accounts/logout", postJson())),
+  clearActiveNcmAccount: async () =>
+    parseNcmAccountStateResponse(await transport.requestJson("/domain/ncm/accounts/clear_active", postJson())),
   dailySigninActiveNcmAccount: async () =>
     parseNcmAccountStateResponse(await transport.requestJson("/domain/ncm/accounts/daily_signin", postJson())),
   deleteNcmAccount: async (userId) =>
@@ -175,6 +197,10 @@ export const createNcmApiClient = (transport: NcmApiTransport): NcmApiClient => 
         })
       )
     ),
+  getNcmPlaylistDetail: async (id) =>
+    parseNcmPlaylistDetailResponse(
+      await transport.requestJson("/domain/ncm/playlist/detail", postJson({ id }))
+    ),
   listNcmPlaylistTracks: async (input) =>
     parseNcmTracksResponse(
       await transport.requestJson(
@@ -186,8 +212,25 @@ export const createNcmApiClient = (transport: NcmApiTransport): NcmApiClient => 
         })
       )
     ),
+  updateNcmPlaylistTracks: async (input) =>
+    parseNcmPlaylistTracksUpdateResponse(
+      await transport.requestJson(
+        "/domain/ncm/playlist/tracks/update",
+        postJson({
+          playlist_id: input.playlistId,
+          song_ids: input.songIds,
+          op: input.op ?? "add"
+        })
+      )
+    ),
+  getNcmDailySongs: async () =>
+    parseNcmDailySongsResponse(await transport.requestJson("/domain/ncm/recommend/songs/tracks", postJson())),
   listNcmDailySongTracks: async () =>
     parseNcmTracksResponse(await transport.requestJson("/domain/ncm/recommend/songs/tracks", postJson())),
+  dislikeNcmDailySong: async (songId) =>
+    parseNcmDailySongDislikeResponse(
+      await transport.requestJson("/domain/ncm/recommend/songs/dislike", postJson({ song_id: songId }))
+    ),
   listNcmSongDetailTracks: async (ids) =>
     parseNcmTracksResponse(await transport.requestJson("/domain/ncm/song/details/tracks", postJson({ ids }))),
   listNcmPersonalFmTracks: async () =>
@@ -200,10 +243,32 @@ export const createNcmApiClient = (transport: NcmApiTransport): NcmApiClient => 
       throw new Error(response.message ?? "Failed to dislike Personal FM track");
     }
   },
+  listNcmHeartbeatTracks: async (input) =>
+    parseNcmTracksResponse(
+      await transport.requestJson(
+        "/domain/ncm/heartbeat/tracks",
+        postJson({
+          song_id: input.songId,
+          playlist_id: input.playlistId,
+          start_song_id: input.startSongId ?? null,
+          count: input.count ?? null
+        })
+      )
+    ),
   listNcmAlbumTracks: async (id) =>
     parseNcmTracksResponse(await transport.requestJson("/domain/ncm/album/tracks", postJson({ id }))),
-  listNcmArtistTracks: async (id) =>
-    parseNcmTracksResponse(await transport.requestJson("/domain/ncm/artist/tracks", postJson({ id }))),
+  listNcmArtistTracks: async (input) =>
+    parseNcmTracksPageResponse(
+      await transport.requestJson(
+        "/domain/ncm/artist/tracks",
+        postJson({
+          id: input.id,
+          limit: input.limit ?? null,
+          offset: input.offset ?? null,
+          order: input.order ?? null
+        })
+      )
+    ),
   getNcmLikelistIds: async (uid) =>
     parseNcmLikelistIdsResponse(await transport.requestJson("/domain/ncm/user/likelist", postJson({ uid }))),
   listNcmCloudTracks: async (input) =>
@@ -222,6 +287,21 @@ export const createNcmApiClient = (transport: NcmApiTransport): NcmApiClient => 
     );
     if (response.status === "error") {
       throw new Error(response.message ?? "Failed to delete NCM cloud track");
+    }
+  },
+  matchNcmCloudTrack: async (input) => {
+    const response = parseStatusMessage(
+      await transport.requestJson(
+        "/domain/ncm/user/cloud/match",
+        postJson({
+          user_id: input.userId,
+          song_id: input.songId,
+          adjust_song_id: input.adjustSongId
+        })
+      )
+    );
+    if (response.status === "error") {
+      throw new Error(response.message ?? "Failed to match NCM cloud track");
     }
   },
   getNcmHomeFeed: async (input) =>

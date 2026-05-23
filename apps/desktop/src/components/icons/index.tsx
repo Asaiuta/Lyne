@@ -271,6 +271,15 @@ export function IconRefresh(props: IconProps) {
   );
 }
 
+export function IconPower(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M10 3.5v6" />
+      <path d="M6.2 5.8a6 6 0 1 0 7.6 0" />
+    </svg>
+  );
+}
+
 export function IconCopy(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
@@ -438,6 +447,15 @@ export function IconSparkle(props: IconProps) {
   );
 }
 
+export function IconFire(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M10.5 18a5.5 5.5 0 0 0 5.5-5.5c0-2.4-1.3-4.2-3.2-5.8-.6 1.7-1.5 2.7-2.5 3.2.3-2.5-.8-4.8-3-6.4.1 3.2-3.3 4.9-3.3 8.9A5.5 5.5 0 0 0 10.5 18z" />
+      <path d="M10.5 15.5A2.5 2.5 0 0 0 13 13c0-1.1-.6-2-1.4-2.7-.4 1-.9 1.6-1.6 1.9.1-1.1-.3-2.1-1.2-2.9 0 1.9-.8 2.5-.8 3.7a2.5 2.5 0 0 0 2.5 2.5z" />
+    </svg>
+  );
+}
+
 export function IconCompass(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
@@ -459,6 +477,15 @@ export function IconHeartFilled(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
       <path d="M10 16.5s-6.5-4.5-6.5-8A3.5 3.5 0 0 1 10 5.5a3.5 3.5 0 0 1 6.5 3c0 3.5-6.5 8-6.5 8z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconHeartBit(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M10 16.5s-6.5-4.5-6.5-8A3.5 3.5 0 0 1 10 5.5a3.5 3.5 0 0 1 6.5 3c0 3.5-6.5 8-6.5 8z" fill="currentColor" stroke="none" />
+      <path d="M5 10.5h1.6l0.9-2 1.5 4 1-2H11.5" fill="none" stroke="#fff" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   );
 }
@@ -496,6 +523,24 @@ export function IconPlaylist(props: IconProps) {
   );
 }
 
+export function IconThumbUp(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M7.2 16.5H5.3a1.7 1.7 0 0 1-1.7-1.7V9.7A1.7 1.7 0 0 1 5.3 8h3.2V5.2a1.4 1.4 0 0 1 2.6-.3l1.1 3.1h2.4a1.7 1.7 0 0 1 1.7 1.7v5.1a1.7 1.7 0 0 1-1.7 1.7H7.2Z" />
+      <path d="M7.2 8v8.3" />
+    </svg>
+  );
+}
+
+export function IconThumbUpFilled(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M7.2 16.5H5.3a1.7 1.7 0 0 1-1.7-1.7V9.7A1.7 1.7 0 0 1 5.3 8h3.2V5.2a1.4 1.4 0 0 1 2.6-.3l1.1 3.1h2.4a1.7 1.7 0 0 1 1.7 1.7v5.1a1.7 1.7 0 0 1-1.7 1.7H7.2Z" fill="currentColor" stroke="none" />
+      <path d="M7.2 8v8.3" stroke="var(--surface, #fff)" />
+    </svg>
+  );
+}
+
 export function IconThumbDown(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
@@ -509,6 +554,16 @@ export function IconStar(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
       <path d="M10 3l2.2 4.5 5 .7-3.6 3.5.8 5L10 14.5 5.6 16.7l.8-5L2.8 8.2l5-.7z" />
+    </svg>
+  );
+}
+
+export function IconBookOpen(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M10 5.8c-1.2-1-2.8-1.5-5-1.5A1.5 1.5 0 0 0 3.5 5.8v10A1.5 1.5 0 0 1 5 14.3c2.2 0 3.8.5 5 1.5" />
+      <path d="M10 5.8c1.2-1 2.8-1.5 5-1.5a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 0-1.5-1.5c-2.2 0-3.8.5-5 1.5" />
+      <path d="M10 5.8v10" />
     </svg>
   );
 }

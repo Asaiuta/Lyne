@@ -3,11 +3,15 @@ import type { Component, JSX } from "solid-js";
 import type { ActivePage } from "../shared/ui/navigation";
 import { isOnlineOnlyPage } from "../shared/ui/navigation";
 import type { ApiClient } from "../shared/api/client";
+import type { LocalPlaylist, ShuffleMode } from "../shared/api/types";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import { useUISettings, type SidebarHiddenItemKey } from "../shared/state/useUISettings";
 import { useTranslation } from "../shared/i18n";
+import { resolveArtworkUrl } from "../shared/ui/artwork";
+import { useDismissibleOverlay } from "../shared/ui/useDismissibleOverlay";
 import { CreatePlaylistModal } from "./CreatePlaylistModal";
 import {
+  loadNcmUserPlaylistGroups,
   type OnlinePlaylistSummary,
   type UserPlaylistMode
 } from "../features/online/ncmPlaylistSummary";
@@ -19,7 +23,9 @@ import {
   IconExpand,
   IconFolder,
   IconHeart,
+  IconHeartBit,
   IconHistory,
+  IconList,
   IconLogo,
   IconPlus,
   IconPlaylist,
@@ -107,7 +113,18 @@ const LOGIN_REQUIRED_PAGES = new Set<ActivePage>([
   "collected-playlists"
 ]);
 
-const SIDEBAR_SETTING_KEY_BY_PAGE: Record<ActivePage, SidebarHiddenItemKey> = {
+type CreatedPlaylistSource = "online" | "local";
+type SidebarPage = Exclude<ActivePage, "song-wiki">;
+
+const CREATED_PLAYLIST_SOURCE_OPTIONS: ReadonlyArray<{
+  value: CreatedPlaylistSource;
+  labelKey: "sidebar.playlist.online" | "sidebar.playlist.local";
+}> = [
+  { value: "online", labelKey: "sidebar.playlist.online" },
+  { value: "local", labelKey: "sidebar.playlist.local" }
+];
+
+const SIDEBAR_SETTING_KEY_BY_PAGE: Record<SidebarPage, SidebarHiddenItemKey> = {
   recommend: "recommend",
   discover: "discover",
   "personal-fm": "personalFm",
@@ -122,6 +139,9 @@ const SIDEBAR_SETTING_KEY_BY_PAGE: Record<ActivePage, SidebarHiddenItemKey> = {
   "created-playlists": "createdPlaylists",
   "collected-playlists": "collectedPlaylists"
 };
+
+const hasSidebarSetting = (page: ActivePage): page is SidebarPage =>
+  page in SIDEBAR_SETTING_KEY_BY_PAGE;
 
 const readSidebarStorage = (key: string): string | null => {
   if (typeof window === "undefined") return null;
@@ -167,8 +187,12 @@ interface SidebarProps {
   onChange: (page: ActivePage) => void;
   selectedPlaylistId?: number | null;
   onSelectPlaylist?: (page: UserPlaylistMode, playlistId: number) => void;
+  onSelectLocalPlaylist?: (playlistId: string) => void;
   isNcmLoggedIn: boolean;
   onRequireNcmLogin: () => void;
+  onRefreshPersonalFm?: () => void;
+  onStartHeartbeat?: () => void;
+  shuffleMode?: ShuffleMode;
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -180,13 +204,33 @@ export function Sidebar(props: SidebarProps) {
   const [collapsedSections, setCollapsedSections] = createSignal(readPersistedCollapsedSections());
   const [createdPlaylists, setCreatedPlaylists] = createSignal<OnlinePlaylistSummary[]>([]);
   const [collectedPlaylists, setCollectedPlaylists] = createSignal<OnlinePlaylistSummary[]>([]);
+  const [localPlaylists, setLocalPlaylists] = createSignal<LocalPlaylist[]>([]);
+  const [createdPlaylistSource, setCreatedPlaylistSource] =
+    createSignal<CreatedPlaylistSource>("online");
+  const [selectedLocalPlaylistId, setSelectedLocalPlaylistId] = createSignal<string | null>(null);
   const [createPlaylistOpen, setCreatePlaylistOpen] = createSignal<boolean>(false);
+  const [createSourceMenuOpen, setCreateSourceMenuOpen] = createSignal<boolean>(false);
+  let createSourceMenuRef: HTMLDivElement | undefined;
 
   const readErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.error.requestFailed");
 
+  useDismissibleOverlay(createSourceMenuOpen, {
+    isInside: (target) => !!createSourceMenuRef && createSourceMenuRef.contains(target),
+    onDismiss: () => setCreateSourceMenuOpen(false)
+  });
+
   createEffect(() => {
     writeSidebarStorage(STORAGE_KEY, collapsedPersisted() ? "1" : "0");
+  });
+
+  onMount(() => {
+    void props.api.listLocalPlaylists()
+      .then(setLocalPlaylists)
+      .catch((error) => {
+        setLocalPlaylists([]);
+        console.warn("[Sidebar] failed to load local playlists", readErrorMessage(error));
+      });
   });
 
   createEffect(() => {
@@ -201,18 +245,8 @@ export function Sidebar(props: SidebarProps) {
   });
 
   const loadUserPlaylists = async (userId: number) => {
-    return Promise.all([
-      props.api.listNcmUserPlaylists({
-        uid: userId,
-        limit: 100,
-        mode: "created-playlists"
-      }),
-      props.api.listNcmUserPlaylists({
-        uid: userId,
-        limit: 100,
-        mode: "collected-playlists"
-      })
-    ]);
+    const groups = await loadNcmUserPlaylistGroups(props.api, userId);
+    return [groups.created, groups.collected] as const;
   };
 
   createEffect(() => {
@@ -258,7 +292,7 @@ export function Sidebar(props: SidebarProps) {
   const toggleAria = () =>
     collapsedPersisted() ? t("sidebar.aria.expand") : t("sidebar.aria.collapse");
   const isItemHidden = (item: NavItem): boolean =>
-    uiSettings.sidebarHiddenItems[SIDEBAR_SETTING_KEY_BY_PAGE[item.key]];
+    hasSidebarSetting(item.key) && uiSettings.sidebarHiddenItems[SIDEBAR_SETTING_KEY_BY_PAGE[item.key]];
   const isItemAllowed = (item: NavItem): boolean =>
     uiSettings.useOnlineService || !isOnlineOnlyPage(item.key);
   const isSectionAllowed = (sectionKey: string): boolean => {
@@ -275,6 +309,13 @@ export function Sidebar(props: SidebarProps) {
   );
   const playlistItemsForSection = (sectionKey: string): OnlinePlaylistSummary[] =>
     sectionKey === "created" ? createdPlaylists() : sectionKey === "collected" ? collectedPlaylists() : [];
+  const localPlaylistCover = (playlist: LocalPlaylist): string | null =>
+    resolveArtworkUrl({
+      externalArtworkUrl: playlist.cover_external_artwork_url,
+      mediaId: playlist.cover_media_id,
+      hasCoverArt: playlist.cover_has_cover_art,
+      urls: props.api
+    });
   const canOpenPage = (page: ActivePage): boolean => {
     if (props.isNcmLoggedIn || !LOGIN_REQUIRED_PAGES.has(page)) return true;
     props.onRequireNcmLogin();
@@ -286,22 +327,37 @@ export function Sidebar(props: SidebarProps) {
   };
   const handlePlaylistSelect = (page: UserPlaylistMode, playlistId: number) => {
     if (!canOpenPage(page)) return;
+    setSelectedLocalPlaylistId(null);
     props.onSelectPlaylist?.(page, playlistId);
   };
+  const handleLocalPlaylistSelect = (playlistId: string) => {
+    setSelectedLocalPlaylistId(playlistId);
+    props.onSelectLocalPlaylist?.(playlistId);
+  };
   const handleCreatePlaylistClick = () => {
-    if (!props.isNcmLoggedIn) {
+    if (createdPlaylistSource() === "online" && !props.isNcmLoggedIn) {
       props.onRequireNcmLogin();
       return;
     }
     setCreatePlaylistOpen(true);
   };
-  const handlePlaylistCreated = async () => {
+  const handlePlaylistCreated = async (mode: CreatedPlaylistSource) => {
+    if (mode === "local") {
+      setLocalPlaylists(await props.api.listLocalPlaylists());
+      return;
+    }
+
     const activeAccount = accountStore.activeAccount();
     if (!activeAccount) return;
     const [created, collected] = await loadUserPlaylists(activeAccount.userId);
     setCreatedPlaylists(created);
     setCollectedPlaylists(collected);
   };
+  const showOnlineCreatedPlaylists = () => createdPlaylistSource() === "online";
+  const createdSectionTitle = () =>
+    createdPlaylistSource() === "local"
+      ? t("sidebar.playlist.local")
+      : t("sidebar.section.createdPlaylists");
 
   return (
     <nav class={className()} aria-label={t("sidebar.aria.primary")}>
@@ -309,9 +365,7 @@ export function Sidebar(props: SidebarProps) {
         <span class="sidebar-brand-logo" aria-hidden="true">
           <IconLogo />
         </span>
-        <Show when={!collapsed()}>
-          <span class="sidebar-brand-product">{t("sidebar.brand.product")}</span>
-        </Show>
+        <span class="sidebar-brand-product">{t("sidebar.brand.product")}</span>
       </button>
 
       <div class="sidebar-scroll">
@@ -325,9 +379,55 @@ export function Sidebar(props: SidebarProps) {
                 <div class={`sidebar-section sidebar-section--${section.key}`}>
                   <Show when={!collapsed()}>
                     <div class="sidebar-section-header">
-                      <span class="sidebar-section-label">{sectionLabel()}</span>
+                      <span class="sidebar-section-label">
+                        {section.key === "created" ? createdSectionTitle() : sectionLabel()}
+                      </span>
                       <div class="sidebar-section-header-actions">
                         <Show when={section.key === "created"}>
+                          <div class="sidebar-playlist-source-menu" ref={createSourceMenuRef}>
+                            <button
+                              type="button"
+                              class={`sidebar-section-action-icon sidebar-playlist-source-trigger${createSourceMenuOpen() ? " is-open" : ""}`}
+                              aria-label={td("sidebar.playlist.source")}
+                              aria-haspopup="menu"
+                              aria-expanded={createSourceMenuOpen()}
+                              title={td("sidebar.playlist.source")}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setCreateSourceMenuOpen((open) => !open);
+                              }}
+                            >
+                              <IconList />
+                            </button>
+                            <Show when={createSourceMenuOpen()}>
+                              <div
+                                class="sidebar-playlist-source-popover"
+                                role="menu"
+                                aria-label={td("sidebar.playlist.source")}
+                              >
+                                <For each={CREATED_PLAYLIST_SOURCE_OPTIONS}>
+                                  {(option) => {
+                                    const isActive = () => createdPlaylistSource() === option.value;
+                                    return (
+                                      <button
+                                        type="button"
+                                        class={`sidebar-playlist-source-option${isActive() ? " is-active" : ""}`}
+                                        role="menuitemradio"
+                                        aria-checked={isActive()}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setCreatedPlaylistSource(option.value);
+                                          setCreateSourceMenuOpen(false);
+                                        }}
+                                      >
+                                        {td(option.labelKey)}
+                                      </button>
+                                    );
+                                  }}
+                                </For>
+                              </div>
+                            </Show>
+                          </div>
                           <button
                             type="button"
                             class="sidebar-section-action-icon"
@@ -358,36 +458,100 @@ export function Sidebar(props: SidebarProps) {
                   <Show when={section.items.length > 0}>
                     <div class={`sidebar-section-body${sectionCollapsed() ? " is-collapsed" : ""}`}>
                       <div class="sidebar-section-body-inner">
-                        <ul class="sidebar-nav">
-                          <For each={section.items}>
-                            {(item) => {
-                              const Icon = item.icon;
-                              const isActive = () => item.key === props.activePage;
-                              const label = () => td(item.labelKey);
-                              return (
-                                <li>
-                                  <button
-                                    type="button"
-                                    class={`sidebar-nav-item${isActive() ? " is-active" : ""}`}
-                                    onClick={() => handleNavItemClick(item.key)}
-                                    aria-current={isActive() ? "page" : undefined}
-                                    title={collapsed() ? label() : undefined}
-                                  >
-                                    <span class="sidebar-nav-icon" aria-hidden="true">
-                                      <Icon />
-                                    </span>
-                                    <Show when={!collapsed()}>
-                                      <span class="sidebar-nav-label">{label()}</span>
-                                    </Show>
-                                  </button>
-                                </li>
-                              );
-                            }}
-                          </For>
-                        </ul>
+                        <Show when={collapsed() || (section.key !== "created" && section.key !== "collected")}>
+                          <ul class="sidebar-nav">
+                            <For each={section.items}>
+                              {(item) => {
+                                const Icon = item.icon;
+                                const isActive = () => item.key === props.activePage;
+                                const label = () => td(item.labelKey);
+                                const badgeCount = () =>
+                                  item.key === "download" ? 0 : 0;
+                                const showFmRefresh = () =>
+                                  item.key === "personal-fm" && !collapsed() && props.isNcmLoggedIn;
+                                const handleFmRefresh = (event: MouseEvent) => {
+                                  event.stopPropagation();
+                                  props.onRefreshPersonalFm?.();
+                                };
+                                const showHeartMode = () =>
+                                  item.key === "liked-songs" && !collapsed() && props.isNcmLoggedIn;
+                                const isHeartActive = () => props.shuffleMode === "heartbeat";
+                                const handleHeartMode = (event: MouseEvent) => {
+                                  event.stopPropagation();
+                                  props.onStartHeartbeat?.();
+                                };
+                                return (
+                                  <li>
+                                    <button
+                                      type="button"
+                                      class={`sidebar-nav-item${isActive() ? " is-active" : ""}`}
+                                      onClick={() => handleNavItemClick(item.key)}
+                                      aria-current={isActive() ? "page" : undefined}
+                                      title={collapsed() ? label() : undefined}
+                                    >
+                                      <span class="sidebar-nav-icon" aria-hidden="true">
+                                        <Icon />
+                                      </span>
+                                      <Show when={!collapsed()}>
+                                        <span class="sidebar-nav-label">{label()}</span>
+                                      </Show>
+                                      <Show when={showFmRefresh()}>
+                                        <span
+                                          role="button"
+                                          tabindex="0"
+                                          class="sidebar-nav-action"
+                                          aria-label={td("sidebar.nav.personalFm.refresh")}
+                                          title={td("sidebar.nav.personalFm.refresh")}
+                                          onClick={handleFmRefresh}
+                                          onKeyDown={(event) => {
+                                            if (event.key === "Enter" || event.key === " ") {
+                                              event.preventDefault();
+                                              handleFmRefresh(event as unknown as MouseEvent);
+                                            }
+                                          }}
+                                        >
+                                          <IconRefresh />
+                                        </span>
+                                      </Show>
+                                      <Show when={showHeartMode()}>
+                                        <span
+                                          role="button"
+                                          tabindex="0"
+                                          class={`sidebar-nav-action sidebar-nav-action--heart${isHeartActive() ? " is-active" : ""}`}
+                                          aria-label={td("sidebar.nav.likedSongs.heartMode")}
+                                          aria-pressed={isHeartActive()}
+                                          title={td("sidebar.nav.likedSongs.heartMode")}
+                                          onClick={handleHeartMode}
+                                          onKeyDown={(event) => {
+                                            if (event.key === "Enter" || event.key === " ") {
+                                              event.preventDefault();
+                                              handleHeartMode(event as unknown as MouseEvent);
+                                            }
+                                          }}
+                                        >
+                                          <IconHeartBit />
+                                        </span>
+                                      </Show>
+                                      <Show when={badgeCount() > 0}>
+                                        <span class="sidebar-nav-badge" aria-label={String(badgeCount())}>
+                                          {badgeCount()}
+                                        </span>
+                                      </Show>
+                                    </button>
+                                  </li>
+                                );
+                              }}
+                            </For>
+                          </ul>
+                        </Show>
 
                         <Show when={!collapsed() && (section.key === "created" || section.key === "collected")}>
-                          <Show when={playlistItemsForSection(section.key).length > 0}>
+                          <Show
+                            when={
+                              playlistItemsForSection(section.key).length > 0 &&
+                              (section.key !== "created" || showOnlineCreatedPlaylists())
+                            }
+                          >
                             <ul class="sidebar-playlist-list">
                               <For each={playlistItemsForSection(section.key)}>
                                 {(playlist) => {
@@ -427,6 +591,42 @@ export function Sidebar(props: SidebarProps) {
                               </For>
                             </ul>
                           </Show>
+                          <Show when={section.key === "created" && !showOnlineCreatedPlaylists()}>
+                            <Show when={localPlaylists().length > 0}>
+                              <ul class="sidebar-playlist-list">
+                                <For each={localPlaylists()}>
+                                  {(playlist) => {
+                                    const coverUrl = () => localPlaylistCover(playlist);
+                                    const isActive = () =>
+                                      props.activePage === "library" &&
+                                      selectedLocalPlaylistId() === playlist.playlist_id;
+
+                                    return (
+                                      <li>
+                                        <button
+                                          type="button"
+                                          class={`sidebar-playlist-item${isActive() ? " is-active" : ""}${uiSettings.menuShowCover ? "" : " is-cover-hidden"}`}
+                                          onClick={() => handleLocalPlaylistSelect(playlist.playlist_id)}
+                                          title={playlist.name}
+                                        >
+                                          <Show when={uiSettings.menuShowCover}>
+                                            <div class="sidebar-playlist-cover" aria-hidden="true">
+                                              <Show when={coverUrl()} fallback={<span>{playlist.name.slice(0, 1)}</span>}>
+                                                {(url) => <img src={url()} alt="" />}
+                                              </Show>
+                                            </div>
+                                          </Show>
+                                          <div class="sidebar-playlist-copy">
+                                            <span class="sidebar-playlist-name">{playlist.name}</span>
+                                          </div>
+                                        </button>
+                                      </li>
+                                    );
+                                  }}
+                                </For>
+                              </ul>
+                            </Show>
+                          </Show>
                         </Show>
                       </div>
                     </div>
@@ -448,7 +648,9 @@ export function Sidebar(props: SidebarProps) {
         {collapsedPersisted() ? <IconExpand /> : <IconCollapse />}
       </button>
       <CreatePlaylistModal
+        api={props.api}
         open={createPlaylistOpen()}
+        mode={createdPlaylistSource()}
         onClose={() => setCreatePlaylistOpen(false)}
         onCreated={handlePlaylistCreated}
       />

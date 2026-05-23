@@ -28,6 +28,7 @@ type Tone = "neutral" | "success" | "error";
 
 interface LoginModalProps {
   open: boolean;
+  disableUid?: boolean;
   onClose: () => void;
 }
 
@@ -568,6 +569,7 @@ export function LoginModal(props: LoginModalProps) {
 
         <div class="login-modal-other">
           <button
+            hidden={props.disableUid === true}
             type="button"
             class="login-modal-link-button"
             classList={{ "is-active": specialMode() === "uid" }}
@@ -575,7 +577,7 @@ export function LoginModal(props: LoginModalProps) {
           >
             {t("ncm.loginModal.tab.uid")}
           </button>
-          <span class="login-modal-divider" aria-hidden="true" />
+          <span hidden={props.disableUid === true} class="login-modal-divider" aria-hidden="true" />
           <button
             type="button"
             class="login-modal-link-button"

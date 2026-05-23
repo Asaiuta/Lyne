@@ -91,9 +91,17 @@ export interface ListNcmUserPlaylistsInput {
 export interface NcmPlaylistSummary {
   id: number;
   name: string;
+  userId: number | null;
+  creatorId: number | null;
   creator: string | null;
   coverUrl: string | null;
   trackCount: number | null;
+  playCount: number | null;
+  description: string | null;
+  tags: string[];
+  createTime: number | null;
+  updateTime: number | null;
+  privacy: number | null;
   subscribed: boolean;
 }
 
@@ -109,6 +117,25 @@ export interface ListNcmPlaylistTracksInput {
   offset?: number;
 }
 
+export type NcmArtistTrackOrder = "hot" | "time";
+
+export interface ListNcmArtistTracksInput {
+  id: number;
+  limit?: number;
+  offset?: number;
+  order?: NcmArtistTrackOrder;
+}
+
+export interface UpdateNcmPlaylistTracksInput {
+  playlistId: number;
+  songIds: number[];
+  op?: "add" | "del";
+}
+
+export interface NcmPlaylistTracksUpdateResult {
+  updatedCount: number;
+}
+
 export interface NcmTrackSummary {
   id: string;
   songId: number;
@@ -119,6 +146,33 @@ export interface NcmTrackSummary {
   duration_secs: number | null;
   artworkUrl: string | null;
   size_bytes?: number | null;
+  qualityLabel?: string | null;
+  privilegeTag?: string | null;
+  explicit?: boolean;
+  originalTag?: string | null;
+  mvId?: number | null;
+  isCloud?: boolean;
+}
+
+export interface NcmDailySongsResult {
+  timestamp: number;
+  tracks: NcmTrackSummary[];
+}
+
+export interface NcmDailySongDislikeResult {
+  track: NcmTrackSummary | null;
+}
+
+export interface ListNcmHeartbeatTracksInput {
+  songId: number;
+  playlistId: number;
+  startSongId?: number;
+  count?: number;
+}
+
+export interface NcmTracksPage {
+  tracks: NcmTrackSummary[];
+  hasMore: boolean;
 }
 
 export interface ListNcmCloudTracksInput {
@@ -131,6 +185,12 @@ export interface NcmCloudTracksPage {
   count: number;
   sizeBytes: number;
   maxSizeBytes: number;
+}
+
+export interface MatchNcmCloudTrackInput {
+  userId: number;
+  songId: number;
+  adjustSongId: number;
 }
 
 export interface GetNcmHomeFeedInput {

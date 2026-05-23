@@ -151,8 +151,7 @@ export function FullPlayer(props: FullPlayerProps) {
   const RepeatIcon = () => (props.repeatMode === "one" ? IconRepeatOne : IconRepeat);
   const VolumeIcon = () => (safeVolume() <= 0.001 ? IconVolumeMute : IconVolumeHigh);
   const repeatLabel = () => t(`player.repeat.${props.repeatMode}` as const);
-  const shuffleLabel = () =>
-    props.shuffleMode === "on" ? t("player.shuffle.on") : t("player.shuffle.off");
+  const shuffleLabel = () => t(`player.shuffle.${props.shuffleMode}` as const);
   const displayTitle = () =>
     uiSettings.hideBracketedContent ? stripBracketedContent(props.title) : props.title;
   const displaySubtitle = () =>
@@ -419,8 +418,9 @@ export function FullPlayer(props: FullPlayerProps) {
     onToggleComment: toggleComment
   });
   const controlShellTransport = () => ({
-    shuffleActive: props.shuffleMode === "on",
+    shuffleActive: props.shuffleMode !== "off",
     shuffleLabel: shuffleLabel(),
+    isHeartbeat: props.shuffleMode === "heartbeat",
     canSkipPrev: props.canSkipPrev,
     canSkipNext: props.canSkipNext,
     isPlaying: props.isPlaying,

@@ -18,20 +18,26 @@ pub(super) const DOMAIN_ROUTE_CONTRACTS: &[(&str, &str)] = &[
     ("POST", "/domain/ncm/accounts/active"),
     ("POST", "/domain/ncm/accounts/refresh"),
     ("POST", "/domain/ncm/accounts/logout"),
+    ("POST", "/domain/ncm/accounts/clear_active"),
     ("POST", "/domain/ncm/accounts/daily_signin"),
     ("POST", "/domain/ncm/user/playlists"),
     ("POST", "/domain/ncm/search/tracks"),
     ("POST", "/domain/ncm/search/playlists"),
+    ("POST", "/domain/ncm/playlist/detail"),
     ("POST", "/domain/ncm/playlist/tracks"),
+    ("POST", "/domain/ncm/playlist/tracks/update"),
     ("POST", "/domain/ncm/recommend/songs/tracks"),
+    ("POST", "/domain/ncm/recommend/songs/dislike"),
     ("POST", "/domain/ncm/song/details/tracks"),
     ("POST", "/domain/ncm/personal_fm/tracks"),
     ("POST", "/domain/ncm/personal_fm/trash"),
+    ("POST", "/domain/ncm/heartbeat/tracks"),
     ("POST", "/domain/ncm/album/tracks"),
     ("POST", "/domain/ncm/artist/tracks"),
     ("POST", "/domain/ncm/user/likelist"),
     ("POST", "/domain/ncm/user/cloud"),
     ("POST", "/domain/ncm/user/cloud/delete"),
+    ("POST", "/domain/ncm/user/cloud/match"),
     ("DELETE", "/domain/ncm/accounts/{user_id}"),
 ];
 
@@ -89,6 +95,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
         web::post().to(logout_active_ncm_account),
     )
     .route(
+        "/domain/ncm/accounts/clear_active",
+        web::post().to(clear_active_ncm_account),
+    )
+    .route(
         "/domain/ncm/accounts/daily_signin",
         web::post().to(daily_signin_active_ncm_account),
     )
@@ -109,8 +119,20 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
         web::post().to(list_ncm_playlist_tracks),
     )
     .route(
+        "/domain/ncm/playlist/tracks/update",
+        web::post().to(update_ncm_playlist_tracks),
+    )
+    .route(
+        "/domain/ncm/playlist/detail",
+        web::post().to(get_ncm_playlist_detail),
+    )
+    .route(
         "/domain/ncm/recommend/songs/tracks",
         web::post().to(list_ncm_daily_song_tracks),
+    )
+    .route(
+        "/domain/ncm/recommend/songs/dislike",
+        web::post().to(dislike_ncm_daily_song),
     )
     .route(
         "/domain/ncm/song/details/tracks",
@@ -123,6 +145,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
     .route(
         "/domain/ncm/personal_fm/trash",
         web::post().to(trash_ncm_personal_fm_track),
+    )
+    .route(
+        "/domain/ncm/heartbeat/tracks",
+        web::post().to(list_ncm_heartbeat_tracks),
     )
     .route(
         "/domain/ncm/album/tracks",
@@ -143,6 +169,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
     .route(
         "/domain/ncm/user/cloud/delete",
         web::post().to(delete_ncm_cloud_track),
+    )
+    .route(
+        "/domain/ncm/user/cloud/match",
+        web::post().to(match_ncm_cloud_track),
     )
     .route(
         "/domain/ncm/accounts/{user_id}",

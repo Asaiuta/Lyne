@@ -1,57 +1,32 @@
-import { For, Show } from "solid-js";
+import { For, Match, Show, Switch, createMemo } from "solid-js";
 import type { Accessor } from "solid-js";
+import { AlbumCard } from "../../../components/AlbumCard";
 import { MediaList } from "../../../components/media/MediaList";
+import { SegmentedTabs } from "../../../components/page/SegmentedTabs";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import type { PlaybackController } from "../shared/playback";
-import type { OnlineTrackItem, SearchTab } from "../shared/types";
-
-interface PlaylistBrowserCardProps {
-  playlist: OnlinePlaylistSummary;
-  active: boolean;
-  coverVisible: boolean;
-  onSelect: () => void;
-}
-
-function PlaylistBrowserCard(props: PlaylistBrowserCardProps) {
-  const { t } = useTranslation();
-  return (
-    <button
-      type="button"
-      class={`online-playlist-card${props.active ? " is-active" : ""}${props.coverVisible ? "" : " is-cover-hidden"}`}
-      onClick={props.onSelect}
-    >
-      <Show when={props.coverVisible}>
-        <div class="online-playlist-art" aria-hidden="true">
-          <Show when={props.playlist.coverUrl} fallback={<span>{props.playlist.name.slice(0, 1)}</span>}>
-            {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
-          </Show>
-        </div>
-      </Show>
-      <div class="online-playlist-copy">
-        <strong>{props.playlist.name}</strong>
-        <span>
-          {t("ncm.playlist.meta", {
-            count: props.playlist.trackCount ?? 0,
-            creator: props.playlist.creator ?? t("ncm.playlist.creatorUnknown")
-          })}
-        </span>
-      </div>
-    </button>
-  );
-}
+import type { FeedCardItem, OnlineTrackItem, SearchTab } from "../shared/types";
 
 export interface SearchModeProps {
   searchTab: SearchTab;
+  onSearchTabChange: (tab: SearchTab) => void;
+  isSearching: boolean;
   songResults: OnlineTrackItem[];
   playlistResults: OnlinePlaylistSummary[];
+  artistResults: FeedCardItem[];
+  albumResults: FeedCardItem[];
+  videoResults: FeedCardItem[];
+  radioResults: FeedCardItem[];
   globalQuery: Accessor<string>;
   parentMode: "recommend" | "discover";
-  selectedPlaylist: OnlinePlaylistSummary | null;
-  playlistTracks: OnlineTrackItem[];
-  isLoadingPlaylistTracks: boolean;
   onSelectPlaylist: (playlist: OnlinePlaylistSummary) => void | Promise<void>;
+  onSelectArtist: (artist: FeedCardItem) => void | Promise<void>;
+  onSelectAlbum: (album: FeedCardItem) => void | Promise<void>;
+  onSelectVideo: (video: FeedCardItem) => void | Promise<void>;
+  onSelectRadio?: (radio: FeedCardItem) => void | Promise<void>;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   discoverSectionSubtitle: string;
   playback: PlaybackController;
   currentTrackPath: string | null;
@@ -60,145 +35,226 @@ export interface SearchModeProps {
 }
 
 export function SearchMode(props: SearchModeProps) {
+  const { t } = useTranslation();
+  const tabItems = createMemo(() => [
+    { value: "songs", label: t("ncm.tabs.songs") },
+    { value: "playlists", label: t("ncm.tabs.playlists") },
+    { value: "artists", label: t("ncm.tabs.artists") },
+    { value: "albums", label: t("ncm.tabs.albums") },
+    { value: "videos", label: t("ncm.tabs.videos") },
+    { value: "radios", label: t("ncm.tabs.radios") }
+  ]);
+  const searchKeyword = createMemo(() => props.globalQuery().trim());
+
   return (
-    <Show when={props.searchTab === "songs"} fallback={<SearchPlaylistLayout {...props} />}>
-      <SongsResultPanel {...props} />
-    </Show>
+    <section class="online-search-page">
+      <div class="online-search-title">
+        <h1>{searchKeyword() || t("ncm.search.title")}</h1>
+        <span>
+          {searchKeyword()
+            ? t("ncm.search.relatedSuffix")
+            : props.parentMode === "recommend"
+              ? t("ncm.results.idle.recommend")
+              : t("ncm.results.idle.discover")}
+        </span>
+      </div>
+      <div class="online-search-tabs">
+        <SegmentedTabs
+          value={props.searchTab}
+          onChange={(next) => props.onSearchTabChange(next as SearchTab)}
+          items={tabItems()}
+          ariaLabel={t("ncm.tabs.aria")}
+        />
+      </div>
+
+      <div class="online-search-router">
+        <Switch>
+          <Match when={props.searchTab === "songs"}>
+            <SongsResultPanel {...props} />
+          </Match>
+          <Match when={props.searchTab === "playlists"}>
+            <PlaylistResultsPanel {...props} />
+          </Match>
+          <Match when={props.searchTab === "artists"}>
+            <FeedCardResultsPanel
+              items={props.artistResults}
+              tab="artists"
+              isSearching={props.isSearching}
+              onSelect={props.onSelectArtist}
+            />
+          </Match>
+          <Match when={props.searchTab === "albums"}>
+            <FeedCardResultsPanel
+              items={props.albumResults}
+              tab="albums"
+              isSearching={props.isSearching}
+              onSelect={props.onSelectAlbum}
+            />
+          </Match>
+          <Match when={props.searchTab === "videos"}>
+            <FeedCardResultsPanel
+              items={props.videoResults}
+              tab="videos"
+              isSearching={props.isSearching}
+              onSelect={props.onSelectVideo}
+            />
+          </Match>
+          <Match when={props.searchTab === "radios"}>
+            <FeedCardResultsPanel
+              items={props.radioResults}
+              tab="radios"
+              isSearching={props.isSearching}
+              onSelect={(item) => void props.onSelectRadio?.(item)}
+            />
+          </Match>
+        </Switch>
+      </div>
+    </section>
   );
 }
 
 function SongsResultPanel(props: SearchModeProps) {
   const { t } = useTranslation();
   return (
-    <section class="online-result-panel">
-      <div class="online-result-panel-head">
-        <div class="online-result-panel-copy">
-          <strong>{props.searchTab === "songs" ? t("ncm.results.songs") : t("ncm.results.playlists")}</strong>
-          <span>
-            {props.globalQuery().trim()
-              ? t("ncm.results.keyword", { keyword: props.globalQuery().trim() })
+    <MediaList
+      items={props.songResults}
+      currentSourcePath={props.currentTrackPath}
+      currentSongId={props.currentSongId}
+      isPlayingNow={props.isPlaying}
+      onPlay={(item) => void props.playback.playOnlineTrack(item)}
+      onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
+      onContextAction={(action, item) => {
+        if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
+      }}
+      isLoading={props.isSearching}
+      emptyState={
+        <SearchEmptyState
+          title={props.globalQuery().trim() ? t("ncm.empty.noSongs") : t("ncm.empty.searchPrompt")}
+          hint={
+            props.globalQuery().trim()
+              ? t("ncm.empty.noSongsHint")
               : props.parentMode === "recommend"
-                ? t("ncm.results.idle.recommend")
-                : t("ncm.results.idle.discover")}
-          </span>
-        </div>
-      </div>
-
-      <MediaList
-        items={props.songResults}
-        currentSourcePath={props.currentTrackPath}
-        currentSongId={props.currentSongId}
-        isPlayingNow={props.isPlaying}
-        onPlay={(item) => void props.playback.playOnlineTrack(item)}
-        onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
-        emptyState={
-          <div class="online-search-empty">
-            <strong>
-              {props.globalQuery().trim() ? t("ncm.empty.noSongs") : t("ncm.empty.searchPrompt")}
-            </strong>
-            <span>
-              {props.globalQuery().trim()
-                ? t("ncm.empty.noSongsHint")
-                : props.parentMode === "recommend"
-                  ? t("ncm.empty.searchPromptHint.recommend")
-                  : t("ncm.empty.searchPromptHint.discover")}
-            </span>
-          </div>
-        }
-      />
-    </section>
+                ? t("ncm.empty.searchPromptHint.recommend")
+                : t("ncm.empty.searchPromptHint.discover")
+          }
+        />
+      }
+    />
   );
 }
 
-function SearchPlaylistLayout(props: SearchModeProps) {
+function PlaylistResultsPanel(props: SearchModeProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
   return (
-    <section class="online-result-panel">
-      <div class="online-result-panel-head">
-        <div class="online-result-panel-copy">
-          <strong>{t("ncm.results.playlists")}</strong>
-          <span>{props.discoverSectionSubtitle}</span>
-        </div>
+    <Show
+      when={props.playlistResults.length > 0}
+      fallback={
+        <SearchEmptyState
+          title={props.isSearching ? t("ncm.search.searching") : t("ncm.empty.noPlaylists")}
+          hint={props.discoverSectionSubtitle}
+        />
+      }
+    >
+      <div class="album-grid content-fade-in online-search-card-grid">
+        <For each={props.playlistResults}>
+          {(playlist) => (
+            <AlbumCard
+              title={playlist.name}
+              subtitle={t("ncm.playlist.meta", {
+                count: playlist.trackCount ?? 0,
+                creator: playlist.creator ?? t("ncm.playlist.creatorUnknown")
+              })}
+              coverUrl={playlist.coverUrl}
+              coverVisible={!uiSettings.hiddenCovers.playlist}
+              playCount={playlist.playCount}
+              description={playlist.description}
+              onClick={() => void props.onSelectPlaylist(playlist)}
+            />
+          )}
+        </For>
       </div>
-      <Show
-        when={props.playlistResults.length > 0}
-        fallback={
-          <div class="online-search-empty">
-            <strong>
-              {props.globalQuery().trim() ? t("ncm.empty.noPlaylists") : t("ncm.empty.searchPrompt")}
-            </strong>
-            <span>
-              {props.globalQuery().trim()
-                ? t("ncm.empty.searchPromptHint.discover")
-                : t("ncm.empty.searchPromptHint.discover")}
-            </span>
-          </div>
-        }
-      >
-        <div class="online-playlist-layout is-search-results">
-          <aside class="online-playlist-browser">
-            <div class="online-playlist-browser-head">
-              <div class="online-playlist-browser-copy">
-                <strong>{t("ncm.results.playlists")}</strong>
-                <span>{t("ncm.playlist.browserCount", { count: props.playlistResults.length })}</span>
-              </div>
-            </div>
-            <div class="online-playlist-grid">
-              <For each={props.playlistResults}>
-                {(playlist) => (
-                  <PlaylistBrowserCard
-                    playlist={playlist}
-                    active={props.selectedPlaylist?.id === playlist.id}
-                    coverVisible={!uiSettings.hiddenCovers.playlist}
-                    onSelect={() => void props.onSelectPlaylist(playlist)}
-                  />
-                )}
-              </For>
-            </div>
-          </aside>
-          <section class="online-playlist-tracks">
-            <Show
-              when={props.selectedPlaylist}
-              fallback={<div class="online-search-empty"><strong>{t("ncm.discover.search.selectPlaylist")}</strong></div>}
-            >
-              {(playlist) => (
-                <>
-                  <header class={`online-playlist-tracks-head${uiSettings.hiddenCovers.playlist ? " is-cover-hidden" : ""}`}>
-                    <Show when={!uiSettings.hiddenCovers.playlist}>
-                      <div class="online-playlist-tracks-art" aria-hidden="true">
-                        <Show when={playlist().coverUrl} fallback={<span>{playlist().name.slice(0, 1)}</span>}>
-                          {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
-                        </Show>
-                      </div>
-                    </Show>
-                    <div class="online-playlist-tracks-copy">
-                      <span class="online-playlist-tracks-eyebrow">{t("ncm.discover.search.playlistEyebrow")}</span>
-                      <h3>{playlist().name}</h3>
-                      <p>
-                        {t("ncm.playlist.meta", {
-                          count: playlist().trackCount ?? 0,
-                          creator: playlist().creator ?? t("ncm.playlist.creatorUnknown")
-                        })}
-                      </p>
-                    </div>
-                  </header>
-                  <MediaList
-                    items={props.playlistTracks}
-                    currentSourcePath={props.currentTrackPath}
-                    currentSongId={props.currentSongId}
-                    isPlayingNow={props.isPlaying}
-                    onPlay={(item) => void props.playback.playOnlineTrack(item)}
-                    onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
-                    isLoading={props.isLoadingPlaylistTracks}
-                    emptyState={<div class="panel-note">{t("ncm.empty.noTracks")}</div>}
-                  />
-                </>
-              )}
-            </Show>
-          </section>
-        </div>
-      </Show>
-    </section>
+    </Show>
+  );
+}
+
+interface FeedCardResultsPanelProps {
+  items: FeedCardItem[];
+  tab: Exclude<SearchTab, "songs" | "playlists">;
+  isSearching: boolean;
+  onSelect: (item: FeedCardItem) => void | Promise<void>;
+}
+
+function FeedCardResultsPanel(props: FeedCardResultsPanelProps) {
+  const { t } = useTranslation();
+  const uiSettings = useUISettings();
+  const emptyTitle = () => {
+    if (props.isSearching) return t("ncm.search.searching");
+    const tab = props.tab;
+    switch (tab) {
+      case "artists": return t("ncm.empty.noArtists");
+      case "albums": return t("ncm.empty.noAlbums");
+      case "videos": return t("ncm.empty.noVideos");
+      case "radios": return t("ncm.empty.noRadios");
+      default: { const _exhaustive: never = tab; return _exhaustive; }
+    }
+  };
+  const emptyHint = () => {
+    const tab = props.tab;
+    switch (tab) {
+      case "artists": return t("ncm.empty.noArtistsHint");
+      case "albums": return t("ncm.empty.noAlbumsHint");
+      case "videos": return t("ncm.empty.noVideosHint");
+      case "radios": return t("ncm.empty.noRadiosHint");
+      default: { const _exhaustive: never = tab; return _exhaustive; }
+    }
+  };
+  const coverVisible = () => {
+    const tab = props.tab;
+    switch (tab) {
+      case "artists": return !uiSettings.hiddenCovers.artist;
+      case "albums": return !uiSettings.hiddenCovers.album;
+      case "videos": return !uiSettings.hiddenCovers.video;
+      case "radios": return !uiSettings.hiddenCovers.radio;
+      default: { const _exhaustive: never = tab; return _exhaustive; }
+    }
+  };
+  return (
+    <Show
+      when={props.items.length > 0}
+      fallback={<SearchEmptyState title={emptyTitle()} hint={emptyHint()} />}
+    >
+      <div class={`album-grid content-fade-in online-search-card-grid online-search-card-grid--${props.tab}`}>
+        <For each={props.items}>
+          {(item) => (
+            <AlbumCard
+              title={item.title}
+              subtitle={item.subtitle}
+              coverUrl={item.coverUrl}
+              coverVisible={coverVisible()}
+              shape={props.tab === "artists" ? "round" : "square"}
+              size={props.tab === "artists" ? "sm" : "md"}
+              playCount={item.playCount}
+              description={item.description}
+              onClick={() => void props.onSelect(item)}
+            />
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
+interface SearchEmptyStateProps {
+  title: string;
+  hint: string;
+}
+
+function SearchEmptyState(props: SearchEmptyStateProps) {
+  return (
+    <div class="online-search-empty">
+      <strong>{props.title}</strong>
+      <span>{props.hint}</span>
+    </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   IconDesktopLyric,
   IconDownload,
   IconHeart,
+  IconHeartBit,
   IconHeartFilled,
   IconMessage,
   IconPause,
@@ -70,6 +71,7 @@ interface FullPlayerShellActionsSection {
 interface FullPlayerShellTransportSection {
   shuffleActive: boolean;
   shuffleLabel: string;
+  isHeartbeat?: boolean;
   canSkipPrev: boolean;
   canSkipNext: boolean;
   isPlaying: boolean;
@@ -258,7 +260,9 @@ export function FullPlayerControlShell(props: FullPlayerControlShellProps) {
             aria-pressed={props.transport.shuffleActive}
             title={props.transport.shuffleLabel}
           >
-            <IconShuffle />
+            <Show when={props.transport.isHeartbeat} fallback={<IconShuffle />}>
+              <IconHeartBit />
+            </Show>
           </button>
           <button
             type="button"

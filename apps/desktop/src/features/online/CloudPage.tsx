@@ -1,4 +1,5 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { ContextMenu, type ContextMenuItem } from "../../components/media/ContextMenu";
 import { MediaList, type MediaContextAction } from "../../components/media/MediaList";
 import {
   IconCloud,
@@ -12,6 +13,8 @@ import {
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
+import { CloudMatchModal } from "./details/CloudMatchModal";
+import { DailySongsBatchModal } from "./details/DailySongsBatchModal";
 import type { NcmTrackReference } from "./ncmPlayback";
 import {
   createErrorMessageReader,
@@ -24,6 +27,17 @@ import type { Feedback, OnlineTrackItem } from "./shared/types";
 const api = createApiClient();
 const CLOUD_PAGE_LIMIT = 500;
 const BYTES_PER_GB = 1024 ** 3;
+const CLOUD_SEARCH_DEBOUNCE_MS = 300;
+
+interface CloudCacheSnapshot {
+  userId: number;
+  tracks: OnlineTrackItem[];
+  totalCount: number;
+  sizeBytes: number;
+  maxSizeBytes: number;
+}
+
+let cloudCache: CloudCacheSnapshot | null = null;
 
 interface CloudPageProps {
   onStateRefresh: (expectedPath?: string | null) => Promise<void>;
@@ -32,6 +46,7 @@ interface CloudPageProps {
   isPlaying: boolean;
   onRegisterPlayback: (track: NcmTrackReference) => void;
   onRequireNcmLogin: () => void;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
 }
 
 const formatGb = (bytes: number): string => {
@@ -39,10 +54,49 @@ const formatGb = (bytes: number): string => {
   return (bytes / BYTES_PER_GB).toFixed(bytes >= BYTES_PER_GB * 10 ? 0 : 2);
 };
 
-const matchesCloudQuery = (item: OnlineTrackItem, query: string): boolean =>
-  [item.title, item.artist, item.album]
-    .filter((value): value is string => Boolean(value))
-    .some((value) => value.toLowerCase().includes(query));
+const normalizeSearchText = (value: string | null | undefined): string =>
+  value?.trim().toLowerCase() ?? "";
+
+const fuzzyTextScore = (value: string | null | undefined, query: string): number => {
+  const text = normalizeSearchText(value);
+  if (!text || !query) return 0;
+  const exactIndex = text.indexOf(query);
+  if (exactIndex >= 0) {
+    return 100 - Math.min(exactIndex, 40);
+  }
+
+  let score = 0;
+  let cursor = 0;
+  let previousMatch = -1;
+  for (const char of query) {
+    const matchIndex = text.indexOf(char, cursor);
+    if (matchIndex < 0) return 0;
+    score += previousMatch >= 0 && matchIndex === previousMatch + 1 ? 12 : 5;
+    previousMatch = matchIndex;
+    cursor = matchIndex + 1;
+  }
+  return score;
+};
+
+const cloudFuzzyScore = (item: OnlineTrackItem, query: string): number => {
+  const fields = [
+    { value: item.title, weight: 0.5 },
+    { value: item.artist, weight: 0.3 },
+    { value: item.album, weight: 0.15 },
+    { value: item.source_path, weight: 0.05 }
+  ];
+  return fields.reduce((score, field) => score + fuzzyTextScore(field.value, query) * field.weight, 0);
+};
+
+const fuzzySearchCloudTracks = (
+  items: readonly OnlineTrackItem[],
+  query: string
+): OnlineTrackItem[] =>
+  items
+    .map((item, index) => ({ item, index, score: cloudFuzzyScore(item, query) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.item);
 
 export function CloudPage(props: CloudPageProps) {
   const { t } = useTranslation();
@@ -52,7 +106,12 @@ export function CloudPage(props: CloudPageProps) {
   const [sizeBytes, setSizeBytes] = createSignal<number>(0);
   const [maxSizeBytes, setMaxSizeBytes] = createSignal<number>(0);
   const [searchValue, setSearchValue] = createSignal<string>("");
+  const [debouncedSearchValue, setDebouncedSearchValue] = createSignal<string>("");
   const [isLoading, setIsLoading] = createSignal<boolean>(false);
+  const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
+  const [menuPosition, setMenuPosition] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [batchOpen, setBatchOpen] = createSignal<boolean>(false);
+  const [matchItem, setMatchItem] = createSignal<OnlineTrackItem | null>(null);
   const [feedback, setFeedback] = createSignal<Feedback>(createInitialFeedback(t));
 
   const setRawFeedback = createFeedbackSetter(setFeedback);
@@ -74,9 +133,9 @@ export function CloudPage(props: CloudPageProps) {
     return Math.min(100, Math.max(0, (sizeBytes() / max) * 100));
   });
   const filteredTracks = createMemo<OnlineTrackItem[]>(() => {
-    const query = searchValue().trim().toLowerCase();
+    const query = debouncedSearchValue().trim().toLowerCase();
     if (!query) return tracks();
-    return tracks().filter((item) => matchesCloudQuery(item, query));
+    return fuzzySearchCloudTracks(tracks(), query);
   });
 
   const loadCloudTracks = async (isCancelled: () => boolean = () => false) => {
@@ -108,6 +167,13 @@ export function CloudPage(props: CloudPageProps) {
         setTracks([...allTracks]);
         offset += CLOUD_PAGE_LIMIT;
       } while (offset < count);
+      cloudCache = {
+        userId: account.userId,
+        tracks: allTracks,
+        totalCount: count,
+        sizeBytes: sizeBytes(),
+        maxSizeBytes: maxSizeBytes()
+      };
       setRawFeedback("neutral", t("ncm.feedback.initial"));
     } catch (error) {
       if (isCancelled()) return;
@@ -128,12 +194,50 @@ export function CloudPage(props: CloudPageProps) {
       setMaxSizeBytes(0);
       return;
     }
+    if (cloudCache?.userId === account.userId) {
+      setTracks(cloudCache.tracks);
+      setTotalCount(cloudCache.totalCount);
+      setSizeBytes(cloudCache.sizeBytes);
+      setMaxSizeBytes(cloudCache.maxSizeBytes);
+    }
     let cancelled = false;
     void loadCloudTracks(() => cancelled);
     onCleanup(() => {
       cancelled = true;
     });
   });
+
+  const menuItems = (): ContextMenuItem[] => [
+    { key: "batch", label: t("ncm.cloud.batch"), icon: <IconList /> }
+  ];
+
+  const openMenu = (event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenuPosition({ x: rect.left, y: rect.bottom + 8 });
+    setMenuOpen(true);
+  };
+
+  const handleMenuSelect = (key: string) => {
+    if (key === "batch") {
+      setBatchOpen(true);
+    }
+  };
+
+  createEffect(() => {
+    const nextSearchValue = searchValue().trim();
+    const timer = setTimeout(() => setDebouncedSearchValue(nextSearchValue), CLOUD_SEARCH_DEBOUNCE_MS);
+    onCleanup(() => clearTimeout(timer));
+  });
+
+  const playTrackContext = async (item: OnlineTrackItem, contextItems: readonly OnlineTrackItem[]) => {
+    const startIndex = contextItems.findIndex((candidate) => candidate.id === item.id);
+    const [first, ...rest] = (startIndex >= 0 ? contextItems.slice(startIndex) : [item]);
+    if (!first) return;
+    await playback.playOnlineTrack(first);
+    for (const restItem of rest) {
+      await playback.enqueueOnlineTrack(restItem);
+    }
+  };
 
   const playAll = async () => {
     const [first, ...rest] = filteredTracks();
@@ -142,6 +246,14 @@ export function CloudPage(props: CloudPageProps) {
     for (const item of rest) {
       await playback.enqueueOnlineTrack(item);
     }
+  };
+
+  const handleTrackDoubleClick = (item: OnlineTrackItem) => {
+    if (debouncedSearchValue().trim()) {
+      void playback.queueNextOnlineTrack(item);
+      return;
+    }
+    void playTrackContext(item, filteredTracks());
   };
 
   const deleteCloudTrack = async (item: OnlineTrackItem) => {
@@ -153,6 +265,14 @@ export function CloudPage(props: CloudPageProps) {
       await api.deleteNcmCloudTrack(item.songId);
       setTracks((current) => current.filter((track) => track.songId !== item.songId));
       setTotalCount((count) => Math.max(0, count - 1));
+      const cache = cloudCache;
+      if (cache !== null && cache.userId === activeAccount()?.userId) {
+        cloudCache = {
+          ...cache,
+          tracks: cache.tracks.filter((track) => track.songId !== item.songId),
+          totalCount: Math.max(0, cache.totalCount - 1)
+        };
+      }
       setRawFeedback("success", t("ncm.cloud.deleted", { title }));
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
@@ -160,9 +280,23 @@ export function CloudPage(props: CloudPageProps) {
   };
 
   const handleContextAction = (action: MediaContextAction, item: OnlineTrackItem) => {
+    if (action === "cloud-match") {
+      setMatchItem(item);
+      return;
+    }
+    if (action === "song-wiki") {
+      props.onNavigateToSongWiki?.(item);
+      return;
+    }
     if (action === "delete-from-cloud" || action === "delete") {
       void deleteCloudTrack(item);
     }
+  };
+
+  const handleCloudMatched = async () => {
+    cloudCache = null;
+    await loadCloudTracks();
+    setRawFeedback("success", t("ncm.cloud.match.success"));
   };
 
   return (
@@ -237,9 +371,9 @@ export function CloudPage(props: CloudPageProps) {
             <button
               type="button"
               class="ghost-button playlist-detail-icon-button"
-              disabled
-              title={t("ncm.cloud.batchUnavailable")}
-              aria-label={t("ncm.cloud.batchUnavailable")}
+              onClick={openMenu}
+              title={t("ncm.cloud.batch")}
+              aria-label={t("ncm.cloud.batch")}
             >
               <IconList />
             </button>
@@ -256,12 +390,22 @@ export function CloudPage(props: CloudPageProps) {
           </Show>
         </section>
 
+        <ContextMenu
+          open={menuOpen()}
+          x={menuPosition().x}
+          y={menuPosition().y}
+          items={menuItems()}
+          onSelect={handleMenuSelect}
+          onClose={() => setMenuOpen(false)}
+        />
+
         <MediaList
           items={filteredTracks()}
           currentSourcePath={props.currentTrackPath}
           currentSongId={props.currentSongId}
           isPlayingNow={props.isPlaying}
           onPlay={(item) => void playback.playOnlineTrack(item)}
+          onDoubleClick={handleTrackDoubleClick}
           onEnqueue={(item) => void playback.enqueueOnlineTrack(item)}
           onContextAction={handleContextAction}
           contextActions={[
@@ -271,7 +415,9 @@ export function CloudPage(props: CloudPageProps) {
             "copy-name",
             "copy-id",
             "share-link",
+            "song-wiki",
             "view-comments",
+            "cloud-match",
             "delete-from-cloud"
           ]}
           deleteActionLabel={t("ncm.cloud.deleteAction")}
@@ -291,6 +437,25 @@ export function CloudPage(props: CloudPageProps) {
               </span>
             </div>
           }
+        />
+
+        <DailySongsBatchModal
+          open={batchOpen()}
+          title={t("library.batch.title")}
+          items={tracks()}
+          loginProfile={activeAccount()}
+          playback={playback}
+          setFeedback={setRawFeedback}
+          onClose={() => setBatchOpen(false)}
+        />
+
+        <CloudMatchModal
+          open={matchItem() !== null}
+          item={matchItem()}
+          userId={activeAccount()?.userId ?? null}
+          setFeedback={setRawFeedback}
+          onClose={() => setMatchItem(null)}
+          onMatched={handleCloudMatched}
         />
 
         <Show when={feedback().message && feedback().message !== t("ncm.feedback.initial")}>

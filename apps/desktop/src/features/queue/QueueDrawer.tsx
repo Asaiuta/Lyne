@@ -1,9 +1,8 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
-import { IconClose, IconDelete, IconMusic, IconPlayCircle, IconRefresh } from "../../components/icons";
+import { IconClose, IconDelete, IconMusic, IconRefresh } from "../../components/icons";
 import {
   displayNameFromSourcePath,
-  formatMediaDuration,
   isMediaListItemCurrent,
   type MediaListItem
 } from "../../components/media/MediaList";
@@ -63,9 +62,6 @@ const queueItemDetail = (item: QueueDrawerItem): string => {
   const parts = [item.artist, item.album].map((value) => value?.trim()).filter(Boolean);
   return parts.length > 0 ? parts.join(" - ") : item.source_path ?? item.status;
 };
-
-const queueItemDuration = (item: QueueDrawerItem): string =>
-  item.duration_secs === null ? "" : formatMediaDuration(item.duration_secs);
 
 export function QueueDrawer(props: QueueDrawerProps) {
   const { t } = useTranslation();
@@ -229,12 +225,6 @@ export function QueueDrawer(props: QueueDrawerProps) {
                                   {queueItemDetail(queueItem)}
                                 </span>
                               </span>
-                              <span class="queue-drawer-duration">{queueItemDuration(queueItem)}</span>
-                              <Show when={!active()}>
-                                <span class="queue-drawer-play" aria-hidden="true">
-                                  <IconPlayCircle />
-                                </span>
-                              </Show>
                             </button>
                             <button
                               type="button"

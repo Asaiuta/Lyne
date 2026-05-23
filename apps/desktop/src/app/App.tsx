@@ -1,4 +1,4 @@
-import { Match, Switch, createEffect, createMemo, createSignal } from "solid-js";
+import { Match, Switch, createEffect, createSignal } from "solid-js";
 import { AppShell } from "../components/AppShell";
 import { BackgroundLayer } from "../components/BackgroundLayer";
 import { FullPlayer } from "../components/FullPlayer";
@@ -8,13 +8,17 @@ import { PlayerBar } from "../components/PlayerBar";
 import { Sidebar } from "../components/Sidebar";
 import { TopNav } from "../components/TopNav";
 import { WindowControls } from "../components/WindowControls";
+import { DownloadPage } from "../features/download/DownloadPage";
 import { HistoryPage } from "../features/history/HistoryPage";
 import { LibraryPage } from "../features/library/LibraryPage";
 import { CloudPage } from "../features/online/CloudPage";
 import { NeteasePage } from "../features/online/NeteasePage";
 import { NeteaseRadioPage } from "../features/online/NeteaseRadioPage";
+import { PersonalFmPage } from "../features/online/PersonalFmPage";
+import { SongWikiPage } from "../features/online/SongWikiPage";
 import { QueueDrawer } from "../features/queue/QueueDrawer";
 import { SettingsPage } from "../features/settings/SettingsPage";
+import { StreamingPage } from "../features/streaming/StreamingPage";
 import type { SettingsCategoryKey } from "../features/settings/components/SettingsCategoryNav";
 import { createApiClient } from "../shared/api/client";
 import { useTranslation } from "../shared/i18n";
@@ -44,20 +48,24 @@ function AppContent() {
   const { td } = useTranslation();
   const accountStore = useNcmAccount();
   const [isNcmLoginOpen, setIsNcmLoginOpen] = createSignal<boolean>(false);
+  const [loginDisableUid, setLoginDisableUid] = createSignal<boolean>(false);
   const [settingsInitialCategory, setSettingsInitialCategory] =
     createSignal<SettingsCategoryKey | undefined>(undefined);
-  const neteaseMode = createMemo<NeteasePageMode | null>(() => {
-    const page = controller.activePage();
-    return isNeteasePageMode(page) ? page : null;
-  });
   const refreshPlayback = async (expectedPath?: string | null) => {
     await Promise.all([
       controller.refreshState(expectedPath),
       controller.refreshQueue()
     ]);
   };
-  const requireNcmLogin = () => setIsNcmLoginOpen(true);
+  const requireNcmLogin = (options: { disableUid?: boolean } = {}) => {
+    setLoginDisableUid(options.disableUid === true);
+    setIsNcmLoginOpen(true);
+  };
   const isNcmLoggedIn = () => accountStore.activeAccount() !== null;
+  const activeWritableNcmProfile = () => {
+    const account = accountStore.activeAccount();
+    return account?.hasCookie === true ? account : null;
+  };
   const openSettings = (category?: SettingsCategoryKey) => {
     setSettingsInitialCategory(category);
     controller.setSettingsOpen(true);
@@ -80,8 +88,12 @@ function AppContent() {
               onChange={controller.handleActivePageChange}
               selectedPlaylistId={controller.selectedPlaylistId()}
               onSelectPlaylist={controller.handleSidebarPlaylistSelect}
+              onSelectLocalPlaylist={controller.handleSidebarLocalPlaylistSelect}
               isNcmLoggedIn={isNcmLoggedIn()}
               onRequireNcmLogin={requireNcmLogin}
+              onRefreshPersonalFm={controller.requestPersonalFmRefresh}
+              onStartHeartbeat={() => void controller.requestHeartbeatMode()}
+              shuffleMode={controller.shuffleMode()}
             />
           }
           topNav={
@@ -93,6 +105,7 @@ function AppContent() {
               onGoForward={controller.handleGoForward}
               onOpenSettings={() => openSettings()}
               onRequireNcmLogin={requireNcmLogin}
+              onNavigateToLikedCollectionTab={controller.handleNavigateToLikedCollectionTab}
               windowControls={<WindowControls visible={controller.uiSettings.customChrome} />}
             />
           }
@@ -153,23 +166,84 @@ function AppContent() {
             activePage={controller.activePage()}
             animation={controller.uiSettings.routeAnimation}
           >
-            {(displayedPage) => (
-              <Switch>
-                <Match when={displayedPage() === "library"}>
-                  <LibraryPage
-                    onStateRefresh={refreshPlayback}
-                    currentTrackPath={controller.currentTrackPath()}
-                    currentMediaId={controller.currentMediaId()}
-                    isPlaying={Boolean(controller.player()?.is_playing)}
-                    onPlaybackState={controller.applyPlayerState}
-                    onPlay={controller.handlePlay}
-                    onPause={controller.handlePause}
-                  />
-                </Match>
-                <Match when={neteaseMode()}>
-                  {(mode) => (
-                    <NeteasePage
-                      mode={mode()}
+            {(displayedPage) => {
+              const displayedNeteaseMode = () => {
+                const page = displayedPage();
+                return isNeteasePageMode(page) ? page : null;
+              };
+              return (
+                <Switch>
+                  <Match when={displayedPage() === "library"}>
+                    <LibraryPage
+                      onStateRefresh={refreshPlayback}
+                      currentTrackPath={controller.currentTrackPath()}
+                      currentMediaId={controller.currentMediaId()}
+                      isPlaying={Boolean(controller.player()?.is_playing)}
+                      onPlaybackState={controller.applyPlayerState}
+                      onPlay={controller.handlePlay}
+                      onPause={controller.handlePause}
+                      onPlaybackHistoryChanged={controller.notifyPlaybackHistoryChanged}
+                      localPlaylistRequest={controller.localPlaylistRequest()}
+                    />
+                  </Match>
+                  <Match when={displayedNeteaseMode()}>
+                    {(mode) => (
+                      <NeteasePage
+                        mode={mode()}
+                        onStateRefresh={refreshPlayback}
+                        currentTrackPath={controller.currentTrackPath()}
+                        currentSongId={controller.currentNcmSongId()}
+                        isPlaying={Boolean(controller.player()?.is_playing)}
+                        onPlay={controller.handlePlay}
+                        onPause={controller.handlePause}
+                        onSkipNext={controller.handleSkipNext}
+                        onRegisterPlayback={controller.registerNcmPlayback}
+                        selectedPlaylistId={controller.selectedPlaylistId()}
+                        onSelectedPlaylistChange={controller.handleSelectedPlaylistChange}
+                        onNavigate={controller.handleActivePageChange}
+                        onNavigateToDiscover={controller.handleNavigateToDiscover}
+                        onNavigateToRadioDetail={controller.handleNavigateToRadioDetail}
+                        onNavigateToSongWiki={controller.handleNavigateToSongWiki}
+                        discoverTabRequest={controller.discoverTabRequest()}
+                        likedCollectionTabRequest={controller.likedCollectionTabRequest()}
+                        artistDetailRequest={controller.artistDetailRequest()}
+                        albumDetailRequest={controller.albumDetailRequest()}
+                        radioSubscribeEvent={controller.radioSubscribeEvent()}
+                        onRequireNcmLogin={requireNcmLogin}
+                      />
+                    )}
+                  </Match>
+                  <Match when={displayedPage() === "recent"}>
+                    <HistoryPage
+                      refreshVersion={controller.playbackHistoryVersion()}
+                      onStateRefresh={refreshPlayback}
+                      currentTrackPath={controller.currentTrackPath()}
+                      currentMediaId={controller.currentMediaId()}
+                      currentSongId={controller.currentNcmSongId()}
+                      isPlaying={Boolean(controller.player()?.is_playing)}
+                      onRegisterPlayback={controller.registerNcmPlayback}
+                      onNavigateToSongWiki={controller.handleNavigateToSongWiki}
+                    />
+                  </Match>
+                  <Match when={displayedPage() === "download"}>
+                    <DownloadPage />
+                  </Match>
+                  <Match when={displayedPage() === "streaming"}>
+                    <StreamingPage />
+                  </Match>
+                  <Match when={displayedPage() === "cloud"}>
+                    <CloudPage
+                      onStateRefresh={refreshPlayback}
+                      currentTrackPath={controller.currentTrackPath()}
+                      currentSongId={controller.currentNcmSongId()}
+                      isPlaying={Boolean(controller.player()?.is_playing)}
+                      onRegisterPlayback={controller.registerNcmPlayback}
+                      onRequireNcmLogin={requireNcmLogin}
+                      onNavigateToSongWiki={controller.handleNavigateToSongWiki}
+                    />
+                  </Match>
+                  <Match when={displayedPage() === "personal-fm"}>
+                    <PersonalFmPage
                       onStateRefresh={refreshPlayback}
                       currentTrackPath={controller.currentTrackPath()}
                       currentSongId={controller.currentNcmSongId()}
@@ -178,58 +252,49 @@ function AppContent() {
                       onPause={controller.handlePause}
                       onSkipNext={controller.handleSkipNext}
                       onRegisterPlayback={controller.registerNcmPlayback}
-                      selectedPlaylistId={controller.selectedPlaylistId()}
-                      onSelectedPlaylistChange={controller.handleSelectedPlaylistChange}
-                      onNavigate={controller.handleActivePageChange}
-                      onNavigateToDiscover={controller.handleNavigateToDiscover}
-                      onNavigateToRadioDetail={controller.handleNavigateToRadioDetail}
-                      discoverTabRequest={controller.discoverTabRequest()}
-                      artistDetailRequest={controller.artistDetailRequest()}
-                      onRequireNcmLogin={requireNcmLogin}
+                      onRequireNcmLogin={() => requireNcmLogin({ disableUid: true })}
+                      onNavigateToSongWiki={controller.handleNavigateToSongWiki}
+                      reloadTick={controller.personalFmReloadTick()}
                     />
-                  )}
-                </Match>
-                <Match when={displayedPage() === "recent"}>
-                  <HistoryPage
-                    refreshVersion={controller.playbackHistoryVersion()}
-                    onStateRefresh={refreshPlayback}
-                    currentTrackPath={controller.currentTrackPath()}
-                    currentMediaId={controller.currentMediaId()}
-                    currentSongId={controller.currentNcmSongId()}
-                    isPlaying={Boolean(controller.player()?.is_playing)}
-                    onRegisterPlayback={controller.registerNcmPlayback}
-                  />
-                </Match>
-                <Match when={displayedPage() === "cloud"}>
-                  <CloudPage
-                    onStateRefresh={refreshPlayback}
-                    currentTrackPath={controller.currentTrackPath()}
-                    currentSongId={controller.currentNcmSongId()}
-                    isPlaying={Boolean(controller.player()?.is_playing)}
-                    onRegisterPlayback={controller.registerNcmPlayback}
-                    onRequireNcmLogin={requireNcmLogin}
-                  />
-                </Match>
-                <Match when={displayedPage() === "radio"}>
-                  <NeteaseRadioPage
-                    radioDetailRequest={controller.radioDetailRequest()}
-                    onStateRefresh={refreshPlayback}
-                    currentTrackPath={controller.currentTrackPath()}
-                    currentSongId={controller.currentNcmSongId()}
-                    isPlaying={Boolean(controller.player()?.is_playing)}
-                    onRegisterPlayback={controller.registerNcmPlayback}
-                  />
-                </Match>
-                <Match when={controller.isPlaceholderPage(displayedPage())}>
-                  <div class="panel panel-placeholder">
-                    <div class="panel-header">
-                      <h2>{td(`sidebar.nav.${displayedPage()}.label`)}</h2>
+                  </Match>
+                  <Match when={displayedPage() === "radio"}>
+                    <NeteaseRadioPage
+                      radioDetailRequest={controller.radioDetailRequest()}
+                      loginProfile={activeWritableNcmProfile()}
+                      onRequireNcmLogin={() => requireNcmLogin({ disableUid: true })}
+                      onSubscribeChange={controller.handleRadioSubscribeChange}
+                      onStateRefresh={refreshPlayback}
+                      currentTrackPath={controller.currentTrackPath()}
+                      currentSongId={controller.currentNcmSongId()}
+                      isPlaying={Boolean(controller.player()?.is_playing)}
+                      onRegisterPlayback={controller.registerNcmPlayback}
+                      onNavigateToSongWiki={controller.handleNavigateToSongWiki}
+                    />
+                  </Match>
+                  <Match when={displayedPage() === "song-wiki"}>
+                    <SongWikiPage
+                      request={controller.songWikiRequest()}
+                      onBack={controller.handleGoBack}
+                      onStateRefresh={refreshPlayback}
+                      onRegisterPlayback={controller.registerNcmPlayback}
+                      onNavigateToArtistDetail={controller.handleNavigateToArtistDetail}
+                      onNavigateToAlbumDetail={controller.handleNavigateToAlbumDetail}
+                      currentTrackPath={controller.currentTrackPath()}
+                      currentSongId={controller.currentNcmSongId()}
+                      isPlaying={Boolean(controller.player()?.is_playing)}
+                    />
+                  </Match>
+                  <Match when={controller.isPlaceholderPage(displayedPage())}>
+                    <div class="panel panel-placeholder">
+                      <div class="panel-header">
+                        <h2>{td(`sidebar.nav.${displayedPage()}.label`)}</h2>
+                      </div>
+                      <p class="panel-note">{td(`page.placeholder.${displayedPage()}`)}</p>
                     </div>
-                    <p class="panel-note">{td(`page.placeholder.${displayedPage()}`)}</p>
-                  </div>
-                </Match>
-              </Switch>
-            )}
+                  </Match>
+                </Switch>
+              );
+            }}
           </PageTransition>
         </AppShell>
 
@@ -284,7 +349,11 @@ function AppContent() {
           onStateRefresh={controller.refreshState}
           initialCategory={settingsInitialCategory()}
         />
-        <LoginModal open={isNcmLoginOpen()} onClose={() => setIsNcmLoginOpen(false)} />
+        <LoginModal
+          open={isNcmLoginOpen()}
+          disableUid={loginDisableUid()}
+          onClose={() => setIsNcmLoginOpen(false)}
+        />
       </UISearchProvider>
     </>
   );

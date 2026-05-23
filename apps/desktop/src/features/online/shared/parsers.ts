@@ -1,8 +1,10 @@
 import type { TranslationKey } from "../../../shared/i18n";
 import type { NcmUserSubcountData } from "../../../shared/api/ncm/user";
+import type { NcmMvArea, NcmMvOrder, NcmMvType } from "../../../shared/api/ncm/video";
 import type {
   DiscoverArtistArea,
   DiscoverArtistInitial,
+  DiscoverMvFilter,
   DiscoverNewArea
 } from "./types";
 
@@ -61,6 +63,29 @@ export const DISCOVER_NEW_AREAS: readonly DiscoverNewArea[] = [
   { labelKey: "ncm.discover.artists.western", albumArea: "EA", songType: 96 },
   { labelKey: "ncm.discover.artists.kr", albumArea: "KR", songType: 16 },
   { labelKey: "ncm.discover.artists.jp", albumArea: "JP", songType: 8 }
+];
+
+export const DISCOVER_MV_AREAS: readonly DiscoverMvFilter<NcmMvArea>[] = [
+  { labelKey: "common.all", value: "全部" },
+  { labelKey: "ncm.discover.artists.cn", value: "内地" },
+  { labelKey: "ncm.discover.mv.area.hkTw", value: "港台" },
+  { labelKey: "ncm.discover.artists.western", value: "欧美" },
+  { labelKey: "ncm.discover.artists.jp", value: "日本" },
+  { labelKey: "ncm.discover.artists.kr", value: "韩国" }
+];
+
+export const DISCOVER_MV_TYPES: readonly DiscoverMvFilter<NcmMvType>[] = [
+  { labelKey: "common.all", value: "全部" },
+  { labelKey: "ncm.discover.mv.type.official", value: "官方版" },
+  { labelKey: "ncm.discover.mv.type.original", value: "原生" },
+  { labelKey: "ncm.discover.mv.type.live", value: "现场版" },
+  { labelKey: "ncm.discover.mv.type.netease", value: "网易出品" }
+];
+
+export const DISCOVER_MV_ORDERS: readonly DiscoverMvFilter<NcmMvOrder>[] = [
+  { labelKey: "ncm.discover.mv.order.fastest", value: "上升最快" },
+  { labelKey: "ncm.discover.mv.order.hot", value: "最热" },
+  { labelKey: "ncm.discover.mv.order.new", value: "最新" }
 ];
 
 export const readUserSubcountData = (payload: unknown): NcmUserSubcountData => {

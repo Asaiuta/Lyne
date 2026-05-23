@@ -22,6 +22,7 @@ interface HistoryPageProps {
   currentSongId: number | null;
   isPlaying: boolean;
   onRegisterPlayback: (track: NcmTrackReference) => void;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
 }
 
 interface Feedback {
@@ -230,11 +231,16 @@ export function HistoryPage(props: HistoryPageProps) {
     }
   };
 
-  const handleContextAction = (action: MediaContextAction) => {
+  const handleContextAction = (action: MediaContextAction, item: HistorySongItem) => {
     if (action === "copy-name") {
       setKeyedFeedback("success", "media.copyName.success");
     } else if (action === "copy-path") {
       setKeyedFeedback("success", "media.copy.success");
+    } else if (action === "song-wiki") {
+      const onlineItem = toOnlineTrackItem(item);
+      if (onlineItem) {
+        props.onNavigateToSongWiki?.(onlineItem);
+      }
     }
   };
 
@@ -279,6 +285,7 @@ export function HistoryPage(props: HistoryPageProps) {
             isPlayingNow={props.isPlaying}
             onPlay={(item) => void handlePlay(item)}
             onEnqueue={(item) => void handleEnqueue(item)}
+            contextActions={["play", "enqueue", "search", "copy-name", "copy-id", "share-link", "song-wiki", "view-comments", "copy-path"]}
             onContextAction={handleContextAction}
             isLoading={isFetching()}
             emptyState={t("history.empty")}

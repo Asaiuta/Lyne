@@ -52,19 +52,19 @@ interface PlayerBarInfoPanelProps {
 export function PlayerBarInfoPanel(props: PlayerBarInfoPanelProps) {
   return (
     <div
-      class={`player-bar-left flex items-center min-w-0 h-full${props.cover.coverHidden ? " is-cover-hidden" : ""}`}
+      class={`player-bar-left${props.cover.coverHidden ? " is-cover-hidden" : ""}`}
     >
       <Show when={!props.cover.coverHidden}>
         <button
           type="button"
-          class={`player-bar-cover relative flex-none w-56px h-56px min-w-56px p-0 overflow-hidden mr-3 cursor-pointer${props.cover.coverTransitioning ? " is-leaving" : ""}`}
+          class={`player-bar-cover${props.cover.coverTransitioning ? " is-leaving" : ""}`}
           onClick={props.cover.onClick}
           aria-label={props.cover.coverExpandLabel}
           title={props.cover.coverExpandLabel}
         >
           <CoverArt coverUrl={props.cover.coverUrl} alt={props.cover.coverAlt} />
           <span
-            class="player-bar-cover-expand absolute inset-0 grid place-items-center opacity-0 pointer-events-none"
+            class="player-bar-cover-expand"
             aria-hidden="true"
           >
             <IconExpand />
@@ -110,7 +110,7 @@ export function PlayerBarInfoPanel(props: PlayerBarInfoPanelProps) {
             </button>
             <Show when={props.menu.open}>
               <div
-                class="player-inline-menu-popover absolute left-0 flex min-w-168px flex-col gap-1"
+                class="player-inline-menu-popover absolute flex min-w-168px flex-col gap-1"
                 role="menu"
                 aria-label={props.menu.label}
               >

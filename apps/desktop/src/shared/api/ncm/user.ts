@@ -62,6 +62,11 @@ export interface NcmLikelistData {
   [key: string]: unknown;
 }
 
+export interface NcmCollectionSublistParams {
+  limit?: number;
+  offset?: number;
+}
+
 /**
  * Parameters for `/scrobble`.
  * Backend keys (lowercase, see `ncm-api-rs/src/api/scrobble.rs`):
@@ -130,6 +135,42 @@ export const userLikelist = (uid: number): Promise<NcmResponseEnvelope<NcmLikeli
   requestNcm<NcmLikelistData>("likelist", {
     method: "POST",
     data: { uid },
+    noCache: true
+  });
+
+export const userAlbumSublist = (
+  params: NcmCollectionSublistParams = {}
+): Promise<NcmResponseEnvelope> =>
+  requestNcm("album/sublist", {
+    method: "POST",
+    data: params,
+    noCache: true
+  });
+
+export const userArtistSublist = (
+  params: NcmCollectionSublistParams = {}
+): Promise<NcmResponseEnvelope> =>
+  requestNcm("artist/sublist", {
+    method: "POST",
+    data: params,
+    noCache: true
+  });
+
+export const userMvSublist = (
+  params: NcmCollectionSublistParams = {}
+): Promise<NcmResponseEnvelope> =>
+  requestNcm("mv/sublist", {
+    method: "POST",
+    data: params,
+    noCache: true
+  });
+
+export const userDjSublist = (
+  params: NcmCollectionSublistParams = {}
+): Promise<NcmResponseEnvelope> =>
+  requestNcm("dj/sublist", {
+    method: "POST",
+    data: params,
     noCache: true
   });
 

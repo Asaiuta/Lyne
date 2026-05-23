@@ -10,19 +10,31 @@ import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { AlbumDetail } from "../details/AlbumDetail";
 import { ArtistDetail } from "../details/ArtistDetail";
 import { DailySongsDetail } from "../details/DailySongsDetail";
-import { LikedSongsDetail } from "../details/LikedSongsDetail";
 import { PlaylistDetail } from "../details/PlaylistDetail";
+import { VideoDetail } from "../details/VideoDetail";
+import { cloudsearch } from "../../../shared/api/ncm/search";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import {
   ALL_PLAYLIST_CATEGORY,
   DISCOVER_ARTIST_AREAS,
   DISCOVER_ARTIST_INITIALS,
+  DISCOVER_MV_AREAS,
+  DISCOVER_MV_ORDERS,
+  DISCOVER_MV_TYPES,
   DISCOVER_NEW_AREAS,
   DISCOVER_PAGE_LIMIT,
   DISCOVER_SEARCH_LIMIT,
   safeLoadDiscover
 } from "../shared/parsers";
 import type { PlaybackController } from "../shared/playback";
+import {
+  NCM_SEARCH_TYPES,
+  parseNcmMvAllCards,
+  parseNcmSearchAlbums,
+  parseNcmSearchArtists,
+  parseNcmSearchRadios,
+  parseNcmSearchVideos
+} from "../searchParsers";
 import type {
   DiscoverNewKind,
   DiscoverPlaylistKind,
@@ -37,11 +49,13 @@ import { useDetailNavigation } from "../shared/useDetailNavigation";
 import { createPagedDiscoverCards } from "../shared/usePagedDiscoverCards";
 import {
   DiscoverArtistShowcase,
+  DiscoverMvShowcase,
   DiscoverNewShowcase,
   DiscoverPlaylistShowcase,
   DiscoverToplistShowcase
 } from "./discoverShowcases";
 import { SearchMode } from "./SearchMode";
+import { mvAll } from "../../../shared/api/ncm/video";
 
 const api = createApiClient();
 
@@ -61,6 +75,7 @@ type DiscoverDetailView =
   | { kind: "liked" }
   | { kind: "album" }
   | { kind: "artist" }
+  | { kind: "video" }
   | { kind: "playlist" }
   | { kind: "browse" };
 
@@ -72,28 +87,39 @@ export interface DiscoverModeProps {
   clearPendingDiscoverSearch: () => void;
   discoverTabRequest?: { tab: string; version: number };
   artistDetailRequest?: { artist: FeedCardItem | null; version: number };
+  albumDetailRequest?: { album: FeedCardItem | null; version: number };
+  onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
   currentTrackPath: string | null;
   currentSongId: number | null;
   isPlaying: boolean;
+  onPause: () => Promise<void>;
 }
 
 export function DiscoverMode(props: DiscoverModeProps) {
   const { t } = useTranslation();
 
-  const [searchTab] = createSignal<SearchTab>("songs");
+  const [searchTab, setSearchTab] = createSignal<SearchTab>("songs");
   const [discoverTab, setDiscoverTab] = createSignal<DiscoverTab>("playlists");
   const [isSearching, setIsSearching] = createSignal(false);
   const [songResults, setSongResults] = createSignal<OnlineTrackItem[]>([]);
   const [playlistResults, setPlaylistResults] = createSignal<OnlinePlaylistSummary[]>([]);
+  const [artistResults, setArtistResults] = createSignal<FeedCardItem[]>([]);
+  const [albumResults, setAlbumResults] = createSignal<FeedCardItem[]>([]);
+  const [videoResults, setVideoResults] = createSignal<FeedCardItem[]>([]);
+  const [radioResults, setRadioResults] = createSignal<FeedCardItem[]>([]);
 
   const [discoverPlaylistKind, setDiscoverPlaylistKind] = createSignal<DiscoverPlaylistKind>("normal");
   const [discoverArtistInitial, setDiscoverArtistInitial] = createSignal<number | string>(-1);
   const [discoverArtistAreaIndex, setDiscoverArtistAreaIndex] = createSignal<number>(0);
   const [discoverNewKind, setDiscoverNewKind] = createSignal<DiscoverNewKind>("albums");
   const [discoverNewAreaIndex, setDiscoverNewAreaIndex] = createSignal<number>(0);
+  const [discoverMvAreaIndex, setDiscoverMvAreaIndex] = createSignal<number>(0);
+  const [discoverMvTypeIndex, setDiscoverMvTypeIndex] = createSignal<number>(0);
+  const [discoverMvOrderIndex, setDiscoverMvOrderIndex] = createSignal<number>(0);
 
   const [catName, setCatName] = createSignal(ALL_PLAYLIST_CATEGORY);
   const [catModalOpen, setCatModalOpen] = createSignal(false);
@@ -118,6 +144,15 @@ export function DiscoverMode(props: DiscoverModeProps) {
   );
   const selectedNewArea = createMemo(
     () => DISCOVER_NEW_AREAS[discoverNewAreaIndex()] ?? DISCOVER_NEW_AREAS[0]
+  );
+  const selectedMvArea = createMemo(
+    () => DISCOVER_MV_AREAS[discoverMvAreaIndex()] ?? DISCOVER_MV_AREAS[0]
+  );
+  const selectedMvType = createMemo(
+    () => DISCOVER_MV_TYPES[discoverMvTypeIndex()] ?? DISCOVER_MV_TYPES[0]
+  );
+  const selectedMvOrder = createMemo(
+    () => DISCOVER_MV_ORDERS[discoverMvOrderIndex()] ?? DISCOVER_MV_ORDERS[0]
   );
 
   const playlistCards = createPagedDiscoverCards(
@@ -171,14 +206,37 @@ export function DiscoverMode(props: DiscoverModeProps) {
     }
   );
 
+  const mvCards = createPagedDiscoverCards(
+    async ({ offset }) => {
+      const payload = await mvAll({
+        area: selectedMvArea().value,
+        type: selectedMvType().value,
+        order: selectedMvOrder().value,
+        limit: DISCOVER_PAGE_LIMIT,
+        offset
+      });
+      const items = parseNcmMvAllCards(payload);
+      return {
+        items,
+        hasMore: items.length >= DISCOVER_PAGE_LIMIT
+      };
+    },
+    {
+      pageSize: DISCOVER_PAGE_LIMIT,
+      onError: (error) => console.warn("[NeteasePage] discover MVs fetch failed", error)
+    }
+  );
+
   const shouldShowPlaylistCards = () => discoverTab() === "playlists";
   const shouldShowAlbumCards = () => discoverTab() === "new" && discoverNewKind() === "albums";
   const shouldShowArtistCards = () => discoverTab() === "artists";
+  const shouldShowMvCards = () => discoverTab() === "mvs";
 
   createEffect(() => {
     if (shouldShowPlaylistCards()) void playlistCards.ensureLoaded();
     if (shouldShowAlbumCards()) void albumCards.ensureLoaded();
     if (shouldShowArtistCards()) void artistCards.ensureLoaded();
+    if (shouldShowMvCards()) void mvCards.ensureLoaded();
   });
 
   createEffect(on(
@@ -205,6 +263,15 @@ export function DiscoverMode(props: DiscoverModeProps) {
     { defer: true }
   ));
 
+  createEffect(on(
+    () => [selectedMvArea().value, selectedMvType().value, selectedMvOrder().value] as const,
+    () => {
+      if (!mvCards.hasLoaded() && !shouldShowMvCards()) return;
+      void mvCards.reset();
+    },
+    { defer: true }
+  ));
+
   const [discoverToplists] = createResource(() =>
     safeLoadDiscover(() => api.listNcmDiscoverToplists(), [])
   );
@@ -213,7 +280,13 @@ export function DiscoverMode(props: DiscoverModeProps) {
     (type) => safeLoadDiscover(() => api.listNcmDiscoverSongs({ type }), [])
   );
 
-  const hasSearchResults = () => songResults().length > 0 || playlistResults().length > 0;
+  const hasSearchResults = () =>
+    songResults().length > 0 ||
+    playlistResults().length > 0 ||
+    artistResults().length > 0 ||
+    albumResults().length > 0 ||
+    videoResults().length > 0 ||
+    radioResults().length > 0;
   const shouldShowDiscoverResults = () => isSearching() || hasSearchResults();
 
   const runSearch = async () => {
@@ -223,25 +296,28 @@ export function DiscoverMode(props: DiscoverModeProps) {
       return;
     }
     setIsSearching(true);
-    detailNav.setSelectedPlaylist(null);
-    detailNav.setPlaylistTracksState([]);
+    detailNav.clearAllDetailViews();
+    setSongResults([]);
+    setPlaylistResults([]);
+    setArtistResults([]);
+    setAlbumResults([]);
+    setVideoResults([]);
+    setRadioResults([]);
     try {
-      if (searchTab() === "songs") {
-        setSongResults(
-          await api.searchNcmTracks({ keywords: query, limit: DISCOVER_SEARCH_LIMIT })
-        );
-        setPlaylistResults([]);
-      } else {
-        const playlists = await api.searchNcmPlaylists({
-          keywords: query,
-          limit: DISCOVER_SEARCH_LIMIT
-        });
-        setPlaylistResults(playlists);
-        setSongResults([]);
-        if (playlists.length > 0) {
-          void detailNav.loadPlaylistTracks(playlists[0]);
-        }
-      }
+      const [songs, playlists, artists, albums, videos, radios] = await Promise.all([
+        api.searchNcmTracks({ keywords: query, limit: DISCOVER_SEARCH_LIMIT }),
+        api.searchNcmPlaylists({ keywords: query, limit: DISCOVER_SEARCH_LIMIT }),
+        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.artists }),
+        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.albums }),
+        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.videos }),
+        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.radios })
+      ]);
+      setSongResults(songs);
+      setPlaylistResults(playlists);
+      setArtistResults(parseNcmSearchArtists(artists));
+      setAlbumResults(parseNcmSearchAlbums(albums));
+      setVideoResults(parseNcmSearchVideos(videos));
+      setRadioResults(parseNcmSearchRadios(radios));
     } catch (error) {
       props.setFeedback("error", readErrorMessage(error));
     } finally {
@@ -298,11 +374,26 @@ export function DiscoverMode(props: DiscoverModeProps) {
     )
   );
 
+  createEffect(
+    on(
+      () => props.albumDetailRequest?.version,
+      (version) => {
+        if (version === undefined || version === 0) return;
+        const album = props.albumDetailRequest?.album;
+        if (!album) return;
+        setDiscoverTab("new");
+        setDiscoverNewKind("albums");
+        void detailNav.loadAlbumTracks(album);
+      }
+    )
+  );
+
   const discoverTabs = createMemo(() => [
     { value: "playlists", label: t("ncm.discover.tab.playlists") },
     { value: "toplists", label: t("ncm.discover.tab.toplists") },
     { value: "artists", label: t("ncm.discover.tab.artists") },
-    { value: "new", label: t("ncm.discover.tab.new") }
+    { value: "new", label: t("ncm.discover.tab.new") },
+    { value: "mvs", label: t("ncm.discover.tab.mvs") }
   ]);
   const discoverSectionTitle = createMemo(() => {
     const tab = discoverTab();
@@ -311,6 +402,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
       case "toplists": return t("ncm.discover.section.toplists");
       case "artists": return t("ncm.discover.section.artists");
       case "new": return t("ncm.discover.section.new");
+      case "mvs": return t("ncm.discover.section.mvs");
       default: { const _exhaustive: never = tab; return _exhaustive; }
     }
   });
@@ -321,6 +413,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
       case "toplists": return t("ncm.discover.subtitle.toplists");
       case "artists": return t("ncm.discover.subtitle.artists");
       case "new": return t("ncm.discover.subtitle.new");
+      case "mvs": return t("ncm.discover.subtitle.mvs");
       default: { const _exhaustive: never = tab; return _exhaustive; }
     }
   });
@@ -336,6 +429,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
     if (detailNav.selectedLikedSongs()) return { kind: "liked" };
     if (detailNav.selectedAlbum()) return { kind: "album" };
     if (detailNav.selectedArtist()) return { kind: "artist" };
+    if (detailNav.selectedVideo()) return { kind: "video" };
     if (detailNav.selectedPlaylist()) return { kind: "playlist" };
     return { kind: "browse" };
   });
@@ -425,8 +519,14 @@ export function DiscoverMode(props: DiscoverModeProps) {
           <DailySongsDetail
             loginProfile={props.loginProfile()}
             tracks={detailNav.dailySongsState()}
+            updatedAt={detailNav.dailySongsUpdatedAt()}
             isLoading={detailNav.isLoadingDailySongs()}
             onBack={detailNav.exitDailySongs}
+            onRefresh={detailNav.refreshDailySongs}
+            onPlayAll={detailNav.playAllDailySongs}
+            onDislike={detailNav.dislikeDailySong}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
+            setFeedback={props.setFeedback}
             playback={props.playback}
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}
@@ -434,24 +534,62 @@ export function DiscoverMode(props: DiscoverModeProps) {
           />
         </Match>
         <Match when={detailView().kind === "liked"}>
-          <LikedSongsDetail
-            loginProfile={props.loginProfile()}
-            tracks={detailNav.likedSongsState()}
-            total={detailNav.likedSongsTotal()}
-            isLoading={detailNav.isLoadingLikedSongs()}
-            onBack={detailNav.exitLikedSongs}
-            playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
-          />
+          <Show
+            when={detailNav.selectedPlaylist()}
+            fallback={<div class="panel-note">{detailNav.isLoadingLikedSongs() ? t("ncm.playlist.loading") : t("ncm.liked.empty")}</div>}
+          >
+            <PlaylistDetail
+              playlist={detailNav.selectedPlaylist()}
+              detail={detailNav.playlistDetailInfo()}
+              tracks={detailNav.filteredPlaylistTracks()}
+              trackCount={detailNav.playlistTrackCount()}
+              metaText={detailNav.playlistMetaText()}
+              subtitleText={t("ncm.liked.eyebrow", {
+                name: props.loginProfile()?.nickname ?? props.loginProfile()?.userId ?? ""
+              })}
+              isLoadingTracks={detailNav.isLoadingPlaylistTracks()}
+              isLoadingDetail={detailNav.isLoadingPlaylistDetail()}
+              isTogglingSubscribe={detailNav.isTogglingPlaylistSubscribe()}
+              isScrolled={detailNav.isPlaylistDetailScrolled()}
+              filter={detailNav.playlistFilter()}
+              detailTab={detailNav.playlistDetailTab()}
+              setFilter={detailNav.setPlaylistFilter}
+              setDetailTab={detailNav.setPlaylistDetailTab}
+              onBack={detailNav.exitLikedSongs}
+              onRefresh={() => detailNav.enterLikedSongs()}
+              onPlayAll={detailNav.playAllPlaylistTracks}
+              onToggleSubscribe={detailNav.togglePlaylistSubscribe}
+              onRemoveTracks={detailNav.removePlaylistTracks}
+              onTracksRemovedLocally={detailNav.removePlaylistTracksLocally}
+              onPlaylistUpdated={detailNav.updateSelectedPlaylist}
+              onReorderTracks={detailNav.reorderPlaylistTracks}
+              onNavigateToSongWiki={props.onNavigateToSongWiki}
+              onScroll={detailNav.handlePlaylistTrackScroll}
+              backLabel={t("ncm.liked.backToFeed")}
+              showCommentsTab={false}
+              emptyStateText={t("ncm.liked.empty")}
+              sourcePlaylistId={detailNav.selectedPlaylist()?.id}
+              lockPlaylistName={true}
+              loginProfile={props.loginProfile()}
+              setFeedback={props.setFeedback}
+              playback={props.playback}
+              currentTrackPath={props.currentTrackPath}
+              currentSongId={props.currentSongId}
+              isPlaying={props.isPlaying}
+            />
+          </Show>
         </Match>
         <Match when={detailView().kind === "album"}>
           <AlbumDetail
             album={detailNav.selectedAlbum()}
+            detail={detailNav.albumDetailInfo()}
             tracks={detailNav.albumTracksState()}
             isLoading={detailNav.isLoadingAlbumTracks()}
+            isLoadingDetail={detailNav.isLoadingAlbumDetail()}
+            isTogglingSubscribe={detailNav.isTogglingAlbumSubscribe()}
+            onToggleSubscribe={detailNav.toggleAlbumSubscribe}
             onBack={detailNav.exitAlbum}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             playback={props.playback}
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}
@@ -461,23 +599,55 @@ export function DiscoverMode(props: DiscoverModeProps) {
         <Match when={detailView().kind === "artist"}>
           <ArtistDetail
             artist={detailNav.selectedArtist()}
+            detail={detailNav.artistDetailInfo()}
             tracks={detailNav.artistTracksState()}
             isLoading={detailNav.isLoadingArtistTracks()}
+            trackOrder={detailNav.artistTrackOrder()}
+            hasMoreTracks={detailNav.artistTracksHasMore()}
+            isLoadingDetail={detailNav.isLoadingArtistDetail()}
+            isTogglingSubscribe={detailNav.isTogglingArtistSubscribe()}
+            albums={detailNav.artistAlbumsState()}
+            videos={detailNav.artistVideosState()}
+            isLoadingAlbums={detailNav.isLoadingArtistAlbums()}
+            isLoadingVideos={detailNav.isLoadingArtistVideos()}
+            hasMoreAlbums={detailNav.artistAlbumsHasMore()}
+            hasMoreVideos={detailNav.artistVideosHasMore()}
+            onLoadAlbums={() => detailNav.loadArtistAlbums()}
+            onLoadVideos={() => detailNav.loadArtistVideos()}
+            onChangeTrackOrder={(order) => detailNav.changeArtistTrackOrder(order)}
+            onLoadMoreTracks={() => detailNav.loadArtistTrackPage({ append: true })}
+            onLoadMoreAlbums={() => detailNav.loadArtistAlbums({ append: true })}
+            onLoadMoreVideos={() => detailNav.loadArtistVideos({ append: true })}
+            onSelectAlbum={(album) => void detailNav.loadAlbumTracks(album)}
+            onSelectVideo={(video) => detailNav.enterVideo(video)}
+            onToggleSubscribe={detailNav.toggleArtistSubscribe}
             onBack={detailNav.exitArtist}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             playback={props.playback}
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}
             isPlaying={props.isPlaying}
           />
         </Match>
+        <Match when={detailView().kind === "video"}>
+          <VideoDetail
+            video={detailNav.selectedVideo()}
+            onBack={detailNav.exitVideo}
+            onPauseAudio={props.onPause}
+            onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
+          />
+        </Match>
         <Match when={detailView().kind === "playlist"}>
           <PlaylistDetail
             playlist={detailNav.selectedPlaylist()}
+            detail={detailNav.playlistDetailInfo()}
             tracks={detailNav.filteredPlaylistTracks()}
             trackCount={detailNav.playlistTrackCount()}
             metaText={detailNav.playlistMetaText()}
             subtitleText={pageTitle()}
             isLoadingTracks={detailNav.isLoadingPlaylistTracks()}
+            isLoadingDetail={detailNav.isLoadingPlaylistDetail()}
+            isTogglingSubscribe={detailNav.isTogglingPlaylistSubscribe()}
             isScrolled={detailNav.isPlaylistDetailScrolled()}
             filter={detailNav.playlistFilter()}
             detailTab={detailNav.playlistDetailTab()}
@@ -485,7 +655,16 @@ export function DiscoverMode(props: DiscoverModeProps) {
             setDetailTab={detailNav.setPlaylistDetailTab}
             onBack={detailNav.handleBackToPlaylists}
             onPlayAll={detailNav.playAllPlaylistTracks}
+            onRefresh={() => {
+              const playlist = detailNav.selectedPlaylist();
+              if (playlist) void detailNav.loadPlaylistTracks(playlist);
+            }}
+            onToggleSubscribe={detailNav.togglePlaylistSubscribe}
+            onPlaylistUpdated={detailNav.updateSelectedPlaylist}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             onScroll={detailNav.handlePlaylistTrackScroll}
+            loginProfile={props.loginProfile()}
+            setFeedback={props.setFeedback}
             playback={props.playback}
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}
@@ -554,17 +733,45 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 isPlaying={props.isPlaying}
               />
             </Show>
+            <Show when={discoverTab() === "mvs"}>
+              <DiscoverMvShowcase
+                mvAreas={DISCOVER_MV_AREAS}
+                mvTypes={DISCOVER_MV_TYPES}
+                mvOrders={DISCOVER_MV_ORDERS}
+                discoverMvAreaIndex={discoverMvAreaIndex()}
+                setDiscoverMvAreaIndex={setDiscoverMvAreaIndex}
+                discoverMvTypeIndex={discoverMvTypeIndex()}
+                setDiscoverMvTypeIndex={setDiscoverMvTypeIndex}
+                discoverMvOrderIndex={discoverMvOrderIndex()}
+                setDiscoverMvOrderIndex={setDiscoverMvOrderIndex}
+                discoverSectionTitle={discoverSectionTitle()}
+                discoverSectionSubtitle={discoverSectionSubtitle()}
+                allVideos={mvCards.items().map(toFeedCardItem)}
+                isLoadingVideos={mvCards.isLoading()}
+                hasMoreVideos={mvCards.hasMore()}
+                onLoadVideo={(video) => detailNav.enterVideo(video)}
+                onLoadMore={() => { void mvCards.loadMore(); }}
+              />
+            </Show>
             <Show when={shouldShowDiscoverResults()}>
               <SearchMode
                 searchTab={searchTab()}
+                onSearchTabChange={setSearchTab}
+                isSearching={isSearching()}
                 songResults={songResults()}
                 playlistResults={playlistResults()}
+                artistResults={artistResults()}
+                albumResults={albumResults()}
+                videoResults={videoResults()}
+                radioResults={radioResults()}
                 globalQuery={props.globalQuery}
                 parentMode="discover"
-                selectedPlaylist={detailNav.selectedPlaylist()}
-                playlistTracks={detailNav.playlistTracksState()}
-                isLoadingPlaylistTracks={detailNav.isLoadingPlaylistTracks()}
                 onSelectPlaylist={(playlist) => void detailNav.loadPlaylistTracks(playlist)}
+                onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
+                onSelectAlbum={(album) => void detailNav.loadAlbumTracks(album)}
+                onSelectVideo={(video) => detailNav.enterVideo(video)}
+                onSelectRadio={(radio) => props.onNavigateToRadioDetail?.(radio)}
+                onNavigateToSongWiki={props.onNavigateToSongWiki}
                 discoverSectionSubtitle={discoverSectionSubtitle()}
                 playback={props.playback}
                 currentTrackPath={props.currentTrackPath}

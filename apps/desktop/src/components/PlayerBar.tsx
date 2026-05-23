@@ -19,8 +19,10 @@ import { usePlayerBarProgress } from "./player/usePlayerBarProgress";
 import { usePlayerBarTimeFormat } from "./player/usePlayerBarTimeFormat";
 import { usePlayerBarNcmQuality } from "./player/usePlayerBarNcmQuality";
 import {
+  IconHeartBit,
   IconRepeat,
   IconRepeatOne,
+  IconShuffle,
   IconVolumeHigh,
   IconVolumeMute
 } from "./icons";
@@ -126,11 +128,11 @@ export function PlayerBar(props: PlayerBarProps) {
     t
   });
   const repeatActive = () => props.repeatMode !== "off";
-  const shuffleActive = () => props.shuffleMode === "on";
+  const shuffleActive = () => props.shuffleMode !== "off";
   const RepeatIcon = () => (props.repeatMode === "one" ? IconRepeatOne : IconRepeat);
+  const ShuffleIcon = () => (props.shuffleMode === "heartbeat" ? IconHeartBit : IconShuffle);
   const repeatLabel = () => t(`player.repeat.${props.repeatMode}` as const);
-  const shuffleLabel = () =>
-    shuffleActive() ? t("player.shuffle.on") : t("player.shuffle.off");
+  const shuffleLabel = () => t(`player.shuffle.${props.shuffleMode}` as const);
   const playPauseLabel = () => (isPlaying() ? t("player.aria.pause") : t("player.aria.play"));
   const handlePlayPauseClick = () => {
     if (isPlaying()) {
@@ -395,13 +397,14 @@ export function PlayerBar(props: PlayerBarProps) {
           menu={infoMenu()}
         />
 
-        <div class="player-bar-center flex items-center justify-center h-full">
+        <div class="player-bar-center">
           <PlayerTransportControls
             isPlaying={isPlaying()}
             isPlayLoading={Boolean(props.isPlayLoading)}
             canSkipPrev={props.canSkipPrev}
             canSkipNext={props.canSkipNext}
             shuffleActive={shuffleActive()}
+            shuffleIcon={ShuffleIcon()}
             repeatActive={repeatActive()}
             repeatIcon={RepeatIcon()}
             playPauseLabel={playPauseLabel()}

@@ -97,12 +97,14 @@ export type ContextMenuOptionKey =
   | "play"
   | "playNext"
   | "addToPlaylist"
+  | "dislike"
   | "more"
   | "search"
   | "copyName"
   | "openFolder"
   | "deleteFromPlaylist"
   | "deleteFromCloud"
+  | "cloudMatch"
   | "deleteFromLibrary"
   | "delete";
 
@@ -273,12 +275,14 @@ export const DEFAULT_CONTEXT_MENU_OPTIONS: ContextMenuOptions = {
   play: true,
   playNext: true,
   addToPlaylist: true,
+  dislike: true,
   more: true,
   search: true,
   copyName: true,
   openFolder: true,
   deleteFromPlaylist: true,
   deleteFromCloud: true,
+  cloudMatch: true,
   deleteFromLibrary: true,
   delete: true
 };

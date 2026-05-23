@@ -1,15 +1,11 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
-import { IconChevronLeft, IconChat, IconClock, IconEye, IconHeart, IconLink, IconShare, IconVideo } from "../../../components/icons";
-import {
-  readResourceCommentsPayload,
-  resourceComments,
-  type NcmSongComment
-} from "../../../shared/api/ncm/comment";
-import { mvDetail, mvDetailInfo, mvUrl } from "../../../shared/api/ncm/video";
-import { ncmMvPageUrl } from "../../../shared/api/ncm/urls";
+import { IconChevronLeft, IconChat, IconClock, IconEye, IconHeart, IconLink, IconShare } from "../../../components/icons";
+import { mvDetail, mvDetailInfo, mvUrl, videoDetail, videoDetailInfo, videoUrl } from "../../../shared/api/ncm/video";
+import { ncmMvPageUrl, ncmVideoPageUrl } from "../../../shared/api/ncm/urls";
 import { useTranslation } from "../../../shared/i18n";
 import type { FeedCardItem } from "../shared/types";
 import { parseVideoDetail, parseVideoSource, type VideoDetailInfo, type VideoSource } from "../videoParsers";
+import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
 
 export interface VideoDetailProps {
   video: FeedCardItem | null;
@@ -17,8 +13,6 @@ export interface VideoDetailProps {
   onPauseAudio: () => void | Promise<void>;
   onSelectArtist?: (artist: FeedCardItem) => void | Promise<void>;
 }
-
-type VideoCommentSort = "hot" | "new";
 
 interface VideoDetailPayload {
   detail: VideoDetailInfo | null;
@@ -46,15 +40,22 @@ const formatDate = (timestamp: number | null): string | null => {
   return date.toLocaleDateString();
 };
 
+const videoKind = (video: FeedCardItem): "mv" | "video" => video.videoKind ?? "mv";
+const upstreamVideoId = (video: FeedCardItem): number | string => video.videoId ?? video.id;
+
 const loadVideoDetail = async (video: FeedCardItem): Promise<VideoDetailPayload> => {
+  const kind = videoKind(video);
+  const id = upstreamVideoId(video);
   const [detailPayload, infoPayload] = await Promise.all([
-    mvDetail({ mvid: video.id }),
-    mvDetailInfo({ mvid: video.id })
+    kind === "mv" ? mvDetail({ mvid: video.id }) : videoDetail({ id }),
+    kind === "mv" ? mvDetailInfo({ mvid: video.id }) : videoDetailInfo({ id })
   ]);
   const detail = parseVideoDetail(detailPayload, infoPayload);
   const qualities = detail?.qualities.length ? detail.qualities : [1080];
   const sources = (await Promise.all(
-    qualities.map(async (quality) => parseVideoSource(await mvUrl({ id: video.id, r: quality })))
+    qualities.map(async (quality) => parseVideoSource(
+      await (kind === "mv" ? mvUrl({ id: video.id, r: quality }) : videoUrl({ id, r: quality }))
+    ))
   )).filter((item): item is VideoSource => item !== null);
   return { detail, sources };
 };
@@ -64,11 +65,6 @@ export function VideoDetail(props: VideoDetailProps) {
   const [playError, setPlayError] = createSignal<string | null>(null);
   const [selectedQuality, setSelectedQuality] = createSignal<number | null>(null);
   const [payload, setPayload] = createSignal<VideoDetailPayload>(EMPTY_VIDEO_PAYLOAD);
-  const [commentSort, setCommentSort] = createSignal<VideoCommentSort>("hot");
-  const [comments, setComments] = createSignal<NcmSongComment[]>([]);
-  const [commentPage, setCommentPage] = createSignal<number>(1);
-  const [commentHasMore, setCommentHasMore] = createSignal<boolean>(false);
-  const [commentLoading, setCommentLoading] = createSignal<boolean>(false);
   let videoRef: HTMLVideoElement | undefined;
 
   const detail = createMemo(() => payload()?.detail ?? null);
@@ -79,7 +75,9 @@ export function VideoDetail(props: VideoDetailProps) {
   });
   const displayTitle = createMemo(() => detail()?.title ?? props.video?.title ?? t("ncm.video.title"));
   const displayCover = createMemo(() => detail()?.coverUrl ?? props.video?.coverUrl ?? null);
-  const commentTotal = createMemo(() => detail()?.commentCount ?? comments().length);
+  const currentVideoKind = createMemo<"mv" | "video">(() => props.video ? videoKind(props.video) : "mv");
+  const currentVideoId = createMemo<number | string | null>(() => props.video ? upstreamVideoId(props.video) : detail()?.id ?? null);
+  const commentsResourceType = createMemo<1 | 5>(() => currentVideoKind() === "mv" ? 1 : 5);
 
   createEffect(() => {
     const video = props.video;
@@ -96,34 +94,6 @@ export function VideoDetail(props: VideoDetailProps) {
     });
   });
 
-  const loadComments = async (page: number, append: boolean) => {
-    const video = props.video;
-    if (!video) return;
-    setCommentLoading(true);
-    try {
-      const cursor = append ? comments()[comments().length - 1]?.time ?? undefined : undefined;
-      const payload = readResourceCommentsPayload(await resourceComments(
-        video.id,
-        1,
-        page,
-        20,
-        commentSort() === "hot" ? 2 : 3,
-        cursor
-      ));
-      setComments((current) => (append ? [...current, ...payload.comments] : payload.comments));
-      setCommentHasMore(payload.hasMore);
-      setCommentPage(page);
-    } catch (error) {
-      console.warn("[VideoDetail] comments fetch failed", error);
-      if (!append) {
-        setComments([]);
-        setCommentHasMore(false);
-      }
-    } finally {
-      setCommentLoading(false);
-    }
-  };
-
   createEffect(() => {
     const media = videoRef;
     const nextSource = source();
@@ -136,22 +106,27 @@ export function VideoDetail(props: VideoDetailProps) {
     setSelectedQuality(items[0]?.quality ?? null);
   }));
 
-  createEffect(on(
-    [() => props.video?.id ?? null, commentSort],
-    () => {
-      setComments([]);
-      setCommentPage(1);
-      setCommentHasMore(false);
-      void loadComments(1, false);
-    }
-  ));
-
   return (
     <section class="ncm-video-detail">
       <button type="button" class="ghost-button ncm-daily-detail-back" onClick={props.onBack}>
         <IconChevronLeft />
         {t("ncm.video.backToFeed")}
       </button>
+
+      <header class="ncm-video-detail-head">
+        <div class="ncm-video-detail-title">
+          <h2>{displayTitle()}</h2>
+          <div class="ncm-video-detail-meta">
+            <span><IconEye /> {formatNumber(detail()?.playCount ?? props.video?.playCount ?? null)}</span>
+            <Show when={detail()?.commentCount !== null && detail()?.commentCount !== undefined}>
+              <span><IconChat /> {formatNumber(detail()?.commentCount ?? null)}</span>
+            </Show>
+            <Show when={formatDate(detail()?.publishTime ?? null)}>
+              {(date) => <span><IconClock /> {date()}</span>}
+            </Show>
+          </div>
+        </div>
+      </header>
 
       <div class="ncm-video-player-shell">
         <video
@@ -188,43 +163,30 @@ export function VideoDetail(props: VideoDetailProps) {
         {(message) => <div class="panel-note">{message()}</div>}
       </Show>
 
-      <header class="ncm-video-detail-head">
-        <div class="ncm-video-detail-title">
-          <h2>{displayTitle()}</h2>
-          <div class="ncm-video-detail-meta">
-            <span><IconVideo /> MV</span>
-            <span><IconEye /> {formatNumber(detail()?.playCount ?? props.video?.playCount ?? null)}</span>
-            <Show when={detail()?.commentCount !== null && detail()?.commentCount !== undefined}>
-              <span><IconChat /> {formatNumber(detail()?.commentCount ?? null)}</span>
-            </Show>
-            <Show when={formatDate(detail()?.publishTime ?? null)}>
-              {(date) => <span><IconClock /> {date()}</span>}
-            </Show>
-          </div>
-        </div>
-        <button type="button" class="ghost-button" onClick={() => window.open(ncmMvPageUrl(props.video?.id ?? detail()?.id ?? 0), "_blank")}>
-          <IconLink />
-          {t("ncm.playlist.openSource")}
-        </button>
-      </header>
-
-      <Show when={detail()?.artist}>
-        {(artist) => (
-          <button type="button" class="ncm-video-artist" onClick={() => void props.onSelectArtist?.(artist())}>
-            <Show when={artist().coverUrl}>
-              {(coverUrl) => <img src={coverUrl()} alt="" />}
-            </Show>
-            <span>
-              <strong>{artist().title}</strong>
-              <small>{t("ncm.video.viewArtist")}</small>
-            </span>
+      <div class="ncm-video-menu">
+        <Show when={detail()?.artist}>
+          {(artist) => (
+            <button type="button" class="ncm-video-artist" onClick={() => void props.onSelectArtist?.(artist())}>
+              <Show when={artist().coverUrl}>
+                {(coverUrl) => <img src={coverUrl()} alt="" />}
+              </Show>
+              <span>
+                <strong>{artist().title}</strong>
+              </span>
+            </button>
+          )}
+        </Show>
+        <div class="ncm-video-actions">
+          <span><IconHeart /> {formatNumber(detail()?.likedCount ?? null)}</span>
+          <span><IconShare /> {formatNumber(detail()?.shareCount ?? null)}</span>
+          <button type="button" class="ghost-button" onClick={() => {
+            const id = currentVideoId() ?? 0;
+            window.open(currentVideoKind() === "mv" ? ncmMvPageUrl(id) : ncmVideoPageUrl(id), "_blank");
+          }}>
+            <IconLink />
+            {t("ncm.playlist.openSource")}
           </button>
-        )}
-      </Show>
-
-      <div class="ncm-video-actions">
-        <span><IconHeart /> {formatNumber(detail()?.likedCount ?? null)}</span>
-        <span><IconShare /> {formatNumber(detail()?.shareCount ?? null)}</span>
+        </div>
       </div>
 
       <Show when={detail()?.description}>
@@ -237,68 +199,12 @@ export function VideoDetail(props: VideoDetailProps) {
         </div>
       </Show>
 
-      <section class="ncm-video-comments">
-        <header class="ncm-video-comments-head">
-          <h3>
-            {t("ncm.video.comments")}
-            <span>{formatNumber(commentTotal())}</span>
-          </h3>
-          <div class="ncm-video-comment-tabs">
-            <button
-              type="button"
-              class={commentSort() === "hot" ? "is-active" : ""}
-              onClick={() => setCommentSort("hot")}
-            >
-              {t("ncm.video.comments.hot")}
-            </button>
-            <button
-              type="button"
-              class={commentSort() === "new" ? "is-active" : ""}
-              onClick={() => setCommentSort("new")}
-            >
-              {t("ncm.video.comments.new")}
-            </button>
-          </div>
-        </header>
-
-        <Show
-          when={comments().length > 0}
-          fallback={<div class="panel-note">{commentLoading() ? t("ncm.video.comments.loading") : t("ncm.video.comments.empty")}</div>}
-        >
-          <div class="ncm-video-comment-list">
-            <For each={comments()}>
-              {(comment) => (
-                <article class="ncm-video-comment">
-                  <Show when={comment.user.avatarUrl} fallback={<span class="ncm-video-comment-avatar" />}>
-                    {(avatarUrl) => <img class="ncm-video-comment-avatar" src={avatarUrl()} alt="" />}
-                  </Show>
-                  <div>
-                    <header>
-                      <strong>{comment.user.nickname}</strong>
-                      <span>{formatNumber(comment.likedCount)}</span>
-                    </header>
-                    <p>{comment.content}</p>
-                    <Show when={formatDate(comment.time)}>
-                      {(date) => <small>{date()}</small>}
-                    </Show>
-                  </div>
-                </article>
-              )}
-            </For>
-          </div>
-        </Show>
-
-        <Show when={commentHasMore()}>
-          <button
-            type="button"
-            class="ghost-button ncm-video-comments-more"
-            disabled={commentLoading()}
-            onClick={() => void loadComments(commentPage() + 1, true)}
-          >
-            {commentLoading() ? t("ncm.video.comments.loading") : t("ncm.video.comments.more")}
-          </button>
-        </Show>
-      </section>
+      <ResourceCommentsPanel
+        resourceId={currentVideoId()}
+        resourceType={commentsResourceType()}
+        class="ncm-video-comments"
+        title={t("ncm.video.comments")}
+      />
     </section>
   );
 }

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js";
 import { useTranslation } from "../../shared/i18n";
 import { useUISearch } from "../../shared/state/UISearchContext";
 import {
@@ -35,6 +35,8 @@ interface LibraryPageProps {
   onPlaybackState: (next: PlayerState) => void;
   onPlay: () => Promise<void> | undefined;
   onPause: () => Promise<void> | undefined;
+  onPlaybackHistoryChanged: () => void;
+  localPlaylistRequest?: { playlistId: string | null; version: number };
 }
 
 export type { LibraryListItem } from "./libraryViewTypes";
@@ -65,6 +67,7 @@ export function LibraryPage(props: LibraryPageProps) {
       const nextState = await controller.playItem(item, contextItems);
       props.onPlaybackState(nextState);
       await props.onStateRefresh(nextState.file_path ?? item.source_path ?? null);
+      props.onPlaybackHistoryChanged();
     }
   });
 
@@ -164,6 +167,7 @@ export function LibraryPage(props: LibraryPageProps) {
       void controller.playCurrentSongView().then(async (nextState) => {
         props.onPlaybackState(nextState);
         await props.onStateRefresh(nextState.file_path);
+        props.onPlaybackHistoryChanged();
       });
       return;
     }
@@ -191,6 +195,19 @@ export function LibraryPage(props: LibraryPageProps) {
       await controller.addItemsToPlaylist(playlist.playlist_id, items);
     }
   };
+
+  createEffect(
+    on(
+      () => props.localPlaylistRequest?.version ?? 0,
+      () => {
+        const playlistId = props.localPlaylistRequest?.playlistId ?? null;
+        if (!playlistId) return;
+        controller.setActiveTab("playlists");
+        void controller.selectLocalPlaylist(playlistId);
+      },
+      { defer: true }
+    )
+  );
 
   const handleConfirmAction = async () => {
     const action = confirmAction();
@@ -308,19 +325,6 @@ export function LibraryPage(props: LibraryPageProps) {
             >
               <IconList />
             </button>
-          </div>
-          <div class="local-library-menu-right">
-            <Show when={controller.libraryTotalCount() > 0}>
-              <label class="local-library-search">
-                <IconSearch />
-                <input
-                  value={controller.localQuery()}
-                  placeholder={t("library.tracks.fuzzySearch")}
-                  autocomplete="off"
-                  onInput={(event) => controller.setLocalQuery(event.currentTarget.value)}
-                />
-              </label>
-            </Show>
             <Show when={controller.activeTab() !== "folders"}>
               <label class="local-library-folder-select" aria-label={t("library.folderFilter.label")}>
                 <IconFolder />
@@ -334,6 +338,19 @@ export function LibraryPage(props: LibraryPageProps) {
                   </For>
                 </select>
                 <IconChevronDown />
+              </label>
+            </Show>
+          </div>
+          <div class="local-library-menu-right">
+            <Show when={controller.libraryTotalCount() > 0}>
+              <label class="local-library-search">
+                <IconSearch />
+                <input
+                  value={controller.localQuery()}
+                  placeholder={t("library.tracks.fuzzySearch")}
+                  autocomplete="off"
+                  onInput={(event) => controller.setLocalQuery(event.currentTarget.value)}
+                />
               </label>
             </Show>
             <SegmentedTabs

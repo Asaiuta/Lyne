@@ -13,13 +13,15 @@ import type {
   DiscoverArtistArea,
   DiscoverArtistInitial,
   DiscoverCardItem,
+  DiscoverMvFilter,
   DiscoverNewArea,
   DiscoverNewKind,
   DiscoverPlaylistKind,
+  FeedCardItem,
   DiscoverToplistItem,
   OnlineTrackItem
 } from "../shared/types";
-import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
+import { playlistSummaryFromDiscoverCard, type OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 
 interface LoadMoreButtonProps {
   isLoading: boolean;
@@ -108,14 +110,7 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
                 coverUrl={item.coverUrl}
                 coverVisible={!uiSettings.hiddenCovers.playlist}
                 onClick={() =>
-                  void props.onLoadPlaylist({
-                    id: item.id,
-                    name: item.title,
-                    creator: item.subtitle,
-                    coverUrl: item.coverUrl,
-                    trackCount: null,
-                    subscribed: false
-                  })
+                  void props.onLoadPlaylist(playlistSummaryFromDiscoverCard(item))
                 }
               />
             )}
@@ -244,14 +239,7 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
                 type="button"
                 class={`online-toplist-card${uiSettings.hiddenCovers.toplist ? " is-cover-hidden" : ""}`}
                 onClick={() =>
-                  void props.onLoadPlaylist({
-                    id: item.id,
-                    name: item.title,
-                    creator: item.subtitle,
-                    coverUrl: item.coverUrl,
-                    trackCount: null,
-                    subscribed: false
-                  })
+                  void props.onLoadPlaylist(playlistSummaryFromDiscoverCard(item))
                 }
               >
                 <Show when={!uiSettings.hiddenCovers.toplist}>
@@ -306,14 +294,7 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
                 coverUrl={item.coverUrl}
                 coverVisible={!uiSettings.hiddenCovers.toplist}
                 onClick={() =>
-                  void props.onLoadPlaylist({
-                    id: item.id,
-                    name: item.title,
-                    creator: item.subtitle,
-                    coverUrl: item.coverUrl,
-                    trackCount: null,
-                    subscribed: false
-                  })
+                  void props.onLoadPlaylist(playlistSummaryFromDiscoverCard(item))
                 }
               />
             )}
@@ -342,6 +323,99 @@ export interface DiscoverNewShowcaseProps {
   currentTrackPath: string | null;
   currentSongId: number | null;
   isPlaying: boolean;
+}
+
+export interface DiscoverMvShowcaseProps {
+  mvAreas: readonly DiscoverMvFilter[];
+  mvTypes: readonly DiscoverMvFilter[];
+  mvOrders: readonly DiscoverMvFilter[];
+  discoverMvAreaIndex: number;
+  setDiscoverMvAreaIndex: (index: number) => void;
+  discoverMvTypeIndex: number;
+  setDiscoverMvTypeIndex: (index: number) => void;
+  discoverMvOrderIndex: number;
+  setDiscoverMvOrderIndex: (index: number) => void;
+  discoverSectionTitle: string;
+  discoverSectionSubtitle: string;
+  allVideos: FeedCardItem[];
+  isLoadingVideos: boolean;
+  hasMoreVideos: boolean;
+  onLoadVideo: (video: FeedCardItem) => void | Promise<void>;
+  onLoadMore: () => void;
+}
+
+export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
+  const { t } = useTranslation();
+  const uiSettings = useUISettings();
+  return (
+    <section class="online-discover-section online-discover-videos">
+      <div class="online-discover-menu online-discover-menu--stacked">
+        <div class="online-discover-filter-menu">
+          <For each={props.mvAreas}>
+            {(item, index) => (
+              <button type="button" class={props.discoverMvAreaIndex === index() ? "is-active" : ""} onClick={() => props.setDiscoverMvAreaIndex(index())}>
+                {t(item.labelKey)}
+              </button>
+            )}
+          </For>
+        </div>
+        <div class="online-discover-filter-menu online-discover-filter-menu--category">
+          <For each={props.mvTypes}>
+            {(item, index) => (
+              <button type="button" class={props.discoverMvTypeIndex === index() ? "is-active" : ""} onClick={() => props.setDiscoverMvTypeIndex(index())}>
+                {t(item.labelKey)}
+              </button>
+            )}
+          </For>
+        </div>
+        <div class="online-discover-filter-menu online-discover-filter-menu--category">
+          <For each={props.mvOrders}>
+            {(item, index) => (
+              <button type="button" class={props.discoverMvOrderIndex === index() ? "is-active" : ""} onClick={() => props.setDiscoverMvOrderIndex(index())}>
+                {t(item.labelKey)}
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
+      <div class="online-result-panel-head">
+        <div class="online-result-panel-copy">
+          <strong>{props.discoverSectionTitle}</strong>
+          <span>{props.discoverSectionSubtitle}</span>
+        </div>
+      </div>
+      <Show
+        when={props.allVideos.length > 0}
+        fallback={
+          props.isLoadingVideos ? (
+            <CoverGridSkeleton count={20} />
+          ) : (
+            <EmptyState description={t("ncm.home.empty")} />
+          )
+        }
+      >
+        <div class="album-grid online-search-card-grid--videos content-fade-in">
+          <For each={props.allVideos}>
+            {(item) => (
+              <AlbumCard
+                title={item.title}
+                subtitle={item.subtitle}
+                coverUrl={item.coverUrl}
+                coverVisible={!uiSettings.hiddenCovers.video}
+                onClick={() => void props.onLoadVideo(item)}
+              />
+            )}
+          </For>
+        </div>
+      </Show>
+      <Show when={props.hasMoreVideos && props.allVideos.length > 0}>
+        <LoadMoreButton
+          isLoading={props.isLoadingVideos}
+          onClick={props.onLoadMore}
+        />
+      </Show>
+    </section>
+  );
 }
 
 export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {

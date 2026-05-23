@@ -22,6 +22,10 @@ export interface NcmRadioProgramParams {
   offset?: number;
 }
 
+export interface NcmRadioProgramDetailParams {
+  id: number;
+}
+
 export const radioCatList = (): Promise<NcmResponseEnvelope> =>
   requestNcm("dj/catelist", {
     method: "POST",
@@ -77,6 +81,24 @@ export const radioPrograms = (params: NcmRadioProgramParams): Promise<NcmRespons
       rid: params.rid,
       ...(params.limit === undefined ? {} : { limit: params.limit }),
       ...(params.offset === undefined ? {} : { offset: params.offset })
+    },
+    noCache: true
+  });
+
+export const radioProgramDetail = (params: NcmRadioProgramDetailParams): Promise<NcmResponseEnvelope> =>
+  requestNcm("dj/program/detail", {
+    method: "POST",
+    data: { id: params.id },
+    noCache: true
+  });
+
+export const radioSub = (rid: number, subscribe: boolean): Promise<NcmResponseEnvelope> =>
+  requestNcm("dj/sub", {
+    method: "POST",
+    data: {
+      rid,
+      t: subscribe ? 1 : 0,
+      timestamp: Date.now()
     },
     noCache: true
   });

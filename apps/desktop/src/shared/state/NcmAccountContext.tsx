@@ -43,6 +43,7 @@ export interface NcmAccountContextValue {
   removeAccount: (userId: number) => Promise<void>;
   switchActive: (userId: number) => Promise<void>;
   refreshActive: () => Promise<void>;
+  ensureActiveLoginValid: () => Promise<boolean>;
   patchActiveAccount: (patch: Partial<NcmAccount>) => void;
   logoutActive: () => Promise<void>;
 }
@@ -260,6 +261,37 @@ export function NcmAccountProvider(props: { children: JSX.Element }) {
     }
   };
 
+  const ensureActiveLoginValid = async (): Promise<boolean> => {
+    const account = activeAccount();
+    if (!account || !account.hasCookie) return true;
+    setIsBusy(true);
+    try {
+      const snapshot = readProfileSnapshot(await getLoginStatus());
+      if (!snapshot || snapshot.userId !== account.userId) {
+        const state = await accountApi.clearActiveNcmAccount();
+        applyAccountState(state);
+        return false;
+      }
+      const state = await accountApi.refreshActiveNcmAccount();
+      const refreshed = state.accounts.find((item) => item.userId === account.userId);
+      const isStillActive = state.activeUserId === account.userId && refreshed?.hasCookie === true;
+      applyAccountState(isStillActive ? state : { ...state, activeUserId: null });
+      return isStillActive;
+    } catch (error) {
+      console.warn("[NcmAccountContext] active login validation failed", error);
+      try {
+        const state = await accountApi.clearActiveNcmAccount();
+        applyAccountState(state);
+      } catch (logoutError) {
+        console.warn("[NcmAccountContext] failed to clear expired active login", logoutError);
+        applyAccountState({ accounts: userList().map((item) => ({ ...item })), activeUserId: null });
+      }
+      return false;
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const patchActiveAccount = (patch: Partial<NcmAccount>): void => {
     const id = activeUserId();
     if (id === null) return;
@@ -286,6 +318,7 @@ export function NcmAccountProvider(props: { children: JSX.Element }) {
         removeAccount,
         switchActive,
         refreshActive,
+        ensureActiveLoginValid,
         patchActiveAccount,
         logoutActive
       }}

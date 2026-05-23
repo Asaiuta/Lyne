@@ -118,7 +118,7 @@ export function usePlaybackCommands(deps: PlaybackCommandsDeps): PlaybackCommand
   };
 
   const handleToggleShuffle = () => {
-    const target: ShuffleMode = deps.shuffleMode() === "on" ? "off" : "on";
+    const target: ShuffleMode = deps.shuffleMode() === "off" ? "on" : "off";
     return runPlayerCommand(() => deps.api.setShuffleMode(target));
   };
 

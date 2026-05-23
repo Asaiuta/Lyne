@@ -15,6 +15,9 @@ export const ncmSongShareUrl = (songId: number, format: NcmShareUrlFormat): stri
 export const ncmMvPageUrl = (mvId: number | string): string =>
   `${NCM_WEB_BASE}/#/mv?id=${mvId}`;
 
+export const ncmVideoPageUrl = (videoId: number | string): string =>
+  `${NCM_WEB_BASE}/#/video?id=${videoId}`;
+
 export const ncmProgramPageUrl = (programId: number | string): string =>
   `${NCM_WEB_BASE}/#/program?id=${programId}`;
 

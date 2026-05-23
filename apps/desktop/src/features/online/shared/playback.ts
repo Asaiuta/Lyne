@@ -19,6 +19,7 @@ export interface PlaybackContext {
 export interface PlaybackController {
   playOnlineTrack: (item: OnlineTrackItem) => Promise<void>;
   enqueueOnlineTrack: (item: OnlineTrackItem) => Promise<void>;
+  queueNextOnlineTrack: (item: OnlineTrackItem) => Promise<void>;
 }
 
 export function createPlaybackController(ctx: PlaybackContext): PlaybackController {
@@ -67,5 +68,16 @@ export function createPlaybackController(ctx: PlaybackContext): PlaybackControll
     }
   };
 
-  return { playOnlineTrack, enqueueOnlineTrack };
+  const queueNextOnlineTrack = async (item: OnlineTrackItem) => {
+    try {
+      const track = await api.resolveNcmTrack(buildResolveInput(item));
+      await api.queueNext(track.streamUrl);
+      onRegisterPlayback(track);
+      setFeedback("success", t("ncm.feedback.trackQueued", { title: item.title ?? item.songId }));
+    } catch (error) {
+      setFeedback("error", readErrorMessage(error));
+    }
+  };
+
+  return { playOnlineTrack, enqueueOnlineTrack, queueNextOnlineTrack };
 }

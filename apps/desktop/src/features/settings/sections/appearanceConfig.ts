@@ -71,12 +71,14 @@ export const CONTEXT_MENU_ITEMS: readonly ToggleConfig<keyof ContextMenuOptions>
   { key: "play", itemId: "contextMenuOptions.play", labelKey: "settings.appearance.contextMenu.play" },
   { key: "playNext", itemId: "contextMenuOptions.playNext", labelKey: "settings.appearance.contextMenu.playNext" },
   { key: "addToPlaylist", itemId: "contextMenuOptions.addToPlaylist", labelKey: "settings.appearance.contextMenu.addToPlaylist" },
+  { key: "dislike", itemId: "contextMenuOptions.dislike", labelKey: "settings.appearance.contextMenu.dislike" },
   { key: "more", itemId: "contextMenuOptions.more", labelKey: "settings.appearance.contextMenu.more" },
   { key: "search", itemId: "contextMenuOptions.search", labelKey: "settings.appearance.contextMenu.search" },
   { key: "copyName", itemId: "contextMenuOptions.copyName", labelKey: "settings.appearance.contextMenu.copyName" },
   { key: "openFolder", itemId: "contextMenuOptions.openFolder", labelKey: "settings.appearance.contextMenu.openFolder" },
   { key: "deleteFromPlaylist", itemId: "contextMenuOptions.deleteFromPlaylist", labelKey: "settings.appearance.contextMenu.deleteFromPlaylist" },
   { key: "deleteFromCloud", itemId: "contextMenuOptions.deleteFromCloud", labelKey: "settings.appearance.contextMenu.deleteFromCloud" },
+  { key: "cloudMatch", itemId: "contextMenuOptions.cloudMatch", labelKey: "settings.appearance.contextMenu.cloudMatch" },
   { key: "deleteFromLibrary", itemId: "contextMenuOptions.deleteFromLibrary", labelKey: "settings.appearance.contextMenu.deleteFromLibrary" }
 ];
 

@@ -1,13 +1,17 @@
 import { parseCurrentLyricsResponse } from "./lyrics";
 import type {
+  NcmDailySongDislikeResult,
+  NcmDailySongsResult,
   NcmTrackPlaybackResult,
   NcmTrackQueueResult,
+  NcmTracksPage,
   NcmTrackSummary,
   ResolvedNcmTrack,
   ResolvedNcmTrackSupplement
 } from "./ncmDomainTypes";
 import {
   isInteger,
+  isBoolean,
   isNullableNumber,
   isNullableString,
   isNullableInteger,
@@ -171,7 +175,13 @@ export const parseNcmTrackSummary = (value: unknown): NcmTrackSummary | null => 
     !isNullableString(value.artist) ||
     !isNullableString(value.album) ||
     !isNullableNumber(value.duration_secs) ||
-    !isNullableString(value.artwork_url)
+    !isNullableString(value.artwork_url) ||
+    (value.quality_label !== undefined && !isNullableString(value.quality_label)) ||
+    (value.privilege_tag !== undefined && !isNullableString(value.privilege_tag)) ||
+    (value.explicit !== undefined && !isBoolean(value.explicit)) ||
+    (value.original_tag !== undefined && !isNullableString(value.original_tag)) ||
+    (value.mv_id !== undefined && !isNullableInteger(value.mv_id)) ||
+    (value.is_cloud !== undefined && !isBoolean(value.is_cloud))
   ) {
     return null;
   }
@@ -184,7 +194,13 @@ export const parseNcmTrackSummary = (value: unknown): NcmTrackSummary | null => 
     album: value.album,
     duration_secs: value.duration_secs,
     artworkUrl: value.artwork_url,
-    size_bytes: isNullableInteger(value.size_bytes) ? value.size_bytes : null
+    size_bytes: isNullableInteger(value.size_bytes) ? value.size_bytes : null,
+    qualityLabel: isNullableString(value.quality_label) ? value.quality_label : null,
+    privilegeTag: isNullableString(value.privilege_tag) ? value.privilege_tag : null,
+    explicit: isBoolean(value.explicit) ? value.explicit : false,
+    originalTag: isNullableString(value.original_tag) ? value.original_tag : null,
+    mvId: isNullableInteger(value.mv_id) ? value.mv_id : null,
+    isCloud: isBoolean(value.is_cloud) ? value.is_cloud : false
   };
 };
 
@@ -204,4 +220,37 @@ export const parseNcmTracksResponse = (value: unknown): NcmTrackSummary[] => {
     throw new Error("Invalid NCM tracks payload");
   }
   return tracks as NcmTrackSummary[];
+};
+
+export const parseNcmTracksPageResponse = (value: unknown): NcmTracksPage => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid NCM tracks page response shape");
+  }
+  return {
+    tracks: parseNcmTracksResponse(value),
+    hasMore: isBoolean(value.has_more) ? value.has_more : false
+  };
+};
+
+export const parseNcmDailySongsResponse = (value: unknown): NcmDailySongsResult => ({
+  timestamp: Date.now(),
+  tracks: parseNcmTracksResponse(value)
+});
+
+export const parseNcmDailySongDislikeResponse = (value: unknown): NcmDailySongDislikeResult => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid NCM daily dislike response shape");
+  }
+  const status = parseStatus(value.status);
+  if (status === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Failed to dislike daily song");
+  }
+  if (value.track === null || value.track === undefined) {
+    return { track: null };
+  }
+  const track = parseNcmTrackSummary(value.track);
+  if (!track) {
+    throw new Error("Invalid NCM daily dislike track payload");
+  }
+  return { track };
 };

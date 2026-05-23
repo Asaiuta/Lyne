@@ -1,6 +1,7 @@
 import type {
   ApiClient,
   GetNcmHomeFeedInput,
+  ListNcmArtistTracksInput,
   ListNcmCloudTracksInput,
   ListNcmDiscoverAlbumsInput,
   ListNcmDiscoverArtistsInput,
@@ -8,9 +9,12 @@ import type {
   ListNcmDiscoverSongsInput,
   ListNcmPlaylistTracksInput,
   ListNcmUserPlaylistsInput,
+  MatchNcmCloudTrackInput,
   NcmAccountState,
   NcmAccountUpsertInput,
   NcmCloudTracksPage,
+  NcmDailySongDislikeResult,
+  NcmDailySongsResult,
   NcmDiscoverAlbumArea,
   NcmDiscoverCard,
   NcmDiscoverCardsPage,
@@ -20,14 +24,17 @@ import type {
   NcmDiscoverToplist,
   NcmHomeFeed,
   NcmPlaylistSummary,
+  NcmPlaylistTracksUpdateResult,
   NcmTrackPlaybackResult,
   NcmTrackQueueResult,
+  NcmTracksPage,
   NcmTrackSummary,
   NcmUserPlaylistMode,
   ResolveNcmTrackInput,
   ResolvedNcmTrack,
   ResolvedNcmTrackSupplement,
-  SearchNcmTracksInput
+  SearchNcmTracksInput,
+  UpdateNcmPlaylistTracksInput
 } from "./client";
 import type { ApiStatus } from "./types";
 import type { NcmResponseEnvelope } from "./ncm/base";
@@ -72,21 +79,27 @@ export type NcmApiMethodContract = [
   Expect<Equal<ApiClient["setActiveNcmAccount"], (userId: number) => Promise<NcmAccountState>>>,
   Expect<Equal<ApiClient["refreshActiveNcmAccount"], () => Promise<NcmAccountState>>>,
   Expect<Equal<ApiClient["logoutActiveNcmAccount"], () => Promise<NcmAccountState>>>,
+  Expect<Equal<ApiClient["clearActiveNcmAccount"], () => Promise<NcmAccountState>>>,
   Expect<Equal<ApiClient["dailySigninActiveNcmAccount"], () => Promise<NcmAccountState>>>,
   Expect<Equal<ApiClient["deleteNcmAccount"], (userId: number) => Promise<NcmAccountState>>>,
   Expect<Equal<ApiClient["listNcmUserPlaylists"], (input: ListNcmUserPlaylistsInput) => Promise<NcmPlaylistSummary[]>>>,
   Expect<Equal<ApiClient["searchNcmTracks"], (input: SearchNcmTracksInput) => Promise<NcmTrackSummary[]>>>,
   Expect<Equal<ApiClient["searchNcmPlaylists"], (input: SearchNcmTracksInput) => Promise<NcmPlaylistSummary[]>>>,
+  Expect<Equal<ApiClient["getNcmPlaylistDetail"], (id: number) => Promise<NcmPlaylistSummary>>>,
   Expect<Equal<ApiClient["listNcmPlaylistTracks"], (input: ListNcmPlaylistTracksInput) => Promise<NcmTrackSummary[]>>>,
+  Expect<Equal<ApiClient["updateNcmPlaylistTracks"], (input: UpdateNcmPlaylistTracksInput) => Promise<NcmPlaylistTracksUpdateResult>>>,
+  Expect<Equal<ApiClient["getNcmDailySongs"], () => Promise<NcmDailySongsResult>>>,
   Expect<Equal<ApiClient["listNcmDailySongTracks"], () => Promise<NcmTrackSummary[]>>>,
+  Expect<Equal<ApiClient["dislikeNcmDailySong"], (songId: number) => Promise<NcmDailySongDislikeResult>>>,
   Expect<Equal<ApiClient["listNcmSongDetailTracks"], (ids: number[]) => Promise<NcmTrackSummary[]>>>,
   Expect<Equal<ApiClient["listNcmPersonalFmTracks"], () => Promise<NcmTrackSummary[]>>>,
   Expect<Equal<ApiClient["trashNcmPersonalFmTrack"], (songId: number) => Promise<void>>>,
   Expect<Equal<ApiClient["listNcmAlbumTracks"], (id: number) => Promise<NcmTrackSummary[]>>>,
-  Expect<Equal<ApiClient["listNcmArtistTracks"], (id: number) => Promise<NcmTrackSummary[]>>>,
+  Expect<Equal<ApiClient["listNcmArtistTracks"], (input: ListNcmArtistTracksInput) => Promise<NcmTracksPage>>>,
   Expect<Equal<ApiClient["getNcmLikelistIds"], (uid: number) => Promise<number[]>>>,
   Expect<Equal<ApiClient["listNcmCloudTracks"], (input: ListNcmCloudTracksInput) => Promise<NcmCloudTracksPage>>>,
   Expect<Equal<ApiClient["deleteNcmCloudTrack"], (songId: number) => Promise<void>>>,
+  Expect<Equal<ApiClient["matchNcmCloudTrack"], (input: MatchNcmCloudTrackInput) => Promise<void>>>,
   Expect<Equal<ApiClient["getNcmHomeFeed"], (input?: GetNcmHomeFeedInput) => Promise<NcmHomeFeed>>>,
   Expect<Equal<ApiClient["listNcmDiscoverPlaylists"], (input: ListNcmDiscoverPlaylistsInput) => Promise<NcmDiscoverCardsPage>>>,
   Expect<Equal<ApiClient["listNcmDiscoverAlbums"], (input: ListNcmDiscoverAlbumsInput) => Promise<NcmDiscoverCardsPage>>>,
@@ -154,9 +167,42 @@ export const domainNcmWireFixtures = {
         album: null,
         duration_secs: 180,
         artworkUrl: "https://example.test/cover.jpg",
-        size_bytes: null
+        size_bytes: null,
+        qualityLabel: "SQ",
+        privilegeTag: "VIP",
+        explicit: true,
+        originalTag: "原",
+        mvId: 123,
+        isCloud: false
       }
     ]
+  },
+  dailyDislikeSuccess: {
+    status: "success",
+    track: null
+  },
+  playlistDetailSuccess: {
+    status: "success",
+    playlist: {
+      id: 42,
+      name: "Late Night Mix",
+      userId: 7,
+      creatorId: 7,
+      creator: "Ada",
+      coverUrl: "https://example.test/playlist.jpg",
+      trackCount: 12,
+      playCount: 345,
+      description: "A quiet playlist",
+      tags: ["jazz"],
+      createTime: 1710000000000,
+      updateTime: 1710000001000,
+      privacy: 0,
+      subscribed: false
+    }
+  },
+  playlistTrackUpdateSuccess: {
+    status: "success",
+    updated_count: 2
   },
   accountStateSuccess: {
     status: "success",
@@ -181,6 +227,9 @@ export const domainNcmWireFixtures = {
   }
 } satisfies {
   tracksSuccess: DomainNcmSuccessEnvelope<{ tracks: NcmTrackSummary[] }>;
+  dailyDislikeSuccess: DomainNcmSuccessEnvelope<{ track: NcmTrackSummary | null }>;
+  playlistDetailSuccess: DomainNcmSuccessEnvelope<{ playlist: NcmPlaylistSummary }>;
+  playlistTrackUpdateSuccess: DomainNcmSuccessEnvelope<{ updated_count: number }>;
   accountStateSuccess: DomainNcmSuccessEnvelope<NcmAccountState>;
   upstreamError: DomainNcmErrorEnvelope;
 };

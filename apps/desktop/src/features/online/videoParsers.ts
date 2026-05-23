@@ -1,7 +1,7 @@
 import type { FeedCardItem } from "./shared/types";
 
 export interface VideoDetailInfo {
-  id: number;
+  id: number | string;
   title: string;
   coverUrl: string | null;
   description: string | null;
@@ -36,6 +36,9 @@ const readNumber = (value: unknown): number | null => {
 const readString = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
+const readId = (value: unknown): number | string | null =>
+  readNumber(value) ?? readString(value);
+
 const readArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 const readArtist = (value: unknown): FeedCardItem | null => {
@@ -56,7 +59,7 @@ const readArtist = (value: unknown): FeedCardItem | null => {
 export const parseVideoDetail = (detailPayload: unknown, infoPayload: unknown): VideoDetailInfo | null => {
   if (!isRecord(detailPayload)) return null;
   const data = isRecord(detailPayload.data) ? detailPayload.data : detailPayload;
-  const id = readNumber(data.id);
+  const id = readId(data.id ?? data.vid);
   const title = readString(data.name ?? data.title);
   if (id === null || title === null) return null;
 
@@ -83,6 +86,7 @@ export const parseVideoDetail = (detailPayload: unknown, infoPayload: unknown): 
       .filter((item): item is string => item !== null),
     qualities: readArray(data.brs)
       .map((item) => (isRecord(item) ? readNumber(item.br ?? item.size) : null))
+      .concat(readArray(data.resolutions).map((item) => (isRecord(item) ? readNumber(item.resolution) : null)))
       .filter((item): item is number => item !== null)
       .sort((a, b) => b - a)
   };
@@ -90,7 +94,8 @@ export const parseVideoDetail = (detailPayload: unknown, infoPayload: unknown): 
 
 export const parseVideoSource = (payload: unknown): VideoSource | null => {
   if (!isRecord(payload)) return null;
-  const data = isRecord(payload.data) ? payload.data : payload;
+  const firstUrl = Array.isArray(payload.urls) ? payload.urls.find(isRecord) : null;
+  const data = firstUrl ?? (isRecord(payload.data) ? payload.data : payload);
   const url = readString(data.url);
   if (url === null) return null;
   return {

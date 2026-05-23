@@ -51,7 +51,7 @@
     bottom: 0;
     z-index: 3;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 356px minmax(0, 1fr);
     align-items: center;
     gap: 0;
     width: 100%;
@@ -222,16 +222,35 @@
     height: 100%;
   }
 
+  .player-bar-left {
+    justify-self: start;
+    width: 100%;
+    max-width: 640px;
+    padding-left: 68px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .player-bar-left.is-cover-hidden {
+    padding-left: 0;
+  }
+
   .player-bar-center {
+    justify-self: center;
     justify-content: center;
+    width: 100%;
   }
 
   .player-bar-right {
-    justify-content: flex-end;
+    justify-self: end;
+    width: 100%;
     max-width: 640px;
+    justify-content: flex-end;
   }
+
   .player-bar-cover {
-    position: relative;
+    position: absolute;
+    left: 0;
     flex: none;
     width: 56px;
     height: 56px;
@@ -296,7 +315,7 @@
   .player-bar-info {
     display: flex;
     min-width: 0;
-    max-width: 584px;
+    width: 100%;
     flex-direction: column;
     justify-content: center;
     gap: 0;
@@ -531,7 +550,7 @@
 
   .player-inline-menu-popover {
     position: absolute;
-    left: 0;
+    left: 50%;
     bottom: calc(100% + 10px);
     z-index: var(--z-popover);
     display: flex;
@@ -545,7 +564,8 @@
     box-shadow: var(--floating-shadow);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
+    transform: translateX(-50%);
+    animation: player-floating-layer-enter var(--duration-fast) var(--ease-standard);
   }
 
   .player-menu-item {
@@ -571,7 +591,8 @@
     align-items: center;
     gap: 8px;
     justify-content: center;
-    margin: 0 60px;
+    width: 100%;
+    margin: 0;
   }
 
   .transport-button {
@@ -736,7 +757,7 @@
 
   .player-volume-popover {
     position: absolute;
-    right: 0;
+    left: 50%;
     bottom: calc(100% + 10px);
     z-index: var(--z-popover);
     display: flex;
@@ -752,7 +773,8 @@
     box-shadow: var(--floating-shadow);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
+    transform: translateX(-50%);
+    animation: player-floating-layer-enter var(--duration-fast) var(--ease-standard);
   }
 
   .player-volume-popover .volume-slider {
@@ -849,7 +871,7 @@
   .player-quality-popover,
   .player-controls-popover {
     position: absolute;
-    right: 0;
+    right: 50%;
     bottom: calc(100% + 10px);
     min-width: 220px;
     padding: 12px 14px;
@@ -862,7 +884,8 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
+    transform: translateX(50%);
+    animation: player-floating-layer-enter-right var(--duration-fast) var(--ease-standard);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
   }
@@ -982,6 +1005,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .context-menu,
+    .top-nav-search-panel,
     .top-nav-search-history,
     .player-inline-menu-popover,
     .player-volume-popover,
@@ -1026,10 +1050,6 @@
     min-width: 0;
   }
 
-  .player-bar-left {
-    max-width: 640px;
-  }
-
   .player-utility-button {
     width: 38px;
     height: 38px;
@@ -1060,6 +1080,28 @@
   .player-queue-button {
     position: relative;
     overflow: visible;
+  }
+
+  @keyframes player-floating-layer-enter {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+
+  @keyframes player-floating-layer-enter-right {
+    from {
+      opacity: 0;
+      transform: translateX(50%) translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(50%) translateY(0);
+    }
   }
 
   .player-queue-button.is-open {
@@ -1095,6 +1137,50 @@
     width: 22px;
     height: 22px;
   }
+
+  @media (max-width: 1024px) {
+    .player-bar {
+      grid-template-columns: minmax(0, 1fr) 292px minmax(0, 1fr);
+    }
+
+    .player-time-stack {
+      display: none;
+    }
+  }
+
+  @media (max-width: 810px) {
+    .player-bar {
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+    }
+
+    .player-bar-center {
+      width: auto;
+    }
+
+    .player-bar-transport {
+      width: auto;
+      gap: 2px;
+      margin: 0 0 0 12px;
+    }
+
+    .player-bar-transport .mode-button {
+      display: none;
+    }
+
+    .player-utility-group {
+      gap: 2px;
+    }
+
+    .player-utility-hidden {
+      display: none;
+    }
+
+    .player-queue-button:has(.player-queue-badge) {
+      margin-right: 8px;
+    }
+  }
+
   .command-error-toast {
     position: fixed;
     right: var(--space-4);

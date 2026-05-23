@@ -6,7 +6,10 @@ import { PageHeader } from "../../../components/page/PageHeader";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
 import { useUISettings } from "../../../shared/state/useUISettings";
-import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
+import {
+  loadNcmUserPlaylistsByMode,
+  type OnlinePlaylistSummary
+} from "../ncmPlaylistSummary";
 import { PlaylistDetail } from "../details/PlaylistDetail";
 import {
   createErrorMessageReader,
@@ -14,7 +17,7 @@ import {
   type FeedbackSetter
 } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
-import type { NcmProfile } from "../shared/types";
+import type { NcmProfile, OnlineTrackItem } from "../shared/types";
 import { useDetailNavigation } from "../shared/useDetailNavigation";
 
 export type UserPlaylistsKind = "created-playlists" | "collected-playlists";
@@ -30,6 +33,7 @@ export interface UserPlaylistsModeProps {
   onLogout: () => void | Promise<void>;
   selectedPlaylistId: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
   currentTrackPath: string | null;
@@ -49,7 +53,16 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
     loginProfile: props.loginProfile,
     playback: props.playback,
     setFeedback: props.setFeedback,
-    onSelectedPlaylistChange: props.onSelectedPlaylistChange
+    onSelectedPlaylistChange: props.onSelectedPlaylistChange,
+    onPlaylistSubscribeChange: (playlist, subscribed) => {
+      if (props.kind !== "collected-playlists") return;
+      setUserPlaylistsState((current) => {
+        if (!subscribed) {
+          return current.filter((item) => item.id !== playlist.id);
+        }
+        return current.some((item) => item.id === playlist.id) ? current : [playlist, ...current];
+      });
+    }
   });
 
   const pageTitle = () =>
@@ -77,11 +90,7 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
     const run = async () => {
       setIsLoadingUserPlaylists(true);
       try {
-        const playlists = await api.listNcmUserPlaylists({
-          uid: profile.userId,
-          limit: 100,
-          mode: kind
-        });
+        const playlists = await loadNcmUserPlaylistsByMode(api, profile.userId, kind);
         if (cancelled) return;
         setUserPlaylistsState(playlists);
       } catch (error) {
@@ -207,7 +216,7 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
             }
           >
             <section class="playlist-grid-section">
-              <div class="album-grid">
+              <div class="album-grid content-fade-in">
                 <For each={userPlaylistsState()}>
                   {(playlist) => (
                     <AlbumCard
@@ -231,11 +240,14 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
       >
         <PlaylistDetail
           playlist={detailNav.selectedPlaylist()}
+          detail={detailNav.playlistDetailInfo()}
           tracks={detailNav.filteredPlaylistTracks()}
           trackCount={detailNav.playlistTrackCount()}
           metaText={detailNav.playlistMetaText()}
           subtitleText={pageTitle()}
           isLoadingTracks={detailNav.isLoadingPlaylistTracks()}
+          isLoadingDetail={detailNav.isLoadingPlaylistDetail()}
+          isTogglingSubscribe={detailNav.isTogglingPlaylistSubscribe()}
           isScrolled={detailNav.isPlaylistDetailScrolled()}
           filter={detailNav.playlistFilter()}
           detailTab={detailNav.playlistDetailTab()}
@@ -243,7 +255,11 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
           setDetailTab={detailNav.setPlaylistDetailTab}
           onBack={detailNav.handleBackToPlaylists}
           onPlayAll={detailNav.playAllPlaylistTracks}
+          onToggleSubscribe={detailNav.togglePlaylistSubscribe}
+          onNavigateToSongWiki={props.onNavigateToSongWiki}
           onScroll={detailNav.handlePlaylistTrackScroll}
+          loginProfile={props.loginProfile()}
+          setFeedback={props.setFeedback}
           playback={props.playback}
           currentTrackPath={props.currentTrackPath}
           currentSongId={props.currentSongId}

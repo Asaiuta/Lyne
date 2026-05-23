@@ -114,6 +114,24 @@ export const albumDetail = (id: number): Promise<NcmResponseEnvelope> =>
     noCache: true
   });
 
+export const albumDetailDynamic = (id: number): Promise<NcmResponseEnvelope> =>
+  requestNcm("album/detail/dynamic", {
+    method: "POST",
+    data: { id },
+    noCache: true
+  });
+
+export const albumSub = (id: number, subscribe: boolean): Promise<NcmResponseEnvelope> =>
+  requestNcm("album/sub", {
+    method: "POST",
+    data: {
+      id,
+      t: subscribe ? 1 : 2,
+      timestamp: Date.now()
+    },
+    noCache: true
+  });
+
 export const artistDetail = (id: number): Promise<NcmResponseEnvelope> =>
   requestNcm("artist/detail", {
     method: "POST",
@@ -121,9 +139,64 @@ export const artistDetail = (id: number): Promise<NcmResponseEnvelope> =>
     noCache: true
   });
 
+export const artistSub = (id: number, subscribe: boolean): Promise<NcmResponseEnvelope> =>
+  requestNcm("artist/sub", {
+    method: "POST",
+    data: {
+      id,
+      t: subscribe ? 1 : 2,
+      timestamp: Date.now()
+    },
+    noCache: true
+  });
+
 export const artists = (id: number): Promise<NcmResponseEnvelope> =>
   requestNcm("artists", {
     method: "POST",
     data: { id },
+    noCache: true
+  });
+
+export interface NcmArtistResourcePageParams {
+  id: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface NcmArtistSongsParams extends NcmArtistResourcePageParams {
+  order?: "hot" | "time";
+}
+
+export const artistSongs = (params: NcmArtistSongsParams): Promise<NcmResponseEnvelope> =>
+  requestNcm("artist/songs", {
+    method: "POST",
+    data: {
+      id: params.id,
+      ...(params.limit === undefined ? {} : { limit: params.limit }),
+      ...(params.offset === undefined ? {} : { offset: params.offset }),
+      ...(params.order === undefined ? {} : { order: params.order })
+    },
+    noCache: true
+  });
+
+export const artistAlbum = (params: NcmArtistResourcePageParams): Promise<NcmResponseEnvelope> =>
+  requestNcm("artist/album", {
+    method: "POST",
+    data: {
+      id: params.id,
+      ...(params.limit === undefined ? {} : { limit: params.limit }),
+      ...(params.offset === undefined ? {} : { offset: params.offset })
+    },
+    noCache: true
+  });
+
+export const artistMv = (params: NcmArtistResourcePageParams): Promise<NcmResponseEnvelope> =>
+  requestNcm("artist/mv", {
+    method: "POST",
+    data: {
+      id: params.id,
+      ...(params.limit === undefined ? {} : { limit: params.limit }),
+      ...(params.offset === undefined ? {} : { offset: params.offset })
+    },
     noCache: true
   });

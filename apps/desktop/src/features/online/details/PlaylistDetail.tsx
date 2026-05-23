@@ -1,26 +1,43 @@
-import { Show } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import {
+  IconChat,
   IconChevronLeft,
   IconDots,
+  IconEye,
+  IconHeart,
+  IconHeartFilled,
   IconList,
   IconMusic,
   IconPlay,
-  IconSearch
+  IconSearch,
+  IconShare,
+  IconSpinner
 } from "../../../components/icons";
+import { ContextMenu, type ContextMenuItem } from "../../../components/media/ContextMenu";
+import type { MediaContextAction } from "../../../components/media/MediaList";
 import { MediaList } from "../../../components/media/MediaList";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
+import type { PlaylistDetailInfo } from "../playlistParsers";
+import type { FeedbackSetter } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
+import type { NcmProfile } from "../shared/types";
 import type { OnlineTrackItem } from "../shared/types";
+import { DailySongsBatchModal } from "./DailySongsBatchModal";
+import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
+import { UpdatePlaylistModal } from "./UpdatePlaylistModal";
 
 export interface PlaylistDetailProps {
   playlist: OnlinePlaylistSummary | null;
+  detail: PlaylistDetailInfo | null;
   tracks: OnlineTrackItem[];
   trackCount: number;
   metaText: string;
   subtitleText: string;
   isLoadingTracks: boolean;
+  isLoadingDetail: boolean;
+  isTogglingSubscribe: boolean;
   isScrolled: boolean;
   filter: string;
   detailTab: "songs" | "comments";
@@ -28,11 +45,22 @@ export interface PlaylistDetailProps {
   setDetailTab: (tab: "songs" | "comments") => void;
   onBack: () => void;
   onPlayAll: () => void | Promise<void>;
+  onRefresh?: () => void | Promise<void>;
+  onToggleSubscribe?: () => void | Promise<void>;
+  onRemoveTracks?: (songIds: readonly number[]) => void | Promise<void>;
+  onTracksRemovedLocally?: (songIds: readonly number[]) => void;
+  onPlaylistUpdated?: (playlist: OnlinePlaylistSummary) => void;
+  onReorderTracks?: (fromIndex: number, toIndex: number) => void | Promise<void>;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   onScroll: (event: Event) => void;
   backLabel?: string;
   showBackButton?: boolean;
   showCommentsTab?: boolean;
   emptyStateText?: string;
+  sourcePlaylistId?: number;
+  lockPlaylistName?: boolean;
+  loginProfile?: NcmProfile | null;
+  setFeedback?: FeedbackSetter;
   playback: PlaybackController;
   currentTrackPath: string | null;
   currentSongId: number | null;
@@ -42,8 +70,124 @@ export interface PlaylistDetailProps {
 export function PlaylistDetail(props: PlaylistDetailProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
+  const [menuPosition, setMenuPosition] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [batchOpen, setBatchOpen] = createSignal<boolean>(false);
+  const [editOpen, setEditOpen] = createSignal<boolean>(false);
+  const detailPlaylist = createMemo<PlaylistDetailInfo | OnlinePlaylistSummary | null>(() =>
+    props.detail ?? props.playlist
+  );
+  const showCommentsTab = createMemo<boolean>(() => props.showCommentsTab ?? true);
+  const showSongs = createMemo<boolean>(() => !showCommentsTab() || props.detailTab === "songs");
+  const emptyStateText = createMemo<string>(() => {
+    const query = props.filter.trim();
+    return query
+      ? t("ncm.playlist.searchEmpty", { query })
+      : props.emptyStateText ?? t("ncm.empty.noTracks");
+  });
+  const isSubscribed = createMemo<boolean>(() => detailPlaylist()?.subscribed ?? false);
+  const hasDynamicCounts = createMemo<boolean>(() =>
+    props.detail?.commentCount !== null && props.detail?.commentCount !== undefined ||
+    props.detail?.shareCount !== null && props.detail?.shareCount !== undefined ||
+    props.detail?.bookedCount !== null && props.detail?.bookedCount !== undefined
+  );
+  const subscribeLabel = createMemo<string>(() => {
+    if (props.isTogglingSubscribe) return t("ncm.playlist.subscribeWorking");
+    return isSubscribed() ? t("ncm.playlist.unsubscribe") : t("ncm.playlist.subscribe");
+  });
+
+  const formatTimestamp = (timestamp: number): string =>
+    new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(timestamp));
+  const playlistUrl = () => {
+    const playlist = detailPlaylist();
+    return playlist ? `https://music.163.com/#/playlist?id=${playlist.id}` : "";
+  };
+  const canEditPlaylist = () => {
+    const playlist = detailPlaylist();
+    const userId = props.loginProfile?.userId;
+    if (!playlist || userId === undefined) return false;
+    return playlist.userId === userId || playlist.creatorId === userId;
+  };
+  const canToggleSubscribe = createMemo<boolean>(() =>
+    Boolean(props.onToggleSubscribe) && !canEditPlaylist()
+  );
+  const menuItems = (): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    if (props.onRefresh) {
+      items.push({ key: "refresh", label: t("ncm.playlist.refreshCache"), icon: <IconList /> });
+    }
+    if (props.onPlaylistUpdated && props.setFeedback && canEditPlaylist()) {
+      items.push({ key: "edit", label: t("ncm.playlist.edit"), icon: <IconDots /> });
+    }
+    if (props.setFeedback) {
+      items.push({ key: "batch", label: t("ncm.daily.batch"), icon: <IconList /> });
+    }
+    items.push(
+      { key: "copy", label: t("ncm.playlist.copyShareLink"), icon: <IconDots /> },
+      { key: "open", label: t("ncm.playlist.openSource"), icon: <IconChevronLeft /> }
+    );
+    return items;
+  };
+  const openMenu = (event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenuPosition({ x: rect.left, y: rect.bottom + 8 });
+    setMenuOpen(true);
+  };
+  const copyShareLink = async () => {
+    const url = playlistUrl();
+    if (!url || typeof navigator === "undefined" || !navigator.clipboard) {
+      props.setFeedback?.("error", t("media.copy.error"));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      props.setFeedback?.("success", t("ncm.playlist.shareCopied"));
+    } catch {
+      props.setFeedback?.("error", t("media.copy.error"));
+    }
+  };
+  const handleMenuSelect = (key: string) => {
+    if (key === "refresh") {
+      void props.onRefresh?.();
+    } else if (key === "edit") {
+      setEditOpen(true);
+    } else if (key === "batch") {
+      setBatchOpen(true);
+    } else if (key === "copy") {
+      void copyShareLink();
+    } else if (key === "open") {
+      const url = playlistUrl();
+      if (url && typeof window !== "undefined") {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    }
+  };
+  const handleContextAction = (action: MediaContextAction, item: OnlineTrackItem) => {
+    if (action === "delete-from-playlist") {
+      void props.onRemoveTracks?.([item.songId]);
+    } else if (action === "song-wiki") {
+      props.onNavigateToSongWiki?.(item);
+    }
+  };
+  const mediaContextActions = (): readonly MediaContextAction[] => {
+    const actions: MediaContextAction[] = [
+      "play",
+      "enqueue",
+      "add-to-playlist",
+      "search",
+      "copy-name",
+      "copy-id",
+      "share-link",
+      "song-wiki",
+      "view-comments"
+    ];
+    if (props.onRemoveTracks) {
+      actions.push("delete-from-playlist");
+    }
+    return actions;
+  };
   return (
-    <Show when={props.playlist}>
+    <Show when={detailPlaylist()}>
       {(playlist) => (
         <section class="playlist-detail">
           <div class={`playlist-detail-shell${props.isScrolled ? " is-small" : ""}`}>
@@ -64,8 +208,8 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
               <div class="playlist-detail-copy">
                 <h2 title={playlist().name}>{playlist().name}</h2>
                 <div class="playlist-detail-collapse">
-                  <Show when={uiSettings.playlistPageElements.description}>
-                    <p class="playlist-detail-desc">{props.subtitleText}</p>
+                  <Show when={uiSettings.playlistPageElements.description && (playlist().description ?? props.subtitleText)}>
+                    {(description) => <p class="playlist-detail-desc">{description()}</p>}
                   </Show>
                   <Show
                     when={
@@ -84,15 +228,57 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                       <Show when={uiSettings.playlistPageElements.time}>
                         <span>
                           <IconList />
-                          {t("ncm.playlist.trackCount", { count: props.trackCount })}
+                          {playlist().updateTime !== null || playlist().createTime !== null
+                            ? formatTimestamp(playlist().updateTime ?? playlist().createTime ?? 0)
+                            : t("ncm.playlist.trackCount", { count: props.trackCount })}
                         </span>
+                      </Show>
+                      <Show when={playlist().playCount !== null}>
+                        <span>
+                          <IconEye />
+                          {playlist().playCount}
+                        </span>
+                      </Show>
+                      <Show when={hasDynamicCounts()}>
+                        <Show when={props.detail?.commentCount !== null && props.detail?.commentCount !== undefined}>
+                          <span>
+                            <IconChat />
+                            {t("ncm.playlist.commentCount", { count: props.detail?.commentCount ?? 0 })}
+                          </span>
+                        </Show>
+                        <Show when={props.detail?.shareCount !== null && props.detail?.shareCount !== undefined}>
+                          <span>
+                            <IconShare />
+                            {t("ncm.playlist.shareCount", { count: props.detail?.shareCount ?? 0 })}
+                          </span>
+                        </Show>
+                        <Show when={props.detail?.bookedCount !== null && props.detail?.bookedCount !== undefined}>
+                          <span>
+                            <IconHeart />
+                            {t("ncm.playlist.bookedCount", { count: props.detail?.bookedCount ?? 0 })}
+                          </span>
+                        </Show>
                       </Show>
                       <Show when={uiSettings.playlistPageElements.tags}>
                         <span>
                           <IconDots />
-                          {playlist().subscribed
-                            ? t("ncm.playlist.tag.subscribed")
-                            : t("ncm.playlist.tag.public")}
+                          <Show
+                            when={playlist().tags.length > 0}
+                            fallback={
+                              playlist().subscribed
+                                ? t("ncm.playlist.tag.subscribed")
+                                : t("ncm.playlist.tag.public")
+                            }
+                          >
+                            <For each={playlist().tags}>
+                              {(tag, index) => (
+                                <>
+                                  {index() > 0 ? " / " : ""}
+                                  {tag}
+                                </>
+                              )}
+                            </For>
+                          </Show>
                         </span>
                       </Show>
                     </div>
@@ -119,11 +305,25 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                         {props.backLabel ?? t("ncm.playlist.backToList")}
                       </button>
                     </Show>
+                    <Show when={canToggleSubscribe()}>
+                      <button
+                        type="button"
+                        class={`ghost-button playlist-detail-subscribe${isSubscribed() ? " is-active" : ""}`}
+                        onClick={() => void props.onToggleSubscribe?.()}
+                        disabled={props.isLoadingDetail || props.isTogglingSubscribe}
+                      >
+                        <Show when={props.isTogglingSubscribe} fallback={isSubscribed() ? <IconHeartFilled /> : <IconHeart />}>
+                          <IconSpinner />
+                        </Show>
+                        {subscribeLabel()}
+                      </button>
+                    </Show>
                     <button
                       type="button"
                       class="ghost-button playlist-detail-more"
                       aria-label={t("ncm.playlist.more")}
                       title={t("ncm.playlist.more")}
+                      onClick={openMenu}
                     >
                       <IconList />
                     </button>
@@ -138,18 +338,18 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                         onInput={(event) => props.setFilter(event.currentTarget.value)}
                       />
                     </label>
-                    <div class="playlist-detail-tabs" role="tablist" aria-label={t("ncm.playlist.tabs.aria")}>
-                      <button
-                        type="button"
-                        class={props.detailTab === "songs" ? "is-active" : ""}
-                        role="tab"
-                        aria-selected={props.detailTab === "songs"}
-                        onClick={() => props.setDetailTab("songs")}
-                      >
-                        {t("ncm.playlist.tab.songs")}
-                        <span>{props.trackCount}</span>
-                      </button>
-                      <Show when={props.showCommentsTab ?? true}>
+                    <Show when={showCommentsTab()}>
+                      <div class="playlist-detail-tabs" role="tablist" aria-label={t("ncm.playlist.tabs.aria")}>
+                        <button
+                          type="button"
+                          class={props.detailTab === "songs" ? "is-active" : ""}
+                          role="tab"
+                          aria-selected={props.detailTab === "songs"}
+                          onClick={() => props.setDetailTab("songs")}
+                        >
+                          {t("ncm.playlist.tab.songs")}
+                          <span>{props.trackCount}</span>
+                        </button>
                         <button
                           type="button"
                           class={props.detailTab === "comments" ? "is-active" : ""}
@@ -158,20 +358,26 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                           onClick={() => props.setDetailTab("comments")}
                         >
                           {t("ncm.playlist.tab.comments")}
+                          <Show when={props.detail?.commentCount !== null && props.detail?.commentCount !== undefined}>
+                            <span>{props.detail?.commentCount ?? 0}</span>
+                          </Show>
                         </button>
-                      </Show>
-                    </div>
+                      </div>
+                    </Show>
                   </div>
                 </div>
               </div>
             </header>
             <Show
-              when={props.detailTab === "songs"}
+              when={showSongs()}
               fallback={
-                <div class="playlist-detail-comments">
-                  <IconDots />
-                  <span>{t("ncm.playlist.commentsPlaceholder")}</span>
-                </div>
+                <ResourceCommentsPanel
+                  class="playlist-detail-comments"
+                  resourceId={playlist().id}
+                  resourceType={2}
+                  title={t("ncm.playlist.tab.comments")}
+                  grouped
+                />
               }
             >
               <MediaList
@@ -181,10 +387,47 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                 isPlayingNow={props.isPlaying}
                 onPlay={(item) => void props.playback.playOnlineTrack(item)}
                 onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
+                onContextAction={handleContextAction}
+                contextActions={mediaContextActions()}
                 onScroll={props.onScroll}
+                draggable={Boolean(props.onReorderTracks) && props.filter.trim().length === 0}
+                onReorder={(fromIndex, toIndex) => void props.onReorderTracks?.(fromIndex, toIndex)}
                 isLoading={props.isLoadingTracks}
-                emptyState={<div class="panel-note">{props.emptyStateText ?? t("ncm.empty.noTracks")}</div>}
+                emptyState={<div class="panel-note">{emptyStateText()}</div>}
               />
+            </Show>
+            <ContextMenu
+              open={menuOpen()}
+              x={menuPosition().x}
+              y={menuPosition().y}
+              items={menuItems()}
+              onSelect={handleMenuSelect}
+              onClose={() => setMenuOpen(false)}
+            />
+            <Show when={props.setFeedback}>
+              {(setFeedback) => (
+                <>
+                  <DailySongsBatchModal
+                    open={batchOpen()}
+                    title={t("library.batch.title")}
+                    items={props.tracks}
+                    loginProfile={props.loginProfile ?? null}
+                    playback={props.playback}
+                    sourcePlaylistId={props.sourcePlaylistId ?? playlist().id}
+                    setFeedback={setFeedback()}
+                    onTracksRemoved={(songIds) => props.onTracksRemovedLocally?.(songIds)}
+                    onClose={() => setBatchOpen(false)}
+                  />
+                  <UpdatePlaylistModal
+                    open={editOpen()}
+                    playlist={playlist()}
+                    nameLocked={props.lockPlaylistName}
+                    setFeedback={setFeedback()}
+                    onUpdated={(updated) => props.onPlaylistUpdated?.(updated)}
+                    onClose={() => setEditOpen(false)}
+                  />
+                </>
+              )}
             </Show>
           </div>
         </section>

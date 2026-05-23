@@ -7,9 +7,8 @@ import { ContextMenu, type ContextMenuItem } from "../../components/media/Contex
 import { createApiClient, type NcmHomeFeed } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { cacheFetch } from "../../shared/state/cacheFetch";
-import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { useUISettings, type CoverHiddenKey, type HomeSectionKey } from "../../shared/state/useUISettings";
-import type { OnlinePlaylistSummary } from "./ncmPlaylistSummary";
+import { playlistSummaryFromFeedCard, type OnlinePlaylistSummary } from "./ncmPlaylistSummary";
 import type { DiscoverTab, FeedCardItem } from "./shared/types";
 
 const EMPTY_HOME_FEED: NcmHomeFeed = {
@@ -106,30 +105,11 @@ function HomeFeedSkeleton() {
 
 export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
   const { t } = useTranslation();
-  const account = useNcmAccount();
 
   const [homeFeed] = createResource(
     () => (props.isLoggedIn && props.userId !== null ? props.userId : "anonymous"),
     (source) => loadHomeFeed(typeof source === "number" ? source : null)
   );
-
-  const greetingKey = (): string => {
-    const hour = new Date().getHours();
-    if (hour < 6) return "ncm.home.greeting.lateNight";
-    if (hour < 9) return "ncm.home.greeting.earlyMorning";
-    if (hour < 12) return "ncm.home.greeting.morning";
-    if (hour < 14) return "ncm.home.greeting.noon";
-    if (hour < 17) return "ncm.home.greeting.afternoon";
-    if (hour < 19) return "ncm.home.greeting.dusk";
-    if (hour < 22) return "ncm.home.greeting.evening";
-    return "ncm.home.greeting.lateNight";
-  };
-
-  const greetingText = createMemo(() => {
-    const base = t(greetingKey() as never);
-    const nickname = account.activeAccount()?.nickname;
-    return nickname ? `${base}，${nickname}` : base;
-  });
 
   const feed = createMemo(() => homeFeed() ?? EMPTY_HOME_FEED);
 
@@ -149,14 +129,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
   });
 
   const handlePlaylist = (item: FeedCardItem) =>
-    props.onSelectPlaylist({
-      id: item.id,
-      name: item.title,
-      creator: item.subtitle,
-      coverUrl: item.coverUrl,
-      trackCount: null,
-      subscribed: false
-    });
+    props.onSelectPlaylist(playlistSummaryFromFeedCard(item));
 
   type CardMenuKind = "playlist" | "album" | "artist" | "video" | "radio";
   interface MenuContext {
@@ -379,13 +352,6 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
 
   return (
     <div class="ncm-home-feed">
-      <Show when={uiSettings.showHomeGreeting}>
-        <header class="ncm-home-feed-greeting">
-          <h1 class="ncm-home-feed-greeting-title">{greetingText()}</h1>
-          <span class="ncm-home-feed-greeting-subtitle">{t("ncm.home.welcome")}</span>
-        </header>
-      </Show>
-
       <Show when={props.isLoggedIn && (props.onSelectDailySongs || props.onSelectLikedSongs || props.onPlayPersonalFm)}>
         <div class="ncm-home-feed-main-rec">
           <div class="ncm-home-feed-main-rec-list">

@@ -6,7 +6,7 @@ import type {
   NcmTrackSupplement
 } from "../features/online/ncmPlayback";
 import type { UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
-import type { FeedCardItem } from "../features/online/shared/types";
+import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "../features/online/shared/types";
 import type {
   PlayerState,
   QueueEntry,
@@ -19,10 +19,16 @@ import {
   STORAGE_KEYS,
   useUISettings
 } from "../shared/state/useUISettings";
+import { useNcmAccount } from "../shared/state/NcmAccountContext";
+import { useTranslation } from "../shared/i18n";
 import { isPlaceholderPage, type ActivePage } from "../shared/ui/navigation";
 import { applyDynamicAccent, extractAccent } from "../shared/styles/dynamicAccent";
 import { applyUserAppearanceSettings } from "../shared/styles/customAppearance";
-import type { ApiClient } from "../shared/api/client";
+import type {
+  ApiClient,
+  NcmTrackSummary,
+  ResolveNcmTrackInput
+} from "../shared/api/client";
 import { readErrorMessage } from "./controllerHelpers";
 import { useNavigationController } from "./useNavigationController";
 import { useNcmTrackEnrichment } from "./useNcmTrackEnrichment";
@@ -47,9 +53,14 @@ export interface AppController {
   fullPlayerOpen: Accessor<boolean>;
   settingsOpen: Accessor<boolean>;
   selectedPlaylistId: Accessor<number | null>;
+  localPlaylistRequest: Accessor<{ playlistId: string | null; version: number }>;
   discoverTabRequest: Accessor<{ tab: string; version: number }>;
   artistDetailRequest: Accessor<{ artist: FeedCardItem | null; version: number }>;
+  albumDetailRequest: Accessor<{ album: FeedCardItem | null; version: number }>;
   radioDetailRequest: Accessor<{ radio: FeedCardItem | null; version: number }>;
+  songWikiRequest: Accessor<{ track: OnlineTrackItem | null; version: number }>;
+  radioSubscribeEvent: Accessor<RadioSubscribeEvent | null>;
+  likedCollectionTabRequest: Accessor<{ tab: "playlists" | "albums" | "artists"; version: number }>;
   player: Accessor<PlayerState | null>;
   currentTrackPath: Accessor<string | null>;
   currentMediaId: Accessor<string | null>;
@@ -74,6 +85,7 @@ export interface AppController {
   currentNcmSupplement: Accessor<NcmTrackSupplement | null>;
   currentIsLiked: Accessor<boolean>;
   playbackHistoryVersion: Accessor<number>;
+  notifyPlaybackHistoryChanged: () => void;
   uiSettings: ReturnType<typeof useUISettings>;
   refreshState: (expectedPath?: string | null) => Promise<void>;
   applyPlayerState: (next: PlayerState) => void;
@@ -95,10 +107,15 @@ export interface AppController {
   handleRemoveQueueEntry: (entryId: number) => Promise<void>;
   handleClearQueue: () => Promise<void>;
   handleSidebarPlaylistSelect: (page: UserPlaylistMode, playlistId: number) => void;
+  handleSidebarLocalPlaylistSelect: (playlistId: string) => void;
   handleSelectedPlaylistChange: (playlistId: number | null) => void;
   handleNavigateToDiscover: (tab: string) => void;
   handleNavigateToArtistDetail: (artist: FeedCardItem) => void;
+  handleNavigateToAlbumDetail: (album: FeedCardItem) => void;
   handleNavigateToRadioDetail: (radio: FeedCardItem) => void;
+  handleNavigateToSongWiki: (track: OnlineTrackItem) => void;
+  handleRadioSubscribeChange: (radio: FeedCardItem, subscribed: boolean) => void;
+  handleNavigateToLikedCollectionTab: (tab: "playlists" | "albums" | "artists") => void;
   handleChangeCurrentNcmQuality: (level: string) => Promise<void>;
   handleGoBack: () => void;
   handleGoForward: () => void;
@@ -108,19 +125,32 @@ export interface AppController {
   setSettingsOpen: (value: boolean) => void;
   setPreloadRequested: (value: boolean) => void;
   isPlaceholderPage: typeof isPlaceholderPage;
+  personalFmReloadTick: Accessor<number>;
+  requestPersonalFmRefresh: () => void;
+  requestHeartbeatMode: () => Promise<void>;
 }
 
 export function useAppController(api: ApiClient): AppController {
   const uiSettings = useUISettings();
   const navigation = useNavigationController();
+  const accountStore = useNcmAccount();
+  const { t } = useTranslation();
 
   const [fullPlayerOpen, setFullPlayerOpen] = createSignal<boolean>(false);
   const [settingsOpen, setSettingsOpen] = createSignal<boolean>(false);
   const [playbackHistoryVersion, setPlaybackHistoryVersion] = createSignal<number>(0);
+  const [personalFmReloadTick, setPersonalFmReloadTick] = createSignal<number>(0);
   let playbackBridge: PlaybackController | null = null;
 
   const notifyPlaybackHistoryChanged = () => {
     setPlaybackHistoryVersion((version) => version + 1);
+  };
+
+  const requestPersonalFmRefresh = () => {
+    if (navigation.activePage() !== "personal-fm") {
+      navigation.handleActivePageChange("personal-fm");
+    }
+    setPersonalFmReloadTick((tick) => tick + 1);
   };
 
   const queue = useQueueController(api, () => playbackBridge);
@@ -181,6 +211,76 @@ export function useAppController(api: ApiClient): AppController {
     }
   };
 
+  const readNcmSongLevel = (): string => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.ncmSongLevel) ?? "exhigh";
+    } catch {
+      return "exhigh";
+    }
+  };
+
+  const buildHeartbeatResolveInput = (item: NcmTrackSummary): ResolveNcmTrackInput => ({
+    songId: item.songId,
+    level: readNcmSongLevel(),
+    sourcePageUrl: item.source_path,
+    title: item.title,
+    artist: item.artist,
+    album: item.album,
+    artworkUrl: item.artworkUrl,
+    durationSecs: item.duration_secs
+  });
+
+  const requestHeartbeatMode = async () => {
+    playback.setCommandError(null);
+    const account = accountStore.activeAccount();
+    if (!account || !account.hasCookie) {
+      playback.setCommandError(t("player.heartbeat.requiresLogin"));
+      return;
+    }
+    const triggerSongId = ncm.currentNcmSongId();
+    if (triggerSongId === null) {
+      playback.setCommandError(t("player.heartbeat.requiresSong"));
+      return;
+    }
+
+    try {
+      const playlists = await api.listNcmUserPlaylists({ uid: account.userId, limit: 1 });
+      const likedPlaylist = playlists.find((entry) => entry.userId === account.userId) ?? playlists[0];
+      if (!likedPlaylist) {
+        playback.setCommandError(t("player.heartbeat.failed"));
+        return;
+      }
+
+      const tracks = await api.listNcmHeartbeatTracks({
+        songId: triggerSongId,
+        playlistId: likedPlaylist.id,
+        count: 20
+      });
+      if (tracks.length === 0) {
+        playback.setCommandError(t("player.heartbeat.failed"));
+        return;
+      }
+
+      const [first, ...rest] = tracks;
+      await api.clearPersistentQueue();
+      const firstResult = await api.playNcmTrack(buildHeartbeatResolveInput(first));
+      ncm.registerNcmPlayback(firstResult.track);
+      playback.applyPlayerState(firstResult.state);
+      await playback.refreshState(firstResult.track.streamUrl);
+
+      for (const item of rest) {
+        const enqueued = await api.enqueueNcmTrack(buildHeartbeatResolveInput(item));
+        ncm.registerNcmPlayback(enqueued.track);
+      }
+
+      const finalState = await api.setShuffleMode("heartbeat");
+      playback.applyPlayerState(finalState);
+      await queue.refreshQueue();
+    } catch (error) {
+      playback.setCommandError(readErrorMessage(error));
+    }
+  };
+
   createEffect(() => {
     applyUserAppearanceSettings(uiSettings);
   });
@@ -223,9 +323,14 @@ export function useAppController(api: ApiClient): AppController {
     fullPlayerOpen,
     settingsOpen,
     selectedPlaylistId: navigation.selectedPlaylistId,
+    localPlaylistRequest: navigation.localPlaylistRequest,
     discoverTabRequest: navigation.discoverTabRequest,
     artistDetailRequest: navigation.artistDetailRequest,
+    albumDetailRequest: navigation.albumDetailRequest,
     radioDetailRequest: navigation.radioDetailRequest,
+    songWikiRequest: navigation.songWikiRequest,
+    radioSubscribeEvent: navigation.radioSubscribeEvent,
+    likedCollectionTabRequest: navigation.likedCollectionTabRequest,
     player: playback.player,
     currentTrackPath: playback.currentTrackPath,
     currentMediaId: playback.currentMediaId,
@@ -250,6 +355,7 @@ export function useAppController(api: ApiClient): AppController {
     currentNcmSupplement: ncm.currentNcmSupplement,
     currentIsLiked: ncm.currentIsLiked,
     playbackHistoryVersion,
+    notifyPlaybackHistoryChanged,
     uiSettings,
     refreshState: playback.refreshState,
     applyPlayerState: playback.applyPlayerState,
@@ -271,10 +377,15 @@ export function useAppController(api: ApiClient): AppController {
     handleRemoveQueueEntry: queue.handleRemoveQueueEntry,
     handleClearQueue: queue.handleClearQueue,
     handleSidebarPlaylistSelect: navigation.handleSidebarPlaylistSelect,
+    handleSidebarLocalPlaylistSelect: navigation.handleSidebarLocalPlaylistSelect,
     handleSelectedPlaylistChange: navigation.handleSelectedPlaylistChange,
     handleNavigateToDiscover: navigation.handleNavigateToDiscover,
     handleNavigateToArtistDetail: navigation.handleNavigateToArtistDetail,
+    handleNavigateToAlbumDetail: navigation.handleNavigateToAlbumDetail,
     handleNavigateToRadioDetail: navigation.handleNavigateToRadioDetail,
+    handleNavigateToSongWiki: navigation.handleNavigateToSongWiki,
+    handleRadioSubscribeChange: navigation.handleRadioSubscribeChange,
+    handleNavigateToLikedCollectionTab: navigation.handleNavigateToLikedCollectionTab,
     handleChangeCurrentNcmQuality,
     handleGoBack: navigation.handleGoBack,
     handleGoForward: navigation.handleGoForward,
@@ -283,6 +394,9 @@ export function useAppController(api: ApiClient): AppController {
     setQueueDrawerOpen: queue.setQueueDrawerOpen,
     setSettingsOpen,
     setPreloadRequested: playback.setPreloadRequested,
-    isPlaceholderPage
+    isPlaceholderPage,
+    personalFmReloadTick,
+    requestPersonalFmRefresh,
+    requestHeartbeatMode
   };
 }

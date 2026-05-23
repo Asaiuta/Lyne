@@ -38,7 +38,7 @@ export function PlayerControlsPopover(props: PlayerControlsPopoverProps) {
       </button>
       <Show when={props.open}>
         <div
-          class="player-controls-popover absolute right-0 min-w-220px flex flex-col gap-2"
+          class="player-controls-popover absolute min-w-220px flex flex-col gap-2"
           role="menu"
           aria-label={props.menuLabel}
         >

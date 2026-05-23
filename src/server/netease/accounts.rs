@@ -76,11 +76,18 @@ pub(super) async fn logout_active_ncm_account(data: web::Data<Arc<AppState>>) ->
                 log::warn!("NCM logout for user {} failed: {}", account.user_id, err);
             }
         }
-        if let Err(err) = data.app_db.delete_ncm_account(account.user_id) {
+        if let Err(err) = data.app_db.clear_active_ncm_account() {
             return internal_server_error_response(err);
         }
     }
     list_ncm_accounts(data).await
+}
+
+pub(super) async fn clear_active_ncm_account(data: web::Data<Arc<AppState>>) -> HttpResponse {
+    match data.app_db.clear_active_ncm_account() {
+        Ok(()) => list_ncm_accounts(data).await,
+        Err(err) => internal_server_error_response(err),
+    }
 }
 
 pub(super) async fn daily_signin_active_ncm_account(

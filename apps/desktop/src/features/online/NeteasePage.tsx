@@ -4,7 +4,7 @@ import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { useUISearch } from "../../shared/state/UISearchContext";
 import type { NcmTrackReference } from "./ncmPlayback";
-import type { FeedCardItem } from "./shared/types";
+import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "./shared/types";
 import {
   createErrorMessageReader,
   createLoginStatusText,
@@ -36,8 +36,12 @@ interface NeteasePageProps {
   onNavigate?: (page: "recommend" | "discover" | "radio") => void;
   onNavigateToDiscover?: (tab: string) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
+  onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   discoverTabRequest?: { tab: string; version: number };
+  likedCollectionTabRequest?: { tab: "playlists" | "albums" | "artists"; version: number };
   artistDetailRequest?: { artist: FeedCardItem | null; version: number };
+  albumDetailRequest?: { album: FeedCardItem | null; version: number };
+  radioSubscribeEvent?: RadioSubscribeEvent | null;
   onRequireNcmLogin: () => void;
 }
 
@@ -116,6 +120,7 @@ export function NeteasePage(props: NeteasePageProps) {
             onNavigate={props.onNavigate}
             onNavigateToDiscover={props.onNavigateToDiscover}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             onMarkPendingDiscoverSearch={() => setPendingDiscoverSearch(true)}
             setFeedback={setRawFeedback}
             playback={playback}
@@ -136,12 +141,16 @@ export function NeteasePage(props: NeteasePageProps) {
             clearPendingDiscoverSearch={() => setPendingDiscoverSearch(false)}
             discoverTabRequest={props.discoverTabRequest}
             artistDetailRequest={props.artistDetailRequest}
+            albumDetailRequest={props.albumDetailRequest}
+            onNavigateToRadioDetail={props.onNavigateToRadioDetail}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={playback}
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}
             isPlaying={props.isPlaying}
+            onPause={props.onPause}
           />
         </Match>
         <Match when={props.mode === "liked-songs"}>
@@ -150,6 +159,7 @@ export function NeteasePage(props: NeteasePageProps) {
             isCheckingLogin={isCheckingLogin}
             isLoginBusy={isLoginBusy}
             onBeginLogin={props.onRequireNcmLogin}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             setFeedback={setRawFeedback}
             playback={playback}
             currentTrackPath={props.currentTrackPath}
@@ -164,12 +174,17 @@ export function NeteasePage(props: NeteasePageProps) {
             isLoginBusy={isLoginBusy}
             onBeginLogin={props.onRequireNcmLogin}
             onLogout={handleLogout}
+            tabRequest={props.likedCollectionTabRequest}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={playback}
             currentTrackPath={props.currentTrackPath}
             currentSongId={props.currentSongId}
             isPlaying={props.isPlaying}
+            onPause={props.onPause}
+            onNavigateToRadioDetail={props.onNavigateToRadioDetail}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
+            radioSubscribeEvent={props.radioSubscribeEvent}
           />
         </Match>
         <Match when={props.mode === "created-playlists" || props.mode === "collected-playlists"}>
@@ -182,6 +197,7 @@ export function NeteasePage(props: NeteasePageProps) {
             onLogout={handleLogout}
             selectedPlaylistId={props.selectedPlaylistId ?? null}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
             setFeedback={setRawFeedback}
             playback={playback}
             currentTrackPath={props.currentTrackPath}

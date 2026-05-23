@@ -111,12 +111,40 @@ pub(super) struct PlaylistTracksRequest {
 }
 
 #[derive(Deserialize)]
-pub(super) struct EntityTracksRequest {
+pub(super) struct PlaylistTrackUpdateRequest {
+    pub(super) playlist_id: i64,
+    pub(super) song_ids: Vec<i64>,
+    pub(super) op: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct PlaylistDetailRequest {
     pub(super) id: i64,
 }
 
 #[derive(Deserialize)]
+pub(super) struct EntityTracksRequest {
+    pub(super) id: i64,
+    pub(super) limit: Option<i64>,
+    pub(super) offset: Option<i64>,
+    pub(super) order: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub(super) struct PersonalFmTrashRequest {
+    pub(super) song_id: i64,
+}
+
+#[derive(Deserialize)]
+pub(super) struct HeartbeatTracksRequest {
+    pub(super) song_id: i64,
+    pub(super) playlist_id: i64,
+    pub(super) start_song_id: Option<i64>,
+    pub(super) count: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct DailySongDislikeRequest {
     pub(super) song_id: i64,
 }
 
@@ -139,6 +167,13 @@ pub(super) struct CloudTracksRequest {
 #[derive(Deserialize)]
 pub(super) struct CloudDeleteRequest {
     pub(super) song_id: i64,
+}
+
+#[derive(Deserialize)]
+pub(super) struct CloudMatchRequest {
+    pub(super) user_id: i64,
+    pub(super) song_id: i64,
+    pub(super) adjust_song_id: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -203,9 +238,17 @@ pub(super) struct NcmProfileSnapshot {
 pub(super) struct NcmPlaylistSummary {
     pub(super) id: i64,
     pub(super) name: String,
+    pub(super) user_id: Option<i64>,
+    pub(super) creator_id: Option<i64>,
     pub(super) creator: Option<String>,
     pub(super) cover_url: Option<String>,
     pub(super) track_count: Option<i64>,
+    pub(super) play_count: Option<f64>,
+    pub(super) description: Option<String>,
+    pub(super) tags: Vec<String>,
+    pub(super) create_time: Option<i64>,
+    pub(super) update_time: Option<i64>,
+    pub(super) privacy: Option<i64>,
     pub(super) subscribed: bool,
 }
 
@@ -220,6 +263,12 @@ pub(super) struct NcmTrackSummary {
     pub(super) duration_secs: Option<f64>,
     pub(super) artwork_url: Option<String>,
     pub(super) size_bytes: Option<i64>,
+    pub(super) quality_label: Option<String>,
+    pub(super) privilege_tag: Option<String>,
+    pub(super) explicit: bool,
+    pub(super) original_tag: Option<String>,
+    pub(super) mv_id: Option<i64>,
+    pub(super) is_cloud: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]

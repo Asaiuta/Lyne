@@ -27,6 +27,13 @@ export interface NcmTopPlaylistParams {
 
 export type NcmCreatePlaylistType = "NORMAL" | "VIDEO" | "SHARED";
 
+export interface NcmUpdatePlaylistInput {
+  id: number;
+  name: string;
+  desc: string;
+  tags: readonly string[];
+}
+
 export const playlistDetail = (params: NcmPlaylistDetailParams): Promise<NcmResponseEnvelope> =>
   requestNcm("playlist/detail", {
     method: "POST",
@@ -38,6 +45,17 @@ export const playlistDetailDynamic = (id: number): Promise<NcmResponseEnvelope> 
   requestNcm("playlist/detail/dynamic", {
     method: "POST",
     data: { id },
+    noCache: true
+  });
+
+export const playlistSubscribe = (id: number, subscribe: boolean): Promise<NcmResponseEnvelope> =>
+  requestNcm("playlist/subscribe", {
+    method: "POST",
+    data: {
+      id,
+      t: subscribe ? 1 : 2,
+      timestamp: Date.now()
+    },
     noCache: true
   });
 
@@ -106,6 +124,28 @@ export const createPlaylist = (
       name,
       privacy: privacy ? "10" : null,
       type
+    },
+    noCache: true
+  });
+
+export const updatePlaylist = (input: NcmUpdatePlaylistInput): Promise<NcmResponseEnvelope> =>
+  requestNcm("playlist/update", {
+    method: "POST",
+    params: {
+      id: input.id,
+      name: input.name,
+      desc: input.desc,
+      tags: input.tags.join(";")
+    },
+    noCache: true
+  });
+
+export const songOrderUpdate = (pid: number, ids: readonly number[]): Promise<NcmResponseEnvelope> =>
+  requestNcm("song/order/update", {
+    method: "POST",
+    data: {
+      pid,
+      ids: JSON.stringify(ids)
     },
     noCache: true
   });

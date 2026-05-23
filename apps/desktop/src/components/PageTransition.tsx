@@ -22,6 +22,29 @@ export function PageTransition(props: PageTransitionProps) {
   let containerRef: HTMLDivElement | undefined;
   const pendingCleanups = new Set<() => void>();
 
+  const readTimeList = (value: string): number[] =>
+    value.split(",").map((part) => {
+      const token = part.trim();
+      if (token.endsWith("ms")) return Number.parseFloat(token);
+      if (token.endsWith("s")) return Number.parseFloat(token) * 1000;
+      return 0;
+    }).filter((duration) => Number.isFinite(duration));
+
+  const longestCssTimelineMs = (el: Element): number => {
+    const style = window.getComputedStyle(el);
+    const transitionDurations = readTimeList(style.transitionDuration);
+    const transitionDelays = readTimeList(style.transitionDelay);
+    const animationDurations = readTimeList(style.animationDuration);
+    const animationDelays = readTimeList(style.animationDelay);
+    const lastTransitionDelay = transitionDelays[transitionDelays.length - 1] ?? 0;
+    const lastAnimationDelay = animationDelays[animationDelays.length - 1] ?? 0;
+    const maxTransition = transitionDurations.reduce((max, duration, index) =>
+      Math.max(max, duration + (transitionDelays[index] ?? lastTransitionDelay)), 0);
+    const maxAnimation = animationDurations.reduce((max, duration, index) =>
+      Math.max(max, duration + (animationDelays[index] ?? lastAnimationDelay)), 0);
+    return Math.max(maxTransition, maxAnimation);
+  };
+
   function animatePhase(
     el: Element | null,
     fromClass: string,
@@ -38,6 +61,7 @@ export function PageTransition(props: PageTransitionProps) {
         el.removeEventListener("transitionend", done);
         clearTimeout(tid);
         pendingCleanups.delete(cancel);
+        pendingCleanups.delete(clearTimer);
         el.classList.remove(activeClass, toClass);
         resolve();
       };
@@ -47,15 +71,15 @@ export function PageTransition(props: PageTransitionProps) {
         clearTimeout(tid);
       };
       pendingCleanups.add(cancel);
-      el.addEventListener("animationend", done, { once: true });
-      el.addEventListener("transitionend", done, { once: true });
-      const tid = setTimeout(done, 600);
-      pendingCleanups.add(() => clearTimeout(tid));
 
       el.classList.add(fromClass);
       (el as HTMLElement).offsetHeight; // force reflow
       el.classList.remove(fromClass);
       el.classList.add(activeClass, toClass);
+      const timelineMs = longestCssTimelineMs(el);
+      const tid = setTimeout(done, Math.max(50, timelineMs + 50));
+      const clearTimer = () => clearTimeout(tid);
+      pendingCleanups.add(clearTimer);
     });
   }
 

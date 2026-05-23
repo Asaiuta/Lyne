@@ -1,6 +1,6 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import type { UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
-import type { FeedCardItem } from "../features/online/shared/types";
+import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "../features/online/shared/types";
 import { isPlaylistPage, type ActivePage } from "../shared/ui/navigation";
 
 export interface DiscoverTabRequest {
@@ -13,25 +13,55 @@ export interface ArtistDetailRequest {
   version: number;
 }
 
+export interface AlbumDetailRequest {
+  album: FeedCardItem | null;
+  version: number;
+}
+
 export interface RadioDetailRequest {
   radio: FeedCardItem | null;
+  version: number;
+}
+
+export interface SongWikiRequest {
+  track: OnlineTrackItem | null;
+  version: number;
+}
+
+export type LikedCollectionTabRequest = {
+  tab: "playlists" | "albums" | "artists";
+  version: number;
+};
+
+export interface LocalPlaylistRequest {
+  playlistId: string | null;
   version: number;
 }
 
 export interface NavigationController {
   activePage: Accessor<ActivePage>;
   selectedPlaylistId: Accessor<number | null>;
+  localPlaylistRequest: Accessor<LocalPlaylistRequest>;
   discoverTabRequest: Accessor<DiscoverTabRequest>;
   artistDetailRequest: Accessor<ArtistDetailRequest>;
+  albumDetailRequest: Accessor<AlbumDetailRequest>;
   radioDetailRequest: Accessor<RadioDetailRequest>;
+  songWikiRequest: Accessor<SongWikiRequest>;
+  radioSubscribeEvent: Accessor<RadioSubscribeEvent | null>;
+  likedCollectionTabRequest: Accessor<LikedCollectionTabRequest>;
   canGoBack: Accessor<boolean>;
   canGoForward: Accessor<boolean>;
   handleActivePageChange: (page: ActivePage) => void;
   handleSidebarPlaylistSelect: (page: UserPlaylistMode, playlistId: number) => void;
+  handleSidebarLocalPlaylistSelect: (playlistId: string) => void;
   handleSelectedPlaylistChange: (playlistId: number | null) => void;
   handleNavigateToDiscover: (tab: string) => void;
   handleNavigateToArtistDetail: (artist: FeedCardItem) => void;
+  handleNavigateToAlbumDetail: (album: FeedCardItem) => void;
   handleNavigateToRadioDetail: (radio: FeedCardItem) => void;
+  handleNavigateToSongWiki: (track: OnlineTrackItem) => void;
+  handleRadioSubscribeChange: (radio: FeedCardItem, subscribed: boolean) => void;
+  handleNavigateToLikedCollectionTab: (tab: LikedCollectionTabRequest["tab"]) => void;
   handleGoBack: () => void;
   handleGoForward: () => void;
 }
@@ -57,8 +87,26 @@ export function useNavigationController(): NavigationController {
     artist: null,
     version: 0
   });
+  const [albumDetailRequest, setAlbumDetailRequest] = createSignal<AlbumDetailRequest>({
+    album: null,
+    version: 0
+  });
   const [radioDetailRequest, setRadioDetailRequest] = createSignal<RadioDetailRequest>({
     radio: null,
+    version: 0
+  });
+  const [songWikiRequest, setSongWikiRequest] = createSignal<SongWikiRequest>({
+    track: null,
+    version: 0
+  });
+  const [radioSubscribeEvent, setRadioSubscribeEvent] = createSignal<RadioSubscribeEvent | null>(null);
+  const [likedCollectionTabRequest, setLikedCollectionTabRequest] =
+    createSignal<LikedCollectionTabRequest>({
+      tab: "playlists",
+      version: 0
+    });
+  const [localPlaylistRequest, setLocalPlaylistRequest] = createSignal<LocalPlaylistRequest>({
+    playlistId: null,
     version: 0
   });
   const [historyStack, setHistoryStack] = createSignal<ActivePage[]>(["recommend"]);
@@ -104,6 +152,12 @@ export function useNavigationController(): NavigationController {
     setSelectedPlaylistId(playlistId);
   };
 
+  const handleSidebarLocalPlaylistSelect = (playlistId: string) => {
+    setSelectedPlaylistId(null);
+    setLocalPlaylistRequest((prev) => ({ playlistId, version: prev.version + 1 }));
+    pushNavigation("library");
+  };
+
   const handleNavigateToDiscover = (tab: string) => {
     setDiscoverTabRequest((prev) => ({ tab, version: prev.version + 1 }));
     pushNavigation("discover");
@@ -114,9 +168,32 @@ export function useNavigationController(): NavigationController {
     pushNavigation("discover");
   };
 
+  const handleNavigateToAlbumDetail = (album: FeedCardItem) => {
+    setAlbumDetailRequest((prev) => ({ album, version: prev.version + 1 }));
+    pushNavigation("discover");
+  };
+
   const handleNavigateToRadioDetail = (radio: FeedCardItem) => {
     setRadioDetailRequest((prev) => ({ radio, version: prev.version + 1 }));
     pushNavigation("radio");
+  };
+
+  const handleNavigateToSongWiki = (track: OnlineTrackItem) => {
+    setSongWikiRequest((prev) => ({ track, version: prev.version + 1 }));
+    pushNavigation("song-wiki");
+  };
+
+  const handleRadioSubscribeChange = (radio: FeedCardItem, subscribed: boolean) => {
+    setRadioSubscribeEvent((prev) => ({
+      radio,
+      subscribed,
+      version: (prev?.version ?? 0) + 1
+    }));
+  };
+
+  const handleNavigateToLikedCollectionTab = (tab: LikedCollectionTabRequest["tab"]) => {
+    setLikedCollectionTabRequest((prev) => ({ tab, version: prev.version + 1 }));
+    pushNavigation("liked");
   };
 
   const handleGoBack = () => {
@@ -142,17 +219,27 @@ export function useNavigationController(): NavigationController {
   return {
     activePage,
     selectedPlaylistId,
+    localPlaylistRequest,
     discoverTabRequest,
     artistDetailRequest,
+    albumDetailRequest,
     radioDetailRequest,
+    songWikiRequest,
+    radioSubscribeEvent,
+    likedCollectionTabRequest,
     canGoBack,
     canGoForward,
     handleActivePageChange,
     handleSidebarPlaylistSelect,
+    handleSidebarLocalPlaylistSelect,
     handleSelectedPlaylistChange,
     handleNavigateToDiscover,
     handleNavigateToArtistDetail,
+    handleNavigateToAlbumDetail,
     handleNavigateToRadioDetail,
+    handleNavigateToSongWiki,
+    handleRadioSubscribeChange,
+    handleNavigateToLikedCollectionTab,
     handleGoBack,
     handleGoForward
   };

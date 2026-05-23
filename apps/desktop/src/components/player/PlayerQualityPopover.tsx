@@ -43,7 +43,7 @@ export function PlayerQualityPopover(props: PlayerQualityPopoverProps) {
       </button>
       <Show when={props.open}>
         <div
-          class="player-quality-popover absolute right-0 min-w-220px flex flex-col gap-2"
+          class="player-quality-popover absolute min-w-220px flex flex-col gap-2"
           role="dialog"
           aria-label={props.dialogLabel}
         >
