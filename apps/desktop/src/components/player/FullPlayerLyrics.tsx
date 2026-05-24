@@ -1,6 +1,10 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { NcmLyricLine, NcmLyricWord } from "../../features/online/ncmPlayback";
+import {
+  FULL_PLAYER_LYRIC_ESTIMATED_ROW_HEIGHT_PX,
+  resolveFullPlayerLyricWindows
+} from "./fullPlayerLyricsVirtualization";
 import { clamp01 } from "./time";
 
 interface FullPlayerLyricsDisplayProps {
@@ -49,14 +53,91 @@ const lyricWordProgress = (word: NcmLyricWord, currentTime: number): number => {
 const timedWords = (line: NcmLyricLine) =>
   line.words && line.words.length > 0 ? line.words : null;
 
+type LyricRenderBlock =
+  | { type: "spacer"; key: string; lineCount: number }
+  | { type: "line"; key: string; line: NcmLyricLine; index: number };
+
 export function FullPlayerLyrics(props: FullPlayerLyricsProps) {
+  const [scrollTop, setScrollTop] = createSignal<number>(0);
+  const [viewportHeight, setViewportHeight] = createSignal<number>(0);
+  let scrollFrame = 0;
+  let pendingScrollTop = 0;
+  let resizeObserver: ResizeObserver | undefined;
+
+  const commitPendingScrollTop = () => {
+    scrollFrame = 0;
+    setScrollTop((current) => (current === pendingScrollTop ? current : pendingScrollTop));
+  };
+
+  const scheduleScrollTop = (nextScrollTop: number) => {
+    pendingScrollTop = nextScrollTop;
+    if (scrollFrame !== 0) return;
+    scrollFrame = window.requestAnimationFrame(commitPendingScrollTop);
+  };
+
+  onCleanup(() => {
+    if (scrollFrame !== 0) {
+      window.cancelAnimationFrame(scrollFrame);
+    }
+    resizeObserver?.disconnect();
+  });
+
+  const lyricWindows = createMemo(() =>
+    resolveFullPlayerLyricWindows({
+      totalLines: props.display.lyrics.length,
+      activeIndex: props.display.activeLyricIndex(),
+      scrollTop: scrollTop(),
+      viewportHeight: viewportHeight()
+    })
+  );
+  const renderBlocks = createMemo<LyricRenderBlock[]>(() => {
+    const blocks: LyricRenderBlock[] = [];
+    let cursor = 0;
+    for (const range of lyricWindows()) {
+      if (range.start > cursor) {
+        blocks.push({
+          type: "spacer",
+          key: `spacer:${cursor}:${range.start}`,
+          lineCount: range.start - cursor
+        });
+      }
+      for (let index = range.start; index < range.end; index += 1) {
+        const line = props.display.lyrics[index];
+        if (!line) continue;
+        blocks.push({ type: "line", key: `line:${index}`, line, index });
+      }
+      cursor = range.end;
+    }
+    if (cursor < props.display.lyrics.length) {
+      blocks.push({
+        type: "spacer",
+        key: `spacer:${cursor}:${props.display.lyrics.length}`,
+        lineCount: props.display.lyrics.length - cursor
+      });
+    }
+    return blocks;
+  });
+
   return (
     <div class="full-player-lyric-panel" style={props.interaction.style}>
       <div class="full-player-lyric-now">{props.display.lyricNow}</div>
       <div
-        ref={props.interaction.lyricListRef}
+        ref={(element) => {
+          props.interaction.lyricListRef(element);
+          setViewportHeight(element.clientHeight);
+          resizeObserver?.disconnect();
+          if (typeof ResizeObserver !== "undefined") {
+            resizeObserver = new ResizeObserver((entries) => {
+              const entry = entries[0];
+              if (!entry) return;
+              setViewportHeight(entry.contentRect.height);
+            });
+            resizeObserver.observe(element);
+          }
+        }}
         class="full-player-lyric-list"
         aria-label={props.interaction.ariaLabel}
+        onScroll={(event) => scheduleScrollTop(event.currentTarget.scrollTop)}
       >
         <Show
           when={props.display.lyrics.length > 0}
@@ -66,20 +147,30 @@ export function FullPlayerLyrics(props: FullPlayerLyricsProps) {
             </div>
           }
         >
-          <For each={props.display.lyrics}>
-            {(line, index) => (
-              <LyricLine
-                line={line}
-                index={index}
-                activeIndex={props.display.activeLyricIndex}
-                currentTime={props.display.currentTime}
-                lyricsBlur={props.settings.lyricsBlur}
-                showWordLyrics={props.settings.showWordLyrics}
-                showTranslation={props.settings.showTranslation}
-                showRomanization={props.settings.showRomanization}
-                swapTranslationRomanization={props.settings.swapTranslationRomanization}
-                onSeek={props.interaction.onSeek}
-              />
+          <For each={renderBlocks()}>
+            {(block) => (
+              block.type === "spacer" ? (
+                <div
+                  class="full-player-lyric-spacer"
+                  style={{
+                    height: `${block.lineCount * FULL_PLAYER_LYRIC_ESTIMATED_ROW_HEIGHT_PX}px`
+                  }}
+                  aria-hidden="true"
+                />
+              ) : (
+                <LyricLine
+                  line={block.line}
+                  index={() => block.index}
+                  activeIndex={props.display.activeLyricIndex}
+                  currentTime={props.display.currentTime}
+                  lyricsBlur={props.settings.lyricsBlur}
+                  showWordLyrics={props.settings.showWordLyrics}
+                  showTranslation={props.settings.showTranslation}
+                  showRomanization={props.settings.showRomanization}
+                  swapTranslationRomanization={props.settings.swapTranslationRomanization}
+                  onSeek={props.interaction.onSeek}
+                />
+              )
             )}
           </For>
         </Show>

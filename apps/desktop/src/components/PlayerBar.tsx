@@ -26,6 +26,7 @@ import {
   IconVolumeHigh,
   IconVolumeMute
 } from "./icons";
+import "../shared/styles/components/player.css";
 
 type WsStatus = "connected" | "connecting" | "disconnected";
 

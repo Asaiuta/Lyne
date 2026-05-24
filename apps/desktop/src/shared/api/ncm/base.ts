@@ -7,6 +7,7 @@ export interface NcmRequestOptions {
   data?: object | undefined;
   noCache?: boolean;
   allowErrorCodes?: readonly number[];
+  signal?: AbortSignal;
   /**
    * Per-request cookie override for login validation flows. `undefined`
    * lets the Rust proxy inject the active backend-owned cookie. A non-empty
@@ -139,7 +140,8 @@ export const requestNcm = async <T = unknown>(
       method,
       headers,
       body,
-      credentials: "include"
+      credentials: "include",
+      signal: options.signal
     });
   };
 

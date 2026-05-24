@@ -37,6 +37,10 @@ interface CloudCacheSnapshot {
   maxSizeBytes: number;
 }
 
+interface CloudLoadOptions {
+  force?: boolean;
+}
+
 let cloudCache: CloudCacheSnapshot | null = null;
 
 interface CloudPageProps {
@@ -105,6 +109,7 @@ export function CloudPage(props: CloudPageProps) {
   const [totalCount, setTotalCount] = createSignal<number>(0);
   const [sizeBytes, setSizeBytes] = createSignal<number>(0);
   const [maxSizeBytes, setMaxSizeBytes] = createSignal<number>(0);
+  const [loadedCount, setLoadedCount] = createSignal<number>(0);
   const [searchValue, setSearchValue] = createSignal<string>("");
   const [debouncedSearchValue, setDebouncedSearchValue] = createSignal<string>("");
   const [isLoading, setIsLoading] = createSignal<boolean>(false);
@@ -127,6 +132,7 @@ export function CloudPage(props: CloudPageProps) {
 
   const activeAccount = createMemo(() => accountStore.activeAccount());
   const showInitialLoading = createMemo<boolean>(() => tracks().length === 0 && isLoading());
+  let cloudRequestVersion = 0;
   const storagePercent = createMemo<number>(() => {
     const max = maxSizeBytes();
     if (max <= 0) return 0;
@@ -137,68 +143,114 @@ export function CloudPage(props: CloudPageProps) {
     if (!query) return tracks();
     return fuzzySearchCloudTracks(tracks(), query);
   });
+  const loadingProgress = createMemo<{ loaded: number; total: number }>(() => {
+    const loaded = isLoading() ? loadedCount() : tracks().length;
+    return {
+      loaded,
+      total: totalCount() || loaded
+    };
+  });
 
-  const loadCloudTracks = async (isCancelled: () => boolean = () => false) => {
+  const resetCloudState = () => {
+    setTracks([]);
+    setTotalCount(0);
+    setSizeBytes(0);
+    setMaxSizeBytes(0);
+    setLoadedCount(0);
+  };
+
+  const applyCloudSnapshot = (snapshot: CloudCacheSnapshot) => {
+    setTracks(snapshot.tracks);
+    setTotalCount(snapshot.totalCount);
+    setSizeBytes(snapshot.sizeBytes);
+    setMaxSizeBytes(snapshot.maxSizeBytes);
+    setLoadedCount(snapshot.tracks.length);
+  };
+
+  const loadCloudTracks = async (
+    isCancelled: () => boolean = () => false,
+    options: CloudLoadOptions = {}
+  ) => {
     const account = activeAccount();
     if (!account) {
-      setTracks([]);
-      setTotalCount(0);
-      setSizeBytes(0);
-      setMaxSizeBytes(0);
+      cloudRequestVersion += 1;
+      setIsLoading(false);
+      resetCloudState();
       return;
     }
 
+    const cached = cloudCache?.userId === account.userId ? cloudCache : null;
+    if (!options.force && cached !== null) {
+      applyCloudSnapshot(cached);
+      setRawFeedback("neutral", t("ncm.feedback.initial"));
+      return;
+    }
+
+    const requestVersion = cloudRequestVersion + 1;
+    cloudRequestVersion = requestVersion;
+    const isStale = () => isCancelled() || requestVersion !== cloudRequestVersion;
+
+    if (cached === null) {
+      resetCloudState();
+    } else {
+      setLoadedCount(0);
+    }
     setIsLoading(true);
     try {
       const allTracks: OnlineTrackItem[] = [];
       let offset = 0;
       let count = 0;
+      let nextSizeBytes = cached?.sizeBytes ?? 0;
+      let nextMaxSizeBytes = cached?.maxSizeBytes ?? 0;
       do {
         const page = await api.listNcmCloudTracks({
           limit: CLOUD_PAGE_LIMIT,
           offset
         });
-        if (isCancelled()) return;
+        if (isStale()) return;
         count = page.count;
+        nextSizeBytes = page.sizeBytes;
+        nextMaxSizeBytes = page.maxSizeBytes;
         setTotalCount(page.count);
         setSizeBytes(page.sizeBytes);
         setMaxSizeBytes(page.maxSizeBytes);
         allTracks.push(...page.tracks);
-        setTracks([...allTracks]);
+        setLoadedCount(allTracks.length);
         offset += CLOUD_PAGE_LIMIT;
+        if (page.tracks.length === 0) break;
       } while (offset < count);
-      cloudCache = {
+      if (isStale()) return;
+
+      const nextSnapshot: CloudCacheSnapshot = {
         userId: account.userId,
         tracks: allTracks,
-        totalCount: count,
-        sizeBytes: sizeBytes(),
-        maxSizeBytes: maxSizeBytes()
+        totalCount: count || allTracks.length,
+        sizeBytes: nextSizeBytes,
+        maxSizeBytes: nextMaxSizeBytes
       };
+      cloudCache = nextSnapshot;
+      applyCloudSnapshot(nextSnapshot);
       setRawFeedback("neutral", t("ncm.feedback.initial"));
     } catch (error) {
-      if (isCancelled()) return;
-      setTracks([]);
-      setTotalCount(0);
+      if (isStale()) return;
+      if (cached === null) {
+        resetCloudState();
+      } else {
+        applyCloudSnapshot(cached);
+      }
       setRawFeedback("error", readErrorMessage(error));
     } finally {
-      if (!isCancelled()) setIsLoading(false);
+      if (!isStale()) setIsLoading(false);
     }
   };
 
   createEffect(() => {
     const account = activeAccount();
     if (!account) {
-      setTracks([]);
-      setTotalCount(0);
-      setSizeBytes(0);
-      setMaxSizeBytes(0);
+      cloudRequestVersion += 1;
+      setIsLoading(false);
+      resetCloudState();
       return;
-    }
-    if (cloudCache?.userId === account.userId) {
-      setTracks(cloudCache.tracks);
-      setTotalCount(cloudCache.totalCount);
-      setSizeBytes(cloudCache.sizeBytes);
-      setMaxSizeBytes(cloudCache.maxSizeBytes);
     }
     let cancelled = false;
     void loadCloudTracks(() => cancelled);
@@ -264,6 +316,7 @@ export function CloudPage(props: CloudPageProps) {
     try {
       await api.deleteNcmCloudTrack(item.songId);
       setTracks((current) => current.filter((track) => track.songId !== item.songId));
+      setLoadedCount((count) => Math.max(0, count - 1));
       setTotalCount((count) => Math.max(0, count - 1));
       const cache = cloudCache;
       if (cache !== null && cache.userId === activeAccount()?.userId) {
@@ -294,8 +347,7 @@ export function CloudPage(props: CloudPageProps) {
   };
 
   const handleCloudMatched = async () => {
-    cloudCache = null;
-    await loadCloudTracks();
+    await loadCloudTracks(() => false, { force: true });
     setRawFeedback("success", t("ncm.cloud.match.success"));
   };
 
@@ -353,15 +405,15 @@ export function CloudPage(props: CloudPageProps) {
               <IconPlay />
               {showInitialLoading()
                 ? t("ncm.cloud.loadingProgress", {
-                    loaded: tracks().length,
-                    total: totalCount()
+                    loaded: loadingProgress().loaded,
+                    total: loadingProgress().total
                   })
                 : t("ncm.cloud.play")}
             </button>
             <button
               type="button"
               class="ghost-button playlist-detail-icon-button"
-              onClick={() => void loadCloudTracks()}
+              onClick={() => void loadCloudTracks(() => false, { force: true })}
               disabled={isLoading()}
               title={t("ncm.cloud.refresh")}
               aria-label={t("ncm.cloud.refresh")}
@@ -426,12 +478,19 @@ export function CloudPage(props: CloudPageProps) {
             <div class="online-search-empty">
               <IconCloud />
               <strong>
-                {searchValue().trim()
+                {showInitialLoading()
+                  ? t("ncm.cloud.loadingProgress", {
+                      loaded: loadingProgress().loaded,
+                      total: loadingProgress().total
+                    })
+                  : searchValue().trim()
                   ? t("ncm.cloud.searchEmptyTitle")
                   : t("ncm.cloud.emptyTitle")}
               </strong>
               <span>
-                {searchValue().trim()
+                {showInitialLoading()
+                  ? t("ncm.playlist.loading")
+                  : searchValue().trim()
                   ? t("ncm.cloud.searchEmptyDescription", { query: searchValue().trim() })
                   : t("ncm.cloud.emptyDescription")}
               </span>

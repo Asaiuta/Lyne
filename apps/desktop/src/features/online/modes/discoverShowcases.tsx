@@ -5,6 +5,7 @@ import { EmptyState } from "../../../components/EmptyState";
 import { IconPlay, IconSpinner } from "../../../components/icons";
 import { MediaList } from "../../../components/media/MediaList";
 import { CoverGridSkeleton } from "../../../components/page/Skeleton";
+import { SImage } from "../../../components/SImage";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { DISCOVER_PAGE_LIMIT, isTranslationKey } from "../shared/parsers";
@@ -245,7 +246,7 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
                 <Show when={!uiSettings.hiddenCovers.toplist}>
                   <div class="online-toplist-cover" aria-hidden="true">
                     <Show when={item.coverUrl} fallback={<span>{item.title.slice(0, 1)}</span>}>
-                      {(coverUrl) => <img src={coverUrl()} alt="" loading="lazy" />}
+                      {(coverUrl) => <SImage src={coverUrl()} alt="" observeVisibility={true} shape="rect" aspect="square" />}
                     </Show>
                     <span class="online-toplist-cover-play" aria-hidden="true">
                       <IconPlay />

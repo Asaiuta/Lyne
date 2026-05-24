@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { NcmSongComment } from "../../shared/api/ncm/comment";
+import { SImage } from "../SImage";
 import { CoverArt } from "../CoverArt";
 import { IconPlay } from "../icons";
 
@@ -102,7 +103,14 @@ function CommentItem(props: { comment: NcmSongComment }) {
         fallback={<div class="full-player-comment-avatar" aria-hidden="true" />}
       >
         {(avatarUrl) => (
-          <img class="full-player-comment-avatar" src={avatarUrl()} alt={props.comment.user.nickname} />
+          <SImage
+            src={avatarUrl()}
+            alt={props.comment.user.nickname}
+            class="full-player-comment-avatar"
+            observeVisibility={true}
+            shape="circle"
+            aspect="square"
+          />
         )}
       </Show>
       <div class="full-player-comment-body">

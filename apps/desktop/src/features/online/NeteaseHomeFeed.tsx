@@ -2,6 +2,7 @@ import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import { AlbumCard } from "../../components/AlbumCard";
 import { DailySongsCard, type DailySongsCardCover } from "../../components/DailySongsCard";
 import { HorizontalCardRow } from "../../components/HorizontalCardRow";
+import { SImage } from "../../components/SImage";
 import { IconAlbum, IconArtist, IconCopy, IconPause, IconPlay, IconPlaylist, IconSkipNext, IconThumbDown } from "../../components/icons";
 import { ContextMenu, type ContextMenuItem } from "../../components/media/ContextMenu";
 import { createApiClient, type NcmHomeFeed } from "../../shared/api/client";
@@ -393,8 +394,23 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
               <Show when={showCover("personalFM") ? personalFmCoverUrl() : null}>
                 {(coverUrl) => (
                   <>
-                    <img class="ncm-home-feed-fm-card-blur" src={coverUrl()} alt="" loading="lazy" />
-                    <img class="ncm-home-feed-fm-card-cover" src={coverUrl()} alt="" loading="lazy" />
+                    <SImage
+                      src={coverUrl()}
+                      alt=""
+                      class="ncm-home-feed-fm-card-blur"
+                      observeVisibility={true}
+                      shape="circle"
+                      aspect="square"
+                      ariaHidden="true"
+                    />
+                    <SImage
+                      src={coverUrl()}
+                      alt=""
+                      class="ncm-home-feed-fm-card-cover"
+                      observeVisibility={true}
+                      shape="circle"
+                      aspect="square"
+                    />
                   </>
                 )}
               </Show>

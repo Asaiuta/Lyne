@@ -34,8 +34,8 @@ export function SpectrumCanvas(props: SpectrumCanvasProps) {
     if (!canvas) return;
     const style = getComputedStyle(canvas);
     activeFill =
-      style.getPropertyValue("--accent-dynamic").trim() ||
-      style.getPropertyValue("--accent-base").trim() ||
+      style.getPropertyValue("--color-primary").trim() ||
+      style.getPropertyValue("--color-primary").trim() ||
       "oklch(0.63 0.22 24)";
     idleFill = style.getPropertyValue("--muted-soft").trim() || "oklch(0.56 0.008 280 / 0.5)";
     scheduleDraw();

@@ -4,6 +4,7 @@ import { Portal } from "solid-js/web";
 import { useTranslation } from "../shared/i18n";
 import { usePresenceTransition } from "../shared/ui/usePresenceTransition";
 import { IconClose } from "./icons";
+import "../shared/styles/components/modals.css";
 
 interface ModalProps {
   open: boolean;

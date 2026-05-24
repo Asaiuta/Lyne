@@ -23,7 +23,8 @@ import {
 } from "../../../shared/api/ncm/user";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import {
-  type OnlinePlaylistSummary
+  type OnlinePlaylistSummary,
+  type UserPlaylistGroups
 } from "../ncmPlaylistSummary";
 import {
   applyNcmPlaylistSubscribeCacheUpdate,
@@ -46,6 +47,7 @@ import { useDetailNavigation } from "../shared/useDetailNavigation";
 
 type CollectionTab = "playlists" | "albums" | "artists" | "videos" | "radios";
 type PlaylistScope = "created" | "collected";
+type CollectionLoadState = "idle" | "loading" | "loaded" | "error";
 
 interface CollectionStat {
   key: CollectionTab;
@@ -75,6 +77,31 @@ interface LikedCollectionModeProps {
 
 const api = createApiClient();
 const COLLECTION_PAGE_SIZE = 50;
+const collectionLoaders = {
+  albums: () => loadAllSublist(userAlbumSublist, "data", parseCoverCollectionItem),
+  artists: () => loadAllSublist(userArtistSublist, "data", parseArtistCollectionItem),
+  videos: () => loadAllSublist(userMvSublist, "data", parseCoverCollectionItem),
+  radios: () => loadAllSublist(userDjSublist, "djRadios", parseCoverCollectionItem)
+} as const;
+const emptyCollectionLoadState = (): Record<CollectionTab, CollectionLoadState> => ({
+  playlists: "idle",
+  albums: "idle",
+  artists: "idle",
+  videos: "idle",
+  radios: "idle"
+});
+
+interface LikedCollectionCache {
+  userId: number;
+  subcount: NcmUserSubcountData;
+  playlists?: UserPlaylistGroups;
+  albums?: FeedCardItem[];
+  artists?: FeedCardItem[];
+  videos?: FeedCardItem[];
+  radios?: FeedCardItem[];
+}
+
+let likedCollectionCache: LikedCollectionCache | null = null;
 
 const collectionTabs: Array<{ value: CollectionTab; labelKey: TranslationKey }> = [
   { value: "playlists", labelKey: "ncm.collection.tabs.playlists" },
@@ -194,6 +221,13 @@ const loadAllSublist = async (
   return allItems;
 };
 
+const ensureLikedCollectionCache = (userId: number): LikedCollectionCache => {
+  if (likedCollectionCache?.userId !== userId) {
+    likedCollectionCache = { userId, subcount: {} };
+  }
+  return likedCollectionCache;
+};
+
 export function LikedCollectionMode(props: LikedCollectionModeProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
@@ -206,9 +240,8 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
   const [collectionVideos, setCollectionVideos] = createSignal<FeedCardItem[]>([]);
   const [collectionRadios, setCollectionRadios] = createSignal<FeedCardItem[]>([]);
   const [subcount, setSubcount] = createSignal<NcmUserSubcountData>({});
-  const [isLoadingPlaylists, setIsLoadingPlaylists] = createSignal(false);
-  const [isLoadingCollections, setIsLoadingCollections] = createSignal(false);
-  const [hasLoadedCollections, setHasLoadedCollections] = createSignal(false);
+  const [loadState, setLoadState] =
+    createSignal<Record<CollectionTab, CollectionLoadState>>(emptyCollectionLoadState());
 
   const detailNav = useDetailNavigation({
     t,
@@ -252,9 +285,13 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
   const currentPlaylists = createMemo(() =>
     playlistScope() === "created" ? visibleCreatedPlaylists() : collectedPlaylists()
   );
+  const activeTabLoading = createMemo<boolean>(() => loadState()[activeTab()] === "loading");
+  const activeCollectionLoading = createMemo<boolean>(() =>
+    activeTab() !== "playlists" && activeTabLoading()
+  );
 
   const totalPlaylistCount = createMemo(() => {
-    if (hasLoadedCollections()) {
+    if (loadState().playlists === "loaded") {
       return visibleCreatedPlaylists().length + collectedPlaylists().length;
     }
     const fromSubcount =
@@ -274,25 +311,25 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
     {
       key: "albums",
       labelKey: "ncm.collection.status.albums",
-      count: hasLoadedCollections() ? collectionAlbums().length : readPositiveCount(subcount().albumCount),
+      count: loadState().albums === "loaded" ? collectionAlbums().length : readPositiveCount(subcount().albumCount),
       icon: IconAlbum
     },
     {
       key: "artists",
       labelKey: "ncm.collection.status.artists",
-      count: hasLoadedCollections() ? collectionArtists().length : readPositiveCount(subcount().artistCount),
+      count: loadState().artists === "loaded" ? collectionArtists().length : readPositiveCount(subcount().artistCount),
       icon: IconArtist
     },
     {
       key: "videos",
       labelKey: "ncm.collection.status.videos",
-      count: hasLoadedCollections() ? collectionVideos().length : readPositiveCount(subcount().mvCount),
+      count: loadState().videos === "loaded" ? collectionVideos().length : readPositiveCount(subcount().mvCount),
       icon: IconPlayCircle
     },
     {
       key: "radios",
       labelKey: "ncm.collection.status.radios",
-      count: hasLoadedCollections() ? collectionRadios().length : readPositiveCount(subcount().djRadioCount),
+      count: loadState().radios === "loaded" ? collectionRadios().length : readPositiveCount(subcount().djRadioCount),
       icon: IconVolumeHigh
     }
   ]);
@@ -308,11 +345,115 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
       setCollectionVideos([]);
       setCollectionRadios([]);
       setSubcount({});
-      setHasLoadedCollections(false);
+      setLoadState(emptyCollectionLoadState());
       detailNav.setSelectedPlaylist(null);
       detailNav.setPlaylistTracksState([]);
     }
   }, { defer: true }));
+
+  const markTabState = (tab: CollectionTab, state: CollectionLoadState) => {
+    setLoadState((current) => ({ ...current, [tab]: state }));
+  };
+
+  const applyPlaylistGroups = (userId: number, groups: UserPlaylistGroups) => {
+    const cache = ensureLikedCollectionCache(userId);
+    cache.playlists = groups;
+    setCreatedPlaylists(groups.created);
+    setCollectedPlaylists(groups.collected);
+    markTabState("playlists", "loaded");
+  };
+
+  const applyCacheSnapshot = (cache: LikedCollectionCache) => {
+    setSubcount(cache.subcount);
+    if (cache.playlists) {
+      setCreatedPlaylists(cache.playlists.created);
+      setCollectedPlaylists(cache.playlists.collected);
+      markTabState("playlists", "loaded");
+    }
+    if (cache.albums) {
+      setCollectionAlbums(cache.albums);
+      markTabState("albums", "loaded");
+    }
+    if (cache.artists) {
+      setCollectionArtists(cache.artists);
+      markTabState("artists", "loaded");
+    }
+    if (cache.videos) {
+      setCollectionVideos(cache.videos);
+      markTabState("videos", "loaded");
+    }
+    if (cache.radios) {
+      setCollectionRadios(cache.radios);
+      markTabState("radios", "loaded");
+    }
+  };
+
+  const loadSubcount = async (userId: number, isCancelled: () => boolean) => {
+    const cache = ensureLikedCollectionCache(userId);
+    if (Object.keys(cache.subcount).length > 0) {
+      setSubcount(cache.subcount);
+      return;
+    }
+    const countEnvelope = await userSubcount().catch(() => null);
+    if (isCancelled()) return;
+    const nextSubcount = countEnvelope === null ? {} : readUserSubcountData(countEnvelope);
+    cache.subcount = nextSubcount;
+    setSubcount(nextSubcount);
+  };
+
+  const loadPlaylistTab = async (profile: NcmProfile, isCancelled: () => boolean) => {
+    const cache = ensureLikedCollectionCache(profile.userId);
+    if (cache.playlists) {
+      applyPlaylistGroups(profile.userId, cache.playlists);
+      return;
+    }
+    markTabState("playlists", "loading");
+    try {
+      const playlistGroups = await loadNcmUserPlaylistGroupsCached(api, profile.userId);
+      if (isCancelled()) return;
+      applyPlaylistGroups(profile.userId, playlistGroups);
+    } catch (error) {
+      if (!isCancelled()) {
+        setCreatedPlaylists([]);
+        setCollectedPlaylists([]);
+        markTabState("playlists", "error");
+        props.setFeedback("error", readErrorMessage(error));
+      }
+    }
+  };
+
+  const loadCollectionTab = async (
+    profile: NcmProfile,
+    tab: Exclude<CollectionTab, "playlists">,
+    isCancelled: () => boolean
+  ) => {
+    const cache = ensureLikedCollectionCache(profile.userId);
+    const cachedItems = cache[tab];
+    if (cachedItems) {
+      if (tab === "albums") setCollectionAlbums(cachedItems);
+      if (tab === "artists") setCollectionArtists(cachedItems);
+      if (tab === "videos") setCollectionVideos(cachedItems);
+      if (tab === "radios") setCollectionRadios(cachedItems);
+      markTabState(tab, "loaded");
+      return;
+    }
+    markTabState(tab, "loading");
+    try {
+      const items = await collectionLoaders[tab]();
+      if (isCancelled()) return;
+      cache[tab] = items;
+      if (tab === "albums") setCollectionAlbums(items);
+      if (tab === "artists") setCollectionArtists(items);
+      if (tab === "videos") setCollectionVideos(items);
+      if (tab === "radios") setCollectionRadios(items);
+      markTabState(tab, "loaded");
+    } catch (error) {
+      if (!isCancelled()) {
+        markTabState(tab, "error");
+        props.setFeedback("error", readErrorMessage(error));
+      }
+    }
+  };
 
   createEffect(() => {
     const profile = props.loginProfile();
@@ -320,48 +461,17 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
 
     let cancelled = false;
     const unsubscribePlaylists = subscribeNcmUserPlaylistGroups(profile.userId, (groups) => {
-      setCreatedPlaylists(groups.created);
-      setCollectedPlaylists(groups.collected);
+      applyPlaylistGroups(profile.userId, groups);
     });
     const run = async () => {
-      setIsLoadingPlaylists(true);
-      setIsLoadingCollections(true);
-      setHasLoadedCollections(false);
-      try {
-        const [playlistGroups, countEnvelope, albums, artists, videos, radios] = await Promise.all([
-          loadNcmUserPlaylistGroupsCached(api, profile.userId),
-          userSubcount().catch(() => null),
-          loadAllSublist(userAlbumSublist, "data", parseCoverCollectionItem),
-          loadAllSublist(userArtistSublist, "data", parseArtistCollectionItem),
-          loadAllSublist(userMvSublist, "data", parseCoverCollectionItem),
-          loadAllSublist(userDjSublist, "djRadios", parseCoverCollectionItem)
-        ]);
-        if (cancelled) return;
-        setCreatedPlaylists(playlistGroups.created);
-        setCollectedPlaylists(playlistGroups.collected);
-        setCollectionAlbums(albums);
-        setCollectionArtists(artists);
-        setCollectionVideos(videos);
-        setCollectionRadios(radios);
-        setSubcount(countEnvelope === null ? {} : readUserSubcountData(countEnvelope));
-        setHasLoadedCollections(true);
-      } catch (error) {
-        if (!cancelled) {
-          setCreatedPlaylists([]);
-          setCollectedPlaylists([]);
-          setCollectionAlbums([]);
-          setCollectionArtists([]);
-          setCollectionVideos([]);
-          setCollectionRadios([]);
-          setSubcount({});
-          setHasLoadedCollections(false);
-          props.setFeedback("error", readErrorMessage(error));
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingPlaylists(false);
-          setIsLoadingCollections(false);
-        }
+      const cache = ensureLikedCollectionCache(profile.userId);
+      applyCacheSnapshot(cache);
+      void loadSubcount(profile.userId, () => cancelled);
+      const tab = activeTab();
+      if (tab === "playlists") {
+        await loadPlaylistTab(profile, () => cancelled);
+      } else {
+        await loadCollectionTab(profile, tab, () => cancelled);
       }
     };
 
@@ -423,7 +533,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
       when={items().length > 0}
       fallback={
         <div class="panel-note">
-          {isLoadingCollections() ? t("ncm.playlist.loading") : t(emptyKey)}
+          {activeCollectionLoading() ? t("ncm.playlist.loading") : t(emptyKey)}
         </div>
       }
     >
@@ -530,7 +640,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
                     when={currentPlaylists().length > 0}
                     fallback={
                       <div class="panel-note">
-                        {isLoadingPlaylists() ? t("ncm.playlist.loading") : t("ncm.empty.noUserPlaylists")}
+                        {activeTabLoading() ? t("ncm.playlist.loading") : t("ncm.empty.noUserPlaylists")}
                       </div>
                     }
                   >

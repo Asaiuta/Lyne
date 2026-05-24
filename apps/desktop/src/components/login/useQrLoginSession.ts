@@ -135,9 +135,10 @@ export function useQrLoginSession(options: UseQrLoginSessionOptions) {
     if (!options.enabled() || !current || current.phase === "confirmed") return;
 
     let cancelled = false;
+    const abortController = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        const response = await checkLoginQr(current.key);
+        const response = await checkLoginQr(current.key, abortController.signal);
         if (cancelled) return;
 
         const code = readNumber(response.code);
@@ -179,6 +180,7 @@ export function useQrLoginSession(options: UseQrLoginSessionOptions) {
     onCleanup(() => {
       cancelled = true;
       window.clearTimeout(timer);
+      abortController.abort();
     });
   });
 

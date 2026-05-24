@@ -120,7 +120,17 @@ export const parseCurrentLyricsResponse = (value: unknown): CurrentLyricsRespons
   };
 };
 
+let currentLyricsInFlight: Promise<CurrentLyricsResponse> | null = null;
+
 export const getCurrentLyrics = async (requestJson: ApiRequestJson): Promise<CurrentLyricsResponse> => {
-  const json = await requestJson("/domain/current_lyrics");
-  return parseCurrentLyricsResponse(json);
+  if (currentLyricsInFlight) return currentLyricsInFlight;
+  const request = requestJson("/domain/current_lyrics")
+    .then(parseCurrentLyricsResponse)
+    .finally(() => {
+      if (currentLyricsInFlight === request) {
+        currentLyricsInFlight = null;
+      }
+    });
+  currentLyricsInFlight = request;
+  return request;
 };

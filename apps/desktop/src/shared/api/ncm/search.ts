@@ -1,4 +1,4 @@
-import { requestNcm, type NcmResponseEnvelope } from "./base";
+import { requestNcm, type NcmRequestOptions, type NcmResponseEnvelope } from "./base";
 
 export interface NcmSearchParams {
   keywords: string;
@@ -21,10 +21,37 @@ export const cloudsearch = (params: NcmSearchParams): Promise<NcmResponseEnvelop
     noCache: true
   });
 
-export const searchDefault = (): Promise<NcmResponseEnvelope> =>
+type RequestSignalOptions = Pick<NcmRequestOptions, "signal">;
+const SONG_DETAIL_CACHE_LIMIT = 200;
+const songDetailCache = new Map<string, Promise<NcmResponseEnvelope>>();
+
+const rememberSongDetailRequest = (
+  key: string,
+  request: Promise<NcmResponseEnvelope>
+): Promise<NcmResponseEnvelope> => {
+  if (songDetailCache.size >= SONG_DETAIL_CACHE_LIMIT) {
+    const oldestKey = songDetailCache.keys().next().value as string | undefined;
+    if (oldestKey !== undefined) {
+      songDetailCache.delete(oldestKey);
+    }
+  }
+  const cachedRequest = request.catch((error: unknown) => {
+    if (songDetailCache.get(key) === cachedRequest) {
+      songDetailCache.delete(key);
+    }
+    throw error;
+  });
+  songDetailCache.set(key, cachedRequest);
+  return cachedRequest;
+};
+
+export const searchDefault = (
+  options: RequestSignalOptions = {}
+): Promise<NcmResponseEnvelope> =>
   requestNcm("search/default", {
     method: "POST",
-    noCache: true
+    noCache: true,
+    signal: options.signal
   });
 
 export const searchHot = (): Promise<NcmResponseEnvelope> =>
@@ -33,24 +60,35 @@ export const searchHot = (): Promise<NcmResponseEnvelope> =>
     noCache: true
   });
 
-export const searchHotDetail = (): Promise<NcmResponseEnvelope> =>
+export const searchHotDetail = (
+  options: RequestSignalOptions = {}
+): Promise<NcmResponseEnvelope> =>
   requestNcm("search/hot/detail", {
     method: "POST",
-    noCache: true
+    noCache: true,
+    signal: options.signal
   });
 
-export const searchSuggest = (keywords: string): Promise<NcmResponseEnvelope> =>
+export const searchSuggest = (
+  keywords: string,
+  options: RequestSignalOptions = {}
+): Promise<NcmResponseEnvelope> =>
   requestNcm("search/suggest", {
     method: "POST",
     data: { keywords },
-    noCache: true
+    noCache: true,
+    signal: options.signal
   });
 
-export const searchSuggestPc = (keywords: string): Promise<NcmResponseEnvelope> =>
+export const searchSuggestPc = (
+  keywords: string,
+  options: RequestSignalOptions = {}
+): Promise<NcmResponseEnvelope> =>
   requestNcm("search/suggest/pc", {
     method: "POST",
     data: { keywords },
-    noCache: true
+    noCache: true,
+    signal: options.signal
   });
 
 export const searchMultimatch = (keywords: string): Promise<NcmResponseEnvelope> =>
@@ -60,14 +98,18 @@ export const searchMultimatch = (keywords: string): Promise<NcmResponseEnvelope>
     noCache: true
   });
 
-export const songDetail = (ids: number | number[]): Promise<NcmResponseEnvelope> =>
-  requestNcm("song/detail", {
+export const songDetail = (ids: number | number[]): Promise<NcmResponseEnvelope> => {
+  const key = Array.isArray(ids) ? ids.join(",") : String(ids);
+  const cached = songDetailCache.get(key);
+  if (cached) return cached;
+  return rememberSongDetailRequest(key, requestNcm("song/detail", {
     method: "POST",
     data: {
-      ids: Array.isArray(ids) ? ids.join(",") : String(ids)
+      ids: key
     },
     noCache: true
-  });
+  }));
+};
 
 export const songMusicDetail = (id: number): Promise<NcmResponseEnvelope> =>
   requestNcm("song/music/detail", {

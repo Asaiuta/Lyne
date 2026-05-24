@@ -55,54 +55,11 @@
     background: transparent;
     border: 0;
     box-shadow: none;
-    backdrop-filter: none;
     scrollbar-gutter: stable;
   }
 
   .content-area:has(> .panel-library) {
     padding-bottom: 0;
-  }
-
-  .bg-layer {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    overflow: hidden;
-    pointer-events: none;
-  }
-
-  .bg-layer::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(900px 520px at 20% 18%, var(--accent-a12), transparent 68%),
-      radial-gradient(720px 500px at 88% 82%, var(--accent-a08), transparent 62%),
-      linear-gradient(180deg, color-mix(in oklch, var(--bg) 18%, transparent), color-mix(in oklch, var(--bg) 40%, transparent));
-    z-index: 0;
-  }
-
-  .bg-layer-image,
-  .bg-layer-image--exit {
-    position: absolute;
-    inset: -6%;
-    width: 112%;
-    height: 112%;
-    object-fit: cover;
-    transform: scale(1.08);
-    transition:
-      opacity var(--duration-slow) var(--ease-standard),
-      transform 2.6s var(--ease-emphasized);
-  }
-
-  .bg-layer-image {
-    animation: bg-layer-drift 18s linear infinite alternate;
-  }
-
-  .bg-layer-mask {
-    position: absolute;
-    inset: 0;
-    backdrop-filter: saturate(1.1);
   }
 
   .sidebar {
@@ -121,7 +78,6 @@
     border-right: 1px solid var(--border-overlay);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
     box-shadow: none;
-    backdrop-filter: none;
     transition:
       width 0.3s var(--ease-standard),
       min-width 0.3s var(--ease-standard),
@@ -302,8 +258,6 @@
     border-radius: var(--floating-radius);
     background: var(--floating-surface);
     box-shadow: var(--floating-shadow);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
   }
 
@@ -325,7 +279,7 @@
   .sidebar-playlist-source-option:hover,
   .sidebar-playlist-source-option.is-active {
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .sidebar-section-toggle.is-collapsed {
@@ -403,7 +357,7 @@
 
   .sidebar-nav-item.is-active {
     color: var(--accent);
-    background: var(--surface-pressed);
+    background: var(--state-pressed-on-surface);
   }
 
   .sidebar-nav-item.is-active .sidebar-nav-label,
@@ -698,7 +652,6 @@
     border: 0;
     background: transparent;
     box-shadow: none;
-    backdrop-filter: none;
     -webkit-app-region: drag;
   }
 
@@ -812,13 +765,13 @@
     padding: 0 16px 0 15px;
     border-radius: var(--radius-pill);
     border: 0;
-    background: var(--surface-hover);
+    background: var(--state-hover-on-surface);
     box-shadow: none;
     -webkit-app-region: no-drag;
   }
 
   .top-nav-search:focus-within {
-    background: var(--surface-pressed);
+    background: var(--state-pressed-on-surface);
     box-shadow: none;
   }
 
@@ -863,8 +816,6 @@
     border-radius: var(--floating-radius);
     background: var(--floating-surface);
     box-shadow: var(--floating-shadow);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
   }
 
@@ -1005,7 +956,7 @@
 
   .top-nav-search-hot-item.is-leading .top-nav-search-hot-rank {
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .top-nav-search-status {
@@ -1234,7 +1185,7 @@
 
   .top-nav-account-stat:hover:not(:disabled) {
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .top-nav-account-stat svg {
@@ -1377,9 +1328,9 @@
   }
 
   .top-nav-account-add:hover:not(:disabled) {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .top-nav-account-feedback {
@@ -1401,7 +1352,7 @@
   }
 
   .top-nav-account-action:hover:not(:disabled) {
-    background: var(--surface-hover);
+    background: var(--state-hover-on-surface);
   }
 
   .top-nav-account-action.is-danger {
@@ -1508,7 +1459,6 @@
   .command-error-toast {
     border: 1px solid color-mix(in oklch, var(--border) 35%, transparent);
     box-shadow: var(--elev-1);
-    backdrop-filter: blur(20px);
   }
 
   .panel,
@@ -1527,7 +1477,6 @@
     border-radius: 0;
     background: transparent;
     box-shadow: none;
-    backdrop-filter: none;
   }
 
   .panel-page {
@@ -1634,8 +1583,8 @@
   .page-action:hover:not(:disabled) {
     color: var(--text);
     transform: none;
-    border-color: var(--surface-pressed);
-    background: var(--surface-hover);
+    border-color: var(--state-pressed-on-surface);
+    background: var(--state-hover-on-surface);
   }
 
   .primary-button:disabled,
@@ -1689,7 +1638,7 @@
   .text-input:focus,
   .login-modal-cookie-input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-a20);
+    box-shadow: 0 0 0 2px var(--color-primary-tonal-20);
   }
 
   .text-input::placeholder,
@@ -1782,7 +1731,7 @@
 
   @keyframes settings-highlight-pulse {
     0% {
-      background: var(--accent-a28);
+      background: var(--color-primary-tonal-28);
     }
     100% {
       background: color-mix(in oklch, var(--surface-2) 50%, transparent);
@@ -1836,7 +1785,7 @@
   }
 
   .toggle-switch input:focus-visible + .toggle-switch-slider {
-    box-shadow: 0 0 0 3px var(--accent-a28);
+    box-shadow: 0 0 0 3px var(--color-primary-tonal-28);
   }
 
   /* ── Range with value ────────────────────────────────── */
@@ -1850,8 +1799,8 @@
     border-radius: var(--radius-track);
     background: linear-gradient(
       to right,
-      var(--accent-a85) 0%,
-      var(--accent-a85) var(--range-pct),
+      var(--color-primary-tonal-85) 0%,
+      var(--color-primary-tonal-85) var(--range-pct),
       var(--surface-3) var(--range-pct),
       var(--surface-3) 100%
     );
@@ -1866,7 +1815,7 @@
   .range-with-value input[type="range"]::-moz-range-progress {
     height: 4px;
     border-radius: var(--radius-track);
-    background: var(--accent-a85);
+    background: var(--color-primary-tonal-85);
   }
 
   .range-with-value input[type="range"]::-webkit-slider-thumb {

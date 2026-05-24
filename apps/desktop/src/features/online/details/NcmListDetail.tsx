@@ -1,5 +1,6 @@
 import { For, Show } from "solid-js";
 import type { JSX } from "solid-js";
+import { SImage } from "../../../components/SImage";
 import { IconEye, IconMusic, IconPlay } from "../../../components/icons";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
 
@@ -54,8 +55,23 @@ export function NcmListDetail(props: NcmListDetailProps) {
         <Show when={!props.hiddenCover && cover()}>
           {(url) => (
             <div class={`ncm-list-detail-cover${props.coverShape === "round" ? " is-round" : ""}`}>
-              <img class="ncm-list-detail-cover-img" src={url()} alt="" />
-              <img class="ncm-list-detail-cover-shadow" src={url()} alt="" />
+              <SImage
+                src={url()}
+                alt=""
+                class="ncm-list-detail-cover-img"
+                observeVisibility={false}
+                shape={props.coverShape === "round" ? "circle" : "rect"}
+                aspect="square"
+              />
+              <SImage
+                src={url()}
+                alt=""
+                class="ncm-list-detail-cover-shadow"
+                observeVisibility={false}
+                shape={props.coverShape === "round" ? "circle" : "rect"}
+                aspect="square"
+                ariaHidden="true"
+              />
               <Show when={props.showCoverMask}>
                 <span class="ncm-list-detail-cover-mask" />
               </Show>

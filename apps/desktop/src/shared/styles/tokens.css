@@ -42,12 +42,18 @@
   --radius-icon-btn: var(--radius-pill);      /* icon buttons, transport, search bars */
 
   /* ---------- Color: surface ladder (SPlayer near-neutral desktop skin) ---------- */
-  --bg: oklch(0.135 0.004 280);
-  --surface-1: oklch(0.175 0.005 280);
-  --surface-2: oklch(0.215 0.006 280);
-  --surface-3: oklch(0.255 0.008 280);
-  --surface-4: oklch(0.295 0.01 280);
-  --surface-container: var(--surface-container-dynamic, oklch(0.175 0.005 280 / 0.85));
+  --bg-base: oklch(0.135 0.004 280);
+  --surface-1-base: oklch(0.175 0.005 280);
+  --surface-2-base: oklch(0.215 0.006 280);
+  --surface-3-base: oklch(0.255 0.008 280);
+  --surface-4-base: oklch(0.295 0.01 280);
+  --bg: var(--bg-base);
+  --surface-1: var(--surface-1-base);
+  --surface-2: var(--surface-2-base);
+  --surface-3: var(--surface-3-base);
+  --surface-4: var(--surface-4-base);
+  --surface-container-default: oklch(0.175 0.005 280 / 0.85);
+  --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
 
   /* alpha companions used for translucent panels / chips. */
   --surface-1-soft: oklch(0.16 0.006 280 / 0.7);
@@ -67,8 +73,11 @@
   /* ---------- Color: semantic surface/border/text aliases ---------- */
   --border-faint: oklch(1 0 0 / 0.04);
   --border-overlay: oklch(1 0 0 / 0.06);
-  --surface-hover: oklch(1 0 0 / 0.08);
-  --surface-pressed: oklch(1 0 0 / 0.12);
+  --state-hover-on-surface: oklch(1 0 0 / 0.08);
+  --state-pressed-on-surface: oklch(1 0 0 / 0.12);
+  --state-selected-on-surface: var(--color-primary-tonal-16);
+  --surface-hover: var(--state-hover-on-surface);
+  --surface-pressed: var(--state-pressed-on-surface);
   --text-placeholder: oklch(1 0 0 / 0.42);
   --text-secondary: oklch(1 0 0 / 0.72);
   --overlay: oklch(0 0 0 / 0.45);
@@ -77,28 +86,45 @@
   --floating-radius: var(--radius-lg);
   --floating-shadow: var(--elev-4);
 
-  /* ---------- Color: accent — SPlayer red ---------- */
-  /* --accent-dynamic is overwritten at runtime from cover art when available. */
-  --accent-base: oklch(0.63 0.215 24);
-  --accent-base-strong: oklch(0.69 0.225 24);
-  --accent-dynamic: var(--accent-base);
-  --accent-dynamic-strong: var(--accent-base-strong);
-  --accent: var(--accent-dynamic);
-  --accent-strong: var(--accent-dynamic-strong);
-  --accent-soft: color-mix(in oklch, var(--accent-dynamic) 16%, transparent);
-  --accent-foreground: oklch(0.99 0.005 25);
+  /* ---------- Color: role palette — Material tone roles from cover art ---------- */
+  --color-primary: rgb(255 179 173);
+  --color-on-primary: rgb(102 6 12);
+  --color-primary-container: rgb(134 32 32);
+  --color-on-primary-container: rgb(255 218 214);
+  --color-secondary: rgb(231 189 185);
+  --color-on-secondary: rgb(68 41 39);
+  --color-secondary-container: rgb(93 63 61);
+  --color-on-secondary-container: rgb(255 218 214);
+  --color-tertiary: rgb(225 194 140);
+  --color-on-tertiary: rgb(64 45 4);
+  --color-tertiary-container: rgb(88 67 25);
+  --color-on-tertiary-container: rgb(255 222 166);
+  --color-neutral: rgb(208 196 194);
+  --color-on-neutral: rgb(54 47 46);
+  --color-neutral-container: rgb(77 69 68);
+  --color-on-neutral-container: rgb(237 224 222);
+  --color-neutral-variant: rgb(216 194 191);
+  --color-on-neutral-variant: rgb(59 45 44);
+  --color-neutral-variant-container: rgb(83 67 66);
+  --color-on-neutral-variant-container: rgb(245 221 219);
+  --color-error: rgb(255 180 171);
+  --color-on-error: rgb(105 0 5);
+  --color-error-container: rgb(147 0 10);
+  --color-on-error-container: rgb(255 218 214);
 
-  /* Accent-on-transparent alpha scale. Replaces ad-hoc
-     `color-mix(in oklch, var(--accent) N%, transparent)` percentages
-     scattered through component CSS so all "accent tinted" surfaces /
-     borders / fills draw from one canonical ladder. */
-  --accent-a08: color-mix(in oklch, var(--accent-dynamic) 8%, transparent);
-  --accent-a12: color-mix(in oklch, var(--accent-dynamic) 12%, transparent);
-  --accent-a20: color-mix(in oklch, var(--accent-dynamic) 20%, transparent);
-  --accent-a28: color-mix(in oklch, var(--accent-dynamic) 28%, transparent);
-  --accent-a45: color-mix(in oklch, var(--accent-dynamic) 45%, transparent);
-  --accent-a58: color-mix(in oklch, var(--accent-dynamic) 58%, transparent);
-  --accent-a85: color-mix(in oklch, var(--accent-dynamic) 85%, transparent);
+  --accent: var(--color-primary);
+  --accent-strong: var(--color-primary);
+  --accent-soft: var(--color-primary-tonal-16);
+  --accent-foreground: var(--color-on-primary);
+  --color-primary-tonal-08: color-mix(in oklch, var(--color-primary) 8%, transparent);
+  --color-primary-tonal-12: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  --color-primary-tonal-16: color-mix(in oklch, var(--color-primary) 16%, transparent);
+  --color-primary-tonal-20: color-mix(in oklch, var(--color-primary) 20%, transparent);
+  --color-primary-tonal-28: color-mix(in oklch, var(--color-primary) 28%, transparent);
+  --color-primary-tonal-45: color-mix(in oklch, var(--color-primary) 45%, transparent);
+  --color-primary-tonal-58: color-mix(in oklch, var(--color-primary) 58%, transparent);
+  --color-primary-tonal-85: color-mix(in oklch, var(--color-primary) 85%, transparent);
+  --color-primary-text-soft: color-mix(in oklch, var(--color-primary) 48%, var(--text-soft));
 
   /* ---------- Semantic ---------- */
   --success: oklch(0.78 0.13 140);
@@ -123,7 +149,7 @@
     0 0 0 1px oklch(1 0 0 / 0.06) inset;
 
   /* glow used for active accents */
-  --glow-accent: 0 0 24px color-mix(in oklch, var(--accent-dynamic) 45%, transparent);
+  --glow-accent: 0 0 24px var(--color-primary-tonal-45);
 
   /* ---------- Motion ---------- */
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -162,6 +188,12 @@
   --sidebar-width-collapsed: 64px;
   --top-nav-height: 70px;
   --player-bar-height: 80px;
+  --page-pad-x: 34px;
+  --page-pad-y: var(--space-4);
+  --page-hero-size-sm: 120px;
+  --page-hero-size-md: 180px;
+  --page-hero-size-lg: 240px;
+  --toast-bottom: calc(var(--player-bar-height, 0px) + var(--space-4));
 
   /* ---------- z-index scale ---------- */
   --z-base: 0;
@@ -171,6 +203,68 @@
   --z-context-menu: 50;
   --z-modal: 60;
   --z-modal-popover: 70;
+}
+
+/* ---------- Appearance modes and centralized backdrop registry ---------- */
+:root {
+  --surface-backdrop-filter: blur(20px);
+  --surface-backdrop-filter-strong: blur(26px) saturate(1.14);
+  --surface-backdrop-filter-soft: blur(6px);
+  --player-bar-backdrop-filter: blur(20px) saturate(1.2);
+  --full-player-vignette-backdrop-filter: blur(var(--full-player-surface-blur, 24px)) saturate(0.94);
+  --full-player-fullscreen-vignette-backdrop-filter: blur(6px) saturate(1.04);
+}
+
+:where(
+  .modal-backdrop,
+  .modal-card,
+  .cat-modal-overlay,
+  .cat-modal,
+  .settings-modal,
+  .settings-modal-card,
+  .context-menu,
+  .media-sort-popover,
+  .top-button-scroll,
+  .player-tooltip,
+  .player-more-menu,
+  .player-volume-popover,
+  .player-popover,
+  .select-input-dropdown,
+  .settings-search-results,
+  .player-utility-group,
+  .player-error-popover,
+  .sidebar-playlist-source-menu,
+  .top-nav-search-panel,
+  .command-error-toast,
+  .modal-card
+) {
+  backdrop-filter: var(--surface-backdrop-filter);
+  -webkit-backdrop-filter: var(--surface-backdrop-filter);
+}
+
+:where(.queue-drawer) {
+  backdrop-filter: var(--surface-backdrop-filter-strong);
+  -webkit-backdrop-filter: var(--surface-backdrop-filter-strong);
+}
+
+:where(.album-card-play-btn) {
+  backdrop-filter: var(--surface-backdrop-filter-soft);
+  -webkit-backdrop-filter: var(--surface-backdrop-filter-soft);
+}
+
+:where(.player-bar) {
+  backdrop-filter: var(--player-bar-backdrop-filter);
+  -webkit-backdrop-filter: var(--player-bar-backdrop-filter);
+}
+
+:where(.full-player-vignette) {
+  backdrop-filter: var(--full-player-vignette-backdrop-filter);
+  -webkit-backdrop-filter: var(--full-player-vignette-backdrop-filter);
+}
+
+:where(.full-player.player-type-fullscreen .full-player-vignette) {
+  backdrop-filter: var(--full-player-fullscreen-vignette-backdrop-filter);
+  -webkit-backdrop-filter: var(--full-player-fullscreen-vignette-backdrop-filter);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -193,12 +287,18 @@
      so cards and floating panels read as "lifted" against the page
      (the opposite of dark mode, where higher surfaces are lighter
      against a near-black page). */
-  --bg: oklch(0.96 0.003 280);
-  --surface-1: oklch(0.98 0.002 280);
-  --surface-2: oklch(0.99 0.002 280);
-  --surface-3: oklch(0.995 0.001 280);
-  --surface-4: oklch(1 0 0);
-  --surface-container: var(--surface-container-dynamic, oklch(0.99 0.002 280 / 0.92));
+  --bg-base: oklch(0.96 0.003 280);
+  --surface-1-base: oklch(0.98 0.002 280);
+  --surface-2-base: oklch(0.99 0.002 280);
+  --surface-3-base: oklch(0.995 0.001 280);
+  --surface-4-base: oklch(1 0 0);
+  --bg: var(--bg-base);
+  --surface-1: var(--surface-1-base);
+  --surface-2: var(--surface-2-base);
+  --surface-3: var(--surface-3-base);
+  --surface-4: var(--surface-4-base);
+  --surface-container-default: oklch(0.99 0.002 280 / 0.92);
+  --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
 
   --surface-1-soft: oklch(0.98 0.002 280 / 0.85);
   --surface-2-soft: oklch(0.99 0.002 280 / 0.85);
@@ -213,11 +313,30 @@
   --muted: oklch(0.50 0.008 280);
   --muted-soft: oklch(0.62 0.008 280);
 
-  /* Light-mode accent approximates HCT tone-10 of the SPlayer coral —
-     a dark, low-chroma warm red used as brand colour on a light page,
-     same role SPlayer plays via Material You tone-mapping. */
-  --accent-base: oklch(0.42 0.13 24);
-  --accent-base-strong: oklch(0.36 0.15 24);
+  --color-primary: rgb(167 56 52);
+  --color-on-primary: rgb(255 255 255);
+  --color-primary-container: rgb(255 218 214);
+  --color-on-primary-container: rgb(65 0 3);
+  --color-secondary: rgb(119 86 83);
+  --color-on-secondary: rgb(255 255 255);
+  --color-secondary-container: rgb(255 218 214);
+  --color-on-secondary-container: rgb(44 21 19);
+  --color-tertiary: rgb(114 91 46);
+  --color-on-tertiary: rgb(255 255 255);
+  --color-tertiary-container: rgb(255 222 166);
+  --color-on-tertiary-container: rgb(38 25 0);
+  --color-neutral: rgb(101 92 91);
+  --color-on-neutral: rgb(255 255 255);
+  --color-neutral-container: rgb(237 224 222);
+  --color-on-neutral-container: rgb(32 26 25);
+  --color-neutral-variant: rgb(107 90 89);
+  --color-on-neutral-variant: rgb(255 255 255);
+  --color-neutral-variant-container: rgb(245 221 219);
+  --color-on-neutral-variant-container: rgb(37 25 23);
+  --color-error: rgb(186 26 26);
+  --color-on-error: rgb(255 255 255);
+  --color-error-container: rgb(255 218 214);
+  --color-on-error-container: rgb(65 0 2);
 
   /* Override the dark-only white-with-alpha aliases with black-with-alpha
      so subtle backgrounds, borders, and secondary text stay visible on a
@@ -226,8 +345,11 @@
      and only become visible on hover (which switches them to var(--text)). */
   --border-faint: oklch(0 0 0 / 0.06);
   --border-overlay: oklch(0 0 0 / 0.09);
-  --surface-hover: oklch(0 0 0 / 0.05);
-  --surface-pressed: oklch(0 0 0 / 0.09);
+  --state-hover-on-surface: oklch(0 0 0 / 0.05);
+  --state-pressed-on-surface: oklch(0 0 0 / 0.09);
+  --state-selected-on-surface: var(--color-primary-tonal-12);
+  --surface-hover: var(--state-hover-on-surface);
+  --surface-pressed: var(--state-pressed-on-surface);
   --text-placeholder: oklch(0 0 0 / 0.45);
   --text-secondary: oklch(0 0 0 / 0.72);
 
@@ -251,5 +373,45 @@
     0 8px 16px oklch(0 0 0 / 0.1),
     0 0 0 1px oklch(0 0 0 / 0.04);
 
-  --glow-accent: 0 0 24px color-mix(in oklch, var(--accent-dynamic) 25%, transparent);
+  --glow-accent: 0 0 24px var(--color-primary-tonal-28);
+}
+
+[data-appearance-mode="solid"] {
+  --floating-surface: var(--surface-2);
+  --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
+}
+
+[data-appearance-mode="cover-blur"] {
+  --surface-1: var(--surface-1-soft);
+  --surface-2: color-mix(in oklch, var(--surface-2-soft) 88%, var(--surface-2-base));
+  --surface-3: color-mix(in oklch, var(--surface-3-soft) 88%, var(--surface-3-base));
+  --surface-container: color-mix(in oklch, var(--surface-container-dynamic, var(--surface-container-default)) 82%, transparent);
+  --floating-surface: color-mix(in oklch, var(--surface-2) 88%, transparent);
+}
+
+[data-appearance-mode="cover-immersive"] {
+  --bg: oklch(0.09 0.006 280);
+  --surface-1: var(--surface-1-soft);
+  --surface-2: var(--surface-2-soft);
+  --surface-3: var(--surface-3-soft);
+  --surface-container: oklch(0 0 0 / 0.2);
+  --floating-surface: oklch(0 0 0 / 0.2);
+  --floating-border: var(--color-primary-tonal-12);
+  --border-overlay: var(--color-primary-tonal-16);
+}
+
+[data-appearance-mode="particles"] {
+  --surface-1: var(--surface-1-soft);
+  --surface-2: color-mix(in oklch, var(--surface-2-soft) 92%, var(--surface-2-base));
+  --surface-3: color-mix(in oklch, var(--surface-3-soft) 92%, var(--surface-3-base));
+  --surface-container: color-mix(in oklch, var(--surface-container-dynamic, var(--surface-container-default)) 76%, transparent);
+  --floating-surface: color-mix(in oklch, var(--surface-2) 82%, transparent);
+}
+
+[data-appearance-mode="vinyl"] {
+  --surface-1: color-mix(in oklch, var(--surface-1-soft) 86%, var(--surface-1-base));
+  --surface-2: color-mix(in oklch, var(--surface-2-soft) 86%, var(--surface-2-base));
+  --surface-3: color-mix(in oklch, var(--surface-3-soft) 86%, var(--surface-3-base));
+  --surface-container: color-mix(in oklch, var(--surface-container-dynamic, var(--surface-container-default)) 80%, transparent);
+  --floating-surface: color-mix(in oklch, var(--surface-2) 84%, transparent);
 }

@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from
 import { CreatePlaylistModal } from "../../../components/CreatePlaylistModal";
 import { IconPlaylist, IconPlus, IconQueueAdd } from "../../../components/icons";
 import { Modal } from "../../../components/Modal";
+import { SImage } from "../../../components/SImage";
 import { createApiClient } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
 import type { NcmPlaylistSummary } from "../../../shared/api/client";
@@ -352,7 +353,7 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
                     >
                       <span class="local-playlist-target-icon" aria-hidden="true">
                         <Show when={playlist.coverUrl} fallback={<IconPlaylist />}>
-                          {(coverUrl) => <img src={coverUrl()} alt="" />}
+                          {(coverUrl) => <SImage src={coverUrl()} alt="" observeVisibility={true} shape="rect" aspect="square" />}
                         </Show>
                       </span>
                       <span class="local-playlist-target-copy">

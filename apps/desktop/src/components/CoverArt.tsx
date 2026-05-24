@@ -1,7 +1,6 @@
-import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { For, createEffect, createSignal, onCleanup } from "solid-js";
 import { useTranslation } from "../shared/i18n";
-import { DEFAULT_COVER_ART_URL } from "../shared/ui/artwork";
-import { isVideoArtworkUrl } from "../shared/ui/mediaArtwork";
+import { SImage } from "./SImage";
 
 interface CoverArtProps {
   coverUrl: string | null;
@@ -14,48 +13,6 @@ interface Layer {
 }
 
 const CROSSFADE_MS = 350;
-
-function CoverPlaceholder() {
-  return (
-    <div class="cover-placeholder" aria-hidden="true">
-      <img src={DEFAULT_COVER_ART_URL} alt="" class="cover-placeholder-img" />
-    </div>
-  );
-}
-
-function CoverLayer(props: { url: string; alt: string }) {
-  const [loaded, setLoaded] = createSignal(false);
-  const [failed, setFailed] = createSignal(false);
-  const isVideo = () => isVideoArtworkUrl(props.url);
-  return (
-    <Show when={!failed()}>
-      <Show
-        when={isVideo()}
-        fallback={
-          <img
-            class={`cover-art-image${loaded() ? " is-loaded" : ""}`}
-            src={props.url}
-            alt={props.alt}
-            onLoad={() => setLoaded(true)}
-            onError={() => setFailed(true)}
-          />
-        }
-      >
-        <video
-          class={`cover-art-image${loaded() ? " is-loaded" : ""}`}
-          src={props.url}
-          aria-label={props.alt}
-          autoplay
-          loop
-          muted
-          playsinline
-          onCanPlay={() => setLoaded(true)}
-          onError={() => setFailed(true)}
-        />
-      </Show>
-    </Show>
-  );
-}
 
 export function CoverArt(props: CoverArtProps) {
   const { t } = useTranslation();
@@ -85,8 +42,30 @@ export function CoverArt(props: CoverArtProps) {
 
   return (
     <div class="cover-art">
-      <CoverPlaceholder />
+      <SImage
+        src={null}
+        alt=""
+        class="cover-placeholder"
+        observeVisibility={false}
+        shape="rect"
+        aspect="square"
+        ariaHidden="true"
+      />
       <For each={layers()}>{(layer) => <CoverLayer url={layer.url} alt={resolvedAlt()} />}</For>
     </div>
+  );
+}
+
+function CoverLayer(props: { url: string; alt: string }) {
+  return (
+    <SImage
+      src={props.url}
+      alt={props.alt}
+      class="cover-art-layer"
+      mediaClass="cover-art-image"
+      observeVisibility={false}
+      shape="rect"
+      aspect="square"
+    />
   );
 }

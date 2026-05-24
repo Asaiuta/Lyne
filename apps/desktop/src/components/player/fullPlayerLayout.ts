@@ -26,6 +26,22 @@ const clampBackgroundFps = (value: number) => Math.min(256, Math.max(24, value))
 
 const clampBackgroundRenderScale = (value: number) => Math.min(3, Math.max(0.1, value));
 
+const getLayoutRatios = (settings: FullPlayerLayoutSettings) => {
+  const leftRatio = settings.playerType === "fullscreen" ? 50 : clampPlayerStyleRatio(settings.playerStyleRatio);
+  return {
+    leftRatio,
+    rightRatio: 100 - leftRatio
+  };
+};
+
+const getLayoutRatioVars = (settings: FullPlayerLayoutSettings): JSX.CSSProperties => {
+  const { leftRatio, rightRatio } = getLayoutRatios(settings);
+  return {
+    "--full-player-left-ratio": `${leftRatio}%`,
+    "--full-player-right-ratio": `${rightRatio}%`
+  } as JSX.CSSProperties;
+};
+
 export const getLyricLineAlign = (settings: FullPlayerLayoutSettings): string =>
   settings.lyricAlignRight ? "flex-end" : settings.lyricsPosition;
 
@@ -51,6 +67,7 @@ export const getRootStyle = (
   const fluidInset = -(8 + renderScale * 12);
   const backgroundBlur = Math.max(0, bgBlur);
   return {
+    ...getLayoutRatioVars(settings),
     "--full-player-fluid-duration": `${duration}s`,
     "--full-player-fluid-frames": String(frameCount),
     "--full-player-fluid-scale": String(fluidScale),
@@ -71,9 +88,9 @@ export const getStageStyle = (
   if (pureLyricMode || showComment || settings.playerType === "fullscreen") {
     return undefined;
   }
-  const coverRatio = clampPlayerStyleRatio(settings.playerStyleRatio);
+  const { leftRatio, rightRatio } = getLayoutRatios(settings);
   return {
-    "grid-template-columns": `minmax(340px, ${coverRatio}fr) minmax(560px, ${100 - coverRatio}fr)`
+    "grid-template-columns": `minmax(340px, ${leftRatio}fr) minmax(560px, ${rightRatio}fr)`
   };
 };
 
@@ -116,11 +133,13 @@ export const getFullPlayerRootClassName = (
   settings: FullPlayerLayoutSettings,
   isOpen: boolean,
   isPlaying: boolean,
-  showComment: boolean
+  showComment: boolean,
+  metaVisible: boolean
 ): string =>
   [
     "full-player",
     isOpen ? "is-open" : "",
+    !metaVisible && !showComment ? "is-meta-hidden" : "",
     `player-type-${settings.playerType}`,
     `background-mode-${settings.playerBackgroundType}`,
     `expand-animation-${settings.playerExpandAnimation === "flow" ? "flow" : "up"}`,
@@ -131,10 +150,3 @@ export const getFullPlayerRootClassName = (
   ]
     .filter(Boolean)
     .join(" ");
-
-export const getCoverBackgroundStyle = (coverUrl: string | null): JSX.CSSProperties | undefined =>
-  coverUrl
-    ? {
-        "background-image": `url("${coverUrl}")`
-      }
-    : undefined;

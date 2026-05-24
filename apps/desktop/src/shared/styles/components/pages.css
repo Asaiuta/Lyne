@@ -1,4 +1,92 @@
 @layer components {
+  .page-surface {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 100%;
+    width: 100%;
+    container-type: inline-size;
+  }
+
+  .page-surface--floating-hero {
+    overflow: hidden;
+  }
+
+  .page-surface--floating-hero > .page-hero {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    z-index: 2;
+  }
+
+  .page-hero {
+    min-width: 0;
+    flex: none;
+  }
+
+  .page-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .page-body--hero-offset {
+    padding-top: var(--page-hero-offset);
+    transition:
+      padding-top var(--duration-base) var(--ease-standard),
+      opacity var(--duration-base) var(--ease-standard);
+  }
+
+  .page-body--scroll-root {
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .page-back-to-top {
+    position: fixed;
+    right: 40px;
+    bottom: calc(var(--toast-bottom) + var(--space-5));
+    z-index: var(--z-sticky);
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--color-primary-tonal-28);
+    border-radius: var(--radius-pill);
+    color: var(--text-soft);
+    background: var(--floating-surface);
+    box-shadow: var(--floating-shadow);
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition:
+      opacity var(--duration-base) var(--ease-standard),
+      transform var(--duration-base) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .page-back-to-top.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .page-back-to-top:hover {
+    color: var(--text);
+    border-color: var(--color-primary-tonal-58);
+  }
+
+  .page-back-to-top svg {
+    width: 22px;
+    height: 22px;
+  }
+
   .local-library-head {
     display: flex;
     flex: none;
@@ -115,8 +203,8 @@
   .local-library-search:focus-within {
     width: 200px;
     color: var(--text-secondary);
-    background: var(--surface-hover);
-    border-color: var(--surface-hover);
+    background: var(--state-hover-on-surface);
+    border-color: var(--state-hover-on-surface);
   }
 
   .local-library-search input {
@@ -154,8 +242,8 @@
   .local-library-folder-select:focus-within,
   .local-library-folder-select:hover {
     color: var(--text-secondary);
-    background: var(--surface-hover);
-    border-color: var(--surface-hover);
+    background: var(--state-hover-on-surface);
+    border-color: var(--state-hover-on-surface);
   }
 
   .local-library-folder-select svg {
@@ -229,7 +317,7 @@
     min-height: 22px;
     margin-top: 4px;
     font-size: 12px;
-    color: color-mix(in oklch, var(--accent-dynamic) 48%, var(--text-soft));
+    color: var(--color-primary-text-soft);
   }
 
   .local-library-router > .status-line {
@@ -294,7 +382,7 @@
     min-height: 76px;
     margin-bottom: 8px;
     padding: 12px;
-    border: 2px solid var(--accent-a12);
+    border: 2px solid var(--color-primary-tonal-12);
     border-radius: var(--radius-sm);
     color: var(--text-soft);
     background: color-mix(in oklch, var(--surface-2) 88%, transparent);
@@ -308,12 +396,12 @@
 
   .local-browser-card:hover,
   .local-browser-card.is-active {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
   }
 
   .local-browser-card.is-active {
     color: var(--text);
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
   }
 
   .local-browser-cover {
@@ -441,13 +529,13 @@
     flex: 1;
   }
 
-  .local-playlist-detail .playlist-detail-shell.is-local-scrolled .playlist-detail-collapse {
+  .local-playlist-detail .page-hero.is-small .playlist-detail-collapse {
     opacity: 0;
     pointer-events: none;
     transform: translateY(-8px);
   }
 
-  .local-playlist-detail .playlist-detail-shell.is-local-scrolled .playlist-detail-art-mask {
+  .local-playlist-detail .page-hero.is-small .playlist-detail-art-mask {
     opacity: 0;
   }
 
@@ -471,7 +559,7 @@
     grid-template-columns: minmax(0, 1fr) 34px;
     align-items: center;
     margin-bottom: 8px;
-    border: 2px solid var(--accent-a12);
+    border: 2px solid var(--color-primary-tonal-12);
     border-radius: var(--radius-sm);
     color: var(--text-soft);
     background: color-mix(in oklch, var(--surface-2) 88%, transparent);
@@ -482,12 +570,12 @@
 
   .local-playlist-card:hover,
   .local-playlist-card.is-active {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
   }
 
   .local-playlist-card.is-active {
     color: var(--text);
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
   }
 
   .local-playlist-main {
@@ -579,7 +667,7 @@
   }
 
   .local-folder-node.is-active {
-    background: color-mix(in oklch, var(--accent-dynamic) 22%, var(--surface-2));
+    background: color-mix(in oklch, var(--color-primary-container) 42%, var(--surface-2));
   }
 
   .local-folder-node-icon {
@@ -610,7 +698,7 @@
   }
 
   .local-folder-node-toggle:hover {
-    background: var(--surface-hover);
+    background: var(--state-hover-on-surface);
     color: var(--text);
   }
 
@@ -706,7 +794,7 @@
   }
 
   .local-playlist-target:hover:not(:disabled) {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     color: var(--text);
   }
 
@@ -717,7 +805,7 @@
     height: 32px;
     border-radius: var(--radius-sm);
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .local-playlist-target-icon svg,
@@ -1049,9 +1137,9 @@
 
   .ncm-update-playlist-tag:hover,
   .ncm-update-playlist-tag.is-active {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .ncm-cloud-match-modal {
@@ -1073,7 +1161,7 @@
   }
 
   .ncm-cloud-match-preview {
-    border-color: var(--accent-a20);
+    border-color: var(--color-primary-tonal-20);
     background: color-mix(in oklch, var(--accent) 8%, transparent);
   }
 
@@ -1178,7 +1266,6 @@
     border-radius: var(--radius-card) 0 0 var(--radius-card);
     background: transparent;
     box-shadow: none;
-    backdrop-filter: none;
   }
 
   .media-list-table.is-album-hidden {
@@ -1285,7 +1372,7 @@
     margin-bottom: 12px;
     padding: 8px 12px;
     border-radius: var(--radius-card);
-    border: 2px solid var(--accent-a12);
+    border: 2px solid var(--color-primary-tonal-12);
     color: var(--text-soft);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
     transition:
@@ -1296,24 +1383,24 @@
   }
 
   .media-row:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
   }
 
   .media-row.is-current {
-    border-color: var(--accent-a58);
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
+    border-color: var(--color-primary-tonal-58);
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
     color: var(--text);
   }
 
   .media-row.is-drop-target {
     border-color: var(--accent);
-    box-shadow: inset 0 0 0 1px var(--accent-a58);
+    box-shadow: inset 0 0 0 1px var(--color-primary-tonal-58);
   }
 
   .media-row.is-checked {
-    border-color: color-mix(in oklch, var(--accent-dynamic) 68%, transparent);
-    background: color-mix(in oklch, var(--accent-dynamic) 18%, var(--surface-2));
+    border-color: var(--color-primary-tonal-58);
+    background: color-mix(in oklch, var(--color-primary-container) 34%, var(--surface-2));
   }
 
   .media-row.is-current .media-row-title,
@@ -1360,7 +1447,7 @@
     z-index: -1;
     opacity: 0;
     border-radius: var(--radius-sm);
-    background: color-mix(in oklch, var(--accent-dynamic) 8%, transparent);
+    background: var(--color-primary-tonal-08);
     transition: opacity 0.3s var(--ease-standard);
   }
 
@@ -1708,7 +1795,6 @@
     border-radius: var(--floating-radius);
     background: var(--floating-surface);
     box-shadow: var(--floating-shadow);
-    backdrop-filter: blur(20px);
     animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
   }
 
@@ -1764,7 +1850,7 @@
     margin-bottom: 12px;
     padding: 8px 12px;
     border-radius: var(--radius-card);
-    border: 2px solid var(--accent-a12);
+    border: 2px solid var(--color-primary-tonal-12);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
     transition:
       background-color 0.3s var(--ease-standard),
@@ -1773,13 +1859,13 @@
 
   .queue-item:hover,
   .history-item:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     background: color-mix(in oklch, var(--surface-3) 84%, transparent);
   }
 
   .queue-item.is-current {
-    border-color: var(--accent-a58);
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
+    border-color: var(--color-primary-tonal-58);
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
   }
 
   .library-root-meta,
@@ -2188,7 +2274,7 @@
   .online-discover-filter-menu button.is-active {
     color: var(--accent-foreground);
     border-color: color-mix(in oklch, var(--accent) 55%, white 12%);
-    background: var(--accent-a85);
+    background: var(--color-primary-tonal-85);
   }
 
   .online-discover-new .online-discover-menu {
@@ -2242,7 +2328,6 @@
     border-radius: var(--floating-radius);
     background: var(--floating-surface);
     box-shadow: var(--floating-shadow);
-    backdrop-filter: blur(20px);
     animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
   }
 
@@ -2305,12 +2390,11 @@
     place-items: center;
     width: 42px;
     height: 42px;
-    border: 1px solid var(--accent-a28);
+    border: 1px solid var(--color-primary-tonal-28);
     border-radius: var(--radius-pill);
     color: var(--text-soft);
     background: var(--floating-surface);
     box-shadow: var(--floating-shadow);
-    backdrop-filter: blur(20px);
     pointer-events: auto;
     transition:
       opacity 0.3s var(--ease-standard),
@@ -2320,7 +2404,7 @@
 
   .media-list-float-button:hover {
     color: var(--text);
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
   }
 
   .media-list-float-button.is-hidden {
@@ -2387,7 +2471,7 @@
 
   .online-discover-section .album-card:hover,
   .ncm-home-feed .album-card:hover {
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .online-discover-section .album-card:active,
@@ -2411,8 +2495,6 @@
   .ncm-home-feed .album-card-play-btn {
     color: #fff;
     background: rgba(255, 255, 255, 0.4);
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
   }
 
   .online-discover-section .album-card-play-btn:active,
@@ -2425,13 +2507,13 @@
     min-height: 80px;
     padding: 0;
     overflow: hidden;
-    border: 2px solid var(--accent-a12);
+    border: 2px solid var(--color-primary-tonal-12);
     background: var(--surface-2);
   }
 
   .online-discover-section .album-card.is-cover-hidden:hover,
   .ncm-home-feed .album-card.is-cover-hidden:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
   }
 
   .online-discover-section .album-card.is-cover-hidden .album-card-copy,
@@ -2490,7 +2572,7 @@
     content: "";
     height: 1px;
     flex: 1;
-    background: var(--surface-hover);
+    background: var(--state-hover-on-surface);
   }
 
   .online-toplist-grid {
@@ -2516,7 +2598,7 @@
   }
 
   .online-toplist-card:hover {
-    border-color: var(--accent-a58, var(--surface-hover));
+    border-color: var(--color-primary-tonal-58, var(--state-hover-on-surface));
   }
 
   .online-toplist-card:hover .online-toplist-cover img {
@@ -2827,7 +2909,7 @@
   }
   .daily-songs-card:hover {
     transform: none;
-    border-color: var(--surface-hover);
+    border-color: var(--state-hover-on-surface);
     background: var(--border-faint);
   }
   .daily-songs-card:hover .daily-songs-card-play {
@@ -2909,7 +2991,7 @@
     place-items: center;
     width: 100%;
     height: 100%;
-    background: var(--surface-3, var(--surface-hover));
+    background: var(--surface-3, var(--state-hover-on-surface));
     border-radius: var(--radius-card);
     font-size: 32px;
     font-weight: 600;
@@ -3037,7 +3119,7 @@
   }
 
   .ncm-home-feed-fm-card:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
   }
 
   .ncm-home-feed-fm-card-blur {
@@ -3129,7 +3211,7 @@
   }
 
   .ncm-home-feed-fm-card-control:hover {
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
     transform: scale(1.1);
   }
 
@@ -3145,11 +3227,11 @@
   .ncm-home-feed-fm-card-control--primary {
     width: 46px;
     height: 46px;
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .ncm-home-feed-fm-card-control--primary:hover {
-    background: var(--accent-a20);
+    background: var(--color-primary-tonal-20);
   }
 
   .ncm-home-feed-fm-card-badge {
@@ -3902,8 +3984,8 @@
   .ncm-artist-count:hover,
   .ncm-artist-count.is-active {
     color: var(--text);
-    border-color: var(--accent-a45);
-    background: var(--accent-a12);
+    border-color: var(--color-primary-tonal-45);
+    background: var(--color-primary-tonal-12);
   }
 
   .ncm-artist-count svg {
@@ -4158,12 +4240,11 @@
     color: var(--accent);
   }
 
-  .ncm-video-artist img {
+  .ncm-video-artist-avatar {
     width: 40px;
     height: 40px;
     flex: none;
     border-radius: var(--radius-pill);
-    object-fit: cover;
   }
 
   .ncm-video-artist span {
@@ -4321,7 +4402,7 @@
     gap: 12px;
     min-height: 128px;
     padding: 16px;
-    border: 2px solid var(--accent-a12);
+    border: 2px solid var(--color-primary-tonal-12);
     border-radius: var(--radius-card);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
   }
@@ -4431,7 +4512,7 @@
     padding: 8px 10px;
     border-radius: var(--radius-sm);
     color: var(--text-soft);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
     font-size: 13px;
     line-height: 1.55;
   }
@@ -4476,6 +4557,18 @@
 
   .ncm-resource-comments-feedback.status-error {
     color: var(--danger, #e5484d);
+  }
+
+  .panel-error-boundary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    min-height: 120px;
+    padding: var(--space-4);
+    border: 1px solid color-mix(in oklch, var(--danger) 42%, transparent);
+    border-radius: var(--radius-card);
+    background: color-mix(in oklch, var(--danger) 8%, var(--surface-1));
   }
 
   .ncm-video-comments-more,
@@ -4611,7 +4704,6 @@
     background: var(--border-faint);
     border: 1px solid var(--border-overlay);
     box-shadow: none;
-    backdrop-filter: none;
   }
 
   .online-result-panel {
@@ -4623,7 +4715,6 @@
     border: 0;
     background: transparent;
     box-shadow: none;
-    backdrop-filter: none;
   }
 
   .online-result-panel-head,
@@ -4860,9 +4951,9 @@
 
   .liked-collection-chip:hover,
   .liked-collection-chip.is-active {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .liked-collection-unavailable {
@@ -4981,8 +5072,8 @@
   }
 
   .radio-category-card:hover {
-    border-color: var(--accent-a58);
-    background: var(--accent-a12);
+    border-color: var(--color-primary-tonal-58);
+    background: var(--color-primary-tonal-12);
   }
 
   .radio-category-card:active {
@@ -5174,7 +5265,7 @@
   }
 
   .playlist-detail-head {
-    position: absolute;
+    position: relative;
     z-index: 2;
     display: flex;
     width: 100%;
@@ -5212,11 +5303,6 @@
 
   .playlist-detail-head.is-cover-hidden .playlist-detail-copy {
     padding-right: 0;
-  }
-
-  .playlist-detail-shell:has(.playlist-detail-head.is-cover-hidden) > .media-list-table,
-  .playlist-detail-shell:has(.playlist-detail-head.is-cover-hidden) > .playlist-detail-comments {
-    padding-top: 200px;
   }
 
   .playlist-detail-art-img,
@@ -5438,7 +5524,7 @@
 
   .playlist-detail-search:focus-within {
     width: 200px;
-    border-color: var(--accent-a45);
+    border-color: var(--color-primary-tonal-45);
   }
 
   .playlist-detail-search svg {
@@ -5497,68 +5583,55 @@
     transform: translateY(-4px);
   }
 
-  .playlist-detail-shell > .media-list-table,
-  .playlist-detail-comments {
-    padding-top: 240px;
-    transition:
-      padding 0.3s var(--ease-standard),
-      opacity 0.3s var(--ease-standard);
-  }
-
-  .playlist-detail-shell.is-small .playlist-detail-head {
+  .page-hero.is-small .playlist-detail-head {
     height: 120px;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-art {
+  .page-hero.is-small .playlist-detail-art {
     margin-right: 12px;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-art-mask {
+  .page-hero.is-small .playlist-detail-art-mask {
     opacity: 0;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-copy h2 {
+  .page-hero.is-small .playlist-detail-copy h2 {
     font-size: 22px;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-collapse {
+  .page-hero.is-small .playlist-detail-collapse {
     opacity: 0;
     pointer-events: none;
     transform: translateY(-8px);
   }
 
-  .playlist-detail-shell.is-small > .media-list-table,
-  .playlist-detail-shell.is-small > .playlist-detail-comments {
-    padding-top: 120px;
-  }
-
-  .playlist-detail-shell.is-small .playlist-detail-play,
-  .playlist-detail-shell.is-small .playlist-detail-back,
-  .playlist-detail-shell.is-small .playlist-detail-subscribe,
-  .playlist-detail-shell.is-small .playlist-detail-more,
-  .playlist-detail-shell.is-small .playlist-detail-icon-button,
-  .playlist-detail-shell.is-small .playlist-detail-search,
-  .playlist-detail-shell.is-small .playlist-detail-tabs {
+  .page-hero.is-small .playlist-detail-play,
+  .page-hero.is-small .playlist-detail-back,
+  .page-hero.is-small .playlist-detail-subscribe,
+  .page-hero.is-small .playlist-detail-more,
+  .page-hero.is-small .playlist-detail-icon-button,
+  .page-hero.is-small .playlist-detail-search,
+  .page-hero.is-small .playlist-detail-tabs {
     height: 32px;
     min-height: 32px;
     font-size: 13px;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-play,
-  .playlist-detail-shell.is-small .playlist-detail-back,
-  .playlist-detail-shell.is-small .playlist-detail-subscribe {
+  .page-hero.is-small .playlist-detail-play,
+  .page-hero.is-small .playlist-detail-back,
+  .page-hero.is-small .playlist-detail-subscribe {
     padding-inline: 14px;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-more {
+  .page-hero.is-small .playlist-detail-more {
     width: 32px;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-icon-button {
+  .page-hero.is-small .playlist-detail-icon-button {
     width: 32px;
   }
 
-  .playlist-detail-shell.is-small .playlist-detail-tabs button {
+  .page-hero.is-small .playlist-detail-tabs button {
     height: 24px;
     font-size: 13px;
   }
@@ -5614,7 +5687,6 @@
     border: 1px solid var(--border-overlay);
     background: var(--border-faint);
     box-shadow: none;
-    backdrop-filter: none;
   }
 
   .online-playlist-browser {
@@ -5668,8 +5740,8 @@
   }
 
   .online-result-panel .media-row.is-current {
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
-    box-shadow: inset 0 0 0 1px var(--accent-a20);
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
+    box-shadow: inset 0 0 0 1px var(--color-primary-tonal-20);
   }
 
   .online-result-panel .media-row-title {
@@ -5696,18 +5768,18 @@
     margin-bottom: 12px;
     padding: 8px 12px;
     border-radius: var(--radius-card);
-    border: 2px solid var(--accent-a12);
+    border: 2px solid var(--color-primary-tonal-12);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
   }
 
   .playlist-detail .media-row:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
   }
 
   .playlist-detail .media-row.is-current {
-    border-color: var(--accent-a58);
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
+    border-color: var(--color-primary-tonal-58);
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
   }
 
   .online-playlist-card {
@@ -5728,7 +5800,7 @@
   .online-playlist-card:hover,
   .online-playlist-card.is-active {
     transform: translateY(-1px);
-    border-color: var(--accent-a20);
+    border-color: var(--color-primary-tonal-20);
     background: var(--border-overlay);
     box-shadow: none;
   }
@@ -6070,7 +6142,7 @@
   }
 
   .song-wiki-info-card:hover {
-    border-color: var(--accent-a20);
+    border-color: var(--color-primary-tonal-20);
     background: color-mix(in oklch, var(--surface-3) 84%, transparent);
   }
 
@@ -6102,7 +6174,7 @@
     padding: 4px 9px;
     border-radius: var(--radius-pill);
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
     font-size: 12px;
     font-style: normal;
     line-height: 16px;
@@ -6127,7 +6199,7 @@
 
   .song-wiki-sheet.is-expanded,
   .song-wiki-sheet:hover {
-    border-color: var(--accent-a20);
+    border-color: var(--color-primary-tonal-20);
     background: color-mix(in oklch, var(--surface-3) 86%, transparent);
   }
 
@@ -6143,11 +6215,10 @@
     text-align: left;
   }
 
-  .song-wiki-sheet-head > img {
+  .song-wiki-sheet-cover {
     width: 56px;
     height: 56px;
     border-radius: var(--radius-sm);
-    object-fit: cover;
   }
 
   .song-wiki-sheet-head > span {
@@ -6212,12 +6283,11 @@
     gap: 10px;
   }
 
-  .song-wiki-sheet-images img {
+  .song-wiki-sheet-image {
     width: 100%;
-    height: auto;
     border-radius: var(--radius-sm);
     background: var(--surface-2);
-    object-fit: cover;
+    box-shadow: none;
   }
 
   .song-wiki-achievement {
@@ -6232,19 +6302,18 @@
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
   }
 
-  .song-wiki-achievement img,
+  .song-wiki-achievement-image,
   .song-wiki-achievement-icon {
     width: 56px;
     height: 56px;
     border-radius: var(--radius-sm);
-    object-fit: cover;
   }
 
   .song-wiki-achievement-icon {
     display: grid;
     place-items: center;
     color: var(--accent);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
   }
 
   .song-wiki-achievement-icon svg {
@@ -6290,13 +6359,13 @@
   }
 
   .song-wiki-similar .media-row:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
   }
 
   .song-wiki-similar .media-row.is-current {
-    border-color: var(--accent-a58);
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
+    border-color: var(--color-primary-tonal-58);
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
   }
 
   .song-wiki-empty {
@@ -6391,8 +6460,8 @@
       grid-template-columns: 48px minmax(0, 1fr) 20px;
     }
 
-    .song-wiki-sheet-head > img,
-    .song-wiki-achievement img,
+    .song-wiki-sheet-cover,
+    .song-wiki-achievement-image,
     .song-wiki-achievement-icon {
       width: 48px;
       height: 48px;
@@ -6436,7 +6505,7 @@
   }
 
   .personal-fm-hero:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
   }
 
   .personal-fm-hero.is-cover-hidden {
@@ -6586,7 +6655,7 @@
     height: 46px;
     min-height: 46px;
     padding: 0;
-    background: var(--accent-a08);
+    background: var(--color-primary-tonal-08);
   }
 
   .personal-fm-play span {
@@ -6614,7 +6683,7 @@
   .personal-fm-play:hover:not(:disabled),
   .personal-fm-icon-button:hover:not(:disabled) {
     transform: scale(1.1);
-    background: var(--accent-a12);
+    background: var(--color-primary-tonal-12);
     color: var(--accent);
   }
 
@@ -6649,7 +6718,7 @@
     width: 42px;
     height: 42px;
     min-height: 42px;
-    background: var(--accent-a08);
+    background: var(--color-primary-tonal-08);
   }
 
   .personal-fm-hero.is-cover-hidden .personal-fm-play {
@@ -6683,13 +6752,13 @@
   }
 
   .personal-fm-list .media-row:hover {
-    border-color: var(--accent-a58);
+    border-color: var(--color-primary-tonal-58);
     background: color-mix(in oklch, var(--surface-2) 92%, transparent);
   }
 
   .personal-fm-list .media-row.is-current {
-    border-color: var(--accent-a58);
-    background: color-mix(in oklch, var(--accent-dynamic) 28%, var(--surface-2));
+    border-color: var(--color-primary-tonal-58);
+    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
   }
 
   .personal-fm-feedback {

@@ -1,3 +1,4 @@
+import { ErrorBoundary } from "solid-js";
 import { render } from "solid-js/web";
 import App from "./app/App";
 import { I18nProvider } from "./shared/i18n";
@@ -5,10 +6,8 @@ import { NcmAccountProvider } from "./shared/state/NcmAccountContext";
 import { readUISettingsSnapshot } from "./shared/state/useUISettings";
 import { applyUserAppearanceSettings } from "./shared/styles/customAppearance";
 import "./shared/styles/global.css";
+import "./shared/styles/appearance.css";
 import "./shared/styles/components/shell.css";
-import "./shared/styles/components/pages.css";
-import "./shared/styles/components/player.css";
-import "./shared/styles/components/modals.css";
 import "./shared/styles/transitions.css";
 import "virtual:uno.css";
 
@@ -37,11 +36,23 @@ if (!root) {
 
 render(
   () => (
-    <I18nProvider>
-      <NcmAccountProvider>
-        <App />
-      </NcmAccountProvider>
-    </I18nProvider>
+    <ErrorBoundary
+      fallback={(error) => (
+        <main class="root-error-boundary" role="alert">
+          <strong>Lyne failed to start</strong>
+          <span>{error instanceof Error ? error.message : "Unknown error"}</span>
+          <button type="button" class="ghost-button" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </main>
+      )}
+    >
+      <I18nProvider>
+        <NcmAccountProvider>
+          <App />
+        </NcmAccountProvider>
+      </I18nProvider>
+    </ErrorBoundary>
   ),
   root
 );

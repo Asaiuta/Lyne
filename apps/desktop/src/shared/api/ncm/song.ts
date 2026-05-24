@@ -18,15 +18,49 @@ const songIdPayload = (params: NcmSongUrlParams) => {
   throw new Error("song URL request requires `id` or `ids`");
 };
 
-export const songUrl = (params: NcmSongUrlParams): Promise<NcmResponseEnvelope> =>
-  requestNcm("song/url", {
+const SONG_URL_CACHE_LIMIT = 200;
+const songUrlCache = new Map<string, Promise<NcmResponseEnvelope>>();
+
+const songUrlCacheKey = (params: NcmSongUrlParams): string =>
+  JSON.stringify({
+    id: params.id ?? null,
+    ids: params.ids ?? null,
+    br: params.br ?? null
+  });
+
+const rememberSongUrlRequest = (
+  key: string,
+  request: Promise<NcmResponseEnvelope>
+): Promise<NcmResponseEnvelope> => {
+  if (songUrlCache.size >= SONG_URL_CACHE_LIMIT) {
+    const oldestKey = songUrlCache.keys().next().value as string | undefined;
+    if (oldestKey !== undefined) {
+      songUrlCache.delete(oldestKey);
+    }
+  }
+  const cachedRequest = request.catch((error: unknown) => {
+    if (songUrlCache.get(key) === cachedRequest) {
+      songUrlCache.delete(key);
+    }
+    throw error;
+  });
+  songUrlCache.set(key, cachedRequest);
+  return cachedRequest;
+};
+
+export const songUrl = (params: NcmSongUrlParams): Promise<NcmResponseEnvelope> => {
+  const key = songUrlCacheKey(params);
+  const cached = songUrlCache.get(key);
+  if (cached) return cached;
+  return rememberSongUrlRequest(key, requestNcm("song/url", {
     method: "POST",
     data: {
       ...songIdPayload(params),
       ...(params.br === undefined ? {} : { br: params.br })
     },
     noCache: true
-  });
+  }));
+};
 
 export const songUrlV1 = (params: NcmSongUrlParams): Promise<NcmResponseEnvelope> =>
   requestNcm("song/url/v1", {

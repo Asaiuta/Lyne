@@ -1,6 +1,7 @@
 import { Show, createEffect, createMemo, createSignal } from "solid-js";
 import { IconCloud, IconSearch } from "../../../components/icons";
 import { Modal } from "../../../components/Modal";
+import { SImage } from "../../../components/SImage";
 import { createApiClient, type NcmTrackSummary } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
@@ -172,7 +173,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
         <div class="ncm-cloud-match-source">
           <div class="ncm-cloud-match-cover">
             <Show when={props.item?.artworkUrl} fallback={<IconCloud />}>
-              {(url) => <img src={url()} alt="" loading="lazy" />}
+              {(url) => <SImage src={url()} alt="" observeVisibility={true} shape="rect" aspect="square" />}
             </Show>
           </div>
           <div class="ncm-cloud-match-copy">
@@ -214,7 +215,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
             <div class="ncm-cloud-match-preview">
               <div class="ncm-cloud-match-cover">
                 <Show when={track().artworkUrl} fallback={<IconCloud />}>
-                  {(url) => <img src={url()} alt="" loading="lazy" />}
+                  {(url) => <SImage src={url()} alt="" observeVisibility={true} shape="rect" aspect="square" />}
                 </Show>
               </div>
               <div class="ncm-cloud-match-copy">

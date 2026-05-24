@@ -1,4 +1,4 @@
-import { Show, createMemo, createSignal, onMount, createEffect } from "solid-js";
+import { Show, createMemo, createSignal, onMount, createEffect, onCleanup } from "solid-js";
 import {
   IconAlbum,
   IconArtist,
@@ -11,6 +11,7 @@ import {
   IconThumbDown
 } from "../../components/icons";
 import { MediaList, type MediaContextAction } from "../../components/media/MediaList";
+import { SImage } from "../../components/SImage";
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
@@ -68,14 +69,24 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
   const heroArtist = createMemo<string>(() => currentFmTrack()?.artist ?? t("ncm.fm.preview.artist"));
   const heroAlbum = createMemo<string>(() => currentFmTrack()?.album ?? t("ncm.fm.preview.album"));
 
+  let loadVersion = 0;
+  let activeLoadAbortController: AbortController | null = null;
+
   const loadTracks = async (options: { autoplay?: boolean } = {}) => {
     if (!activeAccount()) {
+      activeLoadAbortController?.abort();
       setTracks([]);
       return;
     }
+    const requestVersion = loadVersion + 1;
+    loadVersion = requestVersion;
+    activeLoadAbortController?.abort();
+    const abortController = new AbortController();
+    activeLoadAbortController = abortController;
     setIsLoading(true);
     try {
-      const nextTracks = await api.listNcmPersonalFmTracks();
+      const nextTracks = await api.listNcmPersonalFmTracks({ signal: abortController.signal });
+      if (requestVersion !== loadVersion || abortController.signal.aborted) return;
       setTracks(nextTracks);
       if (nextTracks.length === 0) {
         setRawFeedback("error", t("ncm.fm.feedback.empty"));
@@ -86,10 +97,14 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
         await playTracks(nextTracks);
       }
     } catch (error) {
+      if (requestVersion !== loadVersion || abortController.signal.aborted) return;
       setRawFeedback("error", readErrorMessage(error));
       setTracks([]);
     } finally {
-      setIsLoading(false);
+      if (requestVersion === loadVersion) {
+        activeLoadAbortController = null;
+        setIsLoading(false);
+      }
     }
   };
 
@@ -150,6 +165,11 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
     void loadTracks();
   });
 
+  onCleanup(() => {
+    loadVersion += 1;
+    activeLoadAbortController?.abort();
+  });
+
   createEffect((prev: number | undefined) => {
     const tick = props.reloadTick ?? 0;
     if (prev !== undefined && tick !== prev) {
@@ -181,8 +201,23 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
                 <Show when={coverUrl()} fallback={<span><IconSparkle /></span>}>
                   {(image) => (
                     <>
-                      <img class="personal-fm-cover-blur" src={image()} alt="" />
-                      <img class="personal-fm-cover-main" src={image()} alt="" />
+                      <SImage
+                        src={image()}
+                        alt=""
+                        class="personal-fm-cover-blur"
+                        observeVisibility={false}
+                        shape="circle"
+                        aspect="square"
+                        ariaHidden="true"
+                      />
+                      <SImage
+                        src={image()}
+                        alt=""
+                        class="personal-fm-cover-main"
+                        observeVisibility={false}
+                        shape="circle"
+                        aspect="square"
+                      />
                     </>
                   )}
                 </Show>

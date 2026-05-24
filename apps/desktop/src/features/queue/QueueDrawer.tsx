@@ -8,6 +8,10 @@ import {
 } from "../../components/media/MediaList";
 import type { QueueEntry } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
+import {
+  QUEUE_ROW_HEIGHT_PX,
+  resolveQueueVisibleRange
+} from "./queueVirtualization";
 
 interface QueueDrawerProps {
   open: boolean;
@@ -19,9 +23,6 @@ interface QueueDrawerProps {
   onRemoveEntry: (entryId: number) => Promise<void>;
   onClear: () => Promise<void>;
 }
-
-const QUEUE_ROW_HEIGHT = 80;
-const QUEUE_OVERSCAN = 6;
 
 interface QueueDrawerItem extends MediaListItem {
   entryId: number;
@@ -70,6 +71,23 @@ export function QueueDrawer(props: QueueDrawerProps) {
   const [scrollTop, setScrollTop] = createSignal<number>(0);
   const [viewportHeight, setViewportHeight] = createSignal<number>(0);
   let bodyRef: HTMLDivElement | undefined;
+  let scrollFrame = 0;
+  let pendingScrollTop = 0;
+
+  const commitPendingScrollTop = () => {
+    scrollFrame = 0;
+    setScrollTop((current) => (current === pendingScrollTop ? current : pendingScrollTop));
+  };
+
+  const scheduleScrollTop = (nextScrollTop: number) => {
+    pendingScrollTop = nextScrollTop;
+    if (scrollFrame !== 0) return;
+    if (typeof window === "undefined") {
+      commitPendingScrollTop();
+      return;
+    }
+    scrollFrame = window.requestAnimationFrame(commitPendingScrollTop);
+  };
 
   createEffect(() => {
     if (!props.open || typeof window === "undefined") return;
@@ -86,6 +104,12 @@ export function QueueDrawer(props: QueueDrawerProps) {
     queueMicrotask(updateViewportHeight);
     window.addEventListener("resize", updateViewportHeight);
     onCleanup(() => window.removeEventListener("resize", updateViewportHeight));
+  });
+
+  onCleanup(() => {
+    if (scrollFrame !== 0 && typeof window !== "undefined") {
+      window.cancelAnimationFrame(scrollFrame);
+    }
   });
 
   const queueItems = createMemo<QueueDrawerItem[]>(() => props.entries.map(adaptQueueEntry));
@@ -106,13 +130,14 @@ export function QueueDrawer(props: QueueDrawerProps) {
       mediaId: props.currentMediaId
     });
 
-  const virtualRange = createMemo(() => {
-    const length = queueItems().length;
-    const viewportRows = Math.ceil((viewportHeight() || QUEUE_ROW_HEIGHT * 8) / QUEUE_ROW_HEIGHT);
-    const start = Math.max(0, Math.floor(scrollTop() / QUEUE_ROW_HEIGHT) - QUEUE_OVERSCAN);
-    const end = Math.min(length, start + viewportRows + QUEUE_OVERSCAN * 2);
-    return { start, end };
-  });
+  const virtualRange = createMemo((previous: { start: number; end: number }) => {
+    const next = resolveQueueVisibleRange({
+      totalItems: queueItems().length,
+      scrollTop: scrollTop(),
+      viewportHeight: viewportHeight()
+    });
+    return previous.start === next.start && previous.end === next.end ? previous : next;
+  }, { start: 0, end: 0 });
   const visibleEntries = createMemo(() => {
     const range = virtualRange();
     return queueItems().slice(range.start, range.end).map((item, offset) => ({
@@ -120,13 +145,13 @@ export function QueueDrawer(props: QueueDrawerProps) {
       index: range.start + offset
     }));
   });
-  const listHeight = () => `${queueItems().length * QUEUE_ROW_HEIGHT}px`;
+  const listHeight = () => `${queueItems().length * QUEUE_ROW_HEIGHT_PX}px`;
 
   const scrollToCurrent = () => {
     const index = currentIndex();
     if (index < 0) return;
     bodyRef?.scrollTo({
-      top: Math.max(0, index * QUEUE_ROW_HEIGHT - (viewportHeight() - QUEUE_ROW_HEIGHT) / 2),
+      top: Math.max(0, index * QUEUE_ROW_HEIGHT_PX - (viewportHeight() - QUEUE_ROW_HEIGHT_PX) / 2),
       behavior: "smooth"
     });
   };
@@ -190,7 +215,7 @@ export function QueueDrawer(props: QueueDrawerProps) {
             <div
               ref={bodyRef}
               class="queue-drawer-body"
-              onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+              onScroll={(event) => scheduleScrollTop(event.currentTarget.scrollTop)}
             >
               <Show
                 when={props.entries.length > 0}
@@ -204,7 +229,7 @@ export function QueueDrawer(props: QueueDrawerProps) {
                       const active = () => isCurrent(queueItem);
                       const disabled = () => busyEntryId() !== null || clearing();
                       return (
-                        <li style={{ transform: `translateY(${index() * QUEUE_ROW_HEIGHT}px)` }}>
+                        <li style={{ transform: `translateY(${index() * QUEUE_ROW_HEIGHT_PX}px)` }}>
                           <div class={`queue-drawer-item${active() ? " is-current" : ""}`}>
                             <button
                               type="button"

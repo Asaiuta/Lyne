@@ -7,11 +7,13 @@ import {
 } from "../../components/icons";
 import { MediaList } from "../../components/media/MediaList";
 import type { MediaContextAction, MediaSortField, MediaSortOrder, MediaSortState } from "../../components/media/MediaList";
+import { SImage } from "../../components/SImage";
 import { useTranslation } from "../../shared/i18n";
 import { useUISettings } from "../../shared/state/useUISettings";
 import type { LibraryGroup, LibraryListItem } from "./libraryViewTypes";
 
 type LibraryGroupedKind = "artists" | "albums" | "folders";
+const EMPTY_LIBRARY_ITEMS: LibraryListItem[] = [];
 
 interface LibraryGroupedViewProps {
   kind: LibraryGroupedKind;
@@ -58,9 +60,10 @@ export function LibraryGroupedView(props: LibraryGroupedViewProps) {
     if (!selected) return first;
     return props.groups.find((group) => group.key === selected) ?? first;
   });
+  const selectedSongs = createMemo<LibraryListItem[]>(() => selectedGroup()?.songs ?? EMPTY_LIBRARY_ITEMS);
 
   createEffect(() => {
-    props.onActiveItemsChange?.(selectedGroup()?.songs ?? []);
+    props.onActiveItemsChange?.(selectedSongs());
   });
 
   const emptyLabel = createMemo(() => {
@@ -102,7 +105,7 @@ export function LibraryGroupedView(props: LibraryGroupedViewProps) {
                   <Show when={coverVisible()}>
                     <span class="local-browser-cover" aria-hidden="true">
                       <Show when={group.artworkUrl} fallback={<span>{artworkInitial()}</span>}>
-                        <img src={group.artworkUrl ?? ""} alt="" />
+                        {(url) => <SImage src={url()} alt="" observeVisibility={true} shape="rect" aspect="square" />}
                       </Show>
                     </span>
                   </Show>
@@ -124,26 +127,24 @@ export function LibraryGroupedView(props: LibraryGroupedViewProps) {
 
         <div class="local-browser-songs">
           <Show when={selectedGroup()}>
-            {(group) => (
-              <MediaList
-                items={group().songs}
-                currentSourcePath={props.currentTrackPath}
-                currentMediaId={props.currentMediaId}
-                isPlayingNow={props.isPlaying}
-                onPlay={(item) => props.onPlay(item, group().songs)}
-                onEnqueue={props.onEnqueue}
-                onContextAction={props.onContextAction}
-                isLoading={props.isLoading}
-                emptyState={emptyLabel()}
-                hideSize={props.kind !== "folders"}
-                hideArtwork={props.kind === "albums"}
-                contextActions={props.contextActions}
-                deleteActionLabel={props.deleteActionLabel}
-                sort={props.sort}
-                onSortChange={props.onSortChange}
-                onSortOrderChange={props.onSortOrderChange}
-              />
-            )}
+            <MediaList
+              items={selectedSongs()}
+              currentSourcePath={props.currentTrackPath}
+              currentMediaId={props.currentMediaId}
+              isPlayingNow={props.isPlaying}
+              onPlay={(item) => props.onPlay(item, selectedSongs())}
+              onEnqueue={props.onEnqueue}
+              onContextAction={props.onContextAction}
+              isLoading={props.isLoading}
+              emptyState={emptyLabel()}
+              hideSize={props.kind !== "folders"}
+              hideArtwork={props.kind === "albums"}
+              contextActions={props.contextActions}
+              deleteActionLabel={props.deleteActionLabel}
+              sort={props.sort}
+              onSortChange={props.onSortChange}
+              onSortOrderChange={props.onSortOrderChange}
+            />
           </Show>
         </div>
       </div>

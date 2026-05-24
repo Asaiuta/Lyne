@@ -51,6 +51,8 @@ export function DailySongsCard(props: DailySongsCardProps) {
                           src={coverSizeUrl(url(), "s")}
                           observeVisibility={true}
                           releaseOnHide={false}
+                          shape="rect"
+                          aspect="square"
                         />
                       )}
                     </Show>

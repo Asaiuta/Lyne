@@ -67,6 +67,8 @@ export function AlbumCard(props: AlbumCardProps) {
                   class="album-card-art-img"
                   observeVisibility={true}
                   releaseOnHide={false}
+                  shape={isRoundCard() ? "circle" : "rect"}
+                  aspect="square"
                 />
                 <Show when={isRoundCard()}>
                   <SImage
@@ -74,6 +76,9 @@ export function AlbumCard(props: AlbumCardProps) {
                     class="album-card-art-shadow"
                     observeVisibility={true}
                     releaseOnHide={true}
+                    shape="circle"
+                    aspect="square"
+                    ariaHidden="true"
                   />
                   <span class="album-card-art-artist-icon">
                     <IconArtist />

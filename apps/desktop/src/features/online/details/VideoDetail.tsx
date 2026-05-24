@@ -1,5 +1,10 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { IconChevronLeft, IconChat, IconClock, IconEye, IconHeart, IconLink, IconShare } from "../../../components/icons";
+import { BackToTop } from "../../../components/page/BackToTop";
+import { PageBody } from "../../../components/page/PageBody";
+import { PageHero } from "../../../components/page/PageHero";
+import { PageSurface } from "../../../components/page/PageSurface";
+import { SImage } from "../../../components/SImage";
 import { mvDetail, mvDetailInfo, mvUrl, videoDetail, videoDetailInfo, videoUrl } from "../../../shared/api/ncm/video";
 import { ncmMvPageUrl, ncmVideoPageUrl } from "../../../shared/api/ncm/urls";
 import { useTranslation } from "../../../shared/i18n";
@@ -107,104 +112,118 @@ export function VideoDetail(props: VideoDetailProps) {
   }));
 
   return (
-    <section class="ncm-video-detail">
-      <button type="button" class="ghost-button ncm-daily-detail-back" onClick={props.onBack}>
-        <IconChevronLeft />
-        {t("ncm.video.backToFeed")}
-      </button>
+    <PageSurface class="ncm-video-detail" resetKey={currentVideoId()}>
+      <PageHero size="md">
+        <button type="button" class="ghost-button ncm-daily-detail-back" onClick={props.onBack}>
+          <IconChevronLeft />
+          {t("ncm.video.backToFeed")}
+        </button>
 
-      <header class="ncm-video-detail-head">
-        <div class="ncm-video-detail-title">
-          <h2>{displayTitle()}</h2>
-          <div class="ncm-video-detail-meta">
-            <span><IconEye /> {formatNumber(detail()?.playCount ?? props.video?.playCount ?? null)}</span>
-            <Show when={detail()?.commentCount !== null && detail()?.commentCount !== undefined}>
-              <span><IconChat /> {formatNumber(detail()?.commentCount ?? null)}</span>
-            </Show>
-            <Show when={formatDate(detail()?.publishTime ?? null)}>
-              {(date) => <span><IconClock /> {date()}</span>}
-            </Show>
+        <header class="ncm-video-detail-head">
+          <div class="ncm-video-detail-title">
+            <h2>{displayTitle()}</h2>
+            <div class="ncm-video-detail-meta">
+              <span><IconEye /> {formatNumber(detail()?.playCount ?? props.video?.playCount ?? null)}</span>
+              <Show when={detail()?.commentCount !== null && detail()?.commentCount !== undefined}>
+                <span><IconChat /> {formatNumber(detail()?.commentCount ?? null)}</span>
+              </Show>
+              <Show when={formatDate(detail()?.publishTime ?? null)}>
+                {(date) => <span><IconClock /> {date()}</span>}
+              </Show>
+            </div>
           </div>
+        </header>
+      </PageHero>
+
+      <PageBody class="ncm-video-detail-body" scrollable>
+        <div class="ncm-video-player-shell">
+          <video
+            ref={videoRef}
+            class="ncm-video-player"
+            controls
+            poster={displayCover() ?? undefined}
+            onPlay={() => void props.onPauseAudio()}
+            onError={() => setPlayError(t("ncm.video.playbackError"))}
+          >
+            <Show when={source()}>
+              {(item) => <source src={item().url} type="video/mp4" />}
+            </Show>
+          </video>
         </div>
-      </header>
 
-      <div class="ncm-video-player-shell">
-        <video
-          ref={videoRef}
-          class="ncm-video-player"
-          controls
-          poster={displayCover() ?? undefined}
-          onPlay={() => void props.onPauseAudio()}
-          onError={() => setPlayError(t("ncm.video.playbackError"))}
-        >
-          <Show when={source()}>
-            {(item) => <source src={item().url} type="video/mp4" />}
-          </Show>
-        </video>
-      </div>
+        <Show when={sources().length > 1}>
+          <div class="ncm-video-quality" aria-label={t("ncm.video.quality")}>
+            <For each={sources()}>
+              {(item) => (
+                <button
+                  type="button"
+                  class={item.quality === selectedQuality() ? "is-active" : ""}
+                  onClick={() => setSelectedQuality(item.quality)}
+                >
+                  {formatQuality(item.quality)}
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
 
-      <Show when={sources().length > 1}>
-        <div class="ncm-video-quality" aria-label={t("ncm.video.quality")}>
-          <For each={sources()}>
-            {(item) => (
-              <button
-                type="button"
-                class={item.quality === selectedQuality() ? "is-active" : ""}
-                onClick={() => setSelectedQuality(item.quality)}
-              >
-                {formatQuality(item.quality)}
+        <Show when={playError()}>
+          {(message) => <div class="panel-note">{message()}</div>}
+        </Show>
+
+        <div class="ncm-video-menu">
+          <Show when={detail()?.artist}>
+            {(artist) => (
+              <button type="button" class="ncm-video-artist" onClick={() => void props.onSelectArtist?.(artist())}>
+                <Show when={artist().coverUrl}>
+                  {(coverUrl) => (
+                    <SImage
+                      src={coverUrl()}
+                      alt=""
+                      class="ncm-video-artist-avatar"
+                      observeVisibility={true}
+                      shape="circle"
+                      aspect="square"
+                    />
+                  )}
+                </Show>
+                <span>
+                  <strong>{artist().title}</strong>
+                </span>
               </button>
             )}
-          </For>
-        </div>
-      </Show>
-
-      <Show when={playError()}>
-        {(message) => <div class="panel-note">{message()}</div>}
-      </Show>
-
-      <div class="ncm-video-menu">
-        <Show when={detail()?.artist}>
-          {(artist) => (
-            <button type="button" class="ncm-video-artist" onClick={() => void props.onSelectArtist?.(artist())}>
-              <Show when={artist().coverUrl}>
-                {(coverUrl) => <img src={coverUrl()} alt="" />}
-              </Show>
-              <span>
-                <strong>{artist().title}</strong>
-              </span>
+          </Show>
+          <div class="ncm-video-actions">
+            <span><IconHeart /> {formatNumber(detail()?.likedCount ?? null)}</span>
+            <span><IconShare /> {formatNumber(detail()?.shareCount ?? null)}</span>
+            <button type="button" class="ghost-button" onClick={() => {
+              const id = currentVideoId() ?? 0;
+              window.open(currentVideoKind() === "mv" ? ncmMvPageUrl(id) : ncmVideoPageUrl(id), "_blank");
+            }}>
+              <IconLink />
+              {t("ncm.playlist.openSource")}
             </button>
-          )}
+          </div>
+        </div>
+
+        <Show when={detail()?.description}>
+          {(description) => <p class="ncm-video-description">{description()}</p>}
         </Show>
-        <div class="ncm-video-actions">
-          <span><IconHeart /> {formatNumber(detail()?.likedCount ?? null)}</span>
-          <span><IconShare /> {formatNumber(detail()?.shareCount ?? null)}</span>
-          <button type="button" class="ghost-button" onClick={() => {
-            const id = currentVideoId() ?? 0;
-            window.open(currentVideoKind() === "mv" ? ncmMvPageUrl(id) : ncmVideoPageUrl(id), "_blank");
-          }}>
-            <IconLink />
-            {t("ncm.playlist.openSource")}
-          </button>
-        </div>
-      </div>
 
-      <Show when={detail()?.description}>
-        {(description) => <p class="ncm-video-description">{description()}</p>}
-      </Show>
+        <Show when={(detail()?.tags ?? []).length > 0}>
+          <div class="ncm-video-tags">
+            <For each={detail()?.tags ?? []}>{(tag) => <span>{tag}</span>}</For>
+          </div>
+        </Show>
 
-      <Show when={(detail()?.tags ?? []).length > 0}>
-        <div class="ncm-video-tags">
-          <For each={detail()?.tags ?? []}>{(tag) => <span>{tag}</span>}</For>
-        </div>
-      </Show>
-
-      <ResourceCommentsPanel
-        resourceId={currentVideoId()}
-        resourceType={commentsResourceType()}
-        class="ncm-video-comments"
-        title={t("ncm.video.comments")}
-      />
-    </section>
+        <ResourceCommentsPanel
+          resourceId={currentVideoId()}
+          resourceType={commentsResourceType()}
+          class="ncm-video-comments"
+          title={t("ncm.video.comments")}
+        />
+      </PageBody>
+      <BackToTop label={t("media.scroll.top")} />
+    </PageSurface>
   );
 }

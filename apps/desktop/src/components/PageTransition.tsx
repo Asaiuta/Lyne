@@ -142,7 +142,13 @@ export function PageTransition(props: PageTransitionProps) {
   onCleanup(cleanupPending);
 
   return (
-    <div ref={containerRef} class="page-transition-container" style={{ display: "contents" }}>
+    <div
+      ref={containerRef}
+      class="page-transition-container"
+      style={{ display: "contents" }}
+      data-perf-active-page={displayedPage()}
+      data-perf-transition-pending={props.activePage !== displayedPage() ? "true" : undefined}
+    >
       {props.children(displayedPage)}
     </div>
   );

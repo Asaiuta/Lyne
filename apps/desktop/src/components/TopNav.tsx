@@ -16,6 +16,7 @@ import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import { useUISearch } from "../shared/state/UISearchContext";
 import { useUISettings } from "../shared/state/useUISettings";
 import { isSearchEnabledPage, type ActivePage } from "../shared/ui/navigation";
+import { SImage } from "./SImage";
 import {
   IconArtist,
   IconAlbum,
@@ -57,10 +58,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isNcmSearchEntryPage = (page: ActivePage): page is "recommend" | "discover" =>
   page === "recommend" || page === "discover";
 
-const loadNcmSuggestionItems = async (keywords: string): Promise<NcmSearchSuggestionItem[]> => {
+const loadNcmSuggestionItems = async (
+  keywords: string,
+  signal?: AbortSignal
+): Promise<NcmSearchSuggestionItem[]> => {
   let pcError: unknown = null;
   try {
-    const pcItems = parseNcmSearchSuggestions(await searchSuggestPc(keywords));
+    const pcItems = parseNcmSearchSuggestions(await searchSuggestPc(keywords, { signal }));
     if (pcItems.length > 0) {
       return pcItems;
     }
@@ -69,7 +73,7 @@ const loadNcmSuggestionItems = async (keywords: string): Promise<NcmSearchSugges
   }
 
   try {
-    return parseNcmSearchSuggestions(await searchSuggest(keywords));
+    return parseNcmSearchSuggestions(await searchSuggest(keywords, { signal }));
   } catch (error) {
     throw pcError ?? error;
   }
@@ -376,8 +380,12 @@ export function TopNav(props: TopNavProps) {
     if (untrack(isSearchEntryLoading) || untrack(() => defaultKeyword() !== null && hotSearches().length > 0)) return;
 
     let cancelled = false;
+    const abortController = new AbortController();
     setIsSearchEntryLoading(true);
-    void Promise.allSettled([searchDefault(), searchHotDetail()]).then((results) => {
+    void Promise.allSettled([
+      searchDefault({ signal: abortController.signal }),
+      searchHotDetail({ signal: abortController.signal })
+    ]).then((results) => {
       if (cancelled) return;
       const [defaultResult, hotResult] = results;
       if (defaultResult.status === "fulfilled") {
@@ -394,6 +402,7 @@ export function TopNav(props: TopNavProps) {
     });
     onCleanup(() => {
       cancelled = true;
+      abortController.abort();
       setIsSearchEntryLoading(false);
     });
   });
@@ -407,9 +416,10 @@ export function TopNav(props: TopNavProps) {
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
     setIsSuggestionLoading(true);
     const timer = window.setTimeout(() => {
-      void loadNcmSuggestionItems(keyword)
+      void loadNcmSuggestionItems(keyword, abortController.signal)
         .then((items) => {
           if (!cancelled) {
             setSuggestions(items);
@@ -431,6 +441,7 @@ export function TopNav(props: TopNavProps) {
     onCleanup(() => {
       cancelled = true;
       window.clearTimeout(timer);
+      abortController.abort();
     });
   });
 
@@ -661,7 +672,7 @@ export function TopNav(props: TopNavProps) {
           >
             <span class="top-nav-account-avatar" aria-hidden="true">
               <Show when={accountAvatar()} fallback={<IconArtist />}>
-                {(avatar) => <img src={avatar()} alt="" />}
+                {(avatar) => <SImage src={avatar()} alt="" observeVisibility={false} shape="circle" aspect="square" />}
               </Show>
             </span>
             <span class="top-nav-account-copy">
@@ -737,7 +748,7 @@ export function TopNav(props: TopNavProps) {
                           >
                             <span class="top-nav-account-switch-avatar" aria-hidden="true">
                               <Show when={item.avatarUrl} fallback={<IconArtist />}>
-                                {(avatar) => <img src={avatar()} alt="" />}
+                                {(avatar) => <SImage src={avatar()} alt="" observeVisibility={false} shape="circle" aspect="square" />}
                               </Show>
                             </span>
                             <span class="top-nav-account-switch-name">{item.nickname ?? item.userId}</span>

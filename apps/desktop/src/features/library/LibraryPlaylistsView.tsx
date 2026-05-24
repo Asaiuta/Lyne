@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { AlbumCard } from "../../components/AlbumCard";
+import { SImage } from "../../components/SImage";
 import {
   IconChevronLeft,
   IconDelete,
@@ -16,6 +17,11 @@ import {
   type MediaSortOrder,
   type MediaSortState
 } from "../../components/media/MediaList";
+import { BackToTop } from "../../components/page/BackToTop";
+import { PageBody } from "../../components/page/PageBody";
+import { PageHero } from "../../components/page/PageHero";
+import { PageStickyHeader } from "../../components/page/PageStickyHeader";
+import { PageSurface } from "../../components/page/PageSurface";
 import { CoverGridSkeleton } from "../../components/page/Skeleton";
 import type { LocalPlaylist } from "../../shared/api/types";
 import { createApiClient } from "../../shared/api/client";
@@ -49,7 +55,6 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
   const uiSettings = useUISettings();
   const api = createApiClient();
   const [filter, setFilter] = createSignal<string>("");
-  const [isScrolled, setIsScrolled] = createSignal<boolean>(false);
 
   const selectedPlaylist = createMemo<LocalPlaylist | null>(() => {
     const selected = props.selectedPlaylistId;
@@ -78,20 +83,6 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
       props.onPlay(first, selectedPlaylistItems());
     }
   };
-  const handlePlaylistScroll = (event: Event) => {
-    const target = event.currentTarget as HTMLElement;
-    if (target.scrollHeight - target.clientHeight < 150) {
-      setIsScrolled(false);
-      return;
-    }
-    setIsScrolled(target.scrollTop > 80);
-  };
-
-  createEffect(() => {
-    void props.selectedPlaylistId;
-    setIsScrolled(false);
-  });
-
   createEffect(() => {
     props.onActiveItemsChange(selectedPlaylistItems());
   });
@@ -145,114 +136,142 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
         }
       >
         {(playlist) => (
-          <section class="playlist-detail local-playlist-detail">
-            <div class={`playlist-detail-shell${isScrolled() ? " is-local-scrolled" : ""}`}>
-              <header class={`playlist-detail-head${uiSettings.hiddenCovers.list ? " is-cover-hidden" : ""}`}>
-                <Show when={!uiSettings.hiddenCovers.list}>
-                  <div class="playlist-detail-art" aria-hidden="true">
-                    <Show when={playlistCover(playlist())} fallback={<span>{playlist().name.slice(0, 1)}</span>}>
-                      {(coverUrl) => (
-                        <>
-                          <img class="playlist-detail-art-img" src={coverUrl()} alt="" />
-                          <img class="playlist-detail-art-shadow" src={coverUrl()} alt="" />
-                        </>
-                      )}
-                    </Show>
-                    <div class="playlist-detail-art-mask" />
-                  </div>
-                </Show>
-                <div class="playlist-detail-copy">
-                  <div class="playlist-detail-title-row">
-                    <button
-                      type="button"
-                      class="ghost-button playlist-detail-back"
-                      onClick={() => props.onSelectPlaylist("")}
-                      aria-label={t("library.action.backToList")}
-                      title={t("library.action.backToList")}
-                    >
-                      <IconChevronLeft />
-                    </button>
-                    <h2 title={playlist().name}>{playlist().name}</h2>
-                  </div>
-                  <div class="playlist-detail-collapse">
-                    <Show when={uiSettings.playlistPageElements.description && playlist().description}>
-                      {(description) => <p class="playlist-detail-desc">{description()}</p>}
-                    </Show>
-                    <div class="playlist-detail-meta">
-                      <Show when={uiSettings.playlistPageElements.creator}>
-                        <span>
-                          <IconPlaylist />
-                          {t("library.tabs.playlists")}
-                        </span>
+          <PageSurface
+            class="playlist-detail local-playlist-detail playlist-detail-shell"
+            floatingHero
+            resetKey={playlist().playlist_id}
+          >
+            <PageStickyHeader threshold={80}>
+              {({ compact }) => (
+                <>
+                  <PageHero size={uiSettings.hiddenCovers.list ? "md" : "lg"} compact={compact()} class={`playlist-detail-hero${uiSettings.hiddenCovers.list ? " is-cover-hidden" : ""}`}>
+                    <header class={`playlist-detail-head${uiSettings.hiddenCovers.list ? " is-cover-hidden" : ""}`}>
+                      <Show when={!uiSettings.hiddenCovers.list}>
+                        <div class="playlist-detail-art" aria-hidden="true">
+                          <Show when={playlistCover(playlist())} fallback={<span>{playlist().name.slice(0, 1)}</span>}>
+                            {(coverUrl) => (
+                              <>
+                                <SImage
+                                  src={coverUrl()}
+                                  alt=""
+                                  class="playlist-detail-art-img"
+                                  observeVisibility={false}
+                                  shape="rect"
+                                  aspect="square"
+                                />
+                                <SImage
+                                  src={coverUrl()}
+                                  alt=""
+                                  class="playlist-detail-art-shadow"
+                                  observeVisibility={false}
+                                  shape="rect"
+                                  aspect="square"
+                                  ariaHidden="true"
+                                />
+                              </>
+                            )}
+                          </Show>
+                          <div class="playlist-detail-art-mask" />
+                        </div>
                       </Show>
-                      <Show when={uiSettings.playlistPageElements.time}>
-                        <span>
-                          <IconMusic />
-                          {t("library.group.songCount", { count: playlist().track_count })}
-                        </span>
-                      </Show>
-                    </div>
-                  </div>
-                  <div class="playlist-detail-menu">
-                    <div class="playlist-detail-menu-left">
-                      <button
-                        type="button"
-                        class="primary-button playlist-detail-play"
-                        onClick={playSelectedPlaylist}
-                        disabled={selectedPlaylistItems().length === 0 || props.isLoading}
-                      >
-                        <IconPlay />
-                        {t("library.action.playAll")}
-                      </button>
-                      <button
-                        type="button"
-                        class="ghost-button playlist-detail-icon-button"
-                        onClick={() => props.onDeletePlaylist(playlist())}
-                        aria-label={t("library.action.deletePlaylist")}
-                        title={t("library.action.deletePlaylist")}
-                      >
-                        <IconDelete />
-                      </button>
-                    </div>
-                    <div class="playlist-detail-menu-right">
-                      <label class="playlist-detail-search">
-                        <IconSearch />
-                        <input
-                          type="search"
-                          value={filter()}
-                          placeholder={t("library.tracks.fuzzySearch")}
-                          onInput={(event) => setFilter(event.currentTarget.value)}
-                        />
-                      </label>
-                      <div class="playlist-detail-tabs" role="tablist" aria-label={t("library.playlists.title")}>
-                        <button type="button" class="is-active" role="tab" aria-selected="true">
-                          {t("ncm.playlist.tab.songs")}
-                          <span>{playlist().track_count}</span>
-                        </button>
+                      <div class="playlist-detail-copy">
+                        <div class="playlist-detail-title-row">
+                          <button
+                            type="button"
+                            class="ghost-button playlist-detail-back"
+                            onClick={() => props.onSelectPlaylist("")}
+                            aria-label={t("library.action.backToList")}
+                            title={t("library.action.backToList")}
+                          >
+                            <IconChevronLeft />
+                          </button>
+                          <h2 title={playlist().name}>{playlist().name}</h2>
+                        </div>
+                        <div class="playlist-detail-collapse">
+                          <Show when={uiSettings.playlistPageElements.description && playlist().description}>
+                            {(description) => <p class="playlist-detail-desc">{description()}</p>}
+                          </Show>
+                          <div class="playlist-detail-meta">
+                            <Show when={uiSettings.playlistPageElements.creator}>
+                              <span>
+                                <IconPlaylist />
+                                {t("library.tabs.playlists")}
+                              </span>
+                            </Show>
+                            <Show when={uiSettings.playlistPageElements.time}>
+                              <span>
+                                <IconMusic />
+                                {t("library.group.songCount", { count: playlist().track_count })}
+                              </span>
+                            </Show>
+                          </div>
+                        </div>
+                        <div class="playlist-detail-menu">
+                          <div class="playlist-detail-menu-left">
+                            <button
+                              type="button"
+                              class="primary-button playlist-detail-play"
+                              onClick={playSelectedPlaylist}
+                              disabled={selectedPlaylistItems().length === 0 || props.isLoading}
+                            >
+                              <IconPlay />
+                              {t("library.action.playAll")}
+                            </button>
+                            <button
+                              type="button"
+                              class="ghost-button playlist-detail-icon-button"
+                              onClick={() => props.onDeletePlaylist(playlist())}
+                              aria-label={t("library.action.deletePlaylist")}
+                              title={t("library.action.deletePlaylist")}
+                            >
+                              <IconDelete />
+                            </button>
+                          </div>
+                          <div class="playlist-detail-menu-right">
+                            <label class="playlist-detail-search">
+                              <IconSearch />
+                              <input
+                                type="search"
+                                value={filter()}
+                                placeholder={t("library.tracks.fuzzySearch")}
+                                onInput={(event) => setFilter(event.currentTarget.value)}
+                              />
+                            </label>
+                            <div class="playlist-detail-tabs" role="tablist" aria-label={t("library.playlists.title")}>
+                              <button type="button" class="is-active" role="tab" aria-selected="true">
+                                {t("ncm.playlist.tab.songs")}
+                                <span>{playlist().track_count}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                </div>
-              </header>
-              <MediaList
-                items={selectedPlaylistItems()}
-                currentSourcePath={props.currentTrackPath}
-                currentMediaId={props.currentMediaId}
-                isPlayingNow={props.isPlaying}
-                onPlay={(item) => props.onPlay(item, selectedPlaylistItems())}
-                onEnqueue={props.onEnqueue}
-                onContextAction={props.onContextAction}
-                onScroll={handlePlaylistScroll}
-                isLoading={props.isLoading}
-                emptyState={t("library.playlists.emptyTracks")}
-                  contextActions={["play", "enqueue", "search", "copy-name", "show-in-folder", "delete-from-playlist"]}
-                deleteActionLabel={t("library.action.removeFromPlaylist")}
-                sort={props.sort}
-                onSortChange={props.onSortChange}
-                onSortOrderChange={props.onSortOrderChange}
-              />
-            </div>
-          </section>
+                    </header>
+                  </PageHero>
+                  <PageBody offset class="playlist-detail-body">
+                    <MediaList
+                      items={selectedPlaylistItems()}
+                      currentSourcePath={props.currentTrackPath}
+                      currentMediaId={props.currentMediaId}
+                      isPlayingNow={props.isPlaying}
+                      onPlay={(item) => props.onPlay(item, selectedPlaylistItems())}
+                      onEnqueue={props.onEnqueue}
+                      onContextAction={props.onContextAction}
+                      isLoading={props.isLoading}
+                      emptyState={t("library.playlists.emptyTracks")}
+                      contextActions={["play", "enqueue", "search", "copy-name", "show-in-folder", "delete-from-playlist"]}
+                      deleteActionLabel={t("library.action.removeFromPlaylist")}
+                      sort={props.sort}
+                      onSortChange={props.onSortChange}
+                      onSortOrderChange={props.onSortOrderChange}
+                      hideTopScrollTool
+                    />
+                  </PageBody>
+                </>
+              )}
+            </PageStickyHeader>
+            <BackToTop label={t("media.scroll.top")} />
+          </PageSurface>
         )}
       </Show>
     </Show>

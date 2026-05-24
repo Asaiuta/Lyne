@@ -3,6 +3,11 @@ import { AlbumCard } from "../../../components/AlbumCard";
 import { IconAlbum, IconChevronLeft, IconHeart, IconHeartFilled, IconMusic, IconSpinner, IconVideo } from "../../../components/icons";
 import { MediaList } from "../../../components/media/MediaList";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
+import { BackToTop } from "../../../components/page/BackToTop";
+import { PageBody } from "../../../components/page/PageBody";
+import { PageHero } from "../../../components/page/PageHero";
+import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
+import { PageSurface } from "../../../components/page/PageSurface";
 import { useTranslation } from "../../../shared/i18n";
 import type { TranslationKey } from "../../../shared/i18n";
 import type { NcmArtistTrackOrder } from "../../../shared/api/ncmDomainTypes";
@@ -51,7 +56,6 @@ export function ArtistDetail(props: ArtistDetailProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
   const [detailTab, setDetailTab] = createSignal<ArtistDetailTab>("songs");
-  const [isListScrolled, setIsListScrolled] = createSignal<boolean>(false);
   const artist = () => props.detail ?? props.artist;
   const artistId = createMemo<number | null>(() => artist()?.id ?? null);
   const detailTabItems = createMemo<SegmentedTabItem[]>(() => [
@@ -93,17 +97,11 @@ export function ArtistDetail(props: ArtistDetailProps) {
   createEffect(() => {
     artistId();
     setDetailTab("songs");
-    setIsListScrolled(false);
   });
-  const handleTrackScroll = (event: Event) => {
-    const target = event.currentTarget as HTMLElement;
-    setIsListScrolled(target.scrollTop > 10);
-  };
   const setTab = (next: string) => {
     const tab: ArtistDetailTab =
       next === "albums" ? "albums" : next === "videos" ? "videos" : "songs";
     setDetailTab(tab);
-    setIsListScrolled(false);
     if (tab === "albums" && props.albums.length === 0) {
       void props.onLoadAlbums();
     } else if (tab === "videos" && props.videos.length === 0) {
@@ -112,124 +110,135 @@ export function ArtistDetail(props: ArtistDetailProps) {
   };
   if (!artist()) return null;
   return (
-    <section class="ncm-daily-detail">
-      <button
-        type="button"
-        class="ghost-button ncm-daily-detail-back"
-        onClick={props.onBack}
-      >
-        <IconChevronLeft />
-        {t("ncm.artist.backToFeed")}
-      </button>
-      <NcmListDetail
-        title={artist()?.title ?? ""}
-        coverUrl={artist()?.coverUrl}
-        hiddenCover={uiSettings.hiddenCovers.artistDetail}
-        compact={isListScrolled()}
-        coverShape="round"
-        description={artist()?.description ?? metaText()}
-        metaItems={metaItems()}
-        playLabel={t("ncm.daily.playAll")}
-        playDisabled={props.tracks.length === 0}
-        loading={props.isLoading}
-        onPlay={() => {
-          const [first, ...rest] = props.tracks;
-          if (!first) return;
-          void (async () => {
-            await props.playback.playOnlineTrack(first);
-            for (const item of rest) {
-              await props.playback.enqueueOnlineTrack(item);
-            }
-          })();
-        }}
-        actionButtons={
-          <button
-            type="button"
-            class={`ghost-button page-action ncm-artist-subscribe${props.detail?.followed === true ? " is-active" : ""}`}
-            disabled={props.isLoadingDetail || props.isTogglingSubscribe}
-            onClick={() => void props.onToggleSubscribe()}
-          >
-            <Show when={props.isTogglingSubscribe} fallback={props.detail?.followed === true ? <IconHeartFilled /> : <IconHeart />}>
-              <IconSpinner />
-            </Show>
-            {props.isTogglingSubscribe ? t("ncm.artist.subscribeWorking") : subscribeLabel()}
-          </button>
-        }
-      />
-      <div class="ncm-detail-tabs">
-        <SegmentedTabs
-          value={detailTab()}
-          onChange={setTab}
-          items={detailTabItems()}
-          ariaLabel={t("ncm.artist.tabs.aria")}
-        />
-      </div>
-      <Show when={detailTab() === "songs"}>
-        <div class="ncm-artist-song-panel">
-          <div class="ncm-artist-song-toolbar">
-            <SegmentedTabs
-              value={props.trackOrder}
-              onChange={(next) => void props.onChangeTrackOrder(next === "time" ? "time" : "hot")}
-              items={trackOrderItems()}
-              ariaLabel={t("ncm.artist.songs.orderAria")}
-            />
-          </div>
-          <MediaList
-            items={props.tracks}
-            currentSourcePath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlayingNow={props.isPlaying}
-            onPlay={(item) => void props.playback.playOnlineTrack(item)}
-            onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
-            onContextAction={(action, item) => {
-              if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
-            }}
-            onScroll={handleTrackScroll}
-            isLoading={props.isLoading}
-            emptyState={<div class="panel-note">{t("ncm.artist.empty")}</div>}
-          />
-          <Show when={props.hasMoreTracks && props.tracks.length > 0}>
-            <div class="online-discover-load-more">
+    <PageSurface class="ncm-daily-detail" resetKey={artistId()}>
+      <PageStickyHeader threshold={10}>
+        {({ compact }) => (
+          <>
+            <PageHero size="lg" compact={compact()}>
               <button
                 type="button"
-                class="ghost-button"
-                disabled={props.isLoading}
-                onClick={() => void props.onLoadMoreTracks()}
+                class="ghost-button ncm-daily-detail-back"
+                onClick={props.onBack}
               >
-                {props.isLoading ? t("ncm.playlist.loading") : t("ncm.discover.loadMore")}
+                <IconChevronLeft />
+                {t("ncm.artist.backToFeed")}
               </button>
-            </div>
-          </Show>
-        </div>
-      </Show>
-      <Show when={detailTab() === "albums"}>
-        <ArtistResourceGrid
-          items={props.albums}
-          isLoading={props.isLoadingAlbums}
-          hasMore={props.hasMoreAlbums}
-          emptyText={t("ncm.artist.albums.empty")}
-          loadingText={t("ncm.playlist.loading")}
-          loadMoreText={t("ncm.discover.loadMore")}
-          coverHidden={uiSettings.hiddenCovers.album}
-          onLoadMore={props.onLoadMoreAlbums}
-          onSelect={props.onSelectAlbum}
-        />
-      </Show>
-      <Show when={detailTab() === "videos"}>
-        <ArtistResourceGrid
-          items={props.videos}
-          isLoading={props.isLoadingVideos}
-          hasMore={props.hasMoreVideos}
-          emptyText={t("ncm.artist.videos.empty")}
-          loadingText={t("ncm.playlist.loading")}
-          loadMoreText={t("ncm.discover.loadMore")}
-          coverHidden={uiSettings.hiddenCovers.video}
-          variant="videos"
-          onLoadMore={props.onLoadMoreVideos}
-          onSelect={props.onSelectVideo}
-        />
-      </Show>
-    </section>
+              <NcmListDetail
+                title={artist()?.title ?? ""}
+                coverUrl={artist()?.coverUrl}
+                hiddenCover={uiSettings.hiddenCovers.artistDetail}
+                compact={compact()}
+                coverShape="round"
+                description={artist()?.description ?? metaText()}
+                metaItems={metaItems()}
+                playLabel={t("ncm.daily.playAll")}
+                playDisabled={props.tracks.length === 0}
+                loading={props.isLoading}
+                onPlay={() => {
+                  const [first, ...rest] = props.tracks;
+                  if (!first) return;
+                  void (async () => {
+                    await props.playback.playOnlineTrack(first);
+                    for (const item of rest) {
+                      await props.playback.enqueueOnlineTrack(item);
+                    }
+                  })();
+                }}
+                actionButtons={
+                  <button
+                    type="button"
+                    class={`ghost-button page-action ncm-artist-subscribe${props.detail?.followed === true ? " is-active" : ""}`}
+                    disabled={props.isLoadingDetail || props.isTogglingSubscribe}
+                    onClick={() => void props.onToggleSubscribe()}
+                  >
+                    <Show when={props.isTogglingSubscribe} fallback={props.detail?.followed === true ? <IconHeartFilled /> : <IconHeart />}>
+                      <IconSpinner />
+                    </Show>
+                    {props.isTogglingSubscribe ? t("ncm.artist.subscribeWorking") : subscribeLabel()}
+                  </button>
+                }
+              />
+              <div class="ncm-detail-tabs">
+                <SegmentedTabs
+                  value={detailTab()}
+                  onChange={setTab}
+                  items={detailTabItems()}
+                  ariaLabel={t("ncm.artist.tabs.aria")}
+                />
+              </div>
+            </PageHero>
+            <PageBody class="ncm-detail-page-body">
+              <Show when={detailTab() === "songs"}>
+                <div class="ncm-artist-song-panel">
+                  <div class="ncm-artist-song-toolbar">
+                    <SegmentedTabs
+                      value={props.trackOrder}
+                      onChange={(next) => void props.onChangeTrackOrder(next === "time" ? "time" : "hot")}
+                      items={trackOrderItems()}
+                      ariaLabel={t("ncm.artist.songs.orderAria")}
+                    />
+                  </div>
+                  <MediaList
+                    items={props.tracks}
+                    currentSourcePath={props.currentTrackPath}
+                    currentSongId={props.currentSongId}
+                    isPlayingNow={props.isPlaying}
+                    onPlay={(item) => void props.playback.playOnlineTrack(item)}
+                    onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
+                    onContextAction={(action, item) => {
+                      if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
+                    }}
+                    isLoading={props.isLoading}
+                    emptyState={<div class="panel-note">{t("ncm.artist.empty")}</div>}
+                    hideTopScrollTool
+                  />
+                  <Show when={props.hasMoreTracks && props.tracks.length > 0}>
+                    <div class="online-discover-load-more">
+                      <button
+                        type="button"
+                        class="ghost-button"
+                        disabled={props.isLoading}
+                        onClick={() => void props.onLoadMoreTracks()}
+                      >
+                        {props.isLoading ? t("ncm.playlist.loading") : t("ncm.discover.loadMore")}
+                      </button>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
+              <Show when={detailTab() === "albums"}>
+                <ArtistResourceGrid
+                  items={props.albums}
+                  isLoading={props.isLoadingAlbums}
+                  hasMore={props.hasMoreAlbums}
+                  emptyText={t("ncm.artist.albums.empty")}
+                  loadingText={t("ncm.playlist.loading")}
+                  loadMoreText={t("ncm.discover.loadMore")}
+                  coverHidden={uiSettings.hiddenCovers.album}
+                  onLoadMore={props.onLoadMoreAlbums}
+                  onSelect={props.onSelectAlbum}
+                />
+              </Show>
+              <Show when={detailTab() === "videos"}>
+                <ArtistResourceGrid
+                  items={props.videos}
+                  isLoading={props.isLoadingVideos}
+                  hasMore={props.hasMoreVideos}
+                  emptyText={t("ncm.artist.videos.empty")}
+                  loadingText={t("ncm.playlist.loading")}
+                  loadMoreText={t("ncm.discover.loadMore")}
+                  coverHidden={uiSettings.hiddenCovers.video}
+                  variant="videos"
+                  onLoadMore={props.onLoadMoreVideos}
+                  onSelect={props.onSelectVideo}
+                />
+              </Show>
+            </PageBody>
+            <BackToTop label={t("media.scroll.top")} />
+          </>
+        )}
+      </PageStickyHeader>
+    </PageSurface>
   );
 }
 

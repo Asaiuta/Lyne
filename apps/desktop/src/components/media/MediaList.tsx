@@ -31,8 +31,19 @@ import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { MediaListFloatTools } from "./MediaListFloatTools";
 import { MediaListRow } from "./MediaListRow";
 import { MediaSortPopover } from "./MediaSortPopover";
+import { SImage } from "../SImage";
 import { displayNameFromSourcePath, stripBracketedContent } from "./mediaListFormatting";
-import { isMediaListItemCurrent } from "../../shared/media/mediaIdentity";
+import {
+  createMediaIdentityIndex,
+  findMediaIdentityIndex,
+  isMediaListItemCurrent
+} from "../../shared/media/mediaIdentity";
+import {
+  MEDIA_LIST_ROW_HEIGHT_PX,
+  MEDIA_LIST_VIRTUALIZE_THRESHOLD,
+  resolveMediaListVisibleRange,
+  shouldVirtualizeMediaList
+} from "./mediaListVirtualization";
 export { isMediaListItemCurrent, mediaKeyForPath } from "../../shared/media/mediaIdentity";
 export {
   displayNameFromSourcePath,
@@ -123,13 +134,10 @@ interface MediaListProps<T extends MediaListItem> {
   onSortChange?: (field: MediaSortField) => void;
   onSortOrderChange?: (order: MediaSortOrder) => void;
   sortDisabled?: boolean;
+  hideTopScrollTool?: boolean;
   draggable?: boolean;
   onReorder?: (fromIndex: number, toIndex: number) => void;
 }
-
-const VIRTUALIZE_THRESHOLD = 120;
-const VIRTUAL_ROW_HEIGHT_PX = 90;
-const VIRTUAL_OVERSCAN = 5;
 
 interface MenuState {
   open: boolean;
@@ -191,6 +199,8 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const [viewportHeight, setViewportHeight] = createSignal<number>(0);
   let viewportRef: HTMLDivElement | undefined;
   let sortMenuRef: HTMLDivElement | undefined;
+  let scrollFrame = 0;
+  let pendingScrollTop = 0;
 
   const contextActionSet = createMemo<Set<MediaContextAction>>(
     () =>
@@ -253,14 +263,13 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const remoteVirtualStart = createMemo<number | null>(() =>
     props.totalCount !== undefined ? props.virtualStart ?? 0 : null
   );
+  const mediaIdentityIndex = createMemo(() => createMediaIdentityIndex(props.items));
   const currentRenderedIndex = createMemo<number>(() =>
-    props.items.findIndex((item) =>
-      isMediaListItemCurrent(item, {
-        sourcePath: props.currentSourcePath,
-        mediaId: props.currentMediaId,
-        songId: props.currentSongId
-      })
-    )
+    findMediaIdentityIndex(mediaIdentityIndex(), {
+      sourcePath: props.currentSourcePath,
+      mediaId: props.currentMediaId,
+      songId: props.currentSongId
+    })
   );
   const canLocateCurrent = createMemo<boolean>(() => currentRenderedIndex() >= 0);
 
@@ -464,6 +473,27 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     setDropIndex(null);
   };
 
+  const commitPendingScrollTop = () => {
+    scrollFrame = 0;
+    setScrollTop((current) => (current === pendingScrollTop ? current : pendingScrollTop));
+  };
+
+  const scheduleScrollTop = (nextScrollTop: number) => {
+    pendingScrollTop = nextScrollTop;
+    if (scrollFrame !== 0) return;
+    if (typeof window === "undefined") {
+      commitPendingScrollTop();
+      return;
+    }
+    scrollFrame = window.requestAnimationFrame(commitPendingScrollTop);
+  };
+
+  onCleanup(() => {
+    if (scrollFrame !== 0 && typeof window !== "undefined") {
+      window.cancelAnimationFrame(scrollFrame);
+    }
+  });
+
   onMount(() => {
     if (!viewportRef) return;
     const updateViewportHeight = () => setViewportHeight(viewportRef?.clientHeight ?? 0);
@@ -473,14 +503,16 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     onCleanup(() => observer.disconnect());
   });
 
-  const useVirtualRows = createMemo<boolean>(() => totalItems() > VIRTUALIZE_THRESHOLD);
-  const visibleRange = createMemo<{ start: number; end: number }>(() => {
-    if (!useVirtualRows()) return { start: 0, end: totalItems() };
-    const measuredHeight = viewportHeight() || VIRTUAL_ROW_HEIGHT_PX * 8;
-    const start = Math.max(0, Math.floor(scrollTop() / VIRTUAL_ROW_HEIGHT_PX) - VIRTUAL_OVERSCAN);
-    const count = Math.ceil(measuredHeight / VIRTUAL_ROW_HEIGHT_PX) + VIRTUAL_OVERSCAN * 2;
-    return { start, end: Math.min(totalItems(), start + count) };
-  });
+  const useVirtualRows = createMemo<boolean>(() => shouldVirtualizeMediaList(totalItems()));
+  const visibleRange = createMemo<{ start: number; end: number }>((previous) => {
+    const next = resolveMediaListVisibleRange({
+      totalItems: totalItems(),
+      scrollTop: scrollTop(),
+      viewportHeight: viewportHeight(),
+      virtualizeThreshold: MEDIA_LIST_VIRTUALIZE_THRESHOLD
+    });
+    return previous.start === next.start && previous.end === next.end ? previous : next;
+  }, { start: 0, end: 0 });
   const renderedItems = createMemo<T[]>(() => {
     if (remoteVirtualStart() !== null) {
       return props.items;
@@ -489,11 +521,11 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     return props.items.slice(range.start, range.end);
   });
   const virtualHeight = createMemo<number>(() =>
-    useVirtualRows() ? totalItems() * VIRTUAL_ROW_HEIGHT_PX : 0
+    useVirtualRows() ? totalItems() * MEDIA_LIST_ROW_HEIGHT_PX : 0
   );
   const virtualOffset = createMemo<number>(() =>
     useVirtualRows()
-      ? (remoteVirtualStart() ?? visibleRange().start) * VIRTUAL_ROW_HEIGHT_PX
+      ? (remoteVirtualStart() ?? visibleRange().start) * MEDIA_LIST_ROW_HEIGHT_PX
       : 0
   );
 
@@ -506,7 +538,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     if (index < 0) return;
     const absoluteIndex = remoteVirtualStart() !== null ? (props.virtualStart ?? 0) + index : index;
     viewportRef?.scrollTo({
-      top: Math.max(0, absoluteIndex * VIRTUAL_ROW_HEIGHT_PX),
+      top: Math.max(0, absoluteIndex * MEDIA_LIST_ROW_HEIGHT_PX),
       behavior: "smooth"
     });
   };
@@ -702,9 +734,10 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
         <div
           ref={viewportRef}
           class="media-list-viewport"
+          data-page-scroll-root="true"
           data-virtualized={useVirtualRows() ? "true" : undefined}
           onScroll={(event) => {
-            setScrollTop(event.currentTarget.scrollTop);
+            scheduleScrollTop(event.currentTarget.scrollTop);
             props.onScroll?.(event);
           }}
         >
@@ -765,6 +798,7 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
           <MediaListFloatTools
             canLocateCurrent={canLocateCurrent()}
             scrollTop={scrollTop()}
+            showTop={props.hideTopScrollTool !== true}
             currentLabel={t("media.scroll.current")}
             topLabel={t("media.scroll.top")}
             onScrollToCurrent={scrollToCurrent}
@@ -852,7 +886,14 @@ function MediaCommentItem(props: { comment: NcmSongComment }) {
     <article class="media-comment-item">
       <Show when={props.comment.user.avatarUrl} fallback={<div class="media-comment-avatar" aria-hidden="true" />}>
         {(avatarUrl) => (
-          <img class="media-comment-avatar" src={avatarUrl()} alt={props.comment.user.nickname} />
+          <SImage
+            src={avatarUrl()}
+            alt={props.comment.user.nickname}
+            class="media-comment-avatar"
+            observeVisibility={true}
+            shape="circle"
+            aspect="square"
+          />
         )}
       </Show>
       <div class="media-comment-body">

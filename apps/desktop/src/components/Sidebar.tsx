@@ -10,6 +10,7 @@ import { useTranslation } from "../shared/i18n";
 import { resolveArtworkUrl } from "../shared/ui/artwork";
 import { useDismissibleOverlay } from "../shared/ui/useDismissibleOverlay";
 import { CreatePlaylistModal } from "./CreatePlaylistModal";
+import { SImage } from "./SImage";
 import type { OnlinePlaylistSummary, UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
 import {
   loadNcmUserPlaylistGroupsCached,
@@ -498,6 +499,7 @@ export function Sidebar(props: SidebarProps) {
                                     <button
                                       type="button"
                                       class={`sidebar-nav-item${isActive() ? " is-active" : ""}`}
+                                      data-perf-route-key={item.key}
                                       onClick={() => handleNavItemClick(item.key)}
                                       aria-current={isActive() ? "page" : undefined}
                                       title={collapsed() ? label() : undefined}
@@ -590,7 +592,7 @@ export function Sidebar(props: SidebarProps) {
                                               when={playlist.coverUrl}
                                               fallback={<span>{playlist.name.slice(0, 1)}</span>}
                                             >
-                                              {(coverUrl) => <img src={coverUrl()} alt="" />}
+                                              {(coverUrl) => <SImage src={coverUrl()} alt="" observeVisibility={true} shape="rect" aspect="square" />}
                                             </Show>
                                           </div>
                                         </Show>
@@ -625,7 +627,7 @@ export function Sidebar(props: SidebarProps) {
                                           <Show when={uiSettings.menuShowCover}>
                                             <div class="sidebar-playlist-cover" aria-hidden="true">
                                               <Show when={coverUrl()} fallback={<span>{playlist.name.slice(0, 1)}</span>}>
-                                                {(url) => <img src={url()} alt="" />}
+                                                {(url) => <SImage src={url()} alt="" observeVisibility={true} shape="rect" aspect="square" />}
                                               </Show>
                                             </div>
                                           </Show>

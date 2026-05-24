@@ -1,4 +1,5 @@
 import type { UISettings } from "../state/useUISettings";
+import { paletteEngine } from "../theme/paletteEngine";
 
 const CUSTOM_CSS_STYLE_ID = "audioplayer-custom-css";
 
@@ -25,19 +26,15 @@ function readFontStack(settings: UISettings): string | null {
 function applyAccentColor(settings: UISettings): void {
   const root = document.documentElement;
   const color = settings.customAccentColor.trim() || "#fe7971";
-  root.style.setProperty("--accent-base", color);
-  root.style.setProperty(
-    "--accent-base-strong",
-    `color-mix(in oklch, ${color} 86%, white 14%)`
-  );
+  paletteEngine.applySeed(color, root);
 
   if (settings.themeGlobalColor) {
     root.style.setProperty(
       "--surface-container-dynamic",
-      `color-mix(in oklch, ${color} 10%, var(--surface-1))`
+      "var(--color-neutral-container)"
     );
   } else {
-    root.style.removeProperty("--surface-container-dynamic");
+    root.style.setProperty("--surface-container-dynamic", "var(--surface-container-default)");
   }
 }
 

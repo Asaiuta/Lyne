@@ -8,14 +8,18 @@
     "dev:tauri": "npm run build:sidecar && vite",
     "build": "npm run build:web",
     "build:web": "vite build",
+    "build:measure": "npm run build:web && npm run perf:bundle",
     "build:sidecar": "cargo build --release --manifest-path ../../Cargo.toml --bin audio_server",
     "build:bundle": "npm run build:web && npm run build:sidecar",
     "preview": "vite preview",
+    "perf:bundle": "node ./scripts/report-bundle-size.mjs",
+    "perf:routes": "node ./scripts/measure-route-loads.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node ./scripts/run-focused-tests.mjs",
     "tauri": "powershell -ExecutionPolicy Bypass -File ./scripts/tauri-wrapper.ps1"
   },
   "dependencies": {
+    "@material/material-color-utilities": "^0.4.0",
     "@tauri-apps/api": "^2.0.0",
     "qrcode": "^1.5.4",
     "solid-js": "^1.9.3"

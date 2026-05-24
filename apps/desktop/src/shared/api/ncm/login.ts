@@ -81,10 +81,11 @@ export const createLoginQr = (key: string, qrimg = true) =>
     params: { key, qrimg }
   });
 
-export const checkLoginQr = (key: string) =>
+export const checkLoginQr = (key: string, signal?: AbortSignal) =>
   requestAnonymousLogin("login/qr/check", {
     params: { key },
-    allowErrorCodes: QR_CHECK_ALLOWED_CODES
+    allowErrorCodes: QR_CHECK_ALLOWED_CODES,
+    signal
   });
 
 export const getLoginStatus = () =>

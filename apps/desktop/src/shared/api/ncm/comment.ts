@@ -1,4 +1,4 @@
-import { requestNcm, type NcmResponseEnvelope } from "./base";
+import { requestNcm, type NcmRequestOptions, type NcmResponseEnvelope } from "./base";
 
 export interface NcmSongComment {
   commentId: number;
@@ -37,6 +37,7 @@ export interface NcmSongCommentsPayload {
 export type NcmResourceCommentType = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type NcmResourceCommentSort = 1 | 2 | 3;
 export type NcmCommentLikeAction = 1 | 2;
+type RequestSignalOptions = Pick<NcmRequestOptions, "signal">;
 
 export interface NcmCommentHugListPayload {
   total: number;
@@ -176,7 +177,8 @@ export const resourceComments = (
   pageNo = 1,
   pageSize = 20,
   sortType: NcmResourceCommentSort = 2,
-  cursor?: number
+  cursor?: number,
+  options: RequestSignalOptions = {}
 ): Promise<NcmResponseEnvelope> =>
   requestNcm("comment/new", {
     method: "POST",
@@ -189,7 +191,8 @@ export const resourceComments = (
       timestamp: Date.now(),
       ...(cursor === undefined ? {} : { cursor })
     },
-    noCache: true
+    noCache: true,
+    signal: options.signal
   });
 
 export const resourceHotComments = (
@@ -197,7 +200,8 @@ export const resourceHotComments = (
   type: NcmResourceCommentType,
   limit = 20,
   offset = 0,
-  before?: number
+  before?: number,
+  options: RequestSignalOptions = {}
 ): Promise<NcmResponseEnvelope> =>
   requestNcm("comment/hot", {
     method: "POST",
@@ -208,7 +212,8 @@ export const resourceHotComments = (
       offset,
       ...(before === undefined ? {} : { before })
     },
-    noCache: true
+    noCache: true,
+    signal: options.signal
   });
 
 export const commentLike = (

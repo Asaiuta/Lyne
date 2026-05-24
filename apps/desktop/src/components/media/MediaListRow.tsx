@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
 import type { UISettings } from "../../shared/state/useUISettings";
+import { SImage } from "../SImage";
 import { IconCloud, IconPause, IconPlay, IconQueueAdd } from "../icons";
 import type { MediaListItem } from "./MediaList";
 import {
@@ -108,7 +109,7 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
           <Show when={props.showArtwork}>
             <Show when={props.item.artworkUrl}>
               <span class="media-row-artwork" aria-hidden="true">
-                <img src={props.item.artworkUrl ?? ""} alt="" />
+                <SImage src={props.item.artworkUrl} alt="" observeVisibility={true} shape="rect" aspect="square" />
               </span>
             </Show>
             <Show when={!props.item.artworkUrl}>

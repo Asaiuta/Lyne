@@ -4,6 +4,7 @@ import { IconChevronUp, IconLocation } from "../icons";
 interface MediaListFloatToolsProps {
   canLocateCurrent: boolean;
   scrollTop: number;
+  showTop: boolean;
   currentLabel: string;
   topLabel: string;
   onScrollToCurrent: () => void;
@@ -24,16 +25,18 @@ export function MediaListFloatTools(props: MediaListFloatToolsProps) {
           <IconLocation />
         </button>
       </Show>
-      <button
-        type="button"
-        class="media-list-float-button"
-        classList={{ "is-hidden": props.scrollTop <= 100 }}
-        onClick={props.onScrollToTop}
-        aria-label={props.topLabel}
-        title={props.topLabel}
-      >
-        <IconChevronUp />
-      </button>
+      <Show when={props.showTop}>
+        <button
+          type="button"
+          class="media-list-float-button"
+          classList={{ "is-hidden": props.scrollTop <= 100 }}
+          onClick={props.onScrollToTop}
+          aria-label={props.topLabel}
+          title={props.topLabel}
+        >
+          <IconChevronUp />
+        </button>
+      </Show>
     </div>
   );
 }

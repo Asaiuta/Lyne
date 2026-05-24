@@ -83,7 +83,7 @@ export interface NcmApiClient {
   listNcmDailySongTracks: () => Promise<NcmTrackSummary[]>;
   dislikeNcmDailySong: (songId: number) => Promise<NcmDailySongDislikeResult>;
   listNcmSongDetailTracks: (ids: number[]) => Promise<NcmTrackSummary[]>;
-  listNcmPersonalFmTracks: () => Promise<NcmTrackSummary[]>;
+  listNcmPersonalFmTracks: (options?: { signal?: AbortSignal }) => Promise<NcmTrackSummary[]>;
   trashNcmPersonalFmTrack: (songId: number) => Promise<void>;
   listNcmHeartbeatTracks: (input: ListNcmHeartbeatTracksInput) => Promise<NcmTrackSummary[]>;
   listNcmAlbumTracks: (id: number) => Promise<NcmTrackSummary[]>;
@@ -233,8 +233,13 @@ export const createNcmApiClient = (transport: NcmApiTransport): NcmApiClient => 
     ),
   listNcmSongDetailTracks: async (ids) =>
     parseNcmTracksResponse(await transport.requestJson("/domain/ncm/song/details/tracks", postJson({ ids }))),
-  listNcmPersonalFmTracks: async () =>
-    parseNcmTracksResponse(await transport.requestJson("/domain/ncm/personal_fm/tracks", postJson())),
+  listNcmPersonalFmTracks: async (options) =>
+    parseNcmTracksResponse(
+      await transport.requestJson("/domain/ncm/personal_fm/tracks", {
+        ...postJson(),
+        signal: options?.signal
+      })
+    ),
   trashNcmPersonalFmTrack: async (songId) => {
     const response = parseStatusMessage(
       await transport.requestJson("/domain/ncm/personal_fm/trash", postJson({ song_id: songId }))

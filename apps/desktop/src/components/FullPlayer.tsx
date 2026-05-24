@@ -9,7 +9,6 @@ import { FullPlayerControlShell } from "./player/FullPlayerControlShell";
 import { FullPlayerLyrics } from "./player/FullPlayerLyrics";
 import {
   getCommentPanelClassName,
-  getCoverBackgroundStyle,
   getFullPlayerRootClassName,
   getLayoutClassName,
   getLyricLineAlign,
@@ -18,7 +17,6 @@ import {
   getRootStyle,
   getStageStyle
 } from "./player/fullPlayerLayout";
-import { isVideoArtworkUrl } from "../shared/ui/mediaArtwork";
 import { FullPlayerOverlayMenu } from "./player/FullPlayerOverlayMenu";
 import { FullPlayerPrimaryPanel } from "./player/FullPlayerPrimaryPanel";
 import { stripBracketedContent } from "./player/metadata";
@@ -35,6 +33,8 @@ import {
   IconVolumeMute
 } from "./icons";
 import { useUISettings } from "../shared/state/useUISettings";
+import { SImage } from "./SImage";
+import "../shared/styles/components/full-player.css";
 
 interface FullPlayerProps {
   isOpen: boolean;
@@ -74,6 +74,7 @@ interface FullPlayerProps {
 
 const LYRIC_OFFSET_STORAGE_KEY = "ui.lyric.songOffsets";
 const LYRIC_OFFSET_STEP_MS = 500;
+const FULL_PLAYER_CLOSE_PRESENCE_MS = 560;
 
 function readLyricOffsetMap(): Record<string, number> {
   if (typeof window === "undefined") return {};
@@ -112,12 +113,42 @@ export function FullPlayer(props: FullPlayerProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
   const [volumePopoverOpen, setVolumePopoverOpen] = createSignal(false);
+  const [closePresence, setClosePresence] = createSignal<boolean>(props.isOpen);
   const [backgroundLayers, setBackgroundLayers] = createSignal<readonly string[]>([]);
   const [lyricOffsets, setLyricOffsets] = createSignal<Record<string, number>>(readLyricOffsetMap());
   let lyricListRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let fullVolumeRef: HTMLDivElement | undefined;
   let backgroundTimer: number | undefined;
+  let closePresenceTimer: number | undefined;
+
+  const clearBackgroundTimer = () => {
+    if (backgroundTimer === undefined) return;
+    window.clearTimeout(backgroundTimer);
+    backgroundTimer = undefined;
+  };
+  const clearClosePresenceTimer = () => {
+    if (closePresenceTimer === undefined) return;
+    window.clearTimeout(closePresenceTimer);
+    closePresenceTimer = undefined;
+  };
+  const renderActive = () => props.isOpen || closePresence();
+
+  createEffect(() => {
+    clearClosePresenceTimer();
+    if (props.isOpen) {
+      setClosePresence(true);
+      return;
+    }
+    if (!closePresence()) {
+      return;
+    }
+    closePresenceTimer = window.setTimeout(() => {
+      lyricListRef = undefined;
+      closePresenceTimer = undefined;
+      setClosePresence(false);
+    }, FULL_PLAYER_CLOSE_PRESENCE_MS);
+  });
 
   const {
     metaVisible,
@@ -197,7 +228,7 @@ export function FullPlayer(props: FullPlayerProps) {
     return getLyricTransformOrigin(lyricLineAlign());
   };
   const lowFrequencyEnergy = createMemo(() => {
-    if (!uiSettings.playerBackgroundLowFreqVolume || props.spectrum.length === 0) return 0;
+    if (!renderActive() || !uiSettings.playerBackgroundLowFreqVolume || props.spectrum.length === 0) return 0;
     const lows = props.spectrum.slice(0, Math.min(8, props.spectrum.length));
     const average = lows.reduce((sum, value) => sum + Math.max(0, value), 0) / lows.length;
     return clamp01(average);
@@ -227,13 +258,18 @@ export function FullPlayer(props: FullPlayerProps) {
     return key ? lyricOffsets()[key] ?? 0 : 0;
   });
   const lyricOffsetSeconds = createMemo(() => lyricOffsetMs() / 1000);
-  const currentTime = () => props.currentTime + lyricOffsetSeconds();
-  const activeLyricIndex = createMemo(() => findActiveLyricIndex(lyrics(), currentTime()));
+  const currentTime = () => (renderActive() ? props.currentTime + lyricOffsetSeconds() : 0);
+  const activeLyricIndex = createMemo(() => {
+    if (!renderActive()) return -1;
+    return findActiveLyricIndex(lyrics(), currentTime());
+  });
   const compactLyric = createMemo(() => {
+    if (!renderActive()) return null;
     const index = activeLyricIndex();
     return index >= 0 ? lyrics()[index]?.text ?? null : null;
   });
   const instantLyric = createMemo(() => {
+    if (!renderActive()) return null;
     const index = activeLyricIndex();
     if (index < 0) {
       return null;
@@ -254,7 +290,13 @@ export function FullPlayer(props: FullPlayerProps) {
     return getCommentPanelClassName(layoutSettings(), showComment());
   });
   const fullPlayerRootClassName = createMemo(() => {
-    return getFullPlayerRootClassName(layoutSettings(), props.isOpen, props.isPlaying, showComment());
+    return getFullPlayerRootClassName(
+      layoutSettings(),
+      props.isOpen,
+      props.isPlaying,
+      showComment(),
+      metaVisible()
+    );
   });
   const fullscreenLabel = () =>
     isFullscreen() ? t("fullPlayer.action.fullscreenExit") : t("fullPlayer.action.fullscreenEnter");
@@ -286,7 +328,7 @@ export function FullPlayer(props: FullPlayerProps) {
     handleProgressKeyDown
   } = useFullPlayerProgress({
     duration: () => props.duration,
-    currentTime: () => props.currentTime,
+    currentTime: () => (renderActive() ? props.currentTime : 0),
     lyrics,
     timeFormat: () => uiSettings.timeFormat,
     progressAdjustLyric: () => uiSettings.progressAdjustLyric,
@@ -302,13 +344,16 @@ export function FullPlayer(props: FullPlayerProps) {
   });
 
   createEffect(() => {
+    if (!renderActive()) {
+      setBackgroundLayers([]);
+      clearBackgroundTimer();
+      return;
+    }
+
     const nextCoverUrl = props.coverUrl;
     if (!nextCoverUrl) {
       setBackgroundLayers([]);
-      if (backgroundTimer !== undefined) {
-        window.clearTimeout(backgroundTimer);
-        backgroundTimer = undefined;
-      }
+      clearBackgroundTimer();
       return;
     }
 
@@ -317,9 +362,7 @@ export function FullPlayer(props: FullPlayerProps) {
       return [nextCoverUrl, ...layers.slice(0, 1)];
     });
 
-    if (backgroundTimer !== undefined) {
-      window.clearTimeout(backgroundTimer);
-    }
+    clearBackgroundTimer();
     backgroundTimer = window.setTimeout(() => {
       setBackgroundLayers((layers) => layers.slice(0, 1));
       backgroundTimer = undefined;
@@ -327,9 +370,8 @@ export function FullPlayer(props: FullPlayerProps) {
   });
 
   onCleanup(() => {
-    if (backgroundTimer !== undefined) {
-      window.clearTimeout(backgroundTimer);
-    }
+    clearBackgroundTimer();
+    clearClosePresenceTimer();
   });
 
   const lyricNow = () => {
@@ -428,12 +470,12 @@ export function FullPlayer(props: FullPlayerProps) {
     repeatActive: props.repeatMode !== "off",
     repeatLabel: repeatLabel(),
     repeatIcon: RepeatIcon(),
-    canSeek: canSeek(),
+    canSeek: renderActive() && canSeek(),
     duration: props.duration,
-    currentTime: props.currentTime,
-    progress: progress(),
-    timeLeft: timeLeft(),
-    timeRight: timeRight(),
+    currentTime: renderActive() ? props.currentTime : 0,
+    progress: renderActive() ? progress() : 0,
+    timeLeft: renderActive() ? timeLeft() : "0:00",
+    timeRight: renderActive() ? timeRight() : "0:00",
     onToggleShuffle: props.onToggleShuffle,
     onSkipPrev: props.onSkipPrev,
     onPlayPause: handlePlayPauseClick,
@@ -551,24 +593,25 @@ export function FullPlayer(props: FullPlayerProps) {
       onClick={handleSurfaceMove}
       onMouseLeave={handleSurfaceLeave}
     >
-      <Show when={backgroundLayers().length > 0}>
+      <Show when={renderActive() && backgroundLayers().length > 0}>
         <div class="full-player-background" aria-hidden="true">
           <For each={backgroundLayers()}>
             {(url, index) => (
-              <div
+              <SImage
+                src={url}
+                alt=""
                 class={`full-player-fluid${index() === 0 ? " is-current" : " is-previous"}`}
-                style={isVideoArtworkUrl(url) ? undefined : getCoverBackgroundStyle(url)}
-              >
-                <Show when={isVideoArtworkUrl(url)}>
-                  <video class="full-player-fluid-media" src={url} autoplay loop muted playsinline />
-                </Show>
-              </div>
+                mediaClass="full-player-fluid-media"
+                observeVisibility={false}
+                shape="rect"
+                ariaHidden="true"
+              />
             )}
           </For>
         </div>
       </Show>
       <div class="full-player-vignette" aria-hidden="true" />
-      <Show when={showInstantLyric() && instantLyric()}>
+      <Show when={renderActive() && showInstantLyric() && instantLyric()}>
         {(line) => (
           <div class="full-player-instant-lyric absolute top-0 h-80px flex flex-col justify-center items-center pointer-events-none">
             <span class="text-18px leading-tight">{line().text}</span>
@@ -580,7 +623,7 @@ export function FullPlayer(props: FullPlayerProps) {
           </div>
         )}
       </Show>
-      <Show when={showInstantLyric() && !instantLyric() && compactLyric()}>
+      <Show when={renderActive() && showInstantLyric() && !instantLyric() && compactLyric()}>
         {(line) => (
           <div class="full-player-instant-lyric absolute top-0 h-80px flex flex-col justify-center items-center pointer-events-none">
             <span class="text-18px leading-tight">{line()}</span>
@@ -596,19 +639,21 @@ export function FullPlayer(props: FullPlayerProps) {
         onMouseLeave={handleControlLeave}
       />
 
-      <div class={layoutClassName()} style={stageStyle()}>
-        <FullPlayerPrimaryPanel cover={primaryPanelCover()} meta={primaryPanelMeta()} />
+      <Show when={renderActive()}>
+        <div class={layoutClassName()} style={stageStyle()}>
+          <FullPlayerPrimaryPanel cover={primaryPanelCover()} meta={primaryPanelMeta()} />
 
-        <Show when={showComment()}>
-          <FullPlayerComments song={commentsSong()} content={commentsContent()} />
-        </Show>
+          <Show when={showComment()}>
+            <FullPlayerComments song={commentsSong()} content={commentsContent()} />
+          </Show>
 
-        <FullPlayerLyrics
-          display={lyricsDisplay()}
-          settings={lyricsSettings()}
-          interaction={lyricsInteraction()}
-        />
-      </div>
+          <FullPlayerLyrics
+            display={lyricsDisplay()}
+            settings={lyricsSettings()}
+            interaction={lyricsInteraction()}
+          />
+        </div>
+      </Show>
 
       <FullPlayerControlShell
         visible={metaVisible()}
@@ -620,7 +665,7 @@ export function FullPlayer(props: FullPlayerProps) {
         onMouseLeave={handleControlLeave}
       />
 
-      <Show when={uiSettings.showSpectrums && props.spectrum.length > 0}>
+      <Show when={renderActive() && uiSettings.showSpectrums && props.spectrum.length > 0}>
         <div class={`full-player-spectrum${metaVisible() ? "" : " is-visible"}`} aria-hidden="true">
           <SpectrumCanvas data={props.spectrum} active={props.isPlaying} />
         </div>

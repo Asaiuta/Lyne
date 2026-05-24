@@ -23,7 +23,7 @@ import {
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import { useTranslation } from "../shared/i18n";
 import { isPlaceholderPage, type ActivePage } from "../shared/ui/navigation";
-import { applyDynamicAccent, extractAccent } from "../shared/styles/dynamicAccent";
+import { paletteEngine } from "../shared/theme/paletteEngine";
 import { applyUserAppearanceSettings } from "../shared/styles/customAppearance";
 import type {
   ApiClient,
@@ -290,20 +290,27 @@ export function useAppController(api: ApiClient): AppController {
     const themeMode = uiSettings.themeMode;
     void themeMode;
     if (!uiSettings.playerFollowCoverColor) {
-      applyDynamicAccent(null);
       applyUserAppearanceSettings(uiSettings);
       return;
     }
     const url = ncm.currentNcmCoverUrl() ?? playback.coverUrl();
     let cancelled = false;
     if (!url) {
-      applyDynamicAccent(null);
       applyUserAppearanceSettings(uiSettings);
       return;
     }
-    void extractAccent(url).then((color) => {
+    void paletteEngine.extractSourceColor(url).then((sourceColor) => {
       if (cancelled) return;
-      applyDynamicAccent(color);
+      if (sourceColor === null) {
+        applyUserAppearanceSettings(uiSettings);
+        return;
+      }
+      paletteEngine.applyPalette(
+        paletteEngine.createPaletteFromSource(
+          sourceColor,
+          document.documentElement.dataset.theme === "light" ? "light" : "dark"
+        )
+      );
     });
     onCleanup(() => {
       cancelled = true;

@@ -32,6 +32,7 @@ import {
   IconStar
 } from "../../components/icons";
 import { MediaList } from "../../components/media/MediaList";
+import { SImage } from "../../components/SImage";
 import { createErrorMessageReader, type FeedbackSetter } from "./shared/feedback";
 import { createPlaybackController, type PlaybackController } from "./shared/playback";
 import type { NcmTrackReference } from "./ncmPlayback";
@@ -266,8 +267,23 @@ export function SongWikiPage(props: SongWikiPageProps) {
                   <Show when={currentCover()} fallback={<span>{currentTitle().slice(0, 1)}</span>}>
                     {(cover) => (
                       <>
-                        <img class="song-wiki-cover-img" src={cover()} alt="" />
-                        <img class="song-wiki-cover-shadow" src={cover()} alt="" />
+                        <SImage
+                          src={cover()}
+                          alt=""
+                          class="song-wiki-cover-img"
+                          observeVisibility={false}
+                          shape="rect"
+                          aspect="square"
+                        />
+                        <SImage
+                          src={cover()}
+                          alt=""
+                          class="song-wiki-cover-shadow"
+                          observeVisibility={false}
+                          shape="rect"
+                          aspect="square"
+                          ariaHidden="true"
+                        />
                       </>
                     )}
                   </Show>
@@ -496,7 +512,16 @@ function SongWikiSheetSection(props: {
                 <article class={`song-wiki-sheet${expanded() ? " is-expanded" : ""}`}>
                   <button type="button" class="song-wiki-sheet-head" onClick={() => props.onToggleSheet(sheet)}>
                     <Show when={sheet.coverImageUrl}>
-                      {(cover) => <img src={cover()} alt="" />}
+                      {(cover) => (
+                        <SImage
+                          src={cover()}
+                          alt=""
+                          class="song-wiki-sheet-cover"
+                          observeVisibility={true}
+                          shape="rect"
+                          aspect="square"
+                        />
+                      )}
                     </Show>
                     <span>
                       <strong>{sheet.name}</strong>
@@ -528,7 +553,17 @@ function SongWikiSheetSection(props: {
                         <Match when={preview().images.length > 0}>
                           <div class="song-wiki-sheet-images">
                             <For each={preview().images}>
-                              {(image, index) => <img src={image} alt={t("ncm.songWiki.sheets.pageAlt", { page: index() + 1 })} loading="lazy" />}
+                              {(image, index) => (
+                                <SImage
+                                  src={image}
+                                  alt={t("ncm.songWiki.sheets.pageAlt", { page: index() + 1 })}
+                                  class="song-wiki-sheet-image"
+                                  observeVisibility={true}
+                                  shape="rect"
+                                  aspect={4 / 3}
+                                  objectFit="contain"
+                                />
+                              )}
                             </For>
                           </div>
                         </Match>
@@ -561,7 +596,16 @@ function SongWikiAchievementsSection(props: { model: SongWikiViewModel | null })
             {(item) => (
               <article class="song-wiki-achievement">
                 <Show when={item.image} fallback={<span class="song-wiki-achievement-icon"><IconStar /></span>}>
-                  {(image) => <img src={image()} alt="" loading="lazy" />}
+                  {(image) => (
+                    <SImage
+                      src={image()}
+                      alt=""
+                      class="song-wiki-achievement-image"
+                      observeVisibility={true}
+                      shape="rect"
+                      aspect="square"
+                    />
+                  )}
                 </Show>
                 <span>
                   <strong>{item.title}</strong>

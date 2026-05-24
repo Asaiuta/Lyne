@@ -9,6 +9,7 @@ import { createStore } from "solid-js/store";
 import { Modal } from "./Modal";
 import { SegmentedTabs } from "./page/SegmentedTabs";
 import { IconClose, IconLogo } from "./icons";
+import { SImage } from "./SImage";
 import {
   useNcmAccount,
   type NcmAccountInput
@@ -355,10 +356,13 @@ export function LoginModal(props: LoginModalProps) {
                           }
                         >
                           {(avatarUrl) => (
-                            <img
+                            <SImage
                               src={`${avatarUrl().replace(/^http:/, "https:")}?param=100y100`}
                               alt=""
                               class="login-modal-scan-avatar"
+                              observeVisibility={false}
+                              shape="circle"
+                              aspect="square"
                             />
                           )}
                         </Show>

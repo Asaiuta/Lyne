@@ -16,6 +16,12 @@ import {
 import { ContextMenu, type ContextMenuItem } from "../../../components/media/ContextMenu";
 import type { MediaContextAction } from "../../../components/media/MediaList";
 import { MediaList } from "../../../components/media/MediaList";
+import { BackToTop } from "../../../components/page/BackToTop";
+import { PageBody } from "../../../components/page/PageBody";
+import { PageHero } from "../../../components/page/PageHero";
+import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
+import { PageSurface } from "../../../components/page/PageSurface";
+import { SImage } from "../../../components/SImage";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
@@ -189,248 +195,274 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
   return (
     <Show when={detailPlaylist()}>
       {(playlist) => (
-        <section class="playlist-detail">
-          <div class={`playlist-detail-shell${props.isScrolled ? " is-small" : ""}`}>
-            <header class={`playlist-detail-head${uiSettings.hiddenCovers.list ? " is-cover-hidden" : ""}`}>
-              <Show when={!uiSettings.hiddenCovers.list}>
-                <div class="playlist-detail-art" aria-hidden="true">
-                  <Show when={playlist().coverUrl} fallback={<span>{playlist().name.slice(0, 1)}</span>}>
-                    {(coverUrl) => (
-                      <>
-                        <img class="playlist-detail-art-img" src={coverUrl()} alt="" />
-                        <img class="playlist-detail-art-shadow" src={coverUrl()} alt="" />
-                      </>
-                    )}
-                  </Show>
-                  <div class="playlist-detail-art-mask" />
-                </div>
-              </Show>
-              <div class="playlist-detail-copy">
-                <h2 title={playlist().name}>{playlist().name}</h2>
-                <div class="playlist-detail-collapse">
-                  <Show when={uiSettings.playlistPageElements.description && (playlist().description ?? props.subtitleText)}>
-                    {(description) => <p class="playlist-detail-desc">{description()}</p>}
-                  </Show>
-                  <Show
-                    when={
-                      uiSettings.playlistPageElements.creator ||
-                      uiSettings.playlistPageElements.time ||
-                      uiSettings.playlistPageElements.tags
-                    }
-                  >
-                    <div class="playlist-detail-meta">
-                      <Show when={uiSettings.playlistPageElements.creator}>
-                        <span>
-                          <IconMusic />
-                          {playlist().creator ?? t("ncm.playlist.creatorUnknown")}
-                        </span>
-                      </Show>
-                      <Show when={uiSettings.playlistPageElements.time}>
-                        <span>
-                          <IconList />
-                          {playlist().updateTime !== null || playlist().createTime !== null
-                            ? formatTimestamp(playlist().updateTime ?? playlist().createTime ?? 0)
-                            : t("ncm.playlist.trackCount", { count: props.trackCount })}
-                        </span>
-                      </Show>
-                      <Show when={playlist().playCount !== null}>
-                        <span>
-                          <IconEye />
-                          {playlist().playCount}
-                        </span>
-                      </Show>
-                      <Show when={hasDynamicCounts()}>
-                        <Show when={props.detail?.commentCount !== null && props.detail?.commentCount !== undefined}>
-                          <span>
-                            <IconChat />
-                            {t("ncm.playlist.commentCount", { count: props.detail?.commentCount ?? 0 })}
-                          </span>
+        <PageSurface class="playlist-detail playlist-detail-shell" floatingHero resetKey={playlist().id}>
+          <PageStickyHeader threshold={10}>
+            {({ compact }) => (
+              <>
+                <PageHero size={uiSettings.hiddenCovers.list ? "md" : "lg"} compact={compact()} class={`playlist-detail-hero${uiSettings.hiddenCovers.list ? " is-cover-hidden" : ""}`}>
+                  <header class={`playlist-detail-head${uiSettings.hiddenCovers.list ? " is-cover-hidden" : ""}`}>
+                    <Show when={!uiSettings.hiddenCovers.list}>
+                      <div class="playlist-detail-art" aria-hidden="true">
+                        <Show when={playlist().coverUrl} fallback={<span>{playlist().name.slice(0, 1)}</span>}>
+                          {(coverUrl) => (
+                            <>
+                              <SImage
+                                src={coverUrl()}
+                                alt=""
+                                class="playlist-detail-art-img"
+                                observeVisibility={false}
+                                shape="rect"
+                                aspect="square"
+                              />
+                              <SImage
+                                src={coverUrl()}
+                                alt=""
+                                class="playlist-detail-art-shadow"
+                                observeVisibility={false}
+                                shape="rect"
+                                aspect="square"
+                                ariaHidden="true"
+                              />
+                            </>
+                          )}
                         </Show>
-                        <Show when={props.detail?.shareCount !== null && props.detail?.shareCount !== undefined}>
-                          <span>
-                            <IconShare />
-                            {t("ncm.playlist.shareCount", { count: props.detail?.shareCount ?? 0 })}
-                          </span>
-                        </Show>
-                        <Show when={props.detail?.bookedCount !== null && props.detail?.bookedCount !== undefined}>
-                          <span>
-                            <IconHeart />
-                            {t("ncm.playlist.bookedCount", { count: props.detail?.bookedCount ?? 0 })}
-                          </span>
-                        </Show>
-                      </Show>
-                      <Show when={uiSettings.playlistPageElements.tags}>
-                        <span>
-                          <IconDots />
-                          <Show
-                            when={playlist().tags.length > 0}
-                            fallback={
-                              playlist().subscribed
-                                ? t("ncm.playlist.tag.subscribed")
-                                : t("ncm.playlist.tag.public")
-                            }
-                          >
-                            <For each={playlist().tags}>
-                              {(tag, index) => (
-                                <>
-                                  {index() > 0 ? " / " : ""}
-                                  {tag}
-                                </>
-                              )}
-                            </For>
-                          </Show>
-                        </span>
-                      </Show>
-                    </div>
-                  </Show>
-                </div>
-                <div class="playlist-detail-menu">
-                  <div class="playlist-detail-menu-left">
-                    <button
-                      type="button"
-                      class="primary-button playlist-detail-play"
-                      onClick={() => void props.onPlayAll()}
-                      disabled={props.tracks.length === 0 || props.isLoadingTracks}
-                    >
-                      <IconPlay />
-                      {props.isLoadingTracks ? t("ncm.playlist.loading") : t("ncm.playlist.play")}
-                    </button>
-                    <Show when={props.showBackButton ?? true}>
-                      <button
-                        type="button"
-                        class="ghost-button playlist-detail-back"
-                        onClick={props.onBack}
-                      >
-                        <IconChevronLeft />
-                        {props.backLabel ?? t("ncm.playlist.backToList")}
-                      </button>
-                    </Show>
-                    <Show when={canToggleSubscribe()}>
-                      <button
-                        type="button"
-                        class={`ghost-button playlist-detail-subscribe${isSubscribed() ? " is-active" : ""}`}
-                        onClick={() => void props.onToggleSubscribe?.()}
-                        disabled={props.isLoadingDetail || props.isTogglingSubscribe}
-                      >
-                        <Show when={props.isTogglingSubscribe} fallback={isSubscribed() ? <IconHeartFilled /> : <IconHeart />}>
-                          <IconSpinner />
-                        </Show>
-                        {subscribeLabel()}
-                      </button>
-                    </Show>
-                    <button
-                      type="button"
-                      class="ghost-button playlist-detail-more"
-                      aria-label={t("ncm.playlist.more")}
-                      title={t("ncm.playlist.more")}
-                      onClick={openMenu}
-                    >
-                      <IconList />
-                    </button>
-                  </div>
-                  <div class="playlist-detail-menu-right">
-                    <label class="playlist-detail-search">
-                      <IconSearch />
-                      <input
-                        type="search"
-                        value={props.filter}
-                        placeholder={t("ncm.playlist.search")}
-                        onInput={(event) => props.setFilter(event.currentTarget.value)}
-                      />
-                    </label>
-                    <Show when={showCommentsTab()}>
-                      <div class="playlist-detail-tabs" role="tablist" aria-label={t("ncm.playlist.tabs.aria")}>
-                        <button
-                          type="button"
-                          class={props.detailTab === "songs" ? "is-active" : ""}
-                          role="tab"
-                          aria-selected={props.detailTab === "songs"}
-                          onClick={() => props.setDetailTab("songs")}
-                        >
-                          {t("ncm.playlist.tab.songs")}
-                          <span>{props.trackCount}</span>
-                        </button>
-                        <button
-                          type="button"
-                          class={props.detailTab === "comments" ? "is-active" : ""}
-                          role="tab"
-                          aria-selected={props.detailTab === "comments"}
-                          onClick={() => props.setDetailTab("comments")}
-                        >
-                          {t("ncm.playlist.tab.comments")}
-                          <Show when={props.detail?.commentCount !== null && props.detail?.commentCount !== undefined}>
-                            <span>{props.detail?.commentCount ?? 0}</span>
-                          </Show>
-                        </button>
+                        <div class="playlist-detail-art-mask" />
                       </div>
                     </Show>
-                  </div>
-                </div>
-              </div>
-            </header>
-            <Show
-              when={showSongs()}
-              fallback={
-                <ResourceCommentsPanel
-                  class="playlist-detail-comments"
-                  resourceId={playlist().id}
-                  resourceType={2}
-                  title={t("ncm.playlist.tab.comments")}
-                  grouped
+                    <div class="playlist-detail-copy">
+                      <h2 title={playlist().name}>{playlist().name}</h2>
+                      <div class="playlist-detail-collapse">
+                        <Show when={uiSettings.playlistPageElements.description && (playlist().description ?? props.subtitleText)}>
+                          {(description) => <p class="playlist-detail-desc">{description()}</p>}
+                        </Show>
+                        <Show
+                          when={
+                            uiSettings.playlistPageElements.creator ||
+                            uiSettings.playlistPageElements.time ||
+                            uiSettings.playlistPageElements.tags
+                          }
+                        >
+                          <div class="playlist-detail-meta">
+                            <Show when={uiSettings.playlistPageElements.creator}>
+                              <span>
+                                <IconMusic />
+                                {playlist().creator ?? t("ncm.playlist.creatorUnknown")}
+                              </span>
+                            </Show>
+                            <Show when={uiSettings.playlistPageElements.time}>
+                              <span>
+                                <IconList />
+                                {playlist().updateTime !== null || playlist().createTime !== null
+                                  ? formatTimestamp(playlist().updateTime ?? playlist().createTime ?? 0)
+                                  : t("ncm.playlist.trackCount", { count: props.trackCount })}
+                              </span>
+                            </Show>
+                            <Show when={playlist().playCount !== null}>
+                              <span>
+                                <IconEye />
+                                {playlist().playCount}
+                              </span>
+                            </Show>
+                            <Show when={hasDynamicCounts()}>
+                              <Show when={props.detail?.commentCount !== null && props.detail?.commentCount !== undefined}>
+                                <span>
+                                  <IconChat />
+                                  {t("ncm.playlist.commentCount", { count: props.detail?.commentCount ?? 0 })}
+                                </span>
+                              </Show>
+                              <Show when={props.detail?.shareCount !== null && props.detail?.shareCount !== undefined}>
+                                <span>
+                                  <IconShare />
+                                  {t("ncm.playlist.shareCount", { count: props.detail?.shareCount ?? 0 })}
+                                </span>
+                              </Show>
+                              <Show when={props.detail?.bookedCount !== null && props.detail?.bookedCount !== undefined}>
+                                <span>
+                                  <IconHeart />
+                                  {t("ncm.playlist.bookedCount", { count: props.detail?.bookedCount ?? 0 })}
+                                </span>
+                              </Show>
+                            </Show>
+                            <Show when={uiSettings.playlistPageElements.tags}>
+                              <span>
+                                <IconDots />
+                                <Show
+                                  when={playlist().tags.length > 0}
+                                  fallback={
+                                    playlist().subscribed
+                                      ? t("ncm.playlist.tag.subscribed")
+                                      : t("ncm.playlist.tag.public")
+                                  }
+                                >
+                                  <For each={playlist().tags}>
+                                    {(tag, index) => (
+                                      <>
+                                        {index() > 0 ? " / " : ""}
+                                        {tag}
+                                      </>
+                                    )}
+                                  </For>
+                                </Show>
+                              </span>
+                            </Show>
+                          </div>
+                        </Show>
+                      </div>
+                      <div class="playlist-detail-menu">
+                        <div class="playlist-detail-menu-left">
+                          <button
+                            type="button"
+                            class="primary-button playlist-detail-play"
+                            onClick={() => void props.onPlayAll()}
+                            disabled={props.tracks.length === 0 || props.isLoadingTracks}
+                          >
+                            <IconPlay />
+                            {props.isLoadingTracks ? t("ncm.playlist.loading") : t("ncm.playlist.play")}
+                          </button>
+                          <Show when={props.showBackButton ?? true}>
+                            <button
+                              type="button"
+                              class="ghost-button playlist-detail-back"
+                              onClick={props.onBack}
+                            >
+                              <IconChevronLeft />
+                              {props.backLabel ?? t("ncm.playlist.backToList")}
+                            </button>
+                          </Show>
+                          <Show when={canToggleSubscribe()}>
+                            <button
+                              type="button"
+                              class={`ghost-button playlist-detail-subscribe${isSubscribed() ? " is-active" : ""}`}
+                              onClick={() => void props.onToggleSubscribe?.()}
+                              disabled={props.isLoadingDetail || props.isTogglingSubscribe}
+                            >
+                              <Show when={props.isTogglingSubscribe} fallback={isSubscribed() ? <IconHeartFilled /> : <IconHeart />}>
+                                <IconSpinner />
+                              </Show>
+                              {subscribeLabel()}
+                            </button>
+                          </Show>
+                          <button
+                            type="button"
+                            class="ghost-button playlist-detail-more"
+                            aria-label={t("ncm.playlist.more")}
+                            title={t("ncm.playlist.more")}
+                            onClick={openMenu}
+                          >
+                            <IconList />
+                          </button>
+                        </div>
+                        <div class="playlist-detail-menu-right">
+                          <label class="playlist-detail-search">
+                            <IconSearch />
+                            <input
+                              type="search"
+                              value={props.filter}
+                              placeholder={t("ncm.playlist.search")}
+                              onInput={(event) => props.setFilter(event.currentTarget.value)}
+                            />
+                          </label>
+                          <Show when={showCommentsTab()}>
+                            <div class="playlist-detail-tabs" role="tablist" aria-label={t("ncm.playlist.tabs.aria")}>
+                              <button
+                                type="button"
+                                class={props.detailTab === "songs" ? "is-active" : ""}
+                                role="tab"
+                                aria-selected={props.detailTab === "songs"}
+                                onClick={() => props.setDetailTab("songs")}
+                              >
+                                {t("ncm.playlist.tab.songs")}
+                                <span>{props.trackCount}</span>
+                              </button>
+                              <button
+                                type="button"
+                                class={props.detailTab === "comments" ? "is-active" : ""}
+                                role="tab"
+                                aria-selected={props.detailTab === "comments"}
+                                onClick={() => props.setDetailTab("comments")}
+                              >
+                                {t("ncm.playlist.tab.comments")}
+                                <Show when={props.detail?.commentCount !== null && props.detail?.commentCount !== undefined}>
+                                  <span>{props.detail?.commentCount ?? 0}</span>
+                                </Show>
+                              </button>
+                            </div>
+                          </Show>
+                        </div>
+                      </div>
+                    </div>
+                  </header>
+                </PageHero>
+                <PageBody offset class="playlist-detail-body">
+                  <Show
+                    when={showSongs()}
+                    fallback={
+                      <ResourceCommentsPanel
+                        class="playlist-detail-comments"
+                        resourceId={playlist().id}
+                        resourceType={2}
+                        title={t("ncm.playlist.tab.comments")}
+                        grouped
+                        pageScrollRoot
+                      />
+                    }
+                  >
+                    <MediaList
+                      items={props.tracks}
+                      currentSourcePath={props.currentTrackPath}
+                      currentSongId={props.currentSongId}
+                      isPlayingNow={props.isPlaying}
+                      onPlay={(item) => void props.playback.playOnlineTrack(item)}
+                      onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
+                      onContextAction={handleContextAction}
+                      contextActions={mediaContextActions()}
+                      onScroll={props.onScroll}
+                      draggable={Boolean(props.onReorderTracks) && props.filter.trim().length === 0}
+                      onReorder={(fromIndex, toIndex) => void props.onReorderTracks?.(fromIndex, toIndex)}
+                      isLoading={props.isLoadingTracks}
+                      emptyState={<div class="panel-note">{emptyStateText()}</div>}
+                      hideTopScrollTool
+                    />
+                  </Show>
+                </PageBody>
+              </>
+            )}
+          </PageStickyHeader>
+          <BackToTop label={t("media.scroll.top")} />
+          <ContextMenu
+            open={menuOpen()}
+            x={menuPosition().x}
+            y={menuPosition().y}
+            items={menuItems()}
+            onSelect={handleMenuSelect}
+            onClose={() => setMenuOpen(false)}
+          />
+          <Show when={props.setFeedback}>
+            {(setFeedback) => (
+              <>
+                <DailySongsBatchModal
+                  open={batchOpen()}
+                  title={t("library.batch.title")}
+                  items={props.tracks}
+                  loginProfile={props.loginProfile ?? null}
+                  playback={props.playback}
+                  sourcePlaylistId={props.sourcePlaylistId ?? playlist().id}
+                  setFeedback={setFeedback()}
+                  onTracksRemoved={(songIds) => props.onTracksRemovedLocally?.(songIds)}
+                  onClose={() => setBatchOpen(false)}
                 />
-              }
-            >
-              <MediaList
-                items={props.tracks}
-                currentSourcePath={props.currentTrackPath}
-                currentSongId={props.currentSongId}
-                isPlayingNow={props.isPlaying}
-                onPlay={(item) => void props.playback.playOnlineTrack(item)}
-                onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
-                onContextAction={handleContextAction}
-                contextActions={mediaContextActions()}
-                onScroll={props.onScroll}
-                draggable={Boolean(props.onReorderTracks) && props.filter.trim().length === 0}
-                onReorder={(fromIndex, toIndex) => void props.onReorderTracks?.(fromIndex, toIndex)}
-                isLoading={props.isLoadingTracks}
-                emptyState={<div class="panel-note">{emptyStateText()}</div>}
-              />
-            </Show>
-            <ContextMenu
-              open={menuOpen()}
-              x={menuPosition().x}
-              y={menuPosition().y}
-              items={menuItems()}
-              onSelect={handleMenuSelect}
-              onClose={() => setMenuOpen(false)}
-            />
-            <Show when={props.setFeedback}>
-              {(setFeedback) => (
-                <>
-                  <DailySongsBatchModal
-                    open={batchOpen()}
-                    title={t("library.batch.title")}
-                    items={props.tracks}
-                    loginProfile={props.loginProfile ?? null}
-                    playback={props.playback}
-                    sourcePlaylistId={props.sourcePlaylistId ?? playlist().id}
-                    setFeedback={setFeedback()}
-                    onTracksRemoved={(songIds) => props.onTracksRemovedLocally?.(songIds)}
-                    onClose={() => setBatchOpen(false)}
-                  />
-                  <UpdatePlaylistModal
-                    open={editOpen()}
-                    playlist={playlist()}
-                    nameLocked={props.lockPlaylistName}
-                    setFeedback={setFeedback()}
-                    onUpdated={(updated) => props.onPlaylistUpdated?.(updated)}
-                    onClose={() => setEditOpen(false)}
-                  />
-                </>
-              )}
-            </Show>
-          </div>
-        </section>
+                <UpdatePlaylistModal
+                  open={editOpen()}
+                  playlist={playlist()}
+                  nameLocked={props.lockPlaylistName}
+                  setFeedback={setFeedback()}
+                  onUpdated={(updated) => props.onPlaylistUpdated?.(updated)}
+                  onClose={() => setEditOpen(false)}
+                />
+              </>
+            )}
+          </Show>
+        </PageSurface>
       )}
     </Show>
   );

@@ -80,8 +80,8 @@
 @layer base {
   body {
     background:
-      radial-gradient(1100px 640px at 12% -8%, color-mix(in oklch, var(--accent-dynamic) 16%, transparent), transparent 64%),
-      radial-gradient(900px 560px at 100% 100%, color-mix(in oklch, var(--accent-dynamic) 8%, transparent), transparent 60%),
+      radial-gradient(1100px 640px at 12% -8%, var(--color-primary-tonal-16), transparent 64%),
+      radial-gradient(900px 560px at 100% 100%, var(--color-primary-tonal-08), transparent 60%),
       var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
@@ -97,19 +97,38 @@
     flex-direction: column;
   }
 
+  .root-error-boundary {
+    display: grid;
+    min-height: 100vh;
+    place-content: center;
+    gap: var(--space-3);
+    padding: var(--space-6);
+    color: var(--text);
+    background: var(--bg);
+    text-align: center;
+  }
+
   ::selection {
     background: color-mix(in oklch, var(--accent) 35%, transparent);
     color: var(--text);
   }
 
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--color-primary);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
   }
 
   /* refined scrollbar across the app */
   *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+    transition:
+      width var(--duration-fast) var(--ease-standard),
+      height var(--duration-fast) var(--ease-standard);
+  }
+
+  *:hover::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }

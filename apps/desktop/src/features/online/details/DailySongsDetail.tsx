@@ -3,8 +3,12 @@ import { IconChevronLeft, IconList, IconPlay, IconRefresh } from "../../../compo
 import { ContextMenu, type ContextMenuItem } from "../../../components/media/ContextMenu";
 import type { MediaContextAction } from "../../../components/media/MediaList";
 import { MediaList } from "../../../components/media/MediaList";
+import { BackToTop } from "../../../components/page/BackToTop";
+import { PageBody } from "../../../components/page/PageBody";
+import { PageHero } from "../../../components/page/PageHero";
+import { PageSurface } from "../../../components/page/PageSurface";
 import { useTranslation } from "../../../shared/i18n";
-import type { FeedbackSetter } from "../shared/feedback";
+import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
 import type { NcmProfile, OnlineTrackItem } from "../shared/types";
 import { DailySongsBatchModal } from "./DailySongsBatchModal";
@@ -40,6 +44,7 @@ const formatDailyUpdatedTime = (timestamp: number | null): string | null => {
 
 export function DailySongsDetail(props: DailySongsDetailProps) {
   const { t } = useTranslation();
+  const readErrorMessage = createErrorMessageReader(t);
   const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
   const [menuPosition, setMenuPosition] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [refreshing, setRefreshing] = createSignal<boolean>(false);
@@ -70,6 +75,8 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
     setRefreshing(true);
     try {
       await props.onRefresh();
+    } catch (error) {
+      props.setFeedback("error", readErrorMessage(error));
     } finally {
       setRefreshing(false);
     }
@@ -80,6 +87,8 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
     setPlayingAll(true);
     try {
       await props.onPlayAll();
+    } catch (error) {
+      props.setFeedback("error", readErrorMessage(error));
     } finally {
       setPlayingAll(false);
     }
@@ -102,62 +111,68 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
   };
 
   return (
-    <section class="ncm-daily-detail">
-      <button
-        type="button"
-        class="ghost-button ncm-daily-detail-back"
-        onClick={props.onBack}
-      >
-        <IconChevronLeft />
-        {t("ncm.daily.backToFeed")}
-      </button>
-      <header class="ncm-daily-detail-hero">
-        <h2>{t("ncm.daily.title")}</h2>
-        <p class="ncm-daily-detail-meta">{tipText()}</p>
-        <div class="ncm-daily-detail-menu">
-          <button
-            type="button"
-            class="primary-button ncm-daily-play-all"
-            disabled={props.tracks.length === 0 || playingAll()}
-            onClick={() => void handlePlayAll()}
-          >
-            <IconPlay />
-            <span>{playingAll() ? t("ncm.daily.playingAll") : t("ncm.daily.playAll")}</span>
-          </button>
-          <button
-            type="button"
-            class="ghost-button ncm-daily-more"
-            aria-label={t("ncm.daily.more")}
-            disabled={refreshing()}
-            onClick={openMenu}
-          >
-            <IconList />
-          </button>
-        </div>
-      </header>
-      <MediaList
-        items={props.tracks}
-        currentSourcePath={props.currentTrackPath}
-        currentSongId={props.currentSongId}
-        isPlayingNow={props.isPlaying}
-        onPlay={(item) => void props.playback.playOnlineTrack(item)}
-        onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
-        onContextAction={handleContextAction}
-        contextActions={[
-          "play",
-          "enqueue",
-          "daily-dislike",
-          "search",
-          "copy-name",
-          "copy-id",
-          "share-link",
-          "song-wiki",
-          "view-comments"
-        ]}
-        sortDisabled={true}
-        isLoading={props.isLoading}
-        emptyState={<div class="panel-note">{t("ncm.daily.empty")}</div>}
-      />
+    <PageSurface class="ncm-daily-detail" resetKey={props.updatedAt}>
+      <PageHero size="lg">
+        <button
+          type="button"
+          class="ghost-button ncm-daily-detail-back"
+          onClick={props.onBack}
+        >
+          <IconChevronLeft />
+          {t("ncm.daily.backToFeed")}
+        </button>
+        <header class="ncm-daily-detail-hero">
+          <h2>{t("ncm.daily.title")}</h2>
+          <p class="ncm-daily-detail-meta">{tipText()}</p>
+          <div class="ncm-daily-detail-menu">
+            <button
+              type="button"
+              class="primary-button ncm-daily-play-all"
+              disabled={props.tracks.length === 0 || playingAll()}
+              onClick={() => void handlePlayAll()}
+            >
+              <IconPlay />
+              <span>{playingAll() ? t("ncm.daily.playingAll") : t("ncm.daily.playAll")}</span>
+            </button>
+            <button
+              type="button"
+              class="ghost-button ncm-daily-more"
+              aria-label={t("ncm.daily.more")}
+              disabled={refreshing()}
+              onClick={openMenu}
+            >
+              <IconList />
+            </button>
+          </div>
+        </header>
+      </PageHero>
+      <PageBody class="ncm-detail-page-body">
+        <MediaList
+          items={props.tracks}
+          currentSourcePath={props.currentTrackPath}
+          currentSongId={props.currentSongId}
+          isPlayingNow={props.isPlaying}
+          onPlay={(item) => void props.playback.playOnlineTrack(item)}
+          onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
+          onContextAction={handleContextAction}
+          contextActions={[
+            "play",
+            "enqueue",
+            "daily-dislike",
+            "search",
+            "copy-name",
+            "copy-id",
+            "share-link",
+            "song-wiki",
+            "view-comments"
+          ]}
+          sortDisabled={true}
+          isLoading={props.isLoading}
+          emptyState={<div class="panel-note">{t("ncm.daily.empty")}</div>}
+          hideTopScrollTool
+        />
+      </PageBody>
+      <BackToTop label={t("media.scroll.top")} />
       <ContextMenu
         open={menuOpen()}
         x={menuPosition().x}
@@ -174,6 +189,6 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
         setFeedback={props.setFeedback}
         onClose={() => setBatchOpen(false)}
       />
-    </section>
+    </PageSurface>
   );
 }

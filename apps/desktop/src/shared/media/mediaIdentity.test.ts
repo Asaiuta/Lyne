@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isMediaListItemCurrent, mediaKeyForPath } from "./mediaIdentity";
+import {
+  createMediaIdentityIndex,
+  findMediaIdentityIndex,
+  isMediaListItemCurrent,
+  mediaKeyForPath
+} from "./mediaIdentity";
 
 test("mediaKeyForPath mirrors backend canonical media ids", () => {
   assert.equal(
@@ -64,4 +69,30 @@ test("isMediaListItemCurrent matches summary rows by source-path-derived media i
     ),
     true
   );
+});
+
+test("findMediaIdentityIndex locates current media without scanning rows", () => {
+  const index = createMediaIdentityIndex([
+    {
+      songId: 1,
+      media_id: "d:/music/first.flac",
+      source_path: "D:/Music/First.flac"
+    },
+    {
+      songId: 2,
+      media_id: "d:/music/later.flac",
+      source_path: "D:/Music/Later.flac"
+    }
+  ]);
+
+  assert.equal(findMediaIdentityIndex(index, { songId: 2 }), 1);
+  assert.equal(findMediaIdentityIndex(index, { sourcePath: "D:/Music/Later.flac" }), 1);
+  assert.equal(
+    findMediaIdentityIndex(index, {
+      mediaId: "d:/music/first.flac",
+      sourcePath: "D:/Music/Later.flac"
+    }),
+    1
+  );
+  assert.equal(findMediaIdentityIndex(index, { mediaId: "d:/music/missing.flac" }), -1);
 });

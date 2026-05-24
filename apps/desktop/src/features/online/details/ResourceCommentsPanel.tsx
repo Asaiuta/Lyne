@@ -8,6 +8,7 @@ import {
   IconThumbUp,
   IconThumbUpFilled
 } from "../../../components/icons";
+import { SImage } from "../../../components/SImage";
 import {
   commentHugList,
   commentLike,
@@ -34,6 +35,7 @@ export interface ResourceCommentsPanelProps {
   class?: string;
   title?: string;
   grouped?: boolean;
+  pageScrollRoot?: boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -102,12 +104,35 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
   const title = createMemo(() => props.title ?? t("ncm.comments.title"));
   const activeAccount = createMemo(() => accountStore.activeAccount());
   const canWrite = createMemo(() => activeAccount()?.hasCookie === true);
+  const activeRequestControllers = new Set<AbortController>();
+
+  const createRequestAbortState = (): { cancelled: boolean; signal: AbortSignal; cancel: () => void } => {
+    const controller = new AbortController();
+    activeRequestControllers.add(controller);
+    const abortState = {
+      cancelled: false,
+      signal: controller.signal,
+      cancel: () => {
+        abortState.cancelled = true;
+        activeRequestControllers.delete(controller);
+        controller.abort();
+      }
+    };
+    return abortState;
+  };
+
+  onCleanup(() => {
+    for (const controller of activeRequestControllers) {
+      controller.abort();
+    }
+    activeRequestControllers.clear();
+  });
 
   const loadComments = async (
     resourceId: number | string,
     page: number,
     append: boolean,
-    abortState: { cancelled: boolean }
+    abortState: { cancelled: boolean; signal?: AbortSignal; cancel?: () => void }
   ) => {
     setCommentLoading(true);
     try {
@@ -119,7 +144,8 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
         page,
         PAGE_SIZE,
         sortType,
-        cursor
+        cursor,
+        { signal: abortState.signal }
       ));
       if (abortState.cancelled) return;
       setComments((current) => (append ? [...current, ...payload.comments] : payload.comments));
@@ -138,19 +164,23 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
       if (!abortState.cancelled) {
         setCommentLoading(false);
       }
+      abortState.cancel?.();
     }
   };
 
   const loadHotComments = async (
     resourceId: number | string,
-    abortState: { cancelled: boolean }
+    abortState: { cancelled: boolean; signal?: AbortSignal; cancel?: () => void }
   ) => {
     setHotCommentLoading(true);
     try {
       const payload = readResourceCommentsPayload(await resourceHotComments(
         resourceId,
         props.resourceType,
-        PAGE_SIZE
+        PAGE_SIZE,
+        0,
+        undefined,
+        { signal: abortState.signal }
       ));
       if (abortState.cancelled) return;
       setHotComments(payload.hotComments);
@@ -162,13 +192,16 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
       if (!abortState.cancelled) {
         setHotCommentLoading(false);
       }
+      abortState.cancel?.();
     }
   };
 
   createEffect(on(
     [() => props.resourceId, () => props.grouped === true ? "grouped" : commentSort()],
     ([resourceId]) => {
-      const abortState = { cancelled: false };
+      const commentsAbortState = createRequestAbortState();
+      const hotCommentsAbortState =
+        props.grouped === true ? createRequestAbortState() : null;
       setComments([]);
       setHotComments([]);
       setCommentPage(1);
@@ -181,11 +214,16 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
         return;
       }
       if (props.grouped === true) {
-        void loadHotComments(resourceId, abortState);
+        void loadHotComments(resourceId, hotCommentsAbortState ?? commentsAbortState);
       }
-      void loadComments(resourceId, 1, false, abortState);
+      void loadComments(resourceId, 1, false, commentsAbortState);
       onCleanup(() => {
-        abortState.cancelled = true;
+        commentsAbortState.cancelled = true;
+        commentsAbortState.cancel();
+        if (hotCommentsAbortState !== null) {
+          hotCommentsAbortState.cancelled = true;
+          hotCommentsAbortState.cancel();
+        }
       });
     }
   ));
@@ -193,7 +231,7 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
   const handleLoadMore = () => {
     const resourceId = props.resourceId;
     if (!isValidResourceId(resourceId) || commentLoading() || !commentHasMore()) return;
-    void loadComments(resourceId, commentPage() + 1, true, { cancelled: false });
+    void loadComments(resourceId, commentPage() + 1, true, createRequestAbortState());
   };
 
   const handleLikeComment = async (comment: NcmSongComment): Promise<void> => {
@@ -294,7 +332,16 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
         {(comment) => (
           <article class="ncm-resource-comment">
             <Show when={comment.user.avatarUrl} fallback={<span class="ncm-resource-comment-avatar" />}>
-              {(avatarUrl) => <img class="ncm-resource-comment-avatar" src={avatarUrl()} alt="" />}
+              {(avatarUrl) => (
+                <SImage
+                  src={avatarUrl()}
+                  alt={comment.user.nickname}
+                  class="ncm-resource-comment-avatar"
+                  observeVisibility={true}
+                  shape="circle"
+                  aspect="square"
+                />
+              )}
             </Show>
             <div>
               <header>
@@ -357,7 +404,10 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
   );
 
   return (
-    <section class={`ncm-resource-comments${props.grouped === true ? " is-grouped" : ""}${props.class ? ` ${props.class}` : ""}`}>
+    <section
+      class={`ncm-resource-comments${props.grouped === true ? " is-grouped" : ""}${props.class ? ` ${props.class}` : ""}`}
+      data-page-scroll-root={props.pageScrollRoot === true ? "true" : undefined}
+    >
       <Show when={props.grouped !== true}>
         <header class="ncm-resource-comments-head">
           <h3>
