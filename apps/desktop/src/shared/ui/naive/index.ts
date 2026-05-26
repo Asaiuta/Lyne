@@ -1,5 +1,6 @@
 export * from "./button";
 export * from "./display";
+export * from "./dropdown";
 export * from "./feedback";
 export * from "./grid";
 export * from "./input";

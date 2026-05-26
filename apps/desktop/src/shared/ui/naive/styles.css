@@ -2011,4 +2011,179 @@
     --n-color: var(--surface-1);
     --n-text-color: var(--text);
   }
+
+  /* ============================================================
+     NaiveDropdown — NaiveUI 2.43.2 visual contract.
+     Source: D:/AI/SPlayer/node_modules/naive-ui/es/dropdown/src/styles/index.cssr.mjs
+     plus styles/_common.mjs and styles/light.mjs.
+     Reuses the popover enter/leave keyframes since NaiveUI's dropdown
+     shares the same fade-in-scale-up transition.
+     ============================================================ */
+
+  .n-dropdown.n-dropdown-menu {
+    --n-bezier: var(--ease-standard);
+    --n-color: color-mix(in oklch, var(--surface-2) 96%, transparent);
+    --n-text-color: var(--text);
+    --n-divider-color: var(--border-overlay);
+    --n-border-radius: var(--radius-sm);
+    --n-box-shadow: var(--floating-shadow);
+    --n-padding: 4px 0;
+    --n-font-size: 14px;
+    --n-option-height: 34px;
+    --n-option-text-color: var(--text-soft);
+    --n-option-text-color-hover: var(--text);
+    --n-option-text-color-active: var(--color-primary);
+    --n-option-text-color-child-active: var(--color-primary);
+    --n-option-color-hover: color-mix(in oklch, var(--accent) 12%, transparent);
+    --n-option-color-active: color-mix(in oklch, var(--color-primary) 11%, transparent);
+    --n-option-opacity-disabled: 0.5;
+    --n-option-prefix-width: 14px;
+    --n-option-icon-prefix-width: 36px;
+    --n-option-suffix-width: 14px;
+    --n-option-icon-suffix-width: 32px;
+    --n-option-icon-size: 16px;
+    --n-prefix-color: var(--text-soft);
+    --n-suffix-color: var(--text-soft);
+    position: relative;
+    z-index: var(--z-popover);
+    min-width: 120px;
+    padding: var(--n-padding);
+    border-radius: var(--n-border-radius);
+    background-color: var(--n-color);
+    color: var(--n-text-color);
+    box-shadow: var(--n-box-shadow);
+    transform-origin: var(--kb-popper-content-transform-origin, center);
+    outline: none;
+    animation: naive-popover-enter 0.15s var(--n-bezier);
+    transition:
+      background-color 0.3s var(--n-bezier),
+      box-shadow 0.3s var(--n-bezier);
+  }
+
+  .n-dropdown.n-dropdown-menu[data-closed] {
+    animation: naive-popover-leave 0.15s var(--n-bezier) forwards;
+  }
+
+  .n-dropdown-option {
+    position: relative;
+    display: flex;
+    height: var(--n-option-height);
+    align-items: center;
+    box-sizing: border-box;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--n-option-text-color);
+    font-size: var(--n-font-size);
+    line-height: var(--n-option-height);
+    cursor: pointer;
+    outline: none;
+    transition: color 0.3s var(--n-bezier);
+  }
+
+  .n-dropdown-option::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 4px;
+    bottom: 0;
+    left: 4px;
+    border-radius: var(--n-border-radius);
+    transition: background-color 0.3s var(--n-bezier);
+  }
+
+  /* Hover/highlight via Kobalte's data-highlighted plus :hover. */
+  .n-dropdown-option:not(.n-dropdown--disabled):hover,
+  .n-dropdown-option:not(.n-dropdown--disabled)[data-highlighted] {
+    color: var(--n-option-text-color-hover);
+  }
+
+  .n-dropdown-option:not(.n-dropdown--disabled):hover::before,
+  .n-dropdown-option:not(.n-dropdown--disabled)[data-highlighted]::before {
+    background-color: var(--n-option-color-hover);
+  }
+
+  .n-dropdown-option:not(.n-dropdown--disabled):hover .n-dropdown-option-body__prefix,
+  .n-dropdown-option:not(.n-dropdown--disabled):hover .n-dropdown-option-body__suffix,
+  .n-dropdown-option:not(.n-dropdown--disabled)[data-highlighted] .n-dropdown-option-body__prefix,
+  .n-dropdown-option:not(.n-dropdown--disabled)[data-highlighted] .n-dropdown-option-body__suffix {
+    color: var(--n-option-text-color-hover);
+  }
+
+  .n-dropdown-option.n-dropdown--disabled,
+  .n-dropdown-option[data-disabled] {
+    cursor: not-allowed;
+    opacity: var(--n-option-opacity-disabled);
+  }
+
+  .n-dropdown-option-body__prefix {
+    z-index: 1;
+    display: flex;
+    width: var(--n-option-prefix-width);
+    align-items: center;
+    justify-content: center;
+    color: var(--n-prefix-color);
+    transition: color 0.3s var(--n-bezier);
+  }
+
+  .n-dropdown-option-body__prefix--show-icon {
+    width: var(--n-option-icon-prefix-width);
+  }
+
+  .n-dropdown-option-body__prefix svg {
+    width: var(--n-option-icon-size);
+    height: var(--n-option-icon-size);
+  }
+
+  .n-dropdown-option-body__label {
+    z-index: 1;
+    flex: 1;
+    min-width: 0;
+    padding: 0 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .n-dropdown-option-body__suffix {
+    z-index: 1;
+    display: flex;
+    flex-grow: 0;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: flex-end;
+    box-sizing: border-box;
+    min-width: var(--n-option-suffix-width);
+    padding: 0 8px;
+    color: var(--n-suffix-color);
+    transition: color 0.3s var(--n-bezier);
+  }
+
+  .n-dropdown-option-body__suffix svg {
+    width: var(--n-option-icon-size);
+    height: var(--n-option-icon-size);
+  }
+
+  .n-dropdown-divider {
+    margin: 4px 0;
+    height: 1px;
+    background-color: var(--n-divider-color);
+    transition: background-color 0.3s var(--n-bezier);
+  }
+
+  /* Hide the trigger anchor's default focus outline when it carries an inline
+     element style (NaiveUI puts the focus ring on the rendered control surface,
+     not on the wrapping span). */
+  .naive-dropdown-trigger {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    outline: none;
+  }
+
+  /* Light-theme appearance override. */
+  :root[data-theme="light"] .n-dropdown.n-dropdown-menu {
+    --n-color: var(--surface-1);
+    --n-text-color: var(--text);
+  }
 }

@@ -48,8 +48,8 @@ Reusable browser probes already live under `output/playwright/`. Treat these as 
 
 ## Current Guardrails
 
-- Do not import `@kobalte/core` from `index.ts`, `button.tsx`, `display.tsx`, `feedback.tsx`, `grid.tsx`, `grid-logic.ts`, `input.tsx`, `layout.tsx`, `list.tsx`, `popover.tsx`, `popselect.tsx`, `select.tsx`, `select-core.tsx`, `sidebar.tsx`, `switch.tsx`, `tabs.tsx`, or `typography.tsx`.
-- Keep lazy Kobalte wrappers in dedicated files such as `NaivePopselectKobalte.tsx`, `NaivePopoverKobalte.tsx`, `NaiveTabsKobalte.tsx`, `NaiveSwitchKobalte.tsx`, `NaiveInputKobalte.tsx`, and `NaiveSelectKobalte.tsx`.
+- Do not import `@kobalte/core` from `index.ts`, `button.tsx`, `display.tsx`, `dropdown.tsx`, `feedback.tsx`, `grid.tsx`, `grid-logic.ts`, `input.tsx`, `layout.tsx`, `list.tsx`, `popover.tsx`, `popselect.tsx`, `select.tsx`, `select-core.tsx`, `sidebar.tsx`, `switch.tsx`, `tabs.tsx`, or `typography.tsx`.
+- Keep lazy Kobalte wrappers in dedicated files such as `NaivePopselectKobalte.tsx`, `NaivePopoverKobalte.tsx`, `NaiveDropdownKobalte.tsx`, `NaiveTabsKobalte.tsx`, `NaiveSwitchKobalte.tsx`, `NaiveInputKobalte.tsx`, and `NaiveSelectKobalte.tsx`.
 - Keep page or shell-specific wrappers thin: pass class slots and render slots into package-level facades instead of owning generic interaction logic.
 - Keep call sites on the public `index.ts` export so future extraction does not require broad import rewrites.
 - Run `npm run typecheck` and `npm run build:measure` after package-boundary changes.
