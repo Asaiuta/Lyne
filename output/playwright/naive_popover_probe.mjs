@@ -25,6 +25,8 @@ const chromePath =
 const css = await Promise.all([
   readFile("apps/desktop/src/shared/styles/tokens.css", "utf8"),
   readFile("apps/desktop/src/shared/styles/global.css", "utf8"),
+  // MediaSortPopover keeps its layout/background in the routed page stylesheet.
+  readFile("apps/desktop/src/shared/styles/components/pages.css", "utf8"),
   readFile("apps/desktop/src/shared/ui/naive/styles.css", "utf8"),
 ]).then((parts) => parts.join("\n"));
 
