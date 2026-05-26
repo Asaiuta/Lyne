@@ -35,6 +35,8 @@ This package is an app-local facade layer for SPlayer/NaiveUI parity. The route 
 | `NaiveInput` | `NInput` | source-backed NaiveUI 2.43.2 form-control facade with lightweight fallback plus lazy Kobalte `TextField`; Kobalte DOM semantics are preserved and `.n-input` visuals live on the visible shell | source-backed |
 | `NaiveSelect` | `NSelect` | source-backed NaiveUI 2.43.2 selection/menu facade with a startup-light `lazy()` public proxy plus lazy Kobalte `Select`/`Combobox`; Kobalte DOM semantics are preserved and `.n-select` / `.n-base-selection` / `.n-base-select-menu` visuals live on the visible shell/menu | source-backed single/filterable |
 | `NaiveSlider` | `NSlider` | source-backed NaiveUI 2.43.2 single-thumb slider facade with startup-light public proxy plus lazy Kobalte `Slider`; emits `.n-slider*` rail, fill, handle, tooltip, marks, vertical, disabled, and with-mark hooks | source-backed PR-1 volume migrated |
+| `NaiveCheckbox` / `NaiveCheckboxGroup` | `NCheckbox` / `NCheckboxGroup` | source-backed NaiveUI 2.43.2 checkbox facade with startup-light public proxy plus lazy Kobalte `Checkbox`; group is a handwritten coordinator because Kobalte has no checkbox-group primitive | source-backed package ready |
+| `NaiveRadio` / `NaiveRadioGroup` / `NaiveRadioButton` | `NRadio` / `NRadioGroup` / `NRadioButton` | source-backed NaiveUI 2.43.2 radio facade with startup-light public proxy plus lazy Kobalte `RadioGroup`; button skin and splitor hooks are included for inventory parity | source-backed package ready |
 | `NaiveAvatar` | `NAvatar` | handwritten display facade | initial |
 | `NaiveBadge` | `NBadge` | handwritten display facade | initial |
 | `NaiveDivider` | `NDivider` | handwritten display facade | initial |
@@ -158,19 +160,20 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NPopselect` | 3 | `NaivePopselect` facade; Kobalte-backed interaction, CSS/tokens for visual parity |
 | `NResult` | 3 | `NaiveResult` handwritten display facade |
 | `NSpin` | 3 | `NaiveSpin` handwritten display facade |
-| `NCheckbox` | 3 | Kobalte/form-control candidate |
+| `NCheckbox` | 7 occurrences / 3 files | `NaiveCheckbox` source-backed/Kobalte leaf facade; standalone and group children supported, numeric group values round-trip through string-only Kobalte values |
 | `NColorPicker` | 2 | feature-specific custom/Kobalte candidate |
 | `NDynamicTags` | 2 | Kobalte/custom tag input candidate |
 | `NH2` | 3 | `NaiveH2` handwritten typography facade |
 | `NIcon` | 2 | routed to local icon contract; no facade |
 | `NModal` | 2 | existing modal route, Kobalte dialog candidate later |
 | `NProgress` | 2 | `NaiveProgress` handwritten line progress facade |
-| `NRadio` | 2 | Kobalte/form-control candidate |
-| `NRadioGroup` | 2 | Kobalte/form-control candidate |
+| `NRadio` | 3 occurrences / 2 files | `NaiveRadio` source-backed/Kobalte facade; rich JSX labels and numeric/string values supported |
+| `NRadioGroup` | 3 occurrences / 2 files | `NaiveRadioGroup` source-backed/Kobalte facade; group value coercion preserves original string/number values |
 | `NTabPane` | 6 | `NaiveTabs` facade covers tablist semantics; panel ownership remains at call sites until full tab-panel migration is needed |
 | `NThing` | 2 | `NaiveThing` handwritten title/description facade |
 | `NBackTop` | 1 | `NaiveBackTop` handwritten page utility facade |
-| `NCheckboxGroup` | 1 | Kobalte/form-control candidate |
+| `NCheckboxGroup` | 2 occurrences / 1 file | `NaiveCheckboxGroup` handwritten coordinator over Kobalte checkbox children; max/min quota logic ported |
+| `NRadioButton` | 0 occurrences | `NaiveRadioButton` source-backed inventory parity facade; no live SPlayer call site, so production migration is deferred |
 | `NDataTable` | 1 | feature-specific table, not early package primitive |
 | `NDialogProvider` | 1 | routed to `dialog` app service; no facade |
 | `NFloatButton` | 1 | `NaiveFloatButton` handwritten page utility facade |
@@ -204,6 +207,9 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 
 ## Migration Log
 
+- 2026-05-26: Added `NaiveCheckbox` and `NaiveCheckboxGroup` against SPlayer close-confirm and copy-lyrics checkbox usage plus NaiveUI 2.43.2 `Checkbox.mjs` / `CheckboxGroup.mjs`. `checkbox.tsx` stays startup-light; `NaiveCheckboxKobalte.tsx` owns the Kobalte leaf, while the group is handwritten because `@kobalte/core@0.13.11` has no checkbox-group primitive. The facade keeps `.n-checkbox*` / `.n-checkbox-group` hooks, controlled indeterminate, label/children fallback, numeric value round trips, and NaiveUI max/min quota behavior.
+- 2026-05-26: Added `NaiveRadio`, `NaiveRadioGroup`, and `NaiveRadioButton` against SPlayer song-list sort and download-quality radio usage plus NaiveUI 2.43.2 `Radio.mjs` / `RadioGroup.mjs` / `RadioButton.mjs`. `radio.tsx` stays startup-light; `NaiveRadioKobalte.tsx` owns the Kobalte `RadioGroup` implementation, original string/number value lookup, auto-generated names, and button-mode splitor priority hooks. `NaiveRadioButton` is package-ready for parity even though SPlayer has zero current call sites.
+- 2026-05-26: Corrected checkbox/radio inventory counts from the umbrella rough counts to the audited SPlayer footprint: `NCheckbox` 7, `NCheckboxGroup` 2, `NRadio` 3, `NRadioGroup` 3, and `NRadioButton` 0. No AudioPlayer business surface was migrated in this pass; package facade validation is by logic tests, typecheck, build chunk inspection, and future call-site adoption.
 - 2026-05-26: Added `NaiveSlider` against SPlayer `PlayerRightMenu.vue` volume usage, the audited `NSlider` call-site set, and NaiveUI 2.43.2 `Slider.mjs` / `styles/index.cssr.mjs`. The public `slider.tsx` entry stays startup-light and lazy-loads `NaiveSliderKobalte.tsx`, which wraps Kobalte `Slider` while emitting NaiveUI class hooks for rail/fill/handle/indicator/marks, vertical and disabled states, `keyboard={false}`, drag callbacks, and the single-thumb active-mark rule. `PlayerVolumePopover` now consumes the vertical facade with `tooltip={false}`; settings `RangeInput`, player progress, and EQ sliders remain deliberate follow-ups.
 - 2026-05-26: Added page utility facades for `NBackTop`, `NFloatButton`, `NFloatButtonGroup`, and `NQrCode`. `BackToTop` and `MediaListFloatTools` now consume the package-level button utilities while keeping their existing page/media placement classes; `NaiveQrCode` ships as a ready wrapper that lazy-loads `qrcode/lib/browser.js` instead of adding QR generation to startup.
 - 2026-05-26: Added app-level feedback services for NaiveUI provider-only surfaces. `NaiveFeedbackProvider` mounts once near `App` and exposes singleton `message`, `notification`, `dialog`, `modal`, and `loadingBar` APIs; provider rows are marked as app services rather than facades. The implementation is handwritten SolidJS/Portal code and does not import Kobalte.
