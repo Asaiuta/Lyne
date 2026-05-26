@@ -51,6 +51,7 @@ This package is an app-local facade layer for SPlayer/NaiveUI parity. The route 
 | local icon contract | `NIcon` | no facade; callers pass local icon JSX directly into facade slots/props and let NaiveUI class hooks or page classes own sizing/color | bridge |
 | app shell CSS/tokens | `NLayout` / `NLayoutHeader` / `NLayoutSider` | no facade; app shell structure and NaiveUI layout color/border/transition parity are routed to `global.css`, `tokens.css`, and `components/shell.css` | routed |
 | appearance/token system | `NConfigProvider` / `NGlobalStyle` | no facade; provider/global reset responsibilities are routed to existing appearance tokens and `global.css` | routed |
+| `NaiveFeedbackProvider` services | `NMessageProvider` / `NNotificationProvider` / `NDialogProvider` / `NModalProvider` / `NLoadingBarProvider` | app-root provider plus singleton `message`, `notification`, `dialog`, `modal`, and `loadingBar` APIs; no per-provider facades | app service |
 | `NaiveProgress` | `NProgress` | handwritten display facade for line progress | initial |
 | `NaiveResult` | `NResult` | handwritten display facade for status pages and error states | initial |
 | `NaiveSkeleton` | `NSkeleton` | handwritten display facade, existing list/grid wrappers compose it | initial |
@@ -167,7 +168,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NBackTop` | 1 | page utility candidate |
 | `NCheckboxGroup` | 1 | Kobalte/form-control candidate |
 | `NDataTable` | 1 | feature-specific table, not early package primitive |
-| `NDialogProvider` | 1 | feedback provider, future app service |
+| `NDialogProvider` | 1 | routed to `dialog` app service; no facade |
 | `NFloatButton` | 1 | page utility candidate |
 | `NFloatButtonGroup` | 1 | page utility candidate |
 | `NGi` | 4 | `NaiveGridItem` / `NaiveGi` source-backed handwritten layout facade |
@@ -177,10 +178,10 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NLayoutHeader` | 1 | routed to app shell CSS/tokens; no facade |
 | `NLayoutSider` | 1 | routed to app shell CSS/tokens; no facade |
 | `NLi` | 1 | `NaiveLi` handwritten native list facade |
-| `NLoadingBarProvider` | 1 | feedback provider, future app service |
-| `NMessageProvider` | 1 | feedback provider, future app service |
-| `NModalProvider` | 1 | feedback provider, future app service |
-| `NNotificationProvider` | 1 | feedback provider, future app service |
+| `NLoadingBarProvider` | 1 | routed to `loadingBar` app service; no facade |
+| `NMessageProvider` | 1 | routed to `message` app service; no facade |
+| `NModalProvider` | 1 | routed to `modal` app service; no facade |
+| `NNotificationProvider` | 1 | routed to `notification` app service; no facade |
 | `NOl` | 1 | `NaiveOl` handwritten native list facade |
 | `NP` | 1 | `NaiveP` handwritten paragraph facade |
 | `NQrCode` | 1 | feature-specific QR component |
@@ -199,6 +200,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 
 ## Migration Log
 
+- 2026-05-26: Added app-level feedback services for NaiveUI provider-only surfaces. `NaiveFeedbackProvider` mounts once near `App` and exposes singleton `message`, `notification`, `dialog`, `modal`, and `loadingBar` APIs; provider rows are marked as app services rather than facades. The implementation is handwritten SolidJS/Portal code and does not import Kobalte.
 - 2026-05-26: Audited the shell/provider/global-style NaiveUI surfaces as no-facade routes. `NLayout`, `NLayoutHeader`, and `NLayoutSider` map to AudioPlayer's app shell CSS (`global.css`, `tokens.css`, `components/shell.css`); `NConfigProvider` maps to the existing appearance/token system; `NGlobalStyle` maps to `global.css`. The only source-backed reset gap was WebKit tap highlight, now covered by `body { -webkit-tap-highlight-color: transparent; }`.
 - 2026-05-26: Documented the `NIcon` bridge as a no-facade boundary. AudioPlayer keeps local icon components and passes raw JSX through existing facade slots/props (`NaiveButton` children, `NaiveSwitch` icon props, `NaiveTabs` JSX labels, and `NaiveSelect` render hooks); sizing/color remain owned by NaiveUI class hooks or page-level classes.
 - 2026-05-26: Added `NaiveNumberAnimation` against SPlayer's 9 `NNumberAnimation` occurrences across 6 files and NaiveUI 2.43.2 `NumberAnimation.mjs` / `utils.mjs`. The facade is handwritten SolidJS, uses the exact JS `easeOutQuint` curve (`t=0.5 -> 0.96875`), keeps NaiveUI's `Intl.NumberFormat` integer/decimal split, and intentionally wraps the output in `.naive-number-animation` with `tabular-nums` plus `aria-live="polite"` instead of NaiveUI's bare 3-node fragment. `StreamingPage` now uses the package facade for the song-count status strip; behavior/style contract is covered by `number-animation.test.ts` and `output/playwright/naive_number_animation_probe.mjs`.

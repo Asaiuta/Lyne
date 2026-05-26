@@ -2,6 +2,7 @@ export * from "./button";
 export * from "./display";
 export * from "./dropdown";
 export * from "./feedback";
+export * from "./feedback-services";
 export * from "./grid";
 export * from "./input";
 export * from "./list";

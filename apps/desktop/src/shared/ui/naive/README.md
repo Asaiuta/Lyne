@@ -14,6 +14,7 @@ This directory is the local package boundary for SPlayer/NaiveUI-compatible UI f
 - Display-only primitives are handwritten facades: `NaiveAlert`, `NaiveAnchor`, `NaiveButton`, `NaiveAvatar`, `NaiveBadge`, `NaiveDivider`, `NaiveEllipsis`, `NaiveH1`, `NaiveH2`, `NaiveH3`, `NaiveLi`, `NaiveOl`, `NaiveP`, `NaiveText`, `NaiveEmpty`, `NaiveNumberAnimation`, `NaiveProgress`, `NaiveResult`, `NaiveSkeleton`, `NaiveSpin`, `NaiveTag`.
 - Layout/surface/list primitives stay thin and handwritten: `NaiveFlex`, `NaiveGrid`, `NaiveGridItem` / `NaiveGi`, `NaiveCard`, `NaiveList`, `NaiveListItem`, `NaiveThing`, `NaiveScrollbar`.
 - Complex interaction primitives can wrap Kobalte behind lazy files. Keep those wrappers out of startup-critical imports. `NaivePopselect`, `NaiveTabs`, `NaiveSwitch`, `NaiveInput`, and `NaiveSelect` are the first package-level examples.
+- Provider-only NaiveUI surfaces are app services, not facades. `NaiveFeedbackProvider` mounts once near the app root and exposes `message`, `notification`, `dialog`, `modal`, and `loadingBar` singleton APIs.
 - Visual parity belongs in CSS/tokens. Facade props should model behavior and state, not encode one-off page styling.
 - Kobalte DOM semantics are trusted as-is. When Kobalte and NaiveUI disagree on root roles or element shape, keep Kobalte's structure and place NaiveUI class/state hooks on the visible shell/control so UnoCSS, tokens, and CSS can recreate the NaiveUI visuals.
 - SPlayer source remains the reference for component semantics. Update `component-inventory.md` when a new NaiveUI surface is audited or migrated.
@@ -25,6 +26,10 @@ NaiveUI's `NIcon` is routed to AudioPlayer's existing local icon contract; this 
 ## Shell And Provider Routing
 
 NaiveUI's shell-level primitives are routed to app CSS and tokens instead of facades. `NLayout`, `NLayoutHeader`, and `NLayoutSider` are represented by `AppShell`, `Sidebar`, `TopNav`, `global.css`, `tokens.css`, and `components/shell.css`. `NConfigProvider` maps to AudioPlayer's appearance/token system, and `NGlobalStyle` maps to `global.css`. Do not add `NaiveLayout`, `NaiveConfigProvider`, or `NaiveGlobalStyle` unless a future task introduces runtime provider behavior that cannot be represented by tokens.
+
+## Feedback Services
+
+NaiveUI's feedback providers (`NMessageProvider`, `NNotificationProvider`, `NDialogProvider`, `NModalProvider`, and `NLoadingBarProvider`) are routed to `NaiveFeedbackProvider` plus singleton services. The provider owns one portal mount at app root; callers use `message.success(...)`, `notification.info(...)`, `dialog.warning(...)`, `modal.create(...)`, or `loadingBar.start()` instead of importing provider facades per feature.
 
 ## Source-Backed Components
 
@@ -62,7 +67,7 @@ Reusable browser probes already live under `output/playwright/`. Treat these as 
 
 ## Current Guardrails
 
-- Do not import `@kobalte/core` from `index.ts`, `button.tsx`, `display.tsx`, `dropdown.tsx`, `feedback.tsx`, `grid.tsx`, `grid-logic.ts`, `input.tsx`, `layout.tsx`, `list.tsx`, `number-animation.tsx`, `number-animation-logic.ts`, `popover.tsx`, `popconfirm.tsx`, `popselect.tsx`, `select.tsx`, `select-core.tsx`, `sidebar.tsx`, `switch.tsx`, `tabs.tsx`, or `typography.tsx`.
+- Do not import `@kobalte/core` from `index.ts`, `button.tsx`, `display.tsx`, `dropdown.tsx`, `feedback.tsx`, `feedback-services.tsx`, `feedback-services-logic.ts`, `grid.tsx`, `grid-logic.ts`, `input.tsx`, `layout.tsx`, `list.tsx`, `number-animation.tsx`, `number-animation-logic.ts`, `popover.tsx`, `popconfirm.tsx`, `popselect.tsx`, `select.tsx`, `select-core.tsx`, `sidebar.tsx`, `switch.tsx`, `tabs.tsx`, or `typography.tsx`.
 - Keep lazy Kobalte wrappers in dedicated files such as `NaivePopselectKobalte.tsx`, `NaivePopoverKobalte.tsx`, `NaiveDropdownKobalte.tsx`, `NaiveTabsKobalte.tsx`, `NaiveSwitchKobalte.tsx`, `NaiveInputKobalte.tsx`, and `NaiveSelectKobalte.tsx`.
 - Keep page or shell-specific wrappers thin: pass class slots and render slots into package-level facades instead of owning generic interaction logic.
 - Keep call sites on the public `index.ts` export so future extraction does not require broad import rewrites.

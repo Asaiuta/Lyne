@@ -25,6 +25,7 @@ import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import type { ActivePage } from "../shared/ui/navigation";
 import { isOnlineOnlyPage, LOCAL_FALLBACK_PAGE } from "../shared/ui/navigation";
 import { UISearchProvider } from "../shared/state/UISearchContext";
+import { NaiveFeedbackProvider } from "../shared/ui/naive";
 import "../shared/styles/components/pages.css";
 import { useAppController } from "./useAppController";
 
@@ -146,7 +147,7 @@ function AppContent() {
   });
 
   return (
-    <>
+    <NaiveFeedbackProvider>
       <UISearchProvider activePage={controller.activePage}>
         <AppShell
           sidebar={
@@ -455,7 +456,7 @@ function AppContent() {
           </Suspense>
         </PanelErrorBoundary>
       </UISearchProvider>
-    </>
+    </NaiveFeedbackProvider>
   );
 }
 

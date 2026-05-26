@@ -1915,6 +1915,269 @@
   }
 
   /* ============================================================
+     Naive feedback provider services.
+     Provider-only NaiveUI surfaces are routed to singleton app
+     services mounted once by NaiveFeedbackProvider.
+     ============================================================ */
+
+  .n-loading-bar-container {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: var(--z-toast);
+    height: 3px;
+    pointer-events: none;
+  }
+
+  .n-loading-bar {
+    height: 100%;
+    border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+    background: var(--color-primary);
+    box-shadow: 0 0 16px var(--color-primary-tonal-45);
+    transition:
+      width var(--duration-slow) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .n-loading-bar--success {
+    background: var(--success);
+  }
+
+  .n-loading-bar--error {
+    background: var(--danger);
+  }
+
+  .n-message-container,
+  .n-notification-container {
+    position: fixed;
+    z-index: var(--z-toast);
+    display: grid;
+    gap: 10px;
+    pointer-events: none;
+  }
+
+  .n-message-container {
+    right: 50%;
+    bottom: var(--toast-bottom);
+    transform: translateX(50%);
+  }
+
+  .n-notification-container {
+    top: 24px;
+    right: 24px;
+    width: min(360px, calc(100vw - 32px));
+  }
+
+  .n-message-wrapper {
+    display: flex;
+    justify-content: center;
+  }
+
+  .n-message,
+  .n-notification,
+  .n-dialog,
+  .n-modal {
+    color: var(--text);
+    background: var(--floating-surface);
+    border: 1px solid var(--floating-border);
+    border-radius: var(--floating-radius);
+    box-shadow: var(--floating-shadow);
+    backdrop-filter: var(--surface-backdrop-filter);
+    -webkit-backdrop-filter: var(--surface-backdrop-filter);
+  }
+
+  .n-message,
+  .n-notification {
+    pointer-events: auto;
+    animation: naive-popover-enter var(--duration-fast) var(--ease-standard);
+  }
+
+  .n-message {
+    display: inline-flex;
+    min-width: 160px;
+    max-width: min(520px, calc(100vw - 32px));
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .n-message__content {
+    min-width: 0;
+  }
+
+  .n-notification {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .n-notification__main {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .n-notification__title {
+    font-size: 14px;
+    line-height: 1.35;
+  }
+
+  .n-notification__content {
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .n-message--success,
+  .n-notification--success {
+    border-color: color-mix(in oklch, var(--success) 34%, var(--floating-border));
+  }
+
+  .n-message--warning,
+  .n-notification--warning {
+    border-color: color-mix(in oklch, var(--warning) 34%, var(--floating-border));
+  }
+
+  .n-message--error,
+  .n-notification--error {
+    border-color: color-mix(in oklch, var(--danger) 34%, var(--floating-border));
+  }
+
+  .n-message--loading {
+    border-color: color-mix(in oklch, var(--color-primary) 34%, var(--floating-border));
+  }
+
+  .n-feedback-close {
+    position: relative;
+    display: grid;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    border-radius: var(--radius-pill);
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .n-feedback-close::before,
+  .n-feedback-close::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 1.5px;
+    border-radius: var(--radius-pill);
+    background: currentColor;
+  }
+
+  .n-feedback-close::before {
+    transform: rotate(45deg);
+  }
+
+  .n-feedback-close::after {
+    transform: rotate(-45deg);
+  }
+
+  .n-feedback-close:hover {
+    color: var(--text);
+    background: var(--state-hover-on-surface);
+  }
+
+  .n-dialog-mask,
+  .n-modal-mask {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--overlay);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .n-dialog,
+  .n-modal {
+    width: min(420px, 100%);
+    max-height: min(720px, calc(100vh - 48px));
+    overflow: auto;
+    animation: naive-popover-enter var(--duration-fast) var(--ease-standard);
+  }
+
+  .n-dialog {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .n-dialog__title,
+  .n-modal__title {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .n-dialog__content,
+  .n-modal__content {
+    color: var(--text-soft);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .n-dialog__action,
+  .n-modal__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .n-feedback-action {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-sm);
+    color: var(--text-soft);
+    background: transparent;
+    font-size: 13px;
+  }
+
+  .n-feedback-action:hover {
+    color: var(--text);
+    background: var(--state-hover-on-surface);
+  }
+
+  .n-feedback-action.naive-button--primary {
+    border-color: color-mix(in oklch, var(--color-primary) 48%, transparent);
+    color: var(--color-on-primary);
+    background: var(--color-primary);
+  }
+
+  .n-modal {
+    width: min(560px, 100%);
+  }
+
+  .n-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border-overlay);
+  }
+
+  .n-modal__content {
+    padding: 18px;
+  }
+
+  .n-modal__footer {
+    padding: 0 18px 18px;
+  }
+
+  /* ============================================================
      NaivePopover — NaiveUI 2.43.2 visual contract.
      Source: D:/AI/SPlayer/node_modules/naive-ui/es/popover/src/styles/index.cssr.mjs
      plus styles/_common.mjs (space/spaceArrow/arrowOffset/arrowHeight/padding).
