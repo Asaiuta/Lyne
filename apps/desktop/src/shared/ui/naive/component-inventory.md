@@ -39,6 +39,7 @@ This package is an app-local facade layer for SPlayer/NaiveUI parity. The route 
 | `NaiveRadio` / `NaiveRadioGroup` / `NaiveRadioButton` | `NRadio` / `NRadioGroup` / `NRadioButton` | source-backed NaiveUI 2.43.2 radio facade with startup-light public proxy plus lazy Kobalte `RadioGroup`; button skin and splitor hooks are included for inventory parity | source-backed package ready |
 | `NaiveCollapse` / `NaiveCollapseItem` | `NCollapse` / `NCollapseItem` | source-backed NaiveUI 2.43.2 disclosure facade with startup-light public proxy plus lazy Kobalte `Accordion`; emits item/header/content class hooks, active/disabled modifiers, and left/right arrow placement | source-backed package ready |
 | `NaiveCollapseTransition` | `NCollapseTransition` | handwritten measured max-height transition primitive, no Kobalte dependency; mirrors NaiveUI fade-in-expand behavior enough for package adoption | source-backed package ready |
+| `SImage` image route | `NImage` / `NImageGroup` | no Naive facade; base image/media behavior stays in `SImage`, while preview/lightbox/group navigation is owned by `05-24-ui-splayer-n-simage-preview-lightbox` | routed |
 | `NaiveAvatar` | `NAvatar` | handwritten display facade | initial |
 | `NaiveBadge` | `NBadge` | handwritten display facade | initial |
 | `NaiveDivider` | `NDivider` | handwritten display facade | initial |
@@ -128,7 +129,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NSwitch` | 15 | `NaiveSwitch` source-backed/Kobalte facade |
 | `NTabs` | 14 | `NaiveTabs` source-backed/Kobalte facade |
 | `NDropdown` | 13 | Kobalte candidate |
-| `NImage` | 13 | existing `SImage` route; do not duplicate without preview contract |
+| `NImage` | 13 | routed to canonical `SImage`; no `NaiveImage` export until preview APIs land |
 | `NSkeleton` | 13 | `NaiveSkeleton` handwritten display facade |
 | `NAlert` | 11 | `NaiveAlert` handwritten display facade |
 | `NInputNumber` | 11 | Kobalte/form-control candidate or custom numeric control |
@@ -182,7 +183,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NFloatButtonGroup` | 1 | `NaiveFloatButtonGroup` handwritten page utility facade |
 | `NGi` | 4 | `NaiveGridItem` / `NaiveGi` source-backed handwritten layout facade |
 | `NGlobalStyle` | 1 | routed to `global.css`; no facade |
-| `NImageGroup` | 1 | `SImage` preview/lightbox route |
+| `NImageGroup` | 1 | routed to canonical `SImage`; preview/lightbox/group navigation owned by `05-24-ui-splayer-n-simage-preview-lightbox` |
 | `NLayout` | 1 | routed to app shell CSS/tokens; no facade |
 | `NLayoutHeader` | 1 | routed to app shell CSS/tokens; no facade |
 | `NLayoutSider` | 1 | routed to app shell CSS/tokens; no facade |
@@ -209,6 +210,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 
 ## Migration Log
 
+- 2026-05-26: Reconciled `NImage` / `NImageGroup` as a no-facade boundary. Existing `SImage` remains the canonical image/media component for placeholder, loading/error, lazy/decode, release-on-hide, artwork, shape/aspect, object-fit, cross-origin, and class/style slot behavior. NaiveUI preview overlays, grouped navigation, toolbar behavior, and generated image-preview styling remain routed to `05-24-ui-splayer-n-simage-preview-lightbox` before any thin `NaiveImage` alias is considered.
 - 2026-05-26: Added `NaiveCollapse`, `NaiveCollapseItem`, and `NaiveCollapseTransition` against SPlayer about/download/wiki disclosure usage plus NaiveUI 2.43.2 `Collapse.mjs` / `CollapseItem.mjs` / `_internal/fade-in-expand-transition`. `collapse.tsx` stays startup-light and lazy-loads Kobalte `Accordion`; `collapse-transition.tsx` is handwritten with no Kobalte import. The facade keeps `.n-collapse*` hooks, active/disabled and left/right arrow-placement modifiers, numeric-name coercion, `expandedNames` union normalization, and derived `onItemHeaderClick` metadata. Inventory counts were corrected from the umbrella rough 4/4/10 to the audited 5/6/12 active footprint.
 - 2026-05-26: Added `NaiveCheckbox` and `NaiveCheckboxGroup` against SPlayer close-confirm and copy-lyrics checkbox usage plus NaiveUI 2.43.2 `Checkbox.mjs` / `CheckboxGroup.mjs`. `checkbox.tsx` stays startup-light; `NaiveCheckboxKobalte.tsx` owns the Kobalte leaf, while the group is handwritten because `@kobalte/core@0.13.11` has no checkbox-group primitive. The facade keeps `.n-checkbox*` / `.n-checkbox-group` hooks, controlled indeterminate, label/children fallback, numeric value round trips, and NaiveUI max/min quota behavior.
 - 2026-05-26: Added `NaiveRadio`, `NaiveRadioGroup`, and `NaiveRadioButton` against SPlayer song-list sort and download-quality radio usage plus NaiveUI 2.43.2 `Radio.mjs` / `RadioGroup.mjs` / `RadioButton.mjs`. `radio.tsx` stays startup-light; `NaiveRadioKobalte.tsx` owns the Kobalte `RadioGroup` implementation, original string/number value lookup, auto-generated names, and button-mode splitor priority hooks. `NaiveRadioButton` is package-ready for parity even though SPlayer has zero current call sites.

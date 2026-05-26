@@ -24,6 +24,12 @@ This directory is the local package boundary for SPlayer/NaiveUI-compatible UI f
 
 NaiveUI's `NIcon` is routed to AudioPlayer's existing local icon contract; this package does not add a `NaiveIcon` facade. Callers should pass local icon JSX directly into facade slots and props, for example as `NaiveButton` children, `NaiveSwitch` icon props, `NaiveTabs` labels, or `NaiveSelect` `renderLabel` / `renderOption` output. Keep icon sizing/color on the visible NaiveUI class hook or the caller's page class, not in a generic wrapper.
 
+## Image Routing
+
+NaiveUI's `NImage` and `NImageGroup` are routed to AudioPlayer's canonical `SImage` component, not duplicated as `NaiveImage` / `NaiveImageGroup` facades. `SImage` already owns placeholder, loading/error, lazy decode, viewport release, media artwork, shape/aspect, object-fit, cross-origin, and class/style slot behavior.
+
+NaiveUI-style preview overlays, grouped navigation, toolbar behavior, and generated image-preview styling belong to `.trellis/tasks/05-24-ui-splayer-n-simage-preview-lightbox/prd.md`. Do not export `NaiveImage` from this package until `SImage` has preview APIs and a thin alias becomes useful.
+
 ## Shell And Provider Routing
 
 NaiveUI's shell-level primitives are routed to app CSS and tokens instead of facades. `NLayout`, `NLayoutHeader`, and `NLayoutSider` are represented by `AppShell`, `Sidebar`, `TopNav`, `global.css`, `tokens.css`, and `components/shell.css`. `NConfigProvider` maps to AudioPlayer's appearance/token system, and `NGlobalStyle` maps to `global.css`. Do not add `NaiveLayout`, `NaiveConfigProvider`, or `NaiveGlobalStyle` unless a future task introduces runtime provider behavior that cannot be represented by tokens.
