@@ -7,6 +7,7 @@ export * from "./input";
 export * from "./list";
 export * from "./layout";
 export * from "./popover";
+export * from "./popconfirm";
 export * from "./popselect";
 export * from "./scrollbar";
 export * from "./select";

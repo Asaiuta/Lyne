@@ -2013,6 +2013,106 @@
   }
 
   /* ============================================================
+     NaivePopconfirm — NaiveUI 2.43.2 visual contract.
+     Source: D:/AI/SPlayer/node_modules/naive-ui/es/popconfirm/src/styles/index.cssr.mjs
+     and PopconfirmPanel.mjs. Behavior composes on NaivePopover.
+     ============================================================ */
+
+  .n-popover.n-popconfirm {
+    --n-icon-size: 22px;
+    --n-icon-color: var(--warning);
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__panel {
+    box-sizing: border-box;
+    min-width: 0;
+    color: var(--n-text-color);
+    line-height: 1.5;
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__body {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    flex-wrap: nowrap;
+    font-size: var(--n-font-size);
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__icon {
+    display: flex;
+    flex: none;
+    margin: 0 8px 0 0;
+    color: var(--n-icon-color);
+    font-size: var(--n-icon-size);
+    line-height: 1;
+    transition: color 0.3s var(--n-bezier);
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__icon svg {
+    display: block;
+    width: 1em;
+    height: 1em;
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__action {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__action:not(:first-child) {
+    margin-top: 8px;
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__action .naive-button:not(:last-child) {
+    margin-right: 8px;
+  }
+
+  /* Peer Button visual mapping. NaiveUI delegates these colors and sizing
+     to NButton; this local facade maps the same small-button role onto
+     AudioPlayer's lightweight NaiveButton class. */
+  .n-popover.n-popconfirm .n-popconfirm__action .naive-button {
+    display: inline-flex;
+    min-height: 30px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-sm);
+    color: var(--text-soft);
+    background: transparent;
+    font-size: var(--n-font-size);
+    line-height: 1;
+    transition:
+      background-color 0.2s var(--n-bezier),
+      border-color 0.2s var(--n-bezier),
+      color 0.2s var(--n-bezier);
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__action .naive-button:hover:not(:disabled) {
+    border-color: color-mix(in oklch, var(--color-primary) 36%, var(--border-overlay));
+    color: var(--text);
+    background: color-mix(in oklch, var(--color-primary) 10%, transparent);
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__action .naive-button--primary {
+    border-color: color-mix(in oklch, var(--color-primary) 48%, transparent);
+    color: var(--color-on-primary);
+    background: var(--color-primary);
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__action .naive-button--primary:hover:not(:disabled) {
+    border-color: var(--color-primary);
+    color: var(--color-on-primary);
+    background: color-mix(in oklch, var(--color-primary) 86%, white);
+  }
+
+  .n-popover.n-popconfirm .n-popconfirm__action .naive-button.is-secondary {
+    color: var(--color-primary);
+    background: var(--color-primary-tonal-12);
+  }
+
+  /* ============================================================
      NaiveDropdown — NaiveUI 2.43.2 visual contract.
      Source: D:/AI/SPlayer/node_modules/naive-ui/es/dropdown/src/styles/index.cssr.mjs
      plus styles/_common.mjs and styles/light.mjs.
