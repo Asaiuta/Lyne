@@ -33,8 +33,9 @@ export function PlayerQualityPopover(props: PlayerQualityPopoverProps) {
     <>
       <button
         type="button"
-        class={`player-inline-tag player-right-tag player-utility-hidden player-quality-tag cursor-pointer bg-transparent border-0 text-xs${props.open ? " is-open" : ""}`}
+        class={`player-inline-tag player-right-tag player-utility-hidden player-quality-tag cursor-pointer bg-transparent text-xs${props.open ? " is-open" : ""}`}
         aria-label={props.buttonLabel}
+        title={props.buttonLabel}
         aria-haspopup="dialog"
         aria-expanded={props.open}
         onClick={props.onToggle}

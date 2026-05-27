@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { NcmSongComment } from "../../shared/api/ncm/comment";
+import { NaiveH3, NaiveP } from "../../shared/ui/naive";
 import { SImage } from "../SImage";
 import { CoverArt } from "../CoverArt";
 import { IconPlay } from "../icons";
@@ -68,7 +69,7 @@ export function FullPlayerComments(props: FullPlayerCommentsProps) {
         </Show>
         <Show when={props.content.hotComments.length > 0}>
           <section class="full-player-comment-section">
-            <h3>{props.content.hotLabel}</h3>
+            <NaiveH3>{props.content.hotLabel}</NaiveH3>
             <For each={props.content.hotComments}>
               {(comment) => <CommentItem comment={comment} />}
             </For>
@@ -76,12 +77,12 @@ export function FullPlayerComments(props: FullPlayerCommentsProps) {
         </Show>
         <Show when={props.content.comments.length > 0}>
           <section class="full-player-comment-section">
-            <h3>
+            <NaiveH3>
               {props.content.allLabel}
               <Show when={props.content.commentCount > 0}>
                 <span>{props.content.commentCount}</span>
               </Show>
-            </h3>
+            </NaiveH3>
             <For each={props.content.comments}>
               {(comment) => <CommentItem comment={comment} />}
             </For>
@@ -118,7 +119,7 @@ function CommentItem(props: { comment: NcmSongComment }) {
           <span>{props.comment.user.nickname}</span>
           <span>{timeLabel()}</span>
         </div>
-        <p>{props.comment.content}</p>
+        <NaiveP>{props.comment.content}</NaiveP>
         <Show when={props.comment.likedCount > 0}>
           <span class="full-player-comment-like">{props.comment.likedCount}</span>
         </Show>

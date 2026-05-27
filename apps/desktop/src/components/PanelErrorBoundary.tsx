@@ -1,4 +1,5 @@
 import { ErrorBoundary, type JSX } from "solid-js";
+import { NaiveAlert } from "../shared/ui/naive";
 
 interface PanelErrorBoundaryProps {
   children: JSX.Element;
@@ -15,13 +16,11 @@ export function PanelErrorBoundary(props: PanelErrorBoundaryProps) {
   return (
     <ErrorBoundary
       fallback={(error, reset) => (
-        <section
-          class={`panel-error-boundary${props.class ? ` ${props.class}` : ""}`}
-          role="alert"
-        >
+        <section class={`panel-error-boundary${props.class ? ` ${props.class}` : ""}`}>
           <div class="status-stack">
-            <strong>{props.title ?? "Panel unavailable"}</strong>
-            <span class="status-error">{readErrorMessage(error)}</span>
+            <NaiveAlert title={props.title ?? "Panel unavailable"} type="error">
+              <span class="status-error">{readErrorMessage(error)}</span>
+            </NaiveAlert>
           </div>
           <button type="button" class="ghost-button" onClick={reset}>
             Retry

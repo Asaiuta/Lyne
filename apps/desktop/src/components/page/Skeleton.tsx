@@ -1,4 +1,5 @@
 import { For, createMemo } from "solid-js";
+import { NaiveSkeleton } from "../../shared/ui/naive";
 
 interface SkeletonProps {
   shape?: "rect" | "circle" | "text";
@@ -7,11 +8,6 @@ interface SkeletonProps {
   class?: string;
 }
 
-const toCssLength = (value: string | number | undefined): string | undefined => {
-  if (value == null) return undefined;
-  return typeof value === "number" ? `${value}px` : value;
-};
-
 const buildIndexes = (count: number): number[] => Array.from({ length: count }, (_, index) => index);
 
 /**
@@ -19,16 +15,7 @@ const buildIndexes = (count: number): number[] => Array.from({ length: count }, 
  * (1.4s pulse) and supports rect/circle/text shapes.
  */
 export function Skeleton(props: SkeletonProps) {
-  return (
-    <span
-      class={`skeleton${props.shape === "circle" ? " skeleton--circle" : ""}${props.shape === "text" ? " skeleton--text" : ""}${props.class ? ` ${props.class}` : ""}`}
-      style={{
-        width: toCssLength(props.width),
-        height: toCssLength(props.height)
-      }}
-      aria-hidden="true"
-    />
-  );
+  return <NaiveSkeleton {...props} />;
 }
 
 interface CoverGridSkeletonProps {
@@ -49,9 +36,12 @@ export function CoverGridSkeleton(props: CoverGridSkeletonProps) {
       <For each={indexes()}>
         {() => (
           <div class={`album-card skeleton-card${isRound() ? " album-card--round" : ""}`}>
-            <span class={`album-card-art skeleton${isRound() ? " skeleton--circle" : ""}`} />
-            <span class="skeleton skeleton--text skeleton-line skeleton-line--title" />
-            <span class="skeleton skeleton--text skeleton-line" />
+            <NaiveSkeleton
+              class="album-card-art"
+              shape={isRound() ? "circle" : "rect"}
+            />
+            <NaiveSkeleton class="skeleton-line skeleton-line--title" shape="text" />
+            <NaiveSkeleton class="skeleton-line" shape="text" />
           </div>
         )}
       </For>
@@ -75,7 +65,7 @@ export function ListSkeleton(props: ListSkeletonProps) {
   return (
     <div class="skeleton-list" aria-hidden="true">
       <For each={indexes()}>
-        {() => <span class="skeleton skeleton-row" style={{ height: `${height()}px` }} />}
+        {() => <NaiveSkeleton class="skeleton-row" height={height()} />}
       </For>
     </div>
   );

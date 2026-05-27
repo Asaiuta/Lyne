@@ -80,20 +80,6 @@ export const getRootStyle = (
   };
 };
 
-export const getStageStyle = (
-  settings: FullPlayerLayoutSettings,
-  pureLyricMode: boolean,
-  showComment: boolean
-): JSX.CSSProperties | undefined => {
-  if (pureLyricMode || showComment || settings.playerType === "fullscreen") {
-    return undefined;
-  }
-  const { leftRatio, rightRatio } = getLayoutRatios(settings);
-  return {
-    "grid-template-columns": `minmax(340px, ${leftRatio}fr) minmax(560px, ${rightRatio}fr)`
-  };
-};
-
 export const getLayoutClassName = (
   settings: FullPlayerLayoutSettings,
   pureLyricMode: boolean,
@@ -103,6 +89,7 @@ export const getLayoutClassName = (
   const mode = settings.fullPlayerCommentMode;
   return [
     "full-player-stage",
+    "is-source-left-right",
     `is-player-type-${settings.playerType}`,
     settings.fullPlayerLayout === "lyrics" ? "is-lyrics-layout" : "is-balanced-layout",
     settings.hiddenCoverPlayer ? "is-cover-hidden" : "",
@@ -138,6 +125,7 @@ export const getFullPlayerRootClassName = (
 ): string =>
   [
     "full-player",
+    "full-player-source-aligned",
     isOpen ? "is-open" : "",
     !metaVisible && !showComment ? "is-meta-hidden" : "",
     `player-type-${settings.playerType}`,

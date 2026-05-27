@@ -76,7 +76,7 @@ export function PlayerBarInfoPanel(props: PlayerBarInfoPanelProps) {
         <div class="player-bar-title-row flex items-center gap-2 min-w-0">
           <MarqueeText
             text={props.meta.title}
-            class="player-bar-title min-w-0 overflow-hidden text-base font-bold"
+            class="player-bar-title"
           />
           <Show when={props.meta.playbackRateLabel}>
             {(label) => (
@@ -152,7 +152,7 @@ export function PlayerBarInfoPanel(props: PlayerBarInfoPanelProps) {
         </div>
 
         <Show when={props.meta.showSecondaryMeta}>
-          <div class="player-info-secondary relative min-w-0 overflow-hidden flex items-center text-xs">
+          <div class="player-info-secondary">
             <Show
               when={props.meta.showLyric}
               fallback={

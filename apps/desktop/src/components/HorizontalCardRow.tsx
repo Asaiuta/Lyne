@@ -1,5 +1,6 @@
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
+import { NaiveH2 } from "../shared/ui/naive";
 import { IconChevronRight } from "./icons";
 
 interface HorizontalCardRowProps {
@@ -27,7 +28,7 @@ export function HorizontalCardRow(props: HorizontalCardRowProps) {
             }
           }}
         >
-          <h2 class="card-row-title">{props.title}</h2>
+          <NaiveH2 class="card-row-title">{props.title}</NaiveH2>
           <Show when={props.onTitleClick}>
             <IconChevronRight class="card-row-title-arrow" />
           </Show>

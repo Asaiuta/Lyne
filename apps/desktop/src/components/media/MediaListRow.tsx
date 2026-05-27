@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
 import type { UISettings } from "../../shared/state/useUISettings";
+import { NaiveTag, type NaiveTagTone } from "../../shared/ui/naive";
 import { SImage } from "../SImage";
 import { IconCloud, IconPause, IconPlay, IconQueueAdd } from "../icons";
 import type { MediaListItem } from "./MediaList";
@@ -36,10 +37,15 @@ interface MediaListRowProps<T extends MediaListItem> {
   onDragEnd?: () => void;
 }
 
+const qualityTagTone = (quality: string): NaiveTagTone =>
+  quality === "Hi-Res" || quality === "SQ" ? "warning" : quality === "HQ" ? "info" : "primary";
+
 const qualityTagClass = (quality: string): string => {
-  const tone = quality === "Hi-Res" || quality === "SQ" ? "warning" : quality === "HQ" ? "info" : "primary";
+  const tone = qualityTagTone(quality);
   return `media-row-tag media-row-quality-tag media-row-quality-tag-${tone}`;
 };
+
+const originalTagTone = (tag: string): NaiveTagTone => (tag === "翻唱" ? "info" : "primary");
 
 const originalTagClass = (tag: string): string =>
   tag === "翻唱" ? "media-row-tag media-row-tag-info" : "media-row-tag media-row-tag-primary";
@@ -124,24 +130,42 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
             </span>
             <span class="media-row-desc">
               <Show when={props.uiSettings.showSongQuality && props.item.qualityLabel}>
-                {(quality) => <span class={qualityTagClass(quality())}>{quality()}</span>}
+                {(quality) => (
+                  <NaiveTag
+                    class={qualityTagClass(quality())}
+                    tone={qualityTagTone(quality())}
+                  >
+                    {quality()}
+                  </NaiveTag>
+                )}
               </Show>
               <Show when={props.uiSettings.showSongOriginalTag && props.item.originalTag}>
-                {(tag) => <span class={originalTagClass(tag())}>{tag()}</span>}
+                {(tag) => (
+                  <NaiveTag class={originalTagClass(tag())} tone={originalTagTone(tag())}>
+                    {tag()}
+                  </NaiveTag>
+                )}
               </Show>
               <Show when={props.uiSettings.showSongPrivilegeTag && props.item.privilegeTag}>
-                {(tag) => <span class="media-row-tag media-row-tag-error">{tag()}</span>}
+                {(tag) => <NaiveTag class="media-row-tag media-row-tag-error" tone="error">{tag()}</NaiveTag>}
               </Show>
               <Show when={props.uiSettings.showSongPrivilegeTag && props.item.isCloud}>
-                <span class="media-row-tag media-row-tag-info media-row-tag-icon" aria-label="Cloud">
+                <NaiveTag
+                  class="media-row-tag media-row-tag-info media-row-tag-icon"
+                  tone="info"
+                  icon={true}
+                  ariaLabel="Cloud"
+                >
                   <IconCloud />
-                </span>
+                </NaiveTag>
               </Show>
               <Show when={props.item.mvId}>
-                <span class="media-row-tag media-row-tag-warning">MV</span>
+                <NaiveTag class="media-row-tag media-row-tag-warning" tone="warning">MV</NaiveTag>
               </Show>
               <Show when={props.uiSettings.showSongExplicitTag && props.item.explicit}>
-                <span class="media-row-tag media-row-tag-error" title="Explicit Content">E</span>
+                <NaiveTag class="media-row-tag media-row-tag-error" tone="error" title="Explicit Content">
+                  E
+                </NaiveTag>
               </Show>
               <Show when={props.uiSettings.showSongArtist}>
                 <span class="media-row-credits">

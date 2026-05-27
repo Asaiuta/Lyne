@@ -11,24 +11,32 @@ export function usePlayerBarOverlays() {
   let qualityRef: HTMLDivElement | undefined;
   let controlsRef: HTMLDivElement | undefined;
 
+  const focusTrigger = (root: HTMLDivElement | undefined) => {
+    root?.querySelector<HTMLButtonElement>("button")?.focus();
+  };
+
   useDismissibleOverlay(volumePopoverOpen, {
     isInside: (target) => !!volumeRef && volumeRef.contains(target),
-    onDismiss: () => setVolumePopoverOpen(false)
+    onDismiss: () => setVolumePopoverOpen(false),
+    onEscapeDismiss: () => focusTrigger(volumeRef)
   });
 
   useDismissibleOverlay(moreOpen, {
     isInside: (target) => !!moreRef && moreRef.contains(target),
-    onDismiss: () => setMoreOpen(false)
+    onDismiss: () => setMoreOpen(false),
+    onEscapeDismiss: () => focusTrigger(moreRef)
   });
 
   useDismissibleOverlay(qualityOpen, {
     isInside: (target) => !!qualityRef && qualityRef.contains(target),
-    onDismiss: () => setQualityOpen(false)
+    onDismiss: () => setQualityOpen(false),
+    onEscapeDismiss: () => focusTrigger(qualityRef)
   });
 
   useDismissibleOverlay(controlsOpen, {
     isInside: (target) => !!controlsRef && controlsRef.contains(target),
-    onDismiss: () => setControlsOpen(false)
+    onDismiss: () => setControlsOpen(false),
+    onEscapeDismiss: () => focusTrigger(controlsRef)
   });
 
   return {

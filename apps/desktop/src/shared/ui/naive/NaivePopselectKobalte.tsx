@@ -1,11 +1,19 @@
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
-import { For, Show } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createSignal,
+  onCleanup
+} from "solid-js";
 import type { JSX } from "solid-js";
 import type { NaivePopselectOption, NaivePopselectProps } from "./popselect";
 import { joinClassNames } from "./utils";
 
 const fallbackClass = (className: string | undefined, fallback: string): string =>
   className ?? fallback;
+
+const POPSELECT_LEAVE_PRESENCE_MS = 220;
 
 const activeClass = (active: boolean, className: string | undefined): string | false =>
   active ? className ?? "is-active" : false;
@@ -53,16 +61,45 @@ function NaivePopselectRadioOption<TValue extends string>(
 export function NaivePopselectKobalte<TValue extends string>(
   props: NaivePopselectProps<TValue>
 ): JSX.Element {
+  const [contentPresent, setContentPresent] = createSignal<boolean>(props.open);
+  let leaveTimer: ReturnType<typeof setTimeout> | undefined;
+
   const rootClass = () => fallbackClass(props.class, "naive-popselect");
   const triggerClass = () =>
     joinClassNames(
       fallbackClass(props.triggerClass, "naive-popselect-trigger"),
       props.open ? props.triggerOpenClass ?? "is-open" : false
     );
-  const popoverClass = () => fallbackClass(props.popoverClass, "naive-popselect-popover");
+  const popoverClass = () =>
+    joinClassNames(
+      fallbackClass(props.popoverClass, "naive-popselect-popover"),
+      props.open ? "is-open" : "is-closing",
+      "is-naive-popselect-transition"
+    );
+  const clearLeaveTimer = (): void => {
+    if (leaveTimer === undefined) return;
+    clearTimeout(leaveTimer);
+    leaveTimer = undefined;
+  };
   const stopPropagationIfNeeded = (event: Event): void => {
     if (props.stopTriggerPropagation) event.stopPropagation();
   };
+
+  createEffect(() => {
+    if (props.open) {
+      clearLeaveTimer();
+      setContentPresent(true);
+      return;
+    }
+    if (!contentPresent()) return;
+    clearLeaveTimer();
+    leaveTimer = setTimeout(() => {
+      leaveTimer = undefined;
+      setContentPresent(false);
+    }, POPSELECT_LEAVE_PRESENCE_MS);
+  });
+
+  onCleanup(clearLeaveTimer);
 
   return (
     <DropdownMenu
@@ -72,6 +109,7 @@ export function NaivePopselectKobalte<TValue extends string>(
       gutter={props.gutter ?? 10}
       modal={false}
       preventScroll={false}
+      forceMount={contentPresent()}
     >
       <div class={rootClass()}>
         <DropdownMenu.Trigger
@@ -86,9 +124,14 @@ export function NaivePopselectKobalte<TValue extends string>(
           {props.triggerContent}
         </DropdownMenu.Trigger>
       </div>
-      <Show when={props.open && typeof document !== "undefined"}>
+      <Show when={contentPresent() && typeof document !== "undefined"}>
         <DropdownMenu.Portal mount={document.body}>
-          <DropdownMenu.Content class={popoverClass()} aria-label={props.label}>
+          <DropdownMenu.Content
+            class={popoverClass()}
+            aria-label={props.label}
+            aria-hidden={!props.open}
+            style={{ "pointer-events": props.open ? "auto" : "none" }}
+          >
             <DropdownMenu.RadioGroup
               value={props.value}
               onChange={(value) => props.onChange(value as TValue)}

@@ -6,7 +6,8 @@ import {
   IconShuffle,
   IconSkipNext,
   IconSkipPrev,
-  IconSpinner
+  IconSpinner,
+  IconThumbDown
 } from "../icons";
 
 interface PlayerTransportControlsProps {
@@ -26,6 +27,10 @@ interface PlayerTransportControlsProps {
   nextLabel: string;
   nextTitle: string;
   transportLabel: string;
+  isPersonalFm?: boolean;
+  isRadio?: boolean;
+  personalFmTrashLabel?: string;
+  onPersonalFmTrash?: () => void;
   onPlayPause: () => void;
   onSkipPrev: () => void;
   onSkipNext: () => void;
@@ -36,32 +41,50 @@ interface PlayerTransportControlsProps {
 export function PlayerTransportControls(props: PlayerTransportControlsProps) {
   const RepeatIcon = () => props.repeatIcon;
   const ShuffleIcon = () => props.shuffleIcon ?? IconShuffle;
+  const showModeButtons = () => !props.isRadio && !props.isPersonalFm;
 
   return (
     <div class="player-bar-transport" role="group" aria-label={props.transportLabel}>
-      <button
-        type="button"
-        class={`transport-button mode-button${props.shuffleActive ? " is-active" : ""}`}
-        onClick={props.onToggleShuffle}
-        aria-label={props.shuffleLabel}
-        aria-pressed={props.shuffleActive}
-        title={props.shuffleLabel}
+      <Show when={showModeButtons()}>
+        <button
+          type="button"
+          class={`transport-button mode-button${props.shuffleActive ? " is-active" : ""}`}
+          onClick={props.onToggleShuffle}
+          aria-label={props.shuffleLabel}
+          aria-pressed={props.shuffleActive}
+          title={props.shuffleLabel}
+        >
+          {(() => {
+            const Icon = ShuffleIcon();
+            return <Icon />;
+          })()}
+        </button>
+      </Show>
+      <Show
+        when={props.isPersonalFm}
+        fallback={
+          <button
+            type="button"
+            class="transport-button"
+            onClick={props.onSkipPrev}
+            disabled={!props.canSkipPrev}
+            aria-label={props.prevLabel}
+            title={props.prevTitle}
+          >
+            <IconSkipPrev />
+          </button>
+        }
       >
-        {(() => {
-          const Icon = ShuffleIcon();
-          return <Icon />;
-        })()}
-      </button>
-      <button
-        type="button"
-        class="transport-button"
-        onClick={props.onSkipPrev}
-        disabled={!props.canSkipPrev}
-        aria-label={props.prevLabel}
-        title={props.prevTitle}
-      >
-        <IconSkipPrev />
-      </button>
+        <button
+          type="button"
+          class="transport-button"
+          onClick={() => props.onPersonalFmTrash?.()}
+          aria-label={props.personalFmTrashLabel ?? props.prevLabel}
+          title={props.personalFmTrashLabel ?? props.prevTitle}
+        >
+          <IconThumbDown />
+        </button>
+      </Show>
       <button
         type="button"
         class={`transport-button transport-primary${props.isPlayLoading ? " is-loading" : ""}`}
@@ -102,19 +125,21 @@ export function PlayerTransportControls(props: PlayerTransportControlsProps) {
       >
         <IconSkipNext />
       </button>
-      <button
-        type="button"
-        class={`transport-button mode-button${props.repeatActive ? " is-active" : ""}`}
-        onClick={props.onCycleRepeat}
-        aria-label={props.repeatLabel}
-        aria-pressed={props.repeatActive}
-        title={props.repeatLabel}
-      >
-        {(() => {
-          const Icon = RepeatIcon();
-          return <Icon />;
-        })()}
-      </button>
+      <Show when={showModeButtons()}>
+        <button
+          type="button"
+          class={`transport-button mode-button${props.repeatActive ? " is-active" : ""}`}
+          onClick={props.onCycleRepeat}
+          aria-label={props.repeatLabel}
+          aria-pressed={props.repeatActive}
+          title={props.repeatLabel}
+        >
+          {(() => {
+            const Icon = RepeatIcon();
+            return <Icon />;
+          })()}
+        </button>
+      </Show>
     </div>
   );
 }

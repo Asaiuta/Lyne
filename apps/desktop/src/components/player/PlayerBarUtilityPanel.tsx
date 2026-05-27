@@ -1,9 +1,11 @@
 import { Show } from "solid-js";
 import type { Component, JSX } from "solid-js";
-import { IconDesktopLyric, IconPlaylist } from "../icons";
+import { IconClock, IconDesktopLyric, IconPlaylist } from "../icons";
+import { NaiveTag } from "../../shared/ui/naive";
 import { PlayerControlsPopover } from "./PlayerControlsPopover";
 import { PlayerQualityPopover } from "./PlayerQualityPopover";
 import { PlayerVolumePopover } from "./PlayerVolumePopover";
+import { formatTime } from "./time";
 import type { PlayerBarNcmQualityOption } from "./usePlayerBarNcmQuality";
 
 interface PlayerBarUtilityQualityProps {
@@ -81,9 +83,13 @@ interface PlayerBarUtilityPanelProps {
   quality: PlayerBarUtilityQualityProps;
   desktopLyricLabel: string;
   showDesktopLyric: boolean;
+  desktopLyricActive?: boolean;
+  onToggleDesktopLyric?: () => void;
   controls: PlayerBarUtilityControlsProps;
   volume: PlayerBarUtilityVolumeProps;
   queue: PlayerBarUtilityQueueProps;
+  autoCloseRemaining?: number;
+  autoCloseLabel?: string;
 }
 
 export function PlayerBarUtilityPanel(props: PlayerBarUtilityPanelProps) {
@@ -92,7 +98,7 @@ export function PlayerBarUtilityPanel(props: PlayerBarUtilityPanelProps) {
       <div class="player-time-stack">
         <button
           type="button"
-          class="player-time-toggle inline-flex items-center gap-1 min-h-28px bg-transparent border-0 text-xs"
+          class="player-time-toggle"
           onClick={props.onCycleTimeFormat}
           aria-label={props.timeToggleLabel}
           title={props.timeToggleLabel}
@@ -103,6 +109,17 @@ export function PlayerBarUtilityPanel(props: PlayerBarUtilityPanelProps) {
           </span>
           <span class="player-time-total">{props.timeRight}</span>
         </button>
+        <Show when={(props.autoCloseRemaining ?? 0) > 0}>
+          <NaiveTag
+            tone="primary"
+            class="player-autoclose-tag"
+            ariaLabel={props.autoCloseLabel}
+            title={props.autoCloseLabel}
+          >
+            <IconClock />
+            <span class="player-autoclose-time">{formatTime(props.autoCloseRemaining ?? 0)}</span>
+          </NaiveTag>
+        </Show>
       </div>
 
       <div class="player-utility-group" role="group" aria-label={props.utilitiesLabel}>
@@ -139,10 +156,11 @@ export function PlayerBarUtilityPanel(props: PlayerBarUtilityPanelProps) {
         <Show when={props.showDesktopLyric}>
           <button
             type="button"
-            class="player-inline-icon player-utility-button player-utility-disabled player-utility-hidden w-38px h-38px"
+            class={`player-inline-icon player-utility-button player-utility-hidden w-38px h-38px${props.desktopLyricActive ? " is-active" : ""}`}
             aria-label={props.desktopLyricLabel}
             title={props.desktopLyricLabel}
-            disabled
+            aria-pressed={props.desktopLyricActive}
+            onClick={() => props.onToggleDesktopLyric?.()}
           >
             <IconDesktopLyric />
           </button>

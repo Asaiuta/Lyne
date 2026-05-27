@@ -63,6 +63,8 @@ type FallbackPopoverPosition = {
   readonly top: number;
 };
 
+const POPSELECT_LEAVE_PRESENCE_MS = 220;
+
 let loadedNaivePopselect: NaivePopselectComponent | null = null;
 let naivePopselectImport: Promise<NaivePopselectComponent> | null = null;
 
@@ -95,9 +97,17 @@ export function NaivePopselect<TValue extends string>(
   const [fallbackPosition, setFallbackPosition] = createSignal<FallbackPopoverPosition | null>(
     null
   );
+  const [fallbackPresent, setFallbackPresent] = createSignal<boolean>(props.open);
+  let fallbackLeaveTimer: ReturnType<typeof setTimeout> | undefined;
 
   const popoverWidth = () => props.fallbackPopoverWidth ?? 100;
   const gutter = () => props.gutter ?? 10;
+  const renderedLoadedPopselect = (): NaivePopselectComponent | null => {
+    const Loaded = LoadedPopselect();
+    if (!Loaded) return null;
+    if (!props.open && fallbackPresent()) return null;
+    return Loaded;
+  };
   const rootClass = () => fallbackClass(props.class, "naive-popselect");
   const triggerClass = () =>
     joinClassNames(
@@ -105,6 +115,12 @@ export function NaivePopselect<TValue extends string>(
       props.open ? props.triggerOpenClass ?? "is-open" : false
     );
   const popoverClass = () => fallbackClass(props.popoverClass, "naive-popselect-popover");
+  const popoverPresenceClass = () =>
+    joinClassNames(
+      popoverClass(),
+      props.open ? "is-open" : "is-closing",
+      "is-naive-popselect-transition"
+    );
   const optionClass = (active: boolean) =>
     joinClassNames(
       fallbackClass(props.optionClass, "naive-popselect-option"),
@@ -130,6 +146,11 @@ export function NaivePopselect<TValue extends string>(
       top: rect.bottom + gutter()
     });
   };
+  const clearFallbackLeaveTimer = (): void => {
+    if (fallbackLeaveTimer === undefined) return;
+    clearTimeout(fallbackLeaveTimer);
+    fallbackLeaveTimer = undefined;
+  };
   const stopPropagationIfNeeded = (event: Event): void => {
     if (props.stopTriggerPropagation) event.stopPropagation();
   };
@@ -139,11 +160,26 @@ export function NaivePopselect<TValue extends string>(
   });
 
   createEffect(() => {
-    if (!props.open || LoadedPopselect()) {
-      setFallbackPosition(null);
+    if (LoadedPopselect()) {
+      if (props.open || !fallbackPresent()) setFallbackPosition(null);
       return;
     }
-    updateFallbackPosition();
+    if (props.open) updateFallbackPosition();
+  });
+
+  createEffect(() => {
+    if (props.open) {
+      clearFallbackLeaveTimer();
+      setFallbackPresent(true);
+      return;
+    }
+    if (!fallbackPresent()) return;
+    clearFallbackLeaveTimer();
+    fallbackLeaveTimer = setTimeout(() => {
+      fallbackLeaveTimer = undefined;
+      setFallbackPresent(false);
+      setFallbackPosition(null);
+    }, POPSELECT_LEAVE_PRESENCE_MS);
   });
 
   createEffect(() => {
@@ -183,9 +219,11 @@ export function NaivePopselect<TValue extends string>(
     onCleanup(() => preloadWindow.clearTimeout(id));
   });
 
+  onCleanup(clearFallbackLeaveTimer);
+
   return (
     <Show
-      when={LoadedPopselect()}
+      when={renderedLoadedPopselect()}
       fallback={
         <div
           ref={fallbackRoot}
@@ -213,18 +251,26 @@ export function NaivePopselect<TValue extends string>(
           >
             {props.triggerContent}
           </NaiveButton>
-          <Show when={props.open && typeof document !== "undefined" ? fallbackPosition() : null}>
+          <Show
+            when={
+              fallbackPresent() && typeof document !== "undefined"
+                ? fallbackPosition()
+                : null
+            }
+          >
             {(position) => (
               <Portal mount={document.body}>
                 <div
                   ref={fallbackPopover}
-                  class={popoverClass()}
+                  class={popoverPresenceClass()}
                   role="menu"
                   aria-label={props.label}
+                  aria-hidden={!props.open}
                   style={{
                     left: `${position().left}px`,
                     top: `${position().top}px`,
-                    width: `${popoverWidth()}px`
+                    width: `${popoverWidth()}px`,
+                    "pointer-events": props.open ? "auto" : "none"
                   }}
                 >
                   <For each={props.options}>

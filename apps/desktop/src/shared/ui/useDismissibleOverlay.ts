@@ -11,6 +11,8 @@ export interface DismissibleOverlayOptions {
   onDismiss: () => void;
   /** Dismiss on Escape (default `true`). */
   escape?: boolean;
+  /** Optional post-dismiss hook for Escape-only cleanup, such as trigger focus restore. */
+  onEscapeDismiss?: () => void;
   /** Dismiss on capturing window scroll (default `false`). */
   scroll?: boolean;
   /** Dismiss on window blur (default `false`). */
@@ -43,7 +45,10 @@ export function useDismissibleOverlay(
 
     if (options.escape !== false) {
       const handleKey = (event: KeyboardEvent) => {
-        if (event.key === "Escape") options.onDismiss();
+        if (event.key === "Escape") {
+          options.onDismiss();
+          options.onEscapeDismiss?.();
+        }
       };
       window.addEventListener("keydown", handleKey);
       onCleanup(() => window.removeEventListener("keydown", handleKey));

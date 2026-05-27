@@ -19,6 +19,7 @@
     "tauri": "powershell -ExecutionPolicy Bypass -File ./scripts/tauri-wrapper.ps1"
   },
   "dependencies": {
+    "@kobalte/core": "^0.13.11",
     "@material/material-color-utilities": "^0.4.0",
     "@tauri-apps/api": "^2.0.0",
     "qrcode": "^1.5.4",

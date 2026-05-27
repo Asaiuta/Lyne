@@ -1,6 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import type { Component, JSX } from "solid-js";
-import { Portal } from "solid-js/web";
+import type { JSX } from "solid-js";
 import type { ActivePage } from "../shared/ui/navigation";
 import { isOnlineOnlyPage } from "../shared/ui/navigation";
 import type { ApiClient } from "../shared/api/client";
@@ -9,7 +8,14 @@ import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import { useUISettings, type SidebarHiddenItemKey } from "../shared/state/useUISettings";
 import { useTranslation } from "../shared/i18n";
 import { resolveArtworkUrl } from "../shared/ui/artwork";
-import { useDismissibleOverlay } from "../shared/ui/useDismissibleOverlay";
+import {
+  SidebarIconButton,
+  SidebarNavButton,
+  SidebarPopselect,
+  SidebarPlaylistItem,
+  type NaiveSidebarPopselectOption,
+  type NaiveSidebarIconComponent
+} from "../shared/ui/naive";
 import { CreatePlaylistModal } from "./CreatePlaylistModal";
 import { SImage } from "./SImage";
 import type { OnlinePlaylistSummary, UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
@@ -44,7 +50,7 @@ import {
   IconSPlayerStar
 } from "./icons";
 
-type IconComponent = Component<JSX.SvgSVGAttributes<SVGSVGElement>>;
+type IconComponent = NaiveSidebarIconComponent;
 
 interface NavItem {
   key: ActivePage;
@@ -197,24 +203,9 @@ export function Sidebar(props: SidebarProps) {
   const [selectedLocalPlaylistId, setSelectedLocalPlaylistId] = createSignal<string | null>(null);
   const [createPlaylistOpen, setCreatePlaylistOpen] = createSignal<boolean>(false);
   const [createSourceMenuOpen, setCreateSourceMenuOpen] = createSignal<boolean>(false);
-  const [createSourceMenuPosition, setCreateSourceMenuPosition] =
-    createSignal<{ left: number; top: number } | null>(null);
-  let createSourceMenuRef: HTMLDivElement | undefined;
-  let createSourcePopoverRef: HTMLDivElement | undefined;
 
   const readErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.error.requestFailed");
-
-  useDismissibleOverlay(createSourceMenuOpen, {
-    isInside: (target) =>
-      (!!createSourceMenuRef && createSourceMenuRef.contains(target)) ||
-      (!!createSourcePopoverRef && createSourcePopoverRef.contains(target)),
-    onDismiss: () => {
-      setCreateSourceMenuOpen(false);
-      setCreateSourceMenuPosition(null);
-    },
-    escape: false
-  });
 
   createEffect(() => {
     writeSidebarStorage(STORAGE_KEY, collapsedPersisted() ? "1" : "0");
@@ -362,21 +353,8 @@ export function Sidebar(props: SidebarProps) {
     }
     setCreatePlaylistOpen(true);
   };
-  const updateCreateSourceMenuPosition = () => {
-    if (!createSourceMenuRef) return;
-    const rect = createSourceMenuRef.getBoundingClientRect();
-    setCreateSourceMenuPosition({
-      left: rect.left + rect.width / 2 - 50,
-      top: rect.bottom + 10
-    });
-  };
   const handleBrandActivate = () => {
     props.onChange(uiSettings.useOnlineService ? "recommend" : "library");
-  };
-  const handleBrandKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    handleBrandActivate();
   };
   const handlePlaylistCreated = async (mode: CreatedPlaylistSource) => {
     if (mode === "local") {
@@ -395,6 +373,14 @@ export function Sidebar(props: SidebarProps) {
     createdPlaylistSource() === "local"
       ? t("sidebar.playlist.local")
       : t("sidebar.section.createdPlaylists");
+  const createdPlaylistSourceOptions = createMemo<
+    ReadonlyArray<NaiveSidebarPopselectOption<CreatedPlaylistSource>>
+  >(() =>
+    CREATED_PLAYLIST_SOURCE_OPTIONS.map((option) => ({
+      value: option.value,
+      label: td(option.labelKey)
+    }))
+  );
 
   const renderNavItem = (item: NavItem): JSX.Element => {
     const Icon = item.icon;
@@ -421,53 +407,33 @@ export function Sidebar(props: SidebarProps) {
 
     return (
       <li class="sidebar-nav-entry">
-        <button
-          type="button"
-          class={`sidebar-nav-button${isActive() ? " is-active" : ""}`}
-          data-perf-route-key={item.key}
+        <SidebarNavButton
+          icon={Icon}
+          label={label()}
+          active={isActive()}
+          collapsed={collapsed()}
+          routeKey={item.key}
+          badgeCount={badgeCount()}
           onClick={() => handleNavItemClick(item.key)}
-          aria-current={isActive() ? "page" : undefined}
-          aria-label={collapsed() ? label() : undefined}
-          title={collapsed() ? label() : undefined}
-        >
-          <span class={`sidebar-nav-item${isActive() ? " is-active" : ""}`}>
-            <span class="sidebar-nav-icon" aria-hidden="true">
-              <Icon />
-            </span>
-            <span class="sidebar-nav-label">{label()}</span>
-            <Show when={badgeCount() > 0}>
-              <span class="sidebar-nav-badge" aria-label={String(badgeCount())}>
-                {badgeCount()}
-              </span>
-            </Show>
-          </span>
-        </button>
+        />
         <Show when={showFmRefresh()}>
-          <button
-            type="button"
-            class="sidebar-nav-action"
-            aria-label={td("sidebar.nav.personalFm.refresh")}
-            title={td("sidebar.nav.personalFm.refresh")}
+          <SidebarIconButton
+            icon={IconRefresh}
+            label={td("sidebar.nav.personalFm.refresh")}
+            variant="nav"
             onClick={handleFmRefresh}
-          >
-            <span class="sidebar-nav-action-surface" aria-hidden="true">
-              <IconRefresh />
-            </span>
-          </button>
+          />
         </Show>
         <Show when={showHeartMode()}>
-          <button
-            type="button"
-            class={`sidebar-nav-action sidebar-nav-action--heart${isHeartActive() ? " is-active" : ""}`}
-            aria-label={td("sidebar.nav.likedSongs.heartMode")}
-            aria-pressed={isHeartActive()}
-            title={td("sidebar.nav.likedSongs.heartMode")}
+          <SidebarIconButton
+            icon={IconSPlayerHeartBit}
+            label={td("sidebar.nav.likedSongs.heartMode")}
+            variant="nav"
+            class="sidebar-nav-action--heart"
+            active={isHeartActive()}
+            pressed={isHeartActive()}
             onClick={handleHeartMode}
-          >
-            <span class="sidebar-nav-action-surface" aria-hidden="true">
-              <IconSPlayerHeartBit />
-            </span>
-          </button>
+          />
         </Show>
       </li>
     );
@@ -490,85 +456,25 @@ export function Sidebar(props: SidebarProps) {
           <span class="sidebar-section-label">{title()}</span>
           <Show when={groupKey === "created"}>
             <div class="sidebar-section-header-actions">
-              <div class="sidebar-playlist-source-menu" ref={createSourceMenuRef}>
-                <button
-                  type="button"
-                  class={`sidebar-section-action-icon sidebar-playlist-source-trigger${createSourceMenuOpen() ? " is-open" : ""}`}
-                  aria-label={td("sidebar.playlist.source")}
-                  aria-haspopup="menu"
-                  aria-expanded={createSourceMenuOpen()}
-                  title={td("sidebar.playlist.source")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    const nextOpen = !createSourceMenuOpen();
-                    if (nextOpen) updateCreateSourceMenuPosition();
-                    setCreateSourceMenuOpen(nextOpen);
-                  }}
-                >
-                  <span class="sidebar-section-action-surface" aria-hidden="true">
-                    <IconSPlayerMenu />
-                  </span>
-                </button>
-                <Show when={createSourceMenuOpen() && createSourceMenuPosition()}>
-                  {(position) => (
-                    <Portal mount={document.body}>
-                      <div
-                        ref={createSourcePopoverRef}
-                        class="sidebar-playlist-source-popover"
-                        role="menu"
-                        aria-label={td("sidebar.playlist.source")}
-                        style={{ left: `${position().left}px`, top: `${position().top}px` }}
-                      >
-                        <For each={CREATED_PLAYLIST_SOURCE_OPTIONS}>
-                          {(option) => {
-                            const isActive = () => createdPlaylistSource() === option.value;
-                            return (
-                              <button
-                                type="button"
-                                class={`sidebar-playlist-source-option${isActive() ? " is-active" : ""}`}
-                                role="menuitemradio"
-                                aria-checked={isActive()}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setCreatedPlaylistSource(option.value);
-                                  setCreateSourceMenuOpen(false);
-                                  setCreateSourceMenuPosition(null);
-                                }}
-                              >
-                                <span class="sidebar-playlist-source-option-content">
-                                  {td(option.labelKey)}
-                                </span>
-                                <Show when={isActive()}>
-                                  <span
-                                    class="sidebar-playlist-source-option-check"
-                                    aria-hidden="true"
-                                  >
-                                    <IconCheckmark />
-                                  </span>
-                                </Show>
-                              </button>
-                            );
-                          }}
-                        </For>
-                      </div>
-                    </Portal>
-                  )}
-                </Show>
-              </div>
-              <button
-                type="button"
-                class="sidebar-section-action-icon"
-                aria-label={td("sidebar.playlist.create")}
-                title={td("sidebar.playlist.create")}
+              <SidebarPopselect
+                label={td("sidebar.playlist.source")}
+                open={createSourceMenuOpen()}
+                value={createdPlaylistSource()}
+                options={createdPlaylistSourceOptions()}
+                triggerIcon={IconSPlayerMenu}
+                checkIcon={IconCheckmark}
+                onOpenChange={setCreateSourceMenuOpen}
+                onChange={setCreatedPlaylistSource}
+              />
+              <SidebarIconButton
+                icon={IconSPlayerAdd}
+                label={td("sidebar.playlist.create")}
+                variant="section"
                 onClick={(event) => {
                   event.stopPropagation();
                   handleCreatePlaylistClick();
                 }}
-              >
-                <span class="sidebar-section-action-surface" aria-hidden="true">
-                  <IconSPlayerAdd />
-                </span>
-              </button>
+              />
             </div>
           </Show>
         </div>
@@ -597,38 +503,26 @@ export function Sidebar(props: SidebarProps) {
 
             return (
               <li>
-                <button
-                  type="button"
-                  class={`sidebar-playlist-button${isActive() ? " is-active" : ""}${uiSettings.menuShowCover ? "" : " is-cover-hidden"}`}
+                <SidebarPlaylistItem
+                  label={playlist.name}
+                  active={isActive()}
+                  showCover={uiSettings.menuShowCover}
+                  icon={IconPlaylist}
                   onClick={() => handlePlaylistSelect(page, playlist.id)}
-                  title={playlist.name}
-                >
-                  <span class={`sidebar-playlist-item${isActive() ? " is-active" : ""}${uiSettings.menuShowCover ? "" : " is-cover-hidden"}`}>
-                    <Show when={uiSettings.menuShowCover}>
-                      <span class="sidebar-playlist-cover" aria-hidden="true">
-                        <Show when={playlist.coverUrl} fallback={<span>{playlist.name.slice(0, 1)}</span>}>
-                          {(coverUrl) => (
-                            <SImage
-                              src={coverUrl()}
-                              alt=""
-                              observeVisibility={true}
-                              shape="rect"
-                              aspect="square"
-                            />
-                          )}
-                        </Show>
-                      </span>
+                  cover={
+                    <Show when={playlist.coverUrl} fallback={<span>{playlist.name.slice(0, 1)}</span>}>
+                      {(coverUrl) => (
+                        <SImage
+                          src={coverUrl()}
+                          alt=""
+                          observeVisibility={true}
+                          shape="rect"
+                          aspect="square"
+                        />
+                      )}
                     </Show>
-                    <Show when={!uiSettings.menuShowCover}>
-                      <span class="sidebar-playlist-icon" aria-hidden="true">
-                        <IconPlaylist />
-                      </span>
-                    </Show>
-                    <span class="sidebar-playlist-copy">
-                      <span class="sidebar-playlist-name">{playlist.name}</span>
-                    </span>
-                  </span>
-                </button>
+                  }
+                />
               </li>
             );
           }}
@@ -647,38 +541,26 @@ export function Sidebar(props: SidebarProps) {
 
           return (
             <li>
-              <button
-                type="button"
-                class={`sidebar-playlist-button${isActive() ? " is-active" : ""}${uiSettings.menuShowCover ? "" : " is-cover-hidden"}`}
+              <SidebarPlaylistItem
+                label={playlist.name}
+                active={isActive()}
+                showCover={uiSettings.menuShowCover}
+                icon={IconPlaylist}
                 onClick={() => handleLocalPlaylistSelect(playlist.playlist_id)}
-                title={playlist.name}
-              >
-                <span class={`sidebar-playlist-item${isActive() ? " is-active" : ""}${uiSettings.menuShowCover ? "" : " is-cover-hidden"}`}>
-                  <Show when={uiSettings.menuShowCover}>
-                    <span class="sidebar-playlist-cover" aria-hidden="true">
-                      <Show when={coverUrl()} fallback={<span>{playlist.name.slice(0, 1)}</span>}>
-                        {(url) => (
-                          <SImage
-                            src={url()}
-                            alt=""
-                            observeVisibility={true}
-                            shape="rect"
-                            aspect="square"
-                          />
-                        )}
-                      </Show>
-                    </span>
+                cover={
+                  <Show when={coverUrl()} fallback={<span>{playlist.name.slice(0, 1)}</span>}>
+                    {(url) => (
+                      <SImage
+                        src={url()}
+                        alt=""
+                        observeVisibility={true}
+                        shape="rect"
+                        aspect="square"
+                      />
+                    )}
                   </Show>
-                  <Show when={!uiSettings.menuShowCover}>
-                    <span class="sidebar-playlist-icon" aria-hidden="true">
-                      <IconPlaylist />
-                    </span>
-                  </Show>
-                  <span class="sidebar-playlist-copy">
-                    <span class="sidebar-playlist-name">{playlist.name}</span>
-                  </span>
-                </span>
-              </button>
+                }
+              />
             </li>
           );
         }}
@@ -728,19 +610,17 @@ export function Sidebar(props: SidebarProps) {
     <nav class={className()} aria-label={t("sidebar.aria.primary")}>
       <div class="sidebar-scrollbar">
         <div class="sidebar-content">
-          <div
+          <button
+            type="button"
             class="sidebar-brand"
-            role="button"
-            tabIndex={0}
             aria-label={t("sidebar.brand.product")}
             onClick={handleBrandActivate}
-            onKeyDown={handleBrandKeyDown}
           >
             <span class="sidebar-brand-logo" aria-hidden="true">
               <IconLogo />
             </span>
             <span class="sidebar-brand-product">{t("sidebar.brand.product")}</span>
-          </div>
+          </button>
 
           <div class="sidebar-scroll">
             <div class="sidebar-menu">

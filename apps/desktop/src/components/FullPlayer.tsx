@@ -15,10 +15,10 @@ import {
   getLyricTextAlign,
   getLyricTransformOrigin,
   getRootStyle,
-  getStageStyle
 } from "./player/fullPlayerLayout";
 import { FullPlayerOverlayMenu } from "./player/FullPlayerOverlayMenu";
 import { FullPlayerPrimaryPanel } from "./player/FullPlayerPrimaryPanel";
+import { FullPlayerMobilePanel } from "./player/FullPlayerMobilePanel";
 import { stripBracketedContent } from "./player/metadata";
 import { useFullPlayerComments } from "./player/useFullPlayerComments";
 import { useFullPlayerLyricAutoFocus } from "./player/useFullPlayerLyricAutoFocus";
@@ -75,6 +75,7 @@ interface FullPlayerProps {
 const LYRIC_OFFSET_STORAGE_KEY = "ui.lyric.songOffsets";
 const LYRIC_OFFSET_STEP_MS = 500;
 const FULL_PLAYER_CLOSE_PRESENCE_MS = 560;
+const FULL_PLAYER_MOBILE_QUERY = "(max-width: 989.98px)";
 
 function readLyricOffsetMap(): Record<string, number> {
   if (typeof window === "undefined") return {};
@@ -116,6 +117,7 @@ export function FullPlayer(props: FullPlayerProps) {
   const [closePresence, setClosePresence] = createSignal<boolean>(props.isOpen);
   const [backgroundLayers, setBackgroundLayers] = createSignal<readonly string[]>([]);
   const [lyricOffsets, setLyricOffsets] = createSignal<Record<string, number>>(readLyricOffsetMap());
+  const [isMobileFullPlayer, setIsMobileFullPlayer] = createSignal<boolean>(false);
   let lyricListRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let fullVolumeRef: HTMLDivElement | undefined;
@@ -133,6 +135,15 @@ export function FullPlayer(props: FullPlayerProps) {
     closePresenceTimer = undefined;
   };
   const renderActive = () => props.isOpen || closePresence();
+
+  createEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia(FULL_PLAYER_MOBILE_QUERY);
+    const updateMobileState = () => setIsMobileFullPlayer(mediaQuery.matches);
+    updateMobileState();
+    mediaQuery.addEventListener("change", updateMobileState);
+    onCleanup(() => mediaQuery.removeEventListener("change", updateMobileState));
+  });
 
   createEffect(() => {
     clearClosePresenceTimer();
@@ -235,9 +246,6 @@ export function FullPlayer(props: FullPlayerProps) {
   });
   const rootStyle = createMemo(() => {
     return getRootStyle(layoutSettings(), props.bgBlur, lowFrequencyEnergy());
-  });
-  const stageStyle = createMemo(() => {
-    return getStageStyle(layoutSettings(), pureLyricMode(), showComment());
   });
   const handlePlayPauseClick = () => {
     if (props.isPlaying) {
@@ -580,6 +588,21 @@ export function FullPlayer(props: FullPlayerProps) {
       "--lyric-blend-mode": uiSettings.lyricsBlendMode
     }
   });
+  const lyricsElement = () => (
+    <FullPlayerLyrics
+      display={lyricsDisplay()}
+      settings={lyricsSettings()}
+      interaction={lyricsInteraction()}
+    />
+  );
+  const mobileLabels = () => ({
+    close: t("fullPlayer.aria.close"),
+    favorite: t("player.aria.favorite"),
+    transport: t("player.aria.transport"),
+    prev: t("player.aria.prev"),
+    next: t("player.aria.next"),
+    seek: t("player.aria.seek")
+  });
 
   return (
     <div
@@ -611,7 +634,7 @@ export function FullPlayer(props: FullPlayerProps) {
         </div>
       </Show>
       <div class="full-player-vignette" aria-hidden="true" />
-      <Show when={renderActive() && showInstantLyric() && instantLyric()}>
+      <Show when={renderActive() && !isMobileFullPlayer() && showInstantLyric() && instantLyric()}>
         {(line) => (
           <div class="full-player-instant-lyric absolute top-0 h-80px flex flex-col justify-center items-center pointer-events-none">
             <span class="text-18px leading-tight">{line().text}</span>
@@ -623,7 +646,7 @@ export function FullPlayer(props: FullPlayerProps) {
           </div>
         )}
       </Show>
-      <Show when={renderActive() && showInstantLyric() && !instantLyric() && compactLyric()}>
+      <Show when={renderActive() && !isMobileFullPlayer() && showInstantLyric() && !instantLyric() && compactLyric()}>
         {(line) => (
           <div class="full-player-instant-lyric absolute top-0 h-80px flex flex-col justify-center items-center pointer-events-none">
             <span class="text-18px leading-tight">{line()}</span>
@@ -631,41 +654,54 @@ export function FullPlayer(props: FullPlayerProps) {
         )}
       </Show>
 
-      <FullPlayerOverlayMenu
-        state={overlayMenuState()}
-        labels={overlayMenuLabels()}
-        actions={overlayMenuActions()}
-        onMouseEnter={handleControlEnter}
-        onMouseLeave={handleControlLeave}
-      />
+      <Show
+        when={renderActive() && isMobileFullPlayer()}
+        fallback={
+          <>
+            <FullPlayerOverlayMenu
+              state={overlayMenuState()}
+              labels={overlayMenuLabels()}
+              actions={overlayMenuActions()}
+              onMouseEnter={handleControlEnter}
+              onMouseLeave={handleControlLeave}
+            />
 
-      <Show when={renderActive()}>
-        <div class={layoutClassName()} style={stageStyle()}>
-          <FullPlayerPrimaryPanel cover={primaryPanelCover()} meta={primaryPanelMeta()} />
+            <Show when={renderActive()}>
+              <div class={layoutClassName()}>
+                <FullPlayerPrimaryPanel cover={primaryPanelCover()} meta={primaryPanelMeta()} />
 
-          <Show when={showComment()}>
-            <FullPlayerComments song={commentsSong()} content={commentsContent()} />
-          </Show>
+                <Show when={showComment()}>
+                  <FullPlayerComments song={commentsSong()} content={commentsContent()} />
+                </Show>
 
-          <FullPlayerLyrics
-            display={lyricsDisplay()}
-            settings={lyricsSettings()}
-            interaction={lyricsInteraction()}
-          />
-        </div>
+                {lyricsElement()}
+              </div>
+            </Show>
+
+            <FullPlayerControlShell
+              visible={metaVisible()}
+              labels={controlShellLabels()}
+              actions={controlShellActions()}
+              transport={controlShellTransport()}
+              utility={controlShellUtility()}
+              onMouseEnter={handleControlEnter}
+              onMouseLeave={handleControlLeave}
+            />
+          </>
+        }
+      >
+        <FullPlayerMobilePanel
+          cover={primaryPanelCover()}
+          meta={primaryPanelMeta()}
+          actions={controlShellActions()}
+          transport={controlShellTransport()}
+          labels={mobileLabels()}
+          hasLyrics={hasLyrics()}
+          lyrics={lyricsElement}
+        />
       </Show>
 
-      <FullPlayerControlShell
-        visible={metaVisible()}
-        labels={controlShellLabels()}
-        actions={controlShellActions()}
-        transport={controlShellTransport()}
-        utility={controlShellUtility()}
-        onMouseEnter={handleControlEnter}
-        onMouseLeave={handleControlLeave}
-      />
-
-      <Show when={renderActive() && uiSettings.showSpectrums && props.spectrum.length > 0}>
+      <Show when={renderActive() && !isMobileFullPlayer() && uiSettings.showSpectrums && props.spectrum.length > 0}>
         <div class={`full-player-spectrum${metaVisible() ? "" : " is-visible"}`} aria-hidden="true">
           <SpectrumCanvas data={props.spectrum} active={props.isPlaying} />
         </div>

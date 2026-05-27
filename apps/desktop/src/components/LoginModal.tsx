@@ -26,6 +26,10 @@ import { useQrLoginSession } from "./login/useQrLoginSession";
 type LoginTab = "qr" | "phone";
 type SpecialLoginMode = "uid" | "cookie" | null;
 type Tone = "neutral" | "success" | "error";
+interface LoginFeedback {
+  tone: Tone;
+  message: string;
+}
 
 interface LoginModalProps {
   open: boolean;
@@ -94,7 +98,8 @@ export function LoginModal(props: LoginModalProps) {
   const accountStore = useNcmAccount();
   const [activeTab, setActiveTab] = createSignal<LoginTab>("qr");
   const [specialMode, setSpecialMode] = createSignal<SpecialLoginMode>(null);
-  const [feedback, setFeedback] = createSignal<{ tone: Tone; message: string } | null>(null);
+  const [mainFeedback, setMainFeedback] = createSignal<LoginFeedback | null>(null);
+  const [specialFeedback, setSpecialFeedback] = createSignal<LoginFeedback | null>(null);
   const [form, setForm] = createStore<LoginModalFormState>(buildDefaultFormState());
 
   const onCookieCaptured = async (cookie: string, primaryEnvelope?: unknown): Promise<void> => {
@@ -107,7 +112,7 @@ export function LoginModal(props: LoginModalProps) {
       throw new Error(t("ncm.loginModal.error.cookieInvalid"));
     }
 
-    setFeedback({
+    setMainFeedback({
       tone: "success",
       message: t("ncm.loginModal.success.signedIn", {
         name: account.nickname ?? account.userId
@@ -117,19 +122,20 @@ export function LoginModal(props: LoginModalProps) {
   };
 
   const qrLogin = useQrLoginSession({
-    enabled: () => props.open && activeTab() === "qr",
+    enabled: () => props.open && activeTab() === "qr" && specialMode() === null,
     missingQrMessage: t("ncm.loginModal.error.qrKeyMissing"),
     expiredMessage: t("ncm.loginModal.qr.status.expired"),
     sessionFailedMessage: (reason) =>
       t("ncm.loginModal.error.qrSessionFailed", { reason }),
-    onFeedback: setFeedback,
+    onFeedback: setMainFeedback,
     onCookieCaptured
   });
 
   // Reset state every time the dialog opens.
   createEffect(() => {
     if (!props.open) {
-      setFeedback(null);
+      setMainFeedback(null);
+      setSpecialFeedback(null);
       qrLogin.reset();
       setForm(buildDefaultFormState());
       setCaptchaCooldown(0);
@@ -158,19 +164,19 @@ export function LoginModal(props: LoginModalProps) {
   const handleSendCaptcha = async () => {
     const phone = form.phoneNumber.trim();
     if (!phone) {
-      setFeedback({ tone: "error", message: t("ncm.loginModal.error.captchaPhoneRequired") });
+      setMainFeedback({ tone: "error", message: t("ncm.loginModal.error.captchaPhoneRequired") });
       return;
     }
     setForm("isSendingCaptcha", true);
     try {
       await sentCaptcha({ phone, ctcode: form.phoneCountryCode.trim() || "86" });
       setCaptchaCooldown(CAPTCHA_RESEND_SECONDS);
-      setFeedback({
+      setMainFeedback({
         tone: "success",
         message: t("ncm.loginModal.phone.feedback.captchaSent")
       });
     } catch (error) {
-      setFeedback({ tone: "error", message: readErrorMessage(error) });
+      setMainFeedback({ tone: "error", message: readErrorMessage(error) });
     } finally {
       setForm("isSendingCaptcha", false);
     }
@@ -179,15 +185,15 @@ export function LoginModal(props: LoginModalProps) {
   const handlePhoneSubmit = async () => {
     const phone = form.phoneNumber.trim();
     if (!phone) {
-      setFeedback({ tone: "error", message: t("ncm.loginModal.error.captchaPhoneRequired") });
+      setMainFeedback({ tone: "error", message: t("ncm.loginModal.error.captchaPhoneRequired") });
       return;
     }
     if (form.phoneMode === "captcha" && !form.phoneCaptcha.trim()) {
-      setFeedback({ tone: "error", message: t("ncm.loginModal.error.captchaCodeRequired") });
+      setMainFeedback({ tone: "error", message: t("ncm.loginModal.error.captchaCodeRequired") });
       return;
     }
     if (form.phoneMode === "password" && !form.phonePassword) {
-      setFeedback({ tone: "error", message: t("ncm.loginModal.error.passwordRequired") });
+      setMainFeedback({ tone: "error", message: t("ncm.loginModal.error.passwordRequired") });
       return;
     }
     setForm("isSubmittingPhone", true);
@@ -208,7 +214,7 @@ export function LoginModal(props: LoginModalProps) {
       }
       await onCookieCaptured(cookie, response);
     } catch (error) {
-      setFeedback({ tone: "error", message: readErrorMessage(error) });
+      setMainFeedback({ tone: "error", message: readErrorMessage(error) });
     } finally {
       setForm("isSubmittingPhone", false);
     }
@@ -219,7 +225,7 @@ export function LoginModal(props: LoginModalProps) {
     const trimmed = form.uidValue.trim();
     const uid = Number.parseInt(trimmed, 10);
     if (!Number.isFinite(uid) || uid <= 0) {
-      setFeedback({ tone: "error", message: t("ncm.loginModal.error.uidRequired") });
+      setSpecialFeedback({ tone: "error", message: t("ncm.loginModal.error.uidRequired") });
       return;
     }
     setForm("isSubmittingUid", true);
@@ -230,7 +236,7 @@ export function LoginModal(props: LoginModalProps) {
       const profile = isRecord(detail.profile) ? detail.profile : null;
       const userId = readNumber(profile?.userId);
       if (userId === null) {
-        setFeedback({ tone: "error", message: t("ncm.loginModal.error.uidNotFound") });
+        setSpecialFeedback({ tone: "error", message: t("ncm.loginModal.error.uidNotFound") });
         return;
       }
       const account: NcmAccountInput = {
@@ -243,13 +249,14 @@ export function LoginModal(props: LoginModalProps) {
         signinAt: null
       };
       await accountStore.upsertAccount(account);
-      setFeedback({
+      setSpecialFeedback({
         tone: "success",
         message: t("ncm.loginModal.success.uidAdded", { userId })
       });
+      setSpecialMode(null);
       props.onClose();
     } catch (error) {
-      setFeedback({ tone: "error", message: readErrorMessage(error) });
+      setSpecialFeedback({ tone: "error", message: readErrorMessage(error) });
     } finally {
       setForm("isSubmittingUid", false);
     }
@@ -259,7 +266,7 @@ export function LoginModal(props: LoginModalProps) {
   const handleCookieSubmit = async () => {
     const cookie = form.cookieValue.trim();
     if (!cookie) {
-      setFeedback({ tone: "error", message: t("ncm.loginModal.error.cookieRequired") });
+      setSpecialFeedback({ tone: "error", message: t("ncm.loginModal.error.cookieRequired") });
       return;
     }
     setForm("isSubmittingCookie", true);
@@ -271,263 +278,314 @@ export function LoginModal(props: LoginModalProps) {
         upsertAccount: accountStore.upsertAccount
       });
       if (!account) {
-        setFeedback({ tone: "error", message: t("ncm.loginModal.error.cookieInvalid") });
+        setSpecialFeedback({ tone: "error", message: t("ncm.loginModal.error.cookieInvalid") });
         return;
       }
-      setFeedback({
+      setSpecialFeedback({
         tone: "success",
         message: t("ncm.loginModal.success.signedIn", {
           name: account.nickname ?? account.userId
         })
       });
+      setSpecialMode(null);
       props.onClose();
     } catch (error) {
-      setFeedback({ tone: "error", message: readErrorMessage(error) });
+      setSpecialFeedback({ tone: "error", message: readErrorMessage(error) });
     } finally {
       setForm("isSubmittingCookie", false);
     }
   };
 
+  const openSpecialLogin = (mode: Exclude<SpecialLoginMode, null>) => {
+    setSpecialFeedback(null);
+    setSpecialMode(mode);
+  };
+
+  const closeSpecialLogin = () => {
+    setSpecialFeedback(null);
+    setSpecialMode(null);
+  };
+
   return (
-    <Modal
-      open={props.open}
-      onClose={props.onClose}
-      title={t("ncm.loginModal.title")}
-      size="login"
-      closeOnBackdrop={false}
-      closeOnEscape={false}
-      hideHeader
-    >
-      <div class="login-modal-body">
-        <div class="login-modal-logo" aria-hidden="true">
-          <IconLogo />
-        </div>
-        <SegmentedTabs
-          value={activeTab()}
-          onChange={(next) => {
-            setSpecialMode(null);
-            setActiveTab(next as LoginTab);
-          }}
-          items={tabs()}
-          ariaLabel={t("ncm.loginModal.tabs.aria")}
-        />
+    <>
+      <Modal
+        open={props.open}
+        onClose={props.onClose}
+        title={t("ncm.loginModal.title")}
+        size="login"
+        closeOnBackdrop={false}
+        closeOnEscape={false}
+        hideHeader
+      >
+        <div class="login-modal-body">
+          <div class="login-modal-logo" aria-hidden="true">
+            <IconLogo />
+          </div>
+          <SegmentedTabs
+            value={activeTab()}
+            onChange={(next) => {
+              setActiveTab(next as LoginTab);
+            }}
+            items={tabs()}
+            ariaLabel={t("ncm.loginModal.tabs.aria")}
+          />
 
-        <Show when={feedback()}>
-          {(fb) => (
-            <div
-              class={`login-modal-feedback login-modal-feedback-${fb().tone}`}
-              role={fb().tone === "error" ? "alert" : "status"}
-            >
-              {fb().message}
-            </div>
-          )}
-        </Show>
-
-        <Show when={activeTab() === "qr"}>
-          <section class="login-modal-section" hidden={specialMode() !== null}>
-            <div class="login-modal-qr">
-              <Show
-                when={qrLogin.session()?.imageUrl}
-                fallback={
-                  <div class="login-modal-qr-placeholder">
-                    {qrLogin.isCreating()
-                      ? t("ncm.loginModal.qr.status.creating")
-                      : t("ncm.loginModal.qr.status.idle")}
-                  </div>
-                }
+          <Show when={mainFeedback()}>
+            {(fb) => (
+              <div
+                class={`login-modal-feedback login-modal-feedback-${fb().tone}`}
+                role={fb().tone === "error" ? "alert" : "status"}
               >
-                {(imageUrl) => (
-                  <div
-                    class={`login-modal-qr-frame${qrLogin.session()?.phase === "scanned" ? " is-scanned" : ""}`}
-                  >
-                    <img
-                      src={imageUrl()}
-                      alt={t("ncm.login.qr.alt")}
-                      class="login-modal-qr-image"
-                    />
-                    <Show when={qrLogin.session()?.phase === "scanned"}>
-                      <div class="login-modal-scan-user">
-                        <Show
-                          when={qrLogin.session()?.avatarUrl}
-                          fallback={
-                            <div class="login-modal-scan-avatar">
-                              <IconLogo />
-                            </div>
-                          }
-                        >
-                          {(avatarUrl) => (
-                            <SImage
-                              src={`${avatarUrl().replace(/^http:/, "https:")}?param=100y100`}
-                              alt=""
-                              class="login-modal-scan-avatar"
-                              observeVisibility={false}
-                              shape="circle"
-                              aspect="square"
-                            />
-                          )}
-                        </Show>
-                        <span>{qrLogin.session()?.nickname ?? t("ncm.loginModal.qr.status.scanned")}</span>
-                      </div>
-                    </Show>
-                  </div>
-                )}
-              </Show>
-              <div class="login-modal-qr-status">
-                <Show when={qrLogin.session()}>
-                  {(session) => (
-                    <span>
-                      {session().phase === "scanned"
-                        ? t("ncm.loginModal.qr.status.scanned")
-                        : session().phase === "confirmed"
-                          ? t("ncm.loginModal.qr.status.confirmed")
-                          : t("ncm.loginModal.qr.status.waiting")}
-                    </span>
+                {fb().message}
+              </div>
+            )}
+          </Show>
+
+          <Show when={activeTab() === "qr"}>
+            <section class="login-modal-section">
+              <div class="login-modal-qr">
+                <Show
+                  when={qrLogin.session()?.imageUrl}
+                  fallback={
+                    <div class="login-modal-qr-placeholder">
+                      {qrLogin.isCreating()
+                        ? t("ncm.loginModal.qr.status.creating")
+                        : t("ncm.loginModal.qr.status.idle")}
+                    </div>
+                  }
+                >
+                  {(imageUrl) => (
+                    <div
+                      class={`login-modal-qr-frame${qrLogin.session()?.phase === "scanned" ? " is-scanned" : ""}`}
+                    >
+                      <img
+                        src={imageUrl()}
+                        alt={t("ncm.login.qr.alt")}
+                        class="login-modal-qr-image"
+                      />
+                      <Show when={qrLogin.session()?.phase === "scanned"}>
+                        <div class="login-modal-scan-user">
+                          <Show
+                            when={qrLogin.session()?.avatarUrl}
+                            fallback={
+                              <div class="login-modal-scan-avatar">
+                                <IconLogo />
+                              </div>
+                            }
+                          >
+                            {(avatarUrl) => (
+                              <SImage
+                                src={`${avatarUrl().replace(/^http:/, "https:")}?param=100y100`}
+                                alt=""
+                                class="login-modal-scan-avatar"
+                                observeVisibility={false}
+                                shape="circle"
+                                aspect="square"
+                              />
+                            )}
+                          </Show>
+                          <span>{qrLogin.session()?.nickname ?? t("ncm.loginModal.qr.status.scanned")}</span>
+                        </div>
+                      </Show>
+                    </div>
                   )}
                 </Show>
+                <div class="login-modal-qr-status">
+                  <Show when={qrLogin.session()}>
+                    {(session) => (
+                      <span>
+                        {session().phase === "scanned"
+                          ? t("ncm.loginModal.qr.status.scanned")
+                          : session().phase === "confirmed"
+                            ? t("ncm.loginModal.qr.status.confirmed")
+                            : t("ncm.loginModal.qr.status.waiting")}
+                      </span>
+                    )}
+                  </Show>
+                </div>
+                <button
+                  type="button"
+                  class="login-modal-regenerate"
+                  onClick={() => void qrLogin.start()}
+                  disabled={qrLogin.isCreating()}
+                >
+                  {qrLogin.session()
+                    ? t("ncm.loginModal.qr.action.regenerate")
+                    : t("ncm.loginModal.qr.action.start")}
+                </button>
               </div>
-              <button
-                type="button"
-                class="login-modal-regenerate"
-                onClick={() => void qrLogin.start()}
-                disabled={qrLogin.isCreating()}
+            </section>
+          </Show>
+
+          <Show when={activeTab() === "phone"}>
+            <section class="login-modal-section">
+              <form
+                class="login-modal-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handlePhoneSubmit();
+                }}
               >
-                {qrLogin.session()
-                  ? t("ncm.loginModal.qr.action.regenerate")
-                  : t("ncm.loginModal.qr.action.start")}
-              </button>
-            </div>
-          </section>
-        </Show>
-
-        <Show when={activeTab() === "phone"}>
-          <section class="login-modal-section" hidden={specialMode() !== null}>
-            <form
-              class="login-modal-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handlePhoneSubmit();
-              }}
-            >
-              <label class="login-modal-field">
-                <span>{t("ncm.loginModal.phone.label.country")}</span>
-                <input
-                  type="text"
-                  class="text-input"
-                  value={form.phoneCountryCode}
-                  onInput={(event) => setForm("phoneCountryCode", event.currentTarget.value)}
-                />
-              </label>
-              <label class="login-modal-field">
-                <span>{t("ncm.loginModal.phone.label.phone")}</span>
-                <input
-                  type="tel"
-                  class="text-input"
-                  value={form.phoneNumber}
-                  placeholder={t("ncm.loginModal.phone.placeholder.phone")}
-                  onInput={(event) => setForm("phoneNumber", event.currentTarget.value)}
-                />
-              </label>
-
-              <div class="login-modal-toggle" role="radiogroup">
-                <label>
-                  <input
-                    type="radio"
-                    name="phone-mode"
-                    checked={form.phoneMode === "captcha"}
-                    onChange={() => setForm("phoneMode", "captcha")}
-                  />
-                  <span>{t("ncm.loginModal.phone.mode.captcha")}</span>
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="phone-mode"
-                    checked={form.phoneMode === "password"}
-                    onChange={() => setForm("phoneMode", "password")}
-                  />
-                  <span>{t("ncm.loginModal.phone.mode.password")}</span>
-                </label>
-              </div>
-
-              <Show when={form.phoneMode === "captcha"}>
                 <label class="login-modal-field">
-                  <span>{t("ncm.loginModal.phone.label.captcha")}</span>
-                  <div class="login-modal-row">
-                    <input
-                      type="text"
-                      class="text-input"
-                      value={form.phoneCaptcha}
-                      placeholder={t("ncm.loginModal.phone.placeholder.captcha")}
-                      onInput={(event) => setForm("phoneCaptcha", event.currentTarget.value)}
-                    />
-                    <button
-                      type="button"
-                      class="ghost-button"
-                      onClick={() => void handleSendCaptcha()}
-                      disabled={form.isSendingCaptcha || captchaCooldown() > 0}
-                    >
-                      {form.isSendingCaptcha
-                        ? t("ncm.loginModal.phone.action.sendingCaptcha")
-                        : captchaCooldown() > 0
-                          ? t("ncm.loginModal.phone.action.resendCaptcha", {
-                              seconds: captchaCooldown()
-                            })
-                          : t("ncm.loginModal.phone.action.sendCaptcha")}
-                    </button>
-                  </div>
-                </label>
-              </Show>
-
-              <Show when={form.phoneMode === "password"}>
-                <label class="login-modal-field">
-                  <span>{t("ncm.loginModal.phone.label.password")}</span>
+                  <span>{t("ncm.loginModal.phone.label.country")}</span>
                   <input
-                    type="password"
+                    type="text"
                     class="text-input"
-                    value={form.phonePassword}
-                    placeholder={t("ncm.loginModal.phone.placeholder.password")}
-                    onInput={(event) => setForm("phonePassword", event.currentTarget.value)}
+                    value={form.phoneCountryCode}
+                    onInput={(event) => setForm("phoneCountryCode", event.currentTarget.value)}
                   />
                 </label>
-              </Show>
+                <label class="login-modal-field">
+                  <span>{t("ncm.loginModal.phone.label.phone")}</span>
+                  <input
+                    type="tel"
+                    class="text-input"
+                    value={form.phoneNumber}
+                    placeholder={t("ncm.loginModal.phone.placeholder.phone")}
+                    onInput={(event) => setForm("phoneNumber", event.currentTarget.value)}
+                  />
+                </label>
 
-              <button
-                type="submit"
-                class="primary-button login-modal-submit"
-                disabled={form.isSubmittingPhone}
-              >
-                {form.isSubmittingPhone
-                  ? t("ncm.loginModal.phone.action.submitting")
-                  : t("ncm.loginModal.phone.action.submit")}
-              </button>
-            </form>
-          </section>
-        </Show>
+                <div class="login-modal-toggle" role="radiogroup">
+                  <label>
+                    <input
+                      type="radio"
+                      name="phone-mode"
+                      checked={form.phoneMode === "captcha"}
+                      onChange={() => setForm("phoneMode", "captcha")}
+                    />
+                    <span>{t("ncm.loginModal.phone.mode.captcha")}</span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="phone-mode"
+                      checked={form.phoneMode === "password"}
+                      onChange={() => setForm("phoneMode", "password")}
+                    />
+                    <span>{t("ncm.loginModal.phone.mode.password")}</span>
+                  </label>
+                </div>
 
+                <Show when={form.phoneMode === "captcha"}>
+                  <label class="login-modal-field">
+                    <span>{t("ncm.loginModal.phone.label.captcha")}</span>
+                    <div class="login-modal-row">
+                      <input
+                        type="text"
+                        class="text-input"
+                        value={form.phoneCaptcha}
+                        placeholder={t("ncm.loginModal.phone.placeholder.captcha")}
+                        onInput={(event) => setForm("phoneCaptcha", event.currentTarget.value)}
+                      />
+                      <button
+                        type="button"
+                        class="ghost-button"
+                        onClick={() => void handleSendCaptcha()}
+                        disabled={form.isSendingCaptcha || captchaCooldown() > 0}
+                      >
+                        {form.isSendingCaptcha
+                          ? t("ncm.loginModal.phone.action.sendingCaptcha")
+                          : captchaCooldown() > 0
+                            ? t("ncm.loginModal.phone.action.resendCaptcha", {
+                                seconds: captchaCooldown()
+                              })
+                            : t("ncm.loginModal.phone.action.sendCaptcha")}
+                      </button>
+                    </div>
+                  </label>
+                </Show>
+
+                <Show when={form.phoneMode === "password"}>
+                  <label class="login-modal-field">
+                    <span>{t("ncm.loginModal.phone.label.password")}</span>
+                    <input
+                      type="password"
+                      class="text-input"
+                      value={form.phonePassword}
+                      placeholder={t("ncm.loginModal.phone.placeholder.password")}
+                      onInput={(event) => setForm("phonePassword", event.currentTarget.value)}
+                    />
+                  </label>
+                </Show>
+
+                <button
+                  type="submit"
+                  class="primary-button login-modal-submit"
+                  disabled={form.isSubmittingPhone}
+                >
+                  {form.isSubmittingPhone
+                    ? t("ncm.loginModal.phone.action.submitting")
+                    : t("ncm.loginModal.phone.action.submit")}
+                </button>
+              </form>
+            </section>
+          </Show>
+
+          <div class="login-modal-other">
+            <button
+              hidden={props.disableUid === true}
+              type="button"
+              class="login-modal-link-button"
+              onClick={() => openSpecialLogin("uid")}
+            >
+              {t("ncm.loginModal.tab.uid")}
+            </button>
+            <span hidden={props.disableUid === true} class="login-modal-divider" aria-hidden="true" />
+            <button
+              type="button"
+              class="login-modal-link-button"
+              onClick={() => openSpecialLogin("cookie")}
+            >
+              {t("ncm.loginModal.tab.cookie")}
+            </button>
+          </div>
+
+          <button type="button" class="login-modal-cancel" onClick={props.onClose}>
+            <IconClose />
+            {t("ncm.loginModal.action.cancel")}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={props.open && specialMode() !== null}
+        onClose={closeSpecialLogin}
+        title={specialMode() === "uid" ? t("ncm.loginModal.tab.uid") : t("ncm.loginModal.tab.cookie")}
+        size="login"
+      >
         <Show when={specialMode() === "uid"}>
           <section class="login-modal-section login-modal-special">
             <div class="login-modal-help">{t("ncm.loginModal.uid.hint")}</div>
+            <Show when={specialFeedback()}>
+              {(fb) => (
+                <div
+                  class={`login-modal-feedback login-modal-feedback-${fb().tone}`}
+                  role={fb().tone === "error" ? "alert" : "status"}
+                >
+                  {fb().message}
+                </div>
+              )}
+            </Show>
             <form
-              class="login-modal-form"
+              class="login-modal-form login-modal-special-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 void handleUidSubmit();
               }}
             >
-              <label class="login-modal-field">
-                <span>{t("ncm.loginModal.uid.label")}</span>
-                <input
-                  type="text"
-                  inputmode="numeric"
-                  class="text-input"
-                  value={form.uidValue}
-                  placeholder={t("ncm.loginModal.uid.placeholder")}
-                  onInput={(event) => setForm("uidValue", event.currentTarget.value)}
-                />
-              </label>
+              <input
+                type="text"
+                inputmode="numeric"
+                class="text-input"
+                value={form.uidValue}
+                aria-label={t("ncm.loginModal.uid.label")}
+                placeholder={t("ncm.loginModal.uid.placeholder")}
+                onInput={(event) => setForm("uidValue", event.currentTarget.value)}
+              />
               <button
                 type="submit"
-                class="primary-button login-modal-submit"
+                class="primary-button login-modal-submit login-modal-special-submit"
                 disabled={form.isSubmittingUid}
               >
                 {form.isSubmittingUid
@@ -541,26 +599,34 @@ export function LoginModal(props: LoginModalProps) {
         <Show when={specialMode() === "cookie"}>
           <section class="login-modal-section login-modal-special">
             <div class="login-modal-help">{t("ncm.loginModal.cookie.hint")}</div>
+            <Show when={specialFeedback()}>
+              {(fb) => (
+                <div
+                  class={`login-modal-feedback login-modal-feedback-${fb().tone}`}
+                  role={fb().tone === "error" ? "alert" : "status"}
+                >
+                  {fb().message}
+                </div>
+              )}
+            </Show>
             <form
-              class="login-modal-form"
+              class="login-modal-form login-modal-special-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 void handleCookieSubmit();
               }}
             >
-              <label class="login-modal-field">
-                <span>{t("ncm.loginModal.cookie.label")}</span>
-                <textarea
-                  class="text-input login-modal-cookie-input"
-                  rows={4}
-                  value={form.cookieValue}
-                  placeholder={t("ncm.loginModal.cookie.placeholder")}
-                  onInput={(event) => setForm("cookieValue", event.currentTarget.value)}
-                />
-              </label>
+              <textarea
+                class="text-input login-modal-cookie-input"
+                rows={4}
+                value={form.cookieValue}
+                aria-label={t("ncm.loginModal.cookie.label")}
+                placeholder={t("ncm.loginModal.cookie.placeholder")}
+                onInput={(event) => setForm("cookieValue", event.currentTarget.value)}
+              />
               <button
                 type="submit"
-                class="primary-button login-modal-submit"
+                class="primary-button login-modal-submit login-modal-special-submit"
                 disabled={form.isSubmittingCookie}
               >
                 {form.isSubmittingCookie
@@ -570,33 +636,7 @@ export function LoginModal(props: LoginModalProps) {
             </form>
           </section>
         </Show>
-
-        <div class="login-modal-other">
-          <button
-            hidden={props.disableUid === true}
-            type="button"
-            class="login-modal-link-button"
-            classList={{ "is-active": specialMode() === "uid" }}
-            onClick={() => setSpecialMode(specialMode() === "uid" ? null : "uid")}
-          >
-            {t("ncm.loginModal.tab.uid")}
-          </button>
-          <span hidden={props.disableUid === true} class="login-modal-divider" aria-hidden="true" />
-          <button
-            type="button"
-            class="login-modal-link-button"
-            classList={{ "is-active": specialMode() === "cookie" }}
-            onClick={() => setSpecialMode(specialMode() === "cookie" ? null : "cookie")}
-          >
-            {t("ncm.loginModal.tab.cookie")}
-          </button>
-        </div>
-
-        <button type="button" class="login-modal-cancel" onClick={props.onClose}>
-          <IconClose />
-          {t("ncm.loginModal.action.cancel")}
-        </button>
-      </div>
-    </Modal>
+      </Modal>
+    </>
   );
 }

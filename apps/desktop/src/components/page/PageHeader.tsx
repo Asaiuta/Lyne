@@ -1,5 +1,6 @@
 import { Show } from "solid-js";
 import type { JSX } from "solid-js";
+import { NaiveH1 } from "../../shared/ui/naive";
 
 interface PageHeaderProps {
   title: string;
@@ -16,9 +17,9 @@ export function PageHeader(props: PageHeaderProps) {
   return (
     <header class="page-header flex flex-col gap-3">
       <div class="page-header-top flex items-start justify-between gap-3 min-w-0">
-        <h1 class="page-header-title m-0 min-w-0 font-display text-3xl font-800 leading-tight tracking-[-0.02em]">
+        <NaiveH1 class="page-header-title m-0 min-w-0 font-display text-3xl font-800 leading-tight tracking-[-0.02em]">
           {props.title}
-        </h1>
+        </NaiveH1>
         <Show when={props.meta}>
           {(meta) => (
             <div class="page-header-meta flex flex-wrap justify-end gap-1.5 min-w-0 text-[11px] text-muted">

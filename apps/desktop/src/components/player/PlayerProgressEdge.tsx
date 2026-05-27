@@ -41,7 +41,7 @@ export function PlayerProgressEdge(props: PlayerProgressEdgeProps) {
       onKeyDown={props.onKeyDown}
     >
       <div class="player-progress-edge-fill absolute top-1/2 left-0 h-3px" style={{ width: `${props.progress * 100}%` }}>
-        <div class="player-progress-edge-thumb absolute top-1/2 right-0 w-14px h-14px opacity-0 pointer-events-none" aria-hidden="true" />
+        <div class="player-progress-edge-thumb" aria-hidden="true" />
       </div>
       <Show when={props.loadingProgress !== null}>
         <div

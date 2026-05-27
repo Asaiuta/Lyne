@@ -15,6 +15,7 @@ import { useTranslation } from "../shared/i18n";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import { useUISearch } from "../shared/state/UISearchContext";
 import { useUISettings } from "../shared/state/useUISettings";
+import { useDismissibleOverlay } from "../shared/ui/useDismissibleOverlay";
 import { isSearchEnabledPage, type ActivePage } from "../shared/ui/navigation";
 import { SImage } from "./SImage";
 import {
@@ -140,6 +141,8 @@ export function TopNav(props: TopNavProps) {
   const [isSuggestionLoading, setIsSuggestionLoading] = createSignal(false);
   const [searchPanelOpen, setSearchPanelOpen] = createSignal(false);
   let accountMenuRef: HTMLDivElement | undefined;
+  let accountTriggerRef: HTMLButtonElement | undefined;
+  let searchInputRef: HTMLInputElement | undefined;
 
   const searchClassName = () => `top-nav-search${searchEnabled() ? "" : " is-disabled"}`;
   const searchTitle = () =>
@@ -208,6 +211,21 @@ export function TopNav(props: TopNavProps) {
     }
     submitSearch();
     setSearchPanelOpen(false);
+  };
+
+  const handleSearchClear = () => {
+    setQuery("");
+    setSuggestions([]);
+    setSearchPanelOpen(true);
+    searchInputRef?.focus();
+  };
+
+  const closeSearchFocus = () => {
+    setSearchPanelOpen(false);
+    if (uiSettings.searchInputBehavior === "clear") {
+      setQuery("");
+    }
+    searchInputRef?.blur();
   };
 
   const handleSearchPanelKeyword = (keyword: string) => {
@@ -452,24 +470,10 @@ export function TopNav(props: TopNavProps) {
     setIsSuggestionLoading(false);
   });
 
-  createEffect(() => {
-    if (!accountMenuOpen()) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof Node && accountMenuRef?.contains(target)) return;
-      setAccountMenuOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setAccountMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    onCleanup(() => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    });
+  useDismissibleOverlay(accountMenuOpen, {
+    isInside: (target) => !!accountMenuRef && accountMenuRef.contains(target),
+    onDismiss: () => setAccountMenuOpen(false),
+    onEscapeDismiss: () => accountTriggerRef?.focus()
   });
 
   return (
@@ -501,9 +505,19 @@ export function TopNav(props: TopNavProps) {
 
       <div class="top-nav-main">
         <div class="top-nav-search-wrap">
-          <label class={searchClassName()} title={searchTitle()} data-no-drag>
+          <Show when={searchPanelOpen() && searchEnabled()}>
+            <div
+              class="top-nav-search-mask"
+              data-no-drag
+              aria-hidden="true"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={closeSearchFocus}
+            />
+          </Show>
+          <div class={searchClassName()} title={searchTitle()} data-no-drag>
             <IconSearch class="top-nav-search-icon" />
             <input
+              ref={searchInputRef}
               type="search"
               value={query()}
               onInput={handleSearchInput}
@@ -529,7 +543,19 @@ export function TopNav(props: TopNavProps) {
               aria-disabled={!searchEnabled()}
               disabled={!searchEnabled()}
             />
-          </label>
+            <Show when={searchEnabled() && query().length > 0}>
+              <button
+                type="button"
+                class="top-nav-search-clear"
+                aria-label={t("nav.search.clear")}
+                title={t("nav.search.clear")}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={handleSearchClear}
+              >
+                <IconClose />
+              </button>
+            </Show>
+          </div>
           <Show when={showSearchPanel()}>
             <div class="top-nav-search-panel" role="listbox" aria-label={t("nav.search.panel.label")}>
               <Show when={showSearchEntryPanel()}>
@@ -662,6 +688,7 @@ export function TopNav(props: TopNavProps) {
       <div class="top-nav-group top-nav-actions" data-no-drag>
         <div class="top-nav-account-wrap" ref={accountMenuRef}>
           <button
+            ref={accountTriggerRef}
             type="button"
             class={`top-nav-account${accountMenuOpen() ? " is-open" : ""}`}
             data-no-drag
@@ -740,39 +767,32 @@ export function TopNav(props: TopNavProps) {
                     >
                       <For each={accountOtherAccounts()}>
                         {(item) => (
-                          <button
-                            type="button"
-                            class="top-nav-account-switch-item"
-                            onClick={() => void handleSwitchAccount(item.userId)}
-                            disabled={accountStore.isBusy()}
-                          >
-                            <span class="top-nav-account-switch-avatar" aria-hidden="true">
-                              <Show when={item.avatarUrl} fallback={<IconArtist />}>
-                                {(avatar) => <SImage src={avatar()} alt="" observeVisibility={false} shape="circle" aspect="square" />}
-                              </Show>
-                            </span>
-                            <span class="top-nav-account-switch-name">{item.nickname ?? item.userId}</span>
-                            <span
-                              role="button"
-                              tabindex={0}
+                          <div class="top-nav-account-switch-item">
+                            <button
+                              type="button"
+                              class="top-nav-account-switch-main"
+                              onClick={() => void handleSwitchAccount(item.userId)}
+                              disabled={accountStore.isBusy()}
+                            >
+                              <span class="top-nav-account-switch-avatar" aria-hidden="true">
+                                <Show when={item.avatarUrl} fallback={<IconArtist />}>
+                                  {(avatar) => <SImage src={avatar()} alt="" observeVisibility={false} shape="circle" aspect="square" />}
+                                </Show>
+                              </span>
+                              <span class="top-nav-account-switch-name">{item.nickname ?? item.userId}</span>
+                            </button>
+                            <button
+                              type="button"
                               class="top-nav-account-delete"
                               aria-label={t("nav.account.removeAccount", {
                                 name: item.nickname ?? item.userId
                               })}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleRemoveAccount(item.userId);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key !== "Enter" && event.key !== " ") return;
-                                event.preventDefault();
-                                event.stopPropagation();
-                                void handleRemoveAccount(item.userId);
-                              }}
+                              onClick={() => void handleRemoveAccount(item.userId)}
+                              disabled={accountStore.isBusy()}
                             >
                               <IconClose />
-                            </span>
-                          </button>
+                            </button>
+                          </div>
                         )}
                       </For>
                     </Show>
