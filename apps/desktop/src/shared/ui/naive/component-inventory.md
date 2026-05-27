@@ -59,6 +59,7 @@ This package is an app-local facade layer for SPlayer/NaiveUI parity. The route 
 | appearance/token system | `NConfigProvider` / `NGlobalStyle` | no facade; provider/global reset responsibilities are routed to existing appearance tokens and `global.css` | routed |
 | `NaiveFeedbackProvider` services | `NMessageProvider` / `NNotificationProvider` / `NDialogProvider` / `NModalProvider` / `NLoadingBarProvider` | app-root provider plus singleton `message`, `notification`, `dialog`, `modal`, and `loadingBar` APIs; no per-provider facades | app service |
 | app dialog and sheet routes | `NDrawer` / `NDrawerContent` / `NModal` | no generic package facade yet; current ownership stays in `Modal.tsx`, `LoginModal.tsx`, `QueueDrawer.tsx`, settings overlay structure, and feedback `dialog` / `modal` services until a consumer-backed Kobalte Dialog consolidation task | routed |
+| long-tail feature controls | `NDynamicTags` / `NColorPicker` / `NTree` / `NDataTable` | no package facades yet; implement only from consumer-backed feature tasks so tag editing, color picking, tree navigation, and reusable data-table contracts do not ship as dead exports | deferred |
 | `NaiveBackTop` | `NBackTop` | handwritten page utility facade; `BackToTop` consumes it while preserving page placement classes | source-backed |
 | `NaiveFloatButton` / `NaiveFloatButtonGroup` | `NFloatButton` / `NFloatButtonGroup` | handwritten floating action stack; `MediaListFloatTools` consumes it while preserving media-list placement classes | source-backed |
 | `NaiveQrCode` | `NQrCode` | handwritten wrapper that lazy-loads the existing `qrcode/lib/browser.js` generator | source-backed ready |
@@ -165,8 +166,8 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NResult` | 3 | `NaiveResult` handwritten display facade |
 | `NSpin` | 3 | `NaiveSpin` handwritten display facade |
 | `NCheckbox` | 7 occurrences / 3 files | `NaiveCheckbox` source-backed/Kobalte leaf facade; standalone and group children supported, numeric group values round-trip through string-only Kobalte values |
-| `NColorPicker` | 2 | feature-specific custom/Kobalte candidate |
-| `NDynamicTags` | 2 | Kobalte/custom tag input candidate |
+| `NColorPicker` | 2 | deferred until theme color customization has a real AudioPlayer consumer |
+| `NDynamicTags` | 2 | deferred until keyword/tag editing has a real AudioPlayer consumer |
 | `NH2` | 3 | `NaiveH2` handwritten typography facade |
 | `NIcon` | 2 | routed to local icon contract; no facade |
 | `NModal` | 2 | routed to existing `Modal.tsx` and feedback `modal` service; generic `NaiveModal` deferred until modal consolidation |
@@ -178,7 +179,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NBackTop` | 1 | `NaiveBackTop` handwritten page utility facade |
 | `NCheckboxGroup` | 2 occurrences / 1 file | `NaiveCheckboxGroup` handwritten coordinator over Kobalte checkbox children; max/min quota logic ported |
 | `NRadioButton` | 0 occurrences | `NaiveRadioButton` source-backed inventory parity facade; no live SPlayer call site, so production migration is deferred |
-| `NDataTable` | 1 | feature-specific table, not early package primitive |
+| `NDataTable` | 1 | deferred; current batch tables stay feature-specific until reusable table requirements repeat |
 | `NDialogProvider` | 1 | routed to `dialog` app service; no facade |
 | `NFloatButton` | 1 | `NaiveFloatButton` handwritten page utility facade |
 | `NFloatButtonGroup` | 1 | `NaiveFloatButtonGroup` handwritten page utility facade |
@@ -196,7 +197,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NOl` | 1 | `NaiveOl` handwritten native list facade |
 | `NP` | 1 | `NaiveP` handwritten paragraph facade |
 | `NQrCode` | 1 | `NaiveQrCode` wrapper over lazy `qrcode` generation |
-| `NTree` | 1 | Kobalte/custom tree candidate |
+| `NTree` | 1 | deferred; current folder tree behavior stays feature-specific until generic tree navigation is needed |
 
 ## Migration Rules
 
@@ -211,6 +212,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 
 ## Migration Log
 
+- 2026-05-27: Reconciled long-tail `NDynamicTags`, `NColorPicker`, `NTree`, and `NDataTable` as deferred consumer-backed controls. AudioPlayer has no current DynamicTags/ColorPicker consumers, while folder-tree and batch-table behavior is owned by feature-specific library/online surfaces. Future facades should be introduced only from real tag-editing, theme-color, tree-navigation, or reusable-table feature tasks.
 - 2026-05-26: Reconciled `NDrawer`, `NDrawerContent`, and standalone `NModal` as no-facade dialog/sheet boundaries. AudioPlayer keeps current ownership in `Modal.tsx`, `LoginModal.tsx`, `QueueDrawer.tsx`, the settings overlay, and `NaiveFeedbackProvider`'s `dialog` / `modal` services. A future Kobalte `Dialog` facade must be tied to a real consumer migration and own focus trap, focus restore, body scroll lock, Escape/backdrop policy, placement, and NaiveUI class hooks together.
 - 2026-05-26: Reconciled `NImage` / `NImageGroup` as a no-facade boundary. Existing `SImage` remains the canonical image/media component for placeholder, loading/error, lazy/decode, release-on-hide, artwork, shape/aspect, object-fit, cross-origin, and class/style slot behavior. NaiveUI preview overlays, grouped navigation, toolbar behavior, and generated image-preview styling remain routed to `05-24-ui-splayer-n-simage-preview-lightbox` before any thin `NaiveImage` alias is considered.
 - 2026-05-26: Added `NaiveCollapse`, `NaiveCollapseItem`, and `NaiveCollapseTransition` against SPlayer about/download/wiki disclosure usage plus NaiveUI 2.43.2 `Collapse.mjs` / `CollapseItem.mjs` / `_internal/fade-in-expand-transition`. `collapse.tsx` stays startup-light and lazy-loads Kobalte `Accordion`; `collapse-transition.tsx` is handwritten with no Kobalte import. The facade keeps `.n-collapse*` hooks, active/disabled and left/right arrow-placement modifiers, numeric-name coercion, `expandedNames` union normalization, and derived `onItemHeaderClick` metadata. Inventory counts were corrected from the umbrella rough 4/4/10 to the audited 5/6/12 active footprint.

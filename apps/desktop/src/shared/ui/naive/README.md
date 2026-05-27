@@ -44,6 +44,10 @@ NaiveUI's `NDrawer`, `NDrawerContent`, and standalone `NModal` are routed to exi
 
 Do not export `NaiveDrawer`, `NaiveDrawerContent`, or `NaiveModal` until a consumer-backed consolidation task migrates an existing surface and owns focus trap, focus restore, body scroll lock, Escape/backdrop policy, placement, and NaiveUI class hooks together.
 
+## Long-Tail Control Routing
+
+NaiveUI's low-frequency `NDynamicTags`, `NColorPicker`, `NTree`, and `NDataTable` are deferred until real AudioPlayer consumers exist. Current folder-tree and batch-table behavior stays in feature-specific library and online surfaces; theme color editing and keyword/tag editing should introduce dedicated facades only when those features are implemented.
+
 ## Source-Backed Components
 
 - `NaiveTabs` follows SPlayer's `naive-ui@2.43.2` `NTabs` / `NTab` segment branch: `n-tabs`, `n-tabs-nav`, `n-tabs-rail`, `n-tabs-capsule`, `n-tabs-wrapper`, `n-tabs-tab-wrapper`, `n-tabs-tab`, and `n-tabs-tab__label` class hooks are part of the package contract.
