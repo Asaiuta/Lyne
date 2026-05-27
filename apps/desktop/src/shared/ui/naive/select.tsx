@@ -12,14 +12,8 @@ export interface NaiveSelectOption<TValue extends NaiveSelectValue = string> {
   class?: string;
 }
 
-export interface NaiveSelectProps<TValue extends NaiveSelectValue = string> {
-  value: TValue | null;
+interface NaiveSelectBaseProps<TValue extends NaiveSelectValue = string> {
   options: ReadonlyArray<NaiveSelectOption<TValue>>;
-  onUpdateValue?: (
-    value: TValue | null,
-    option: NaiveSelectOption<TValue> | null
-  ) => void;
-  onChange?: (value: TValue | null, option: NaiveSelectOption<TValue> | null) => void;
   onClear?: () => void;
   onFocus?: (event: FocusEvent) => void;
   onBlur?: (event: FocusEvent) => void;
@@ -49,7 +43,35 @@ export interface NaiveSelectProps<TValue extends NaiveSelectValue = string> {
   optionClass?: string;
   renderLabel?: (option: NaiveSelectOption<TValue>, selected: boolean) => JSX.Element;
   renderOption?: (option: NaiveSelectOption<TValue>, selected: boolean) => JSX.Element;
+  tag?: boolean;
+  maxTagCount?: number | "responsive";
 }
+
+export interface NaiveSelectSingleProps<TValue extends NaiveSelectValue = string>
+  extends NaiveSelectBaseProps<TValue> {
+  multiple?: false;
+  value: TValue | null;
+  onUpdateValue?: (
+    value: TValue | null,
+    option: NaiveSelectOption<TValue> | null
+  ) => void;
+  onChange?: (value: TValue | null, option: NaiveSelectOption<TValue> | null) => void;
+}
+
+export interface NaiveSelectMultipleProps<TValue extends NaiveSelectValue = string>
+  extends NaiveSelectBaseProps<TValue> {
+  multiple: true;
+  value: readonly TValue[];
+  onUpdateValue?: (
+    value: TValue[],
+    option: NaiveSelectOption<TValue>[]
+  ) => void;
+  onChange?: (value: TValue[], option: NaiveSelectOption<TValue>[]) => void;
+}
+
+export type NaiveSelectProps<TValue extends NaiveSelectValue = string> =
+  | NaiveSelectSingleProps<TValue>
+  | NaiveSelectMultipleProps<TValue>;
 
 export interface NaiveSelectRenderState {
   open: boolean;

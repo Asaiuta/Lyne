@@ -9,12 +9,40 @@ import { joinClassNames } from "./utils";
 
 export const naiveSelectSelectedOption = <TValue extends NaiveSelectValue>(
   props: NaiveSelectProps<TValue>
-): NaiveSelectOption<TValue> | null =>
-  props.options.find((option) => option.value === props.value) ?? null;
+): NaiveSelectOption<TValue> | null => {
+  if (props.multiple || props.value == null) return null;
+  return (
+    props.options.find((option) => option.value === props.value) ?? {
+      label: String(props.value),
+      value: props.value
+    }
+  );
+};
+
+export const naiveSelectSelectedOptions = <TValue extends NaiveSelectValue>(
+  props: NaiveSelectProps<TValue>
+): NaiveSelectOption<TValue>[] => {
+  if (!props.multiple) {
+    const selected = naiveSelectSelectedOption(props);
+    return selected ? [selected] : [];
+  }
+  const optionByValue = new Map<NaiveSelectValue, NaiveSelectOption<TValue>>(
+    props.options.map((option) => [option.value, option])
+  );
+  return props.value.map((value) => optionByValue.get(value) ?? { label: String(value), value });
+};
+
+export const naiveSelectHasValue = <TValue extends NaiveSelectValue>(
+  props: NaiveSelectProps<TValue>
+): boolean => (props.multiple ? props.value.length > 0 : props.value != null);
 
 export const naiveSelectDisplayLabel = <TValue extends NaiveSelectValue>(
   props: NaiveSelectProps<TValue>
 ): string => {
+  if (props.multiple) {
+    const selected = naiveSelectSelectedOptions(props);
+    return selected.length > 0 ? selected.map((option) => option.label).join(", ") : props.placeholder ?? "";
+  }
   const selected = naiveSelectSelectedOption(props);
   if (selected) return selected.label;
   return props.value == null ? props.placeholder ?? "" : String(props.value);
@@ -44,7 +72,8 @@ export const naiveBaseSelectionClass = <TValue extends NaiveSelectValue>(
     state.open ? "n-base-selection--active" : false,
     state.focused ? "n-base-selection--focus" : false,
     props.disabled ? "n-base-selection--disabled" : false,
-    props.value != null || state.open ? "n-base-selection--selected" : false
+    props.multiple ? "n-base-selection--multiple" : false,
+    naiveSelectHasValue(props) || state.open ? "n-base-selection--selected" : false
   );
 
 export const naiveSelectMenuClass = <TValue extends NaiveSelectValue>(
@@ -54,6 +83,7 @@ export const naiveSelectMenuClass = <TValue extends NaiveSelectValue>(
     "naive-select-menu",
     "n-select-menu",
     "n-base-select-menu",
+    props.multiple ? "n-base-select-menu--multiple" : false,
     props.size ? `naive-select-menu--${props.size}` : false,
     props.menuClass
   );
