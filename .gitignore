@@ -46,6 +46,12 @@ Desktop.ini
 
 # QA
 qa-screenshots/
+output/playwright/
+test-results/
+
+# Local agent config / migration backups
+.claude/settings.local.json
+.claude/**/*.backup
 
 
 
@@ -53,6 +59,10 @@ qa-screenshots/
 .tmp-*/
 .tmp/
 tmp/
+apps/desktop/vite.config.ts.timestamp-*.mjs
+
+# Local experiments / vendored sources
+libebur128/
 
 # Archived apps (removed post-migration)
 apps/desktop-react-archive/
