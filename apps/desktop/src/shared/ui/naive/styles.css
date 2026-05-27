@@ -705,6 +705,46 @@
     box-shadow: var(--n-box-shadow-focus-error);
   }
 
+  .n-input__suffix-icon--password-eye {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      color 0.2s var(--n-bezier),
+      background-color 0.2s var(--n-bezier);
+  }
+
+  .n-input__suffix-icon--password-eye::before {
+    position: absolute;
+    inset: 7px 5px;
+    border: 1.5px solid currentColor;
+    border-radius: 999px / 700px;
+    content: "";
+  }
+
+  .n-input__suffix-icon--password-eye::after {
+    position: absolute;
+    inset: 10px;
+    border-radius: 50%;
+    background: currentColor;
+    content: "";
+  }
+
+  .n-input__suffix-icon--password-eye[aria-pressed="true"] {
+    color: var(--accent);
+    background-color: color-mix(in oklch, var(--accent) 14%, transparent);
+  }
+
+  .n-input__suffix-icon--password-eye:not(:disabled):hover {
+    color: var(--text);
+    background-color: var(--surface-2);
+  }
+
   .naive-tabs.n-tabs {
     --n-bezier: var(--ease-standard);
     --n-color-segment: color-mix(in oklch, var(--surface-3) 78%, transparent);

@@ -13,6 +13,7 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
   let inputEl: HTMLInputElement | HTMLTextAreaElement | undefined;
   const [focused, setFocused] = createSignal<boolean>(false);
   const [hovered, setHovered] = createSignal<boolean>(false);
+  const [passwordRevealed, setPasswordRevealed] = createSignal<boolean>(false);
 
   const handleValueChange = (value: string): void => {
     if (props.allowInput && !props.allowInput(value)) {
@@ -40,6 +41,29 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
     const target = event.currentTarget as HTMLInputElement | HTMLTextAreaElement;
     props.onChange?.(target.value);
   };
+  const togglePasswordReveal = (): void => {
+    setPasswordRevealed((revealed) => !revealed);
+    inputEl?.focus();
+  };
+  const passwordReveal = (): JSX.Element | undefined => {
+    if (props.type !== "password") return undefined;
+    return (
+      <button
+        type="button"
+        class="n-input__suffix-icon n-input__suffix-icon--password-eye"
+        aria-label={passwordRevealed() ? "Hide password" : "Show password"}
+        aria-pressed={passwordRevealed()}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          if ((props.showPasswordOn ?? "click") === "mousedown") togglePasswordReveal();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          if ((props.showPasswordOn ?? "click") === "click") togglePasswordReveal();
+        }}
+      />
+    );
+  };
 
   return (
     <TextField
@@ -58,10 +82,12 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
         inputProps={props}
         state={{ focused: focused(), hovered: hovered() }}
         onClear={handleClear}
+        passwordReveal={passwordReveal()}
       >
         <div class={isTextarea(props) ? "n-input__textarea" : "n-input__input"}>
           {isTextarea(props) ? (
             <TextField.TextArea
+              {...props.inputProps}
               ref={(el: HTMLTextAreaElement) => {
                 inputEl = el;
               }}
@@ -87,10 +113,17 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
             />
           ) : (
             <TextField.Input
+              {...props.inputProps}
               ref={(el: HTMLInputElement) => {
                 inputEl = el;
               }}
-              type={props.type ?? "text"}
+              type={
+                props.type === "password"
+                  ? passwordRevealed()
+                    ? "text"
+                    : "password"
+                  : props.type ?? "text"
+              }
               class={naiveInputElementClass(props)}
               placeholder={props.placeholder}
               autofocus={props.autofocus}

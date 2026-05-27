@@ -23,6 +23,9 @@ export interface NaiveInputAutosize {
   maxRows?: number;
 }
 
+type NativeInputPassthroughValue = string | number | boolean | undefined;
+export type NativeInputPassthroughProps = Record<string, NativeInputPassthroughValue>;
+
 export interface NaiveInputProps {
   value: string;
   onUpdateValue?: (value: string) => void;
@@ -47,6 +50,8 @@ export interface NaiveInputProps {
   bordered?: boolean;
   loading?: boolean;
   autofocus?: boolean;
+  showPasswordOn?: "click" | "mousedown";
+  inputProps?: NativeInputPassthroughProps;
   name?: string;
   id?: string;
   rows?: number;
@@ -89,6 +94,7 @@ const isTextarea = (props: NaiveInputProps): boolean => props.type === "textarea
 const isBordered = (props: NaiveInputProps): boolean => props.bordered ?? true;
 const hasSuffix = (props: NaiveInputProps, state: NaiveInputRenderState): boolean =>
   props.suffix != null ||
+  props.type === "password" ||
   props.loading !== undefined ||
   (props.clearable === true && props.value.length > 0 && (state.focused || state.hovered));
 
@@ -138,6 +144,7 @@ export function NaiveInputShell(props: {
   state: NaiveInputRenderState;
   children: JSX.Element;
   onClear?: (event: MouseEvent) => void;
+  passwordReveal?: JSX.Element;
 }): JSX.Element {
   const inputProps = () => props.inputProps;
   const showSuffix = () => hasSuffix(inputProps(), props.state);
@@ -177,6 +184,7 @@ export function NaiveInputShell(props: {
                 aria-hidden="true"
               />
             </Show>
+            {props.passwordReveal}
             {inputProps().suffix}
           </div>
         </Show>
@@ -195,6 +203,7 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
     createSignal<NaiveInputComponent | null>(loadedNaiveInput);
   const [focused, setFocused] = createSignal<boolean>(false);
   const [hovered, setHovered] = createSignal<boolean>(false);
+  const [passwordRevealed, setPasswordRevealed] = createSignal<boolean>(false);
 
   const ensureLoaded = (): void => {
     void loadNaiveInput().then((component) => setLoadedInput(() => component));
@@ -212,6 +221,29 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
     emitValue("");
     props.onChange?.("");
     fallbackInput?.focus();
+  };
+  const togglePasswordReveal = (): void => {
+    setPasswordRevealed((revealed) => !revealed);
+    fallbackInput?.focus();
+  };
+  const passwordReveal = (): JSX.Element | undefined => {
+    if (props.type !== "password") return undefined;
+    return (
+      <button
+        type="button"
+        class="n-input__suffix-icon n-input__suffix-icon--password-eye"
+        aria-label={passwordRevealed() ? "Hide password" : "Show password"}
+        aria-pressed={passwordRevealed()}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          if ((props.showPasswordOn ?? "click") === "mousedown") togglePasswordReveal();
+        }}
+        onClick={(event) => {
+          event.preventDefault();
+          if ((props.showPasswordOn ?? "click") === "click") togglePasswordReveal();
+        }}
+      />
+    );
   };
 
   createEffect(() => {
@@ -237,16 +269,24 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
             inputProps={props}
             state={{ focused: focused(), hovered: hovered() }}
             onClear={handleClear}
+            passwordReveal={passwordReveal()}
           >
             <div class={isTextarea(props) ? "n-input__textarea" : "n-input__input"}>
               <Show
                 when={isTextarea(props)}
                 fallback={
                   <input
+                    {...props.inputProps}
                     ref={(el) => {
                       fallbackInput = el;
                     }}
-                    type={props.type === "password" ? "password" : props.type ?? "text"}
+                    type={
+                      props.type === "password"
+                        ? passwordRevealed()
+                          ? "text"
+                          : "password"
+                        : props.type ?? "text"
+                    }
                     class={naiveInputElementClass(props)}
                     value={props.value}
                     placeholder={props.placeholder}
@@ -282,6 +322,7 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
                 }
               >
                 <textarea
+                  {...props.inputProps}
                   ref={(el) => {
                     fallbackInput = el;
                   }}
