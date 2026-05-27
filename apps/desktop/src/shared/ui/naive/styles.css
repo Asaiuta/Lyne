@@ -745,6 +745,138 @@
     background-color: var(--surface-2);
   }
 
+  .naive-input-number.n-input-number {
+    display: inline-flex;
+    width: 100%;
+    min-width: 0;
+    vertical-align: bottom;
+  }
+
+  .naive-input-number-input.n-input {
+    width: 100%;
+  }
+
+  .naive-input-number-input .n-input-wrapper {
+    padding-right: 0;
+  }
+
+  .naive-input-number-input .n-input__input-el {
+    text-align: inherit;
+  }
+
+  .naive-input-number-input .n-input-number-prefix,
+  .naive-input-number-input .n-input-number-suffix {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    color: var(--n-suffix-text-color);
+    line-height: var(--n-height);
+    white-space: nowrap;
+  }
+
+  .naive-input-number-input .n-input-number-prefix {
+    margin-right: 8px;
+  }
+
+  .naive-input-number-input .n-input-number-suffix {
+    margin-left: 8px;
+  }
+
+  .naive-input-number-input .n-input-number-clear {
+    position: relative;
+    display: inline-flex;
+    width: var(--n-clear-size);
+    height: var(--n-clear-size);
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin-left: 6px;
+    border: 0;
+    border-radius: 50%;
+    color: var(--n-clear-color);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .naive-input-number-input .n-input-number-clear:hover {
+    color: var(--n-clear-color-hover);
+  }
+
+  .naive-input-number-input .n-input-number-clear:active {
+    color: var(--n-clear-color-pressed);
+  }
+
+  .naive-input-number-input .n-input-number-clear .n-base-icon::before,
+  .naive-input-number-input .n-input-number-clear .n-base-icon::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 1.5px;
+    border-radius: 1px;
+    background: currentColor;
+    content: "";
+  }
+
+  .naive-input-number-input .n-input-number-clear .n-base-icon::before {
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+
+  .naive-input-number-input .n-input-number-clear .n-base-icon::after {
+    transform: translate(-50%, -50%) rotate(-45deg);
+  }
+
+  .naive-input-number-input .n-input-number-button-group {
+    display: inline-flex;
+    width: 24px;
+    align-self: stretch;
+    flex-direction: column;
+    flex-shrink: 0;
+    margin-left: 6px;
+    border-left: var(--n-border);
+  }
+
+  .naive-input-number-input .n-input-number-button {
+    position: relative;
+    display: inline-flex;
+    min-width: 0;
+    height: 50%;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    color: var(--text-muted);
+    background: transparent;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition:
+      color 0.2s var(--n-bezier),
+      background-color 0.2s var(--n-bezier);
+  }
+
+  .naive-input-number-input .n-input-number-button:first-child {
+    border-bottom: var(--n-border);
+  }
+
+  .naive-input-number-input .n-input-number-button:not(:disabled):hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+
+  .naive-input-number-input .n-input-number-button:not(:disabled):active {
+    color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 12%, transparent);
+  }
+
+  .naive-input-number-input .n-input-number-button:disabled {
+    color: var(--text-placeholder);
+    cursor: not-allowed;
+  }
+
   .naive-tabs.n-tabs {
     --n-bezier: var(--ease-standard);
     --n-color-segment: color-mix(in oklch, var(--surface-3) 78%, transparent);

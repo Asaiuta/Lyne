@@ -8,6 +8,7 @@ export * from "./feedback";
 export * from "./feedback-services";
 export * from "./grid";
 export * from "./input";
+export * from "./input-number";
 export * from "./list";
 export * from "./layout";
 export * from "./number-animation";
