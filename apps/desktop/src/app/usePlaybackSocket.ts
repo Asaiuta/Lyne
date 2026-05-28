@@ -113,9 +113,6 @@ export const applyPlaybackSocketEvent = (event: WsEvent, deps: PlaybackSocketDep
       if (deps.shouldSuppressRemotePosition()) {
         break;
       }
-      deps.patchPlayerState({
-        current_time: event.position
-      });
       deps.setLivePosition(event.position);
       break;
     case "playback_history_updated":

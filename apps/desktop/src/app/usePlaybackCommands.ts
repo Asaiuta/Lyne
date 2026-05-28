@@ -28,6 +28,7 @@ export interface PlaybackCommands {
   handlePlay: () => Promise<void>;
   handlePause: () => Promise<void>;
   handleSeek: (position: number) => Promise<void>;
+  handleVolumePreview: (volume: number) => Promise<void>;
   handleVolumeChange: (volume: number) => Promise<void>;
   handleCycleRepeat: () => Promise<void>;
   handleToggleShuffle: () => Promise<void>;
@@ -36,6 +37,10 @@ export interface PlaybackCommands {
 export function usePlaybackCommands(deps: PlaybackCommandsDeps): PlaybackCommands {
   let seekCommandId = 0;
   let volumeCommandId = 0;
+  let volumeRequestInFlight = false;
+  let queuedVolumeRequest:
+    | { target: number; commandId: number; commit: boolean }
+    | null = null;
   let suppressRemotePositionUntil = 0;
 
   const runPlayerCommand = async (command: () => Promise<PlayerState>) => {
@@ -88,28 +93,60 @@ export function usePlaybackCommands(deps: PlaybackCommandsDeps): PlaybackCommand
     }
   };
 
-  const handleVolumeChange = async (volume: number) => {
+  const flushQueuedVolumeRequest = (): void => {
+    if (volumeRequestInFlight || queuedVolumeRequest === null) {
+      return;
+    }
+
+    const request = queuedVolumeRequest;
+    queuedVolumeRequest = null;
+    volumeRequestInFlight = true;
+
+    void deps.api
+      .setVolume(request.target)
+      .then((next) => {
+        if (request.commandId !== volumeCommandId) {
+          return;
+        }
+        if (request.commit) {
+          deps.applyPlayerState({
+            ...next,
+            volume: request.target
+          });
+        }
+      })
+      .catch((error) => {
+        if (request.commandId !== volumeCommandId) {
+          return;
+        }
+        deps.setCommandError(readErrorMessage(error));
+        if (request.commit) {
+          void deps.refreshState();
+        }
+      })
+      .finally(() => {
+        volumeRequestInFlight = false;
+        flushQueuedVolumeRequest();
+      });
+  };
+
+  const queueVolumeRequest = (volume: number, commit: boolean): void => {
     const commandId = ++volumeCommandId;
     const target = Math.max(0, Math.min(1, volume));
     deps.setCommandError(null);
-    deps.patchPlayerState({ volume: target });
-
-    try {
-      const next = await deps.api.setVolume(target);
-      if (commandId !== volumeCommandId) {
-        return;
-      }
-      deps.applyPlayerState({
-        ...next,
-        volume: target
-      });
-    } catch (error) {
-      if (commandId !== volumeCommandId) {
-        return;
-      }
-      deps.setCommandError(readErrorMessage(error));
-      void deps.refreshState();
+    if (commit) {
+      deps.patchPlayerState({ volume: target });
     }
+    queuedVolumeRequest = { target, commandId, commit };
+    flushQueuedVolumeRequest();
+  };
+
+  const handleVolumeChange = async (volume: number) => {
+    queueVolumeRequest(volume, true);
+  };
+
+  const handleVolumePreview = async (volume: number) => {
+    queueVolumeRequest(volume, false);
   };
 
   const handleCycleRepeat = () => {
@@ -127,6 +164,7 @@ export function usePlaybackCommands(deps: PlaybackCommandsDeps): PlaybackCommand
     handlePlay,
     handlePause,
     handleSeek,
+    handleVolumePreview,
     handleVolumeChange,
     handleCycleRepeat,
     handleToggleShuffle

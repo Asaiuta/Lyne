@@ -94,6 +94,7 @@ export interface AppController {
   handlePlay: () => Promise<void>;
   handlePause: () => Promise<void>;
   handleSeek: (position: number) => Promise<void>;
+  handleVolumePreview: (volume: number) => Promise<void>;
   handleVolumeChange: (volume: number) => Promise<void>;
   handleSkipPrev: () => Promise<void> | undefined;
   handleSkipNext: () => Promise<void> | undefined;
@@ -371,6 +372,7 @@ export function useAppController(api: ApiClient): AppController {
     handlePlay: playback.handlePlay,
     handlePause: playback.handlePause,
     handleSeek: playback.handleSeek,
+    handleVolumePreview: playback.handleVolumePreview,
     handleVolumeChange: playback.handleVolumeChange,
     handleSkipPrev: queue.handleSkipPrev,
     handleSkipNext: queue.handleSkipNext,

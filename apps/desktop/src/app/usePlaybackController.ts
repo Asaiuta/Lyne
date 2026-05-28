@@ -77,6 +77,7 @@ export interface PlaybackController {
   handlePlay: () => Promise<void>;
   handlePause: () => Promise<void>;
   handleSeek: (position: number) => Promise<void>;
+  handleVolumePreview: (volume: number) => Promise<void>;
   handleVolumeChange: (volume: number) => Promise<void>;
   handleCycleRepeat: () => Promise<void>;
   handleToggleShuffle: () => Promise<void>;
@@ -292,6 +293,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
     handlePlay: commands.handlePlay,
     handlePause: commands.handlePause,
     handleSeek: commands.handleSeek,
+    handleVolumePreview: commands.handleVolumePreview,
     handleVolumeChange: commands.handleVolumeChange,
     handleCycleRepeat: commands.handleCycleRepeat,
     handleToggleShuffle: commands.handleToggleShuffle

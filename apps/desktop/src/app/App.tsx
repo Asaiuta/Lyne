@@ -209,6 +209,7 @@ function AppContent() {
               onPlay={controller.handlePlay}
               onPause={controller.handlePause}
               onSeek={controller.handleSeek}
+              onVolumePreview={controller.handleVolumePreview}
               onVolumeChange={controller.handleVolumeChange}
               onSkipPrev={controller.handleSkipPrev}
               onSkipNext={controller.handleSkipNext}
@@ -400,6 +401,7 @@ function AppContent() {
               onPlay={controller.handlePlay}
               onPause={controller.handlePause}
               onSeek={controller.handleSeek}
+              onVolumePreview={controller.handleVolumePreview}
               onVolumeChange={controller.handleVolumeChange}
               onSkipPrev={controller.handleSkipPrev}
               onSkipNext={controller.handleSkipNext}

@@ -219,6 +219,22 @@ test("position events are ignored while local seek suppression is active", () =>
   assert.deepEqual(calls.livePosition, []);
 });
 
+test("position events update only live position without patching player state", () => {
+  const { calls, deps } = createDeps({
+    status: "success",
+    data: playerState({ current_time: 10 })
+  });
+
+  applyPlaybackSocketEvent(
+    { type: "position", position: 42, timestamp: 1000 },
+    deps
+  );
+
+  assert.equal(calls.patches.length, 0);
+  assert.deepEqual(calls.livePosition, [42]);
+  assert.deepEqual(calls.refreshes, []);
+});
+
 test("spectrum_data only writes when the spectrum surface is visible", () => {
   const { calls, deps } = createDeps({ status: "idle" });
 
