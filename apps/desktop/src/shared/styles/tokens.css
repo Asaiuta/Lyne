@@ -47,7 +47,7 @@
   --surface-2-base: oklch(0.215 0.006 280);
   --surface-3-base: oklch(0.255 0.008 280);
   --surface-4-base: oklch(0.295 0.01 280);
-  --bg: var(--bg-base);
+  --bg: var(--bg-dynamic, var(--bg-base));
   --surface-1: var(--surface-1-base);
   --surface-2: var(--surface-2-base);
   --surface-3: var(--surface-3-base);
@@ -58,6 +58,17 @@
   --player-bar-surface: var(--player-bar-surface-dynamic, var(--player-bar-surface-default));
   --player-bar-accent-default: rgb(255 218 214);
   --player-bar-accent: var(--player-bar-accent-dynamic, var(--player-bar-accent-default));
+  --player-cover-accent-default: rgb(239 239 239);
+  --player-cover-accent: var(--player-cover-accent-dynamic, var(--player-cover-accent-default));
+  --player-cover-accent-rgb: 239, 239, 239;
+  --splayer-primary: rgb(255 218 214);
+  --splayer-primary-rgb: 255, 218, 214;
+  --splayer-background: rgb(68 41 39);
+  --splayer-background-rgb: 68, 41, 39;
+  --splayer-surface-container: rgb(58 33 31);
+  --splayer-surface-container-rgb: 58, 33, 31;
+  --splayer-main-cover-color: rgb(255 218 214);
+  --splayer-main-cover-rgb: 255, 218, 214;
 
   /* alpha companions used for translucent panels / chips. */
   --surface-1-soft: oklch(0.16 0.006 280 / 0.7);
@@ -85,7 +96,7 @@
   --text-placeholder: oklch(1 0 0 / 0.42);
   --text-secondary: oklch(1 0 0 / 0.72);
   --overlay: oklch(0 0 0 / 0.45);
-  --floating-surface: var(--surface-2);
+  --floating-surface: var(--floating-surface-dynamic, var(--surface-2));
   --floating-border: var(--border-overlay);
   --floating-radius: var(--radius-sm);
   --floating-shadow: var(--elev-4);
@@ -116,8 +127,8 @@
   --color-error-container: rgb(147 0 10);
   --color-on-error-container: rgb(255 218 214);
 
-  --accent: var(--color-primary);
-  --accent-strong: var(--color-primary);
+  --accent: var(--accent-dynamic, var(--color-primary));
+  --accent-strong: var(--accent-dynamic, var(--color-primary));
   --accent-soft: var(--color-primary-tonal-16);
   --accent-foreground: var(--color-on-primary);
   --color-primary-tonal-08: color-mix(in oklch, var(--color-primary) 8%, transparent);
@@ -127,8 +138,76 @@
   --color-primary-tonal-28: color-mix(in oklch, var(--color-primary) 28%, transparent);
   --color-primary-tonal-45: color-mix(in oklch, var(--color-primary) 45%, transparent);
   --color-primary-tonal-58: color-mix(in oklch, var(--color-primary) 58%, transparent);
+  --color-primary-tonal-70: color-mix(in oklch, var(--color-primary) 70%, transparent);
   --color-primary-tonal-85: color-mix(in oklch, var(--color-primary) 85%, transparent);
   --color-primary-text-soft: color-mix(in oklch, var(--color-primary) 48%, var(--text-soft));
+
+  /* SPlayer-compatible Naive provider bridge. Runtime settings update these
+     variables from customAppearance.ts; CSS defaults keep first paint stable. */
+  --naive-primary-color: var(--splayer-primary);
+  --naive-primary-color-hover: color-mix(in srgb, var(--splayer-primary) 78%, transparent);
+  --naive-primary-color-pressed: color-mix(in srgb, var(--splayer-primary) 26%, transparent);
+  --naive-primary-color-suppl: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
+  --naive-primary-color-09: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-primary-color-10: color-mix(in srgb, var(--splayer-primary) 10%, transparent);
+  --naive-primary-color-12: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
+  --naive-primary-color-16: color-mix(in srgb, var(--splayer-primary) 16%, transparent);
+  --naive-primary-color-20: color-mix(in srgb, var(--splayer-primary) 20%, transparent);
+  --naive-primary-color-30: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
+  --naive-primary-color-38: color-mix(in srgb, var(--splayer-primary) 38%, transparent);
+  --naive-primary-color-48: color-mix(in srgb, var(--splayer-primary) 48%, transparent);
+  --naive-primary-color-58: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
+  --naive-text-color-1: var(--text);
+  --naive-text-color-2: var(--text-soft);
+  --naive-text-color-3: var(--muted);
+  --naive-text-color-disabled: var(--text-placeholder);
+  --naive-placeholder-color-disabled: var(--text-placeholder);
+  --naive-icon-color: var(--splayer-primary);
+  --naive-icon-color-hover: var(--text-soft);
+  --naive-icon-color-disabled: var(--text-placeholder);
+  --naive-close-icon-color: var(--muted);
+  --naive-hover-color: var(--state-hover-on-surface);
+  --naive-border-color: var(--border-overlay);
+  --naive-card-color: var(--surface-2);
+  --naive-tag-color: var(--surface-2);
+  --naive-modal-color: var(--floating-surface);
+  --naive-popover-color: var(--floating-surface);
+  --naive-button-color-2: var(--state-hover-on-surface);
+  --naive-button-color-2-hover: var(--state-pressed-on-surface);
+  --naive-button-color-2-pressed: var(--state-hover-on-surface);
+  --naive-button-text-color-hover: var(--naive-primary-color-hover);
+  --naive-button-text-color-focus: var(--naive-primary-color-58);
+  --naive-button-color-primary: var(--naive-primary-color);
+  --naive-button-color-hover-primary: var(--naive-primary-color-hover);
+  --naive-button-color-pressed-primary: var(--naive-primary-color-pressed);
+  --naive-button-color-focus-primary: var(--naive-primary-color);
+  --naive-slider-handle-color: var(--naive-primary-color);
+  --naive-slider-fill-color: var(--naive-primary-color);
+  --naive-slider-fill-color-hover: var(--naive-primary-color);
+  --naive-slider-rail-color: var(--naive-primary-color-20);
+  --naive-slider-rail-color-hover: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
+  --naive-slider-indicator-color: var(--surface-container-default);
+  --naive-slider-indicator-text-color: var(--splayer-primary);
+  --naive-switch-rail-color-active: var(--naive-primary-color);
+  --naive-input-color: color-mix(in oklch, var(--surface-2) 70%, transparent);
+  --naive-input-color-focus: var(--naive-input-color);
+  --naive-input-placeholder-color: var(--text-placeholder);
+  --naive-input-border: 1px solid var(--border-subtle);
+  --naive-input-clear-color: var(--text-placeholder);
+  --naive-input-clear-color-hover: var(--text-soft);
+  --naive-input-clear-color-pressed: var(--text);
+  --naive-empty-text-color: var(--muted);
+  --naive-divider-color: var(--border-overlay);
+  --naive-dropdown-divider-color: var(--border-overlay);
+  --naive-layout-sider-border-color: var(--border-overlay);
+  --naive-drawer-header-border-bottom: 1px solid var(--border-overlay);
+  --naive-drawer-footer-border-top: 1px solid var(--border-overlay);
+  --naive-menu-divider-color: var(--border-overlay);
+  --naive-progress-rail-color: var(--surface-3);
+  --naive-tooltip-color: var(--surface-container-default);
+  --naive-tooltip-text-color: var(--splayer-primary);
+  --naive-tabs-color-segment: var(--surface-container-default);
+  --naive-tabs-tab-color-segment: var(--naive-primary-color-12);
 
   /* ---------- Semantic ---------- */
   --success: oklch(0.78 0.13 140);
@@ -296,7 +375,7 @@
   --surface-2-base: oklch(0.99 0.002 280);
   --surface-3-base: oklch(0.995 0.001 280);
   --surface-4-base: oklch(1 0 0);
-  --bg: var(--bg-base);
+  --bg: var(--bg-dynamic, var(--bg-base));
   --surface-1: var(--surface-1-base);
   --surface-2: var(--surface-2-base);
   --surface-3: var(--surface-3-base);
@@ -307,6 +386,17 @@
   --player-bar-surface: var(--player-bar-surface-dynamic, var(--player-bar-surface-default));
   --player-bar-accent-default: rgb(44 21 19);
   --player-bar-accent: var(--player-bar-accent-dynamic, var(--player-bar-accent-default));
+  --player-cover-accent-default: rgb(239 239 239);
+  --player-cover-accent: var(--player-cover-accent-dynamic, var(--player-cover-accent-default));
+  --player-cover-accent-rgb: 239, 239, 239;
+  --splayer-primary: rgb(44 21 19);
+  --splayer-primary-rgb: 44, 21, 19;
+  --splayer-background: rgb(255 233 231);
+  --splayer-background-rgb: 255, 233, 231;
+  --splayer-surface-container: rgb(255 218 214);
+  --splayer-surface-container-rgb: 255, 218, 214;
+  --splayer-main-cover-color: rgb(255 218 214);
+  --splayer-main-cover-rgb: 255, 218, 214;
 
   --surface-1-soft: oklch(0.98 0.002 280 / 0.85);
   --surface-2-soft: oklch(0.99 0.002 280 / 0.85);
@@ -385,7 +475,7 @@
 }
 
 [data-appearance-mode="solid"] {
-  --floating-surface: var(--surface-2);
+  --floating-surface: var(--floating-surface-dynamic, var(--surface-2));
   --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
   --player-bar-surface: var(--player-bar-surface-dynamic, var(--player-bar-surface-default));
   --surface-backdrop-filter: none;
@@ -402,7 +492,7 @@
   --surface-3: color-mix(in oklch, var(--surface-3-soft) 88%, var(--surface-3-base));
   --surface-container: color-mix(in oklch, var(--surface-container-dynamic, var(--surface-container-default)) 82%, transparent);
   --player-bar-surface: var(--surface-container);
-  --floating-surface: color-mix(in oklch, var(--surface-2) 88%, transparent);
+  --floating-surface: color-mix(in oklch, var(--floating-surface-dynamic, var(--surface-2)) 88%, transparent);
 }
 
 [data-appearance-mode="cover-immersive"] {
@@ -423,7 +513,7 @@
   --surface-3: color-mix(in oklch, var(--surface-3-soft) 92%, var(--surface-3-base));
   --surface-container: color-mix(in oklch, var(--surface-container-dynamic, var(--surface-container-default)) 76%, transparent);
   --player-bar-surface: var(--surface-container);
-  --floating-surface: color-mix(in oklch, var(--surface-2) 82%, transparent);
+  --floating-surface: color-mix(in oklch, var(--floating-surface-dynamic, var(--surface-2)) 82%, transparent);
 }
 
 [data-appearance-mode="vinyl"] {
@@ -432,5 +522,5 @@
   --surface-3: color-mix(in oklch, var(--surface-3-soft) 86%, var(--surface-3-base));
   --surface-container: color-mix(in oklch, var(--surface-container-dynamic, var(--surface-container-default)) 80%, transparent);
   --player-bar-surface: var(--surface-container);
-  --floating-surface: color-mix(in oklch, var(--surface-2) 84%, transparent);
+  --floating-surface: color-mix(in oklch, var(--floating-surface-dynamic, var(--surface-2)) 84%, transparent);
 }

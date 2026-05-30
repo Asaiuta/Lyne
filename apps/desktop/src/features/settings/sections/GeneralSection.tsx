@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from "solid-js";
+import { createMemo, createSignal, type Accessor, type Setter } from "solid-js";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { createApiClient } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
@@ -6,6 +6,8 @@ import type {
   CloseAppMethod,
   SearchInputBehavior,
   ShareUrlFormat,
+  UISettings,
+  UISettingsBooleanFieldName,
   UpdateChannel
 } from "../../../shared/state/useUISettings";
 import {
@@ -15,12 +17,12 @@ import {
 import { dialog, message } from "../../../shared/ui/naive";
 import {
   BooleanSettingItem,
-  SelectSettingItem
+  SelectSettingItem,
+  type SelectOption
 } from "../components/SettingControls";
 import { settingsSectionClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import type { SelectOption } from "../components/SelectInput";
-import { togglePersistedField } from "../storage";
+import { setPersistedBooleanField } from "../storage";
 import {
   clearBrowserSessionCacheByPrefix,
   requestOnlineServiceModeChange,
@@ -145,8 +147,16 @@ export function GeneralSection(props: GeneralSectionProps) {
   let itemIndex = 0;
   const nextIndex = () => itemIndex++;
 
-  const handleOnlineServiceChange = () => {
-    const nextEnabled = !useOnlineService();
+  const setBooleanField = <K extends UISettingsBooleanFieldName>(
+    field: K,
+    nextValue: UISettings[K],
+    value: Accessor<UISettings[K]>,
+    setValue: Setter<UISettings[K]>
+  ) => {
+    setPersistedBooleanField(field, nextValue, value, setValue);
+  };
+
+  const handleOnlineServiceChange = (nextEnabled: boolean) => {
     void requestOnlineServiceModeChange(nextEnabled, {
       confirmChange: () =>
         confirmOnlineServiceChange({
@@ -173,8 +183,7 @@ export function GeneralSection(props: GeneralSectionProps) {
     });
   };
 
-  const handleTaskbarProgressChange = () => {
-    const nextEnabled = !showTaskbarProgress();
+  const handleTaskbarProgressChange = (nextEnabled: boolean) => {
     setTaskbarProgressPreference(nextEnabled, {
       persistValue: (value) =>
         commitUISettingField(
@@ -237,8 +246,8 @@ export function GeneralSection(props: GeneralSectionProps) {
           highlighted={isHi("showCloseAppTip")}
           index={nextIndex()}
           checked={showCloseAppTip()}
-          onChange={() =>
-            togglePersistedField("showCloseAppTip", showCloseAppTip, setShowCloseAppTip)
+          onChange={(checked) =>
+            setBooleanField("showCloseAppTip", checked, showCloseAppTip, setShowCloseAppTip)
           }
         />
         <BooleanSettingItem
@@ -260,8 +269,13 @@ export function GeneralSection(props: GeneralSectionProps) {
           highlighted={isHi("checkUpdateOnStart")}
           index={nextIndex()}
           checked={checkUpdateOnStart()}
-          onChange={() =>
-            togglePersistedField("checkUpdateOnStart", checkUpdateOnStart, setCheckUpdateOnStart)
+          onChange={(checked) =>
+            setBooleanField(
+              "checkUpdateOnStart",
+              checked,
+              checkUpdateOnStart,
+              setCheckUpdateOnStart
+            )
           }
         />
         <SelectSettingItem
@@ -284,8 +298,8 @@ export function GeneralSection(props: GeneralSectionProps) {
           highlighted={isHi("showSearchHistory")}
           index={nextIndex()}
           checked={showSearchHistory()}
-          onChange={() =>
-            togglePersistedField("showSearchHistory", showSearchHistory, setShowSearchHistory)
+          onChange={(checked) =>
+            setBooleanField("showSearchHistory", checked, showSearchHistory, setShowSearchHistory)
           }
         />
         <BooleanSettingItem
@@ -296,7 +310,9 @@ export function GeneralSection(props: GeneralSectionProps) {
           index={nextIndex()}
           checked={showHotSearch()}
           disabled={onlineSearchControlsDisabled()}
-          onChange={() => togglePersistedField("showHotSearch", showHotSearch, setShowHotSearch)}
+          onChange={(checked) =>
+            setBooleanField("showHotSearch", checked, showHotSearch, setShowHotSearch)
+          }
         />
         <BooleanSettingItem
           id="enableSearchKeyword"
@@ -306,9 +322,10 @@ export function GeneralSection(props: GeneralSectionProps) {
           index={nextIndex()}
           checked={enableSearchKeyword()}
           disabled={onlineSearchControlsDisabled()}
-          onChange={() =>
-            togglePersistedField(
+          onChange={(checked) =>
+            setBooleanField(
               "enableSearchKeyword",
+              checked,
               enableSearchKeyword,
               setEnableSearchKeyword
             )

@@ -15,11 +15,11 @@ import {
   BooleanSettingItem,
   ButtonSettingItem,
   RangeSettingItem,
-  SelectSettingItem
+  SelectSettingItem,
+  type SelectOption
 } from "../components/SettingControls";
 import { settingsHintClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import type { SelectOption } from "../components/SelectInput";
 import {
   COVER_MANAGER_ITEM,
   LAYOUT_MANAGER_ITEMS,
@@ -51,7 +51,7 @@ interface DirectBooleanItemConfig {
   labelKey: TranslationKey;
   descriptionKey?: TranslationKey;
   checked: () => boolean;
-  onChange: () => void;
+  onChange: (checked: boolean) => void;
 }
 
 const LAYOUT_BOOLEAN_ITEMS: readonly BooleanItemConfig[] = [
@@ -207,7 +207,7 @@ function renderBooleanItem(
       highlighted={props.highlightId === config.id}
       index={props.nextIndex()}
       checked={value()}
-      onChange={() => props.settings.toggleField(config.field, value, setValue)}
+      onChange={(checked) => props.settings.setBooleanField(config.field, checked, value, setValue)}
     />
   );
 }
@@ -286,9 +286,10 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
       labelKey: "settings.appearance.playerBackgroundPause",
       descriptionKey: "settings.appearance.playerBackgroundPause.desc",
       checked: props.settings.playerBackgroundPause,
-      onChange: () =>
-        props.settings.toggleField(
+      onChange: (checked) =>
+        props.settings.setBooleanField(
           "playerBackgroundPause",
+          checked,
           props.settings.playerBackgroundPause,
           props.settings.setPlayerBackgroundPause
         )
@@ -298,9 +299,10 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
       labelKey: "settings.appearance.playerBackgroundLowFreqVolume",
       descriptionKey: "settings.appearance.playerBackgroundLowFreqVolume.desc",
       checked: props.settings.playerBackgroundLowFreqVolume,
-      onChange: () =>
-        props.settings.toggleField(
+      onChange: (checked) =>
+        props.settings.setBooleanField(
           "playerBackgroundLowFreqVolume",
+          checked,
           props.settings.playerBackgroundLowFreqVolume,
           props.settings.setPlayerBackgroundLowFreqVolume
         )
@@ -313,9 +315,10 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
       labelKey: "settings.appearance.showSpectrums",
       descriptionKey: "settings.appearance.showSpectrums.desc",
       checked: props.settings.showSpectrums,
-      onChange: () =>
-        props.settings.toggleField(
+      onChange: (checked) =>
+        props.settings.setBooleanField(
           "showSpectrums",
+          checked,
           props.settings.showSpectrums,
           props.settings.setShowSpectrums
         )

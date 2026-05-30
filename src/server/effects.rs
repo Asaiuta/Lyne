@@ -35,123 +35,122 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         );
 }
 
-fn persist_eq_config(data: &web::Data<Arc<AppState>>, player: &AudioPlayer) {
+fn persist_dsp_config_payload(
+    data: &web::Data<Arc<AppState>>,
+    key: &str,
+    payload: &serde_json::Value,
+) {
+    if let Err(e) = data.app_db.upsert_dsp_config(key, payload) {
+        log::warn!("Failed to persist {} config: {}", key, e);
+    }
+}
+
+fn eq_config_payload(player: &AudioPlayer) -> serde_json::Value {
     let eq_snapshot = player.lockfree_eq_params.read();
-    let payload = serde_json::json!({
+    serde_json::json!({
         "eq_type": player.shared_state().eq_type.read().clone(),
         "enabled": eq_snapshot.enabled,
         "gains": eq_snapshot.gains,
         "fir_enabled": player.is_fir_eq_enabled(),
-    });
-    if let Err(e) = data.app_db.upsert_dsp_config("eq", &payload) {
-        log::warn!("Failed to persist EQ config: {}", e);
-    }
+    })
 }
 
-fn persist_crossfeed_config(data: &web::Data<Arc<AppState>>, player: &AudioPlayer) {
+fn noise_shaper_config_payload(player: &AudioPlayer) -> serde_json::Value {
+    serde_json::json!({
+        "curve": player.get_noise_shaper_curve(),
+        "output_bits": player.get_output_bits(),
+        "dither_enabled": player.dither_enabled
+    })
+}
+
+fn crossfeed_config_payload(player: &AudioPlayer) -> serde_json::Value {
     let settings = player.get_crossfeed_info();
-    let payload = serde_json::json!({
+    serde_json::json!({
         "enabled": settings.enabled,
         "mix": settings.mix
-    });
-    if let Err(e) = data.app_db.upsert_dsp_config("crossfeed", &payload) {
-        log::warn!("Failed to persist crossfeed config: {}", e);
-    }
+    })
 }
 
-fn persist_saturation_config(data: &web::Data<Arc<AppState>>, player: &AudioPlayer) {
+fn saturation_config_payload(player: &AudioPlayer) -> serde_json::Value {
     let settings = player.get_saturation_info();
-    let payload = serde_json::to_value(settings).unwrap_or(serde_json::Value::Null);
-    if let Err(e) = data.app_db.upsert_dsp_config("saturation", &payload) {
-        log::warn!("Failed to persist saturation config: {}", e);
-    }
+    serde_json::to_value(settings).unwrap_or(serde_json::Value::Null)
 }
 
-fn persist_dynamic_loudness_config(data: &web::Data<Arc<AppState>>, player: &AudioPlayer) {
-    let payload = serde_json::json!({
+fn dynamic_loudness_config_payload(player: &AudioPlayer) -> serde_json::Value {
+    serde_json::json!({
         "enabled": player.is_dynamic_loudness_enabled(),
         "strength": player.get_dynamic_loudness_strength(),
         "factor": player.get_dynamic_loudness_factor(),
         "band_gains": player.get_dynamic_loudness_gains()
-    });
-    if let Err(e) = data.app_db.upsert_dsp_config("dynamic_loudness", &payload) {
-        log::warn!("Failed to persist dynamic loudness config: {}", e);
-    }
-}
-
-fn persist_noise_shaper_config(data: &web::Data<Arc<AppState>>, player: &AudioPlayer) {
-    let payload = serde_json::json!({
-        "curve": player.get_noise_shaper_curve(),
-        "output_bits": player.get_output_bits(),
-        "dither_enabled": player.dither_enabled
-    });
-    if let Err(e) = data.app_db.upsert_dsp_config("noise_shaper", &payload) {
-        log::warn!("Failed to persist noise shaper config: {}", e);
-    }
+    })
 }
 
 async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -> HttpResponse {
-    let mut player = data.player.lock();
     let normalized_bands = body.bands.as_ref().map(|bands| {
         normalize_eq_bands(bands.clone(), |unknown| {
             log::warn!("Unknown EQ band name: '{}'", unknown);
         })
     });
 
-    let is_fir = player.is_fir_eq_enabled();
+    let (message, payload, state_response) = {
+        let mut player = data.player.lock();
+        let is_fir = player.is_fir_eq_enabled();
 
-    if is_fir {
-        if let Some(enabled) = body.enabled {
-            if !enabled {
-                player.disable_fir_eq();
-            }
-        }
-
-        if let Some(ref bands) = normalized_bands {
-            let mut gains = [0.0_f64; 10];
-            let mut any_set = false;
-
-            for (name, &gain) in bands {
-                if let Some(idx) = eq_band_name_to_index(name.as_str()) {
-                    gains[idx] = gain;
-                    any_set = true;
+        if is_fir {
+            if let Some(enabled) = body.enabled {
+                if !enabled {
+                    player.disable_fir_eq();
                 }
             }
 
-            if any_set {
-                if let Err(e) = player.set_fir_bands(&gains) {
-                    return internal_server_error_response(e);
+            if let Some(ref bands) = normalized_bands {
+                let mut gains = [0.0_f64; 10];
+                let mut any_set = false;
+
+                for (name, &gain) in bands {
+                    if let Some(idx) = eq_band_name_to_index(name.as_str()) {
+                        gains[idx] = gain;
+                        any_set = true;
+                    }
+                }
+
+                if any_set {
+                    if let Err(e) = player.set_fir_bands(&gains) {
+                        return internal_server_error_response(e);
+                    }
                 }
             }
-        }
 
-        persist_eq_config(&data, &player);
-        drop(player);
-        return HttpResponse::Ok().json(ApiResponse::success_with_state(
-            "FIR EQ updated",
-            get_enriched_player_state(&data.player.lock(), &data.app_db),
-        ));
-    }
-
-    if let Some(enabled) = body.enabled {
-        player.lockfree_eq_params.set_enabled(enabled);
-    }
-
-    if let Some(ref bands) = normalized_bands {
-        for (name, &gain) in bands {
-            if let Some(idx) = eq_band_name_to_index(name.as_str()) {
-                player.lockfree_eq_params.set_band_gain(idx, gain);
+            (
+                "FIR EQ updated",
+                eq_config_payload(&player),
+                get_player_state(&player),
+            )
+        } else {
+            if let Some(enabled) = body.enabled {
+                player.lockfree_eq_params.set_enabled(enabled);
             }
+
+            if let Some(ref bands) = normalized_bands {
+                for (name, &gain) in bands {
+                    if let Some(idx) = eq_band_name_to_index(name.as_str()) {
+                        player.lockfree_eq_params.set_band_gain(idx, gain);
+                    }
+                }
+            }
+
+            *player.shared_state().eq_type.write() = "IIR".to_string();
+            (
+                "EQ updated",
+                eq_config_payload(&player),
+                get_player_state(&player),
+            )
         }
-    }
+    };
 
-    *player.shared_state().eq_type.write() = "IIR".to_string();
-    persist_eq_config(&data, &player);
-
-    HttpResponse::Ok().json(ApiResponse::success_with_state(
-        "EQ updated",
-        get_enriched_player_state(&player, &data.app_db),
-    ))
+    persist_dsp_config_payload(&data, "eq", &payload);
+    let state_response = enrich_player_state(&data.app_db, state_response);
+    HttpResponse::Ok().json(ApiResponse::success_with_state(message, state_response))
 }
 
 async fn set_eq_type(
@@ -162,32 +161,40 @@ async fn set_eq_type(
 
     match eq_type_upper.as_str() {
         "IIR" => {
-            let mut player = data.player.lock();
-            player.disable_fir_eq();
-            *player.shared_state().eq_type.write() = "IIR".to_string();
-            persist_eq_config(&data, &player);
+            let payload = {
+                let mut player = data.player.lock();
+                player.disable_fir_eq();
+                *player.shared_state().eq_type.write() = "IIR".to_string();
+                eq_config_payload(&player)
+            };
+            persist_dsp_config_payload(&data, "eq", &payload);
             HttpResponse::Ok().json(ApiResponse::success("EQ type set to IIR"))
         }
         "FIR" => {
             let num_taps = body.fir_taps.unwrap_or(1023);
-            let mut player = data.player.lock();
-            match player.enable_fir_eq(num_taps) {
-                Ok(()) => {
-                    *player.shared_state().eq_type.write() = "FIR".to_string();
-                    persist_eq_config(&data, &player);
-                    HttpResponse::Ok().json(ApiResponse::success(&format!(
-                        "FIR EQ enabled with {} taps",
-                        num_taps
-                    )))
-                }
-                Err(e) => {
-                    if not_implemented_error(&e) {
-                        HttpResponse::NotImplemented().json(ApiResponse::error(&e))
-                    } else {
-                        internal_server_error_response(e)
+            let payload = {
+                let mut player = data.player.lock();
+                match player.enable_fir_eq(num_taps) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        return if not_implemented_error(&e) {
+                            HttpResponse::NotImplemented().json(ApiResponse::error(&e))
+                        } else {
+                            internal_server_error_response(e)
+                        };
                     }
                 }
-            }
+
+                {
+                    *player.shared_state().eq_type.write() = "FIR".to_string();
+                    eq_config_payload(&player)
+                }
+            };
+            persist_dsp_config_payload(&data, "eq", &payload);
+            HttpResponse::Ok().json(ApiResponse::success(&format!(
+                "FIR EQ enabled with {} taps",
+                num_taps
+            )))
         }
         _ => bad_request_response(format!(
             "Unknown EQ type: '{}'. Supported types: IIR, FIR",
@@ -200,22 +207,29 @@ async fn configure_optimizations(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ConfigureOptimizationsRequest>,
 ) -> HttpResponse {
-    let mut player = data.player.lock();
+    let (payload, state_response) = {
+        let mut player = data.player.lock();
 
-    if let Some(dither) = body.dither_enabled {
-        player.dither_enabled = dither;
-        player.lockfree_noise_shaper_params.set_enabled(dither);
-    }
+        if let Some(dither) = body.dither_enabled {
+            player.dither_enabled = dither;
+            player.lockfree_noise_shaper_params.set_enabled(dither);
+        }
 
-    if let Some(rg) = body.replaygain_enabled {
-        player.replaygain_enabled = rg;
-    }
+        if let Some(rg) = body.replaygain_enabled {
+            player.replaygain_enabled = rg;
+        }
 
-    persist_noise_shaper_config(&data, &player);
+        (
+            noise_shaper_config_payload(&player),
+            get_player_state(&player),
+        )
+    };
 
+    persist_dsp_config_payload(&data, "noise_shaper", &payload);
+    let state_response = enrich_player_state(&data.app_db, state_response);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Optimizations updated",
-        get_enriched_player_state(&player, &data.app_db),
+        state_response,
     ))
 }
 
@@ -223,17 +237,23 @@ async fn set_crossfeed(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetCrossfeedRequest>,
 ) -> HttpResponse {
-    let player = data.player.lock();
+    let (settings, payload) = {
+        let player = data.player.lock();
 
-    if let Some(enabled) = body.enabled {
-        player.set_crossfeed_enabled(enabled);
-    }
-    if let Some(mix) = body.mix {
-        player.set_crossfeed_mix(mix);
-    }
+        if let Some(enabled) = body.enabled {
+            player.set_crossfeed_enabled(enabled);
+        }
+        if let Some(mix) = body.mix {
+            player.set_crossfeed_mix(mix);
+        }
 
-    let settings = player.get_crossfeed_info();
-    persist_crossfeed_config(&data, &player);
+        (
+            player.get_crossfeed_info(),
+            crossfeed_config_payload(&player),
+        )
+    };
+
+    persist_dsp_config_payload(&data, "crossfeed", &payload);
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
         "message": "Crossfeed updated",
@@ -261,43 +281,49 @@ async fn set_saturation(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetSaturationRequest>,
 ) -> HttpResponse {
-    let player = data.player.lock();
+    let (settings, payload) = {
+        let player = data.player.lock();
 
-    if let Some(enabled) = body.enabled {
-        player.set_saturation_enabled(enabled);
-    }
-    if let Some(drive) = body.drive {
-        player.set_saturation_drive(drive);
-    }
-    if let Some(threshold) = body.threshold {
-        player.lockfree_saturation_params.set_threshold(threshold);
-    }
-    if let Some(mix) = body.mix {
-        player.set_saturation_mix(mix);
-    }
-    if let Some(input_gain_db) = body.input_gain_db {
-        player
-            .lockfree_saturation_params
-            .set_input_gain(input_gain_db);
-    }
-    if let Some(output_gain_db) = body.output_gain_db {
-        player
-            .lockfree_saturation_params
-            .set_output_gain(output_gain_db);
-    }
-    if let Some(highpass_mode) = body.highpass_mode {
-        player
-            .lockfree_saturation_params
-            .set_highpass_mode(highpass_mode);
-    }
-    if let Some(highpass_cutoff) = body.highpass_cutoff {
-        player
-            .lockfree_saturation_params
-            .set_highpass_cutoff(highpass_cutoff);
-    }
+        if let Some(enabled) = body.enabled {
+            player.set_saturation_enabled(enabled);
+        }
+        if let Some(drive) = body.drive {
+            player.set_saturation_drive(drive);
+        }
+        if let Some(threshold) = body.threshold {
+            player.lockfree_saturation_params.set_threshold(threshold);
+        }
+        if let Some(mix) = body.mix {
+            player.set_saturation_mix(mix);
+        }
+        if let Some(input_gain_db) = body.input_gain_db {
+            player
+                .lockfree_saturation_params
+                .set_input_gain(input_gain_db);
+        }
+        if let Some(output_gain_db) = body.output_gain_db {
+            player
+                .lockfree_saturation_params
+                .set_output_gain(output_gain_db);
+        }
+        if let Some(highpass_mode) = body.highpass_mode {
+            player
+                .lockfree_saturation_params
+                .set_highpass_mode(highpass_mode);
+        }
+        if let Some(highpass_cutoff) = body.highpass_cutoff {
+            player
+                .lockfree_saturation_params
+                .set_highpass_cutoff(highpass_cutoff);
+        }
 
-    let settings = player.get_saturation_info();
-    persist_saturation_config(&data, &player);
+        (
+            player.get_saturation_info(),
+            saturation_config_payload(&player),
+        )
+    };
+
+    persist_dsp_config_payload(&data, "saturation", &payload);
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
         "message": "Saturation updated",
@@ -319,28 +345,35 @@ async fn set_dynamic_loudness(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetDynamicLoudnessRequest>,
 ) -> HttpResponse {
-    let player = data.player.lock();
+    let (response, payload) = {
+        let player = data.player.lock();
 
-    if let Some(enabled) = body.enabled {
-        player.set_dynamic_loudness_enabled(enabled);
-    }
-    if let Some(strength) = body.strength {
-        if !(0.0..=1.0).contains(&strength) {
-            return bad_request_response("Strength must be between 0.0 and 1.0");
+        if let Some(enabled) = body.enabled {
+            player.set_dynamic_loudness_enabled(enabled);
         }
-        player.set_dynamic_loudness_strength(strength);
-    }
+        if let Some(strength) = body.strength {
+            if !(0.0..=1.0).contains(&strength) {
+                return bad_request_response("Strength must be between 0.0 and 1.0");
+            }
+            player.set_dynamic_loudness_strength(strength);
+        }
 
-    persist_dynamic_loudness_config(&data, &player);
+        (
+            serde_json::json!({
+                "enabled": player.is_dynamic_loudness_enabled(),
+                "strength": player.get_dynamic_loudness_strength(),
+                "factor": player.get_dynamic_loudness_factor(),
+                "band_gains": player.get_dynamic_loudness_gains()
+            }),
+            dynamic_loudness_config_payload(&player),
+        )
+    };
+
+    persist_dsp_config_payload(&data, "dynamic_loudness", &payload);
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
         "message": "Dynamic Loudness updated",
-        "dynamic_loudness": {
-            "enabled": player.is_dynamic_loudness_enabled(),
-            "strength": player.get_dynamic_loudness_strength(),
-            "factor": player.get_dynamic_loudness_factor(),
-            "band_gains": player.get_dynamic_loudness_gains()
-        }
+        "dynamic_loudness": response
     }))
 }
 
@@ -376,19 +409,26 @@ async fn set_noise_shaper_curve(
         }
     };
 
-    let player = data.player.lock();
-    if let Err(e) = player.set_noise_shaper_curve(curve) {
-        return internal_server_error_response(e);
-    }
+    let (payload, enabled, bits) = {
+        let player = data.player.lock();
+        if let Err(e) = player.set_noise_shaper_curve(curve) {
+            return internal_server_error_response(e);
+        }
+        (
+            noise_shaper_config_payload(&player),
+            player.dither_enabled,
+            player.get_output_bits(),
+        )
+    };
 
-    persist_noise_shaper_config(&data, &player);
+    persist_dsp_config_payload(&data, "noise_shaper", &payload);
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
         "message": format!("Noise shaper curve set to {:?}", curve),
         "noise_shaper": {
             "curve": format!("{:?}", curve),
-            "enabled": player.dither_enabled,
-            "bits": player.get_output_bits()
+            "enabled": enabled,
+            "bits": bits
         }
     }))
 }
@@ -415,10 +455,13 @@ async fn configure_output_bits(
         return bad_request_response("Invalid bit depth. Supported: 16, 24, 32");
     }
 
-    let player = data.player.lock();
-    player.set_output_bits(body.bits);
-    persist_noise_shaper_config(&data, &player);
+    let payload = {
+        let player = data.player.lock();
+        player.set_output_bits(body.bits);
+        noise_shaper_config_payload(&player)
+    };
 
+    persist_dsp_config_payload(&data, "noise_shaper", &payload);
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
         "message": format!("Output bit depth set to {} bits", body.bits)

@@ -7,13 +7,13 @@ import {
   readUISettingsSnapshot
 } from "../../../shared/state/useUISettings";
 import {
-  SettingItem,
-  RangeInput,
-  settingsSectionClass
-} from "../components/SettingItem";
+  BooleanSettingItem,
+  RangeSettingItem,
+  SelectSettingItem,
+  type SelectOption
+} from "../components/SettingControls";
+import { settingsSectionClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import { SelectInput, type SelectOption } from "../components/SelectInput";
-import { togglePersistedField } from "../storage";
 
 const api = createApiClient();
 
@@ -68,34 +68,43 @@ export function PlaybackSection(props: PlaybackSectionProps) {
     });
   });
 
-  const handleAutoPlay = () => {
-    togglePersistedField("autoPlay", autoPlay, setAutoPlay);
+  const handleAutoPlay = (checked: boolean) => {
+    commitUISettingField("autoPlay", checked, autoPlay, setAutoPlay);
   };
-  const handleUseNextPrefetch = () => {
+  const handleUseNextPrefetch = (checked: boolean) => {
     const previous = useNextPrefetch();
-    const next = !previous;
-    setUseNextPrefetch(next);
-    void api.saveSettings({ use_next_prefetch: next }).catch(() => {
+    setUseNextPrefetch(checked);
+    void api.saveSettings({ use_next_prefetch: checked }).catch(() => {
       setUseNextPrefetch(previous);
     });
   };
-  const handleVolumeFade = () => {
-    togglePersistedField("volumeFade", volumeFade, setVolumeFade);
+  const handleVolumeFade = (checked: boolean) => {
+    commitUISettingField("volumeFade", checked, volumeFade, setVolumeFade);
   };
   const handleVolumeFadeTime = (v: number) => {
     commitUISettingField("volumeFadeTime", v, volumeFadeTime, setVolumeFadeTime);
   };
-  const handleMemoryLastSeek = () => {
-    togglePersistedField("memoryLastSeek", memoryLastSeek, setMemoryLastSeek);
+  const handleMemoryLastSeek = (checked: boolean) => {
+    commitUISettingField("memoryLastSeek", checked, memoryLastSeek, setMemoryLastSeek);
   };
-  const handleProgressTooltipShow = () => {
-    togglePersistedField("progressTooltipShow", progressTooltipShow, setProgressTooltipShow);
+  const handleProgressTooltipShow = (checked: boolean) => {
+    commitUISettingField(
+      "progressTooltipShow",
+      checked,
+      progressTooltipShow,
+      setProgressTooltipShow
+    );
   };
-  const handleProgressLyricShow = () => {
-    togglePersistedField("progressLyricShow", progressLyricShow, setProgressLyricShow);
+  const handleProgressLyricShow = (checked: boolean) => {
+    commitUISettingField("progressLyricShow", checked, progressLyricShow, setProgressLyricShow);
   };
-  const handleProgressAdjustLyric = () => {
-    togglePersistedField("progressAdjustLyric", progressAdjustLyric, setProgressAdjustLyric);
+  const handleProgressAdjustLyric = (checked: boolean) => {
+    commitUISettingField(
+      "progressAdjustLyric",
+      checked,
+      progressAdjustLyric,
+      setProgressAdjustLyric
+    );
   };
   const handleNcmSongLevel = (level: string) => {
     commitUISettingField("ncmSongLevel", level, ncmSongLevel, setNcmSongLevel);
@@ -104,128 +113,106 @@ export function PlaybackSection(props: PlaybackSectionProps) {
   return (
     <section class={settingsSectionClass}>
       <SettingGroup title={t("settings.playback.title")}>
-        <SettingItem
+        <BooleanSettingItem
           id="autoPlay"
           label={t("settings.playback.autoPlay")}
           description={t("settings.playback.autoPlay.desc")}
           highlighted={isHi("autoPlay")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={autoPlay()} onChange={handleAutoPlay} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={autoPlay()}
+          onChange={handleAutoPlay}
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="useNextPrefetch"
           label={t("settings.playback.useNextPrefetch")}
           description={t("settings.playback.useNextPrefetch.desc")}
           highlighted={isHi("useNextPrefetch")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={useNextPrefetch()} onChange={handleUseNextPrefetch} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={useNextPrefetch()}
+          onChange={handleUseNextPrefetch}
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="memoryLastSeek"
           label={t("settings.playback.memoryLastSeek")}
           description={t("settings.playback.memoryLastSeek.desc")}
           highlighted={isHi("memoryLastSeek")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={memoryLastSeek()} onChange={handleMemoryLastSeek} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={memoryLastSeek()}
+          onChange={handleMemoryLastSeek}
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="progressTooltipShow"
           label={t("settings.playback.progressTooltipShow")}
           description={t("settings.playback.progressTooltipShow.desc")}
           highlighted={isHi("progressTooltipShow")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={progressTooltipShow()} onChange={handleProgressTooltipShow} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={progressTooltipShow()}
+          onChange={handleProgressTooltipShow}
+        />
 
         <Show when={progressTooltipShow()}>
-          <SettingItem
+          <BooleanSettingItem
             id="progressLyricShow"
             label={t("settings.playback.progressLyricShow")}
             description={t("settings.playback.progressLyricShow.desc")}
             highlighted={isHi("progressLyricShow")}
             index={nextIndex()}
-          >
-            <label class="toggle-switch">
-              <input type="checkbox" checked={progressLyricShow()} onChange={handleProgressLyricShow} />
-              <span class="toggle-switch-slider" />
-            </label>
-          </SettingItem>
+            checked={progressLyricShow()}
+            onChange={handleProgressLyricShow}
+          />
         </Show>
 
-        <SettingItem
+        <BooleanSettingItem
           id="progressAdjustLyric"
           label={t("settings.playback.progressAdjustLyric")}
           description={t("settings.playback.progressAdjustLyric.desc")}
           highlighted={isHi("progressAdjustLyric")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={progressAdjustLyric()} onChange={handleProgressAdjustLyric} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={progressAdjustLyric()}
+          onChange={handleProgressAdjustLyric}
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="volumeFade"
           label={t("settings.playback.volumeFade")}
           description={t("settings.playback.volumeFade.desc")}
           highlighted={isHi("volumeFade")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={volumeFade()} onChange={handleVolumeFade} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={volumeFade()}
+          onChange={handleVolumeFade}
+        />
 
         <Show when={volumeFade()}>
-          <SettingItem id="volumeFadeTime" label={t("settings.playback.volumeFadeTime")} highlighted={isHi("volumeFadeTime")} index={nextIndex()}>
-            <RangeInput
-              min={200}
-              max={2000}
-              step={50}
-              value={volumeFadeTime()}
-              onPreview={setVolumeFadeTime}
-              onCommit={handleVolumeFadeTime}
-              formatSuffix="ms"
-            />
-          </SettingItem>
+          <RangeSettingItem
+            id="volumeFadeTime"
+            label={t("settings.playback.volumeFadeTime")}
+            highlighted={isHi("volumeFadeTime")}
+            index={nextIndex()}
+            min={200}
+            max={2000}
+            step={50}
+            value={volumeFadeTime()}
+            onPreview={setVolumeFadeTime}
+            onCommit={handleVolumeFadeTime}
+            formatSuffix="ms"
+          />
         </Show>
       </SettingGroup>
 
       <SettingGroup title={t("settings.playback.audioSettings")}>
-        <SettingItem
+        <SelectSettingItem
           id="ncmSongLevel"
           label={t("settings.ncm.songLevel")}
           description={t("settings.ncm.songLevel.desc")}
           highlighted={isHi("ncmSongLevel")}
           index={nextIndex()}
-        >
-          <SelectInput
-            value={ncmSongLevel()}
-            options={songLevelOptions()}
-            onChange={handleNcmSongLevel}
-          />
-        </SettingItem>
+          value={ncmSongLevel()}
+          options={songLevelOptions()}
+          onChange={handleNcmSongLevel}
+        />
       </SettingGroup>
     </section>
   );

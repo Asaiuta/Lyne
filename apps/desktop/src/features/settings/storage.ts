@@ -114,5 +114,14 @@ export function togglePersistedField<K extends UISettingsBooleanFieldName>(
   currentValue: Accessor<UISettings[K]>,
   setValue: Setter<UISettings[K]>
 ): boolean {
-  return commitUISettingField(field, (!currentValue()) as UISettings[K], currentValue, setValue);
+  return setPersistedBooleanField(field, (!currentValue()) as UISettings[K], currentValue, setValue);
+}
+
+export function setPersistedBooleanField<K extends UISettingsBooleanFieldName>(
+  field: K,
+  value: UISettings[K],
+  currentValue: Accessor<UISettings[K]>,
+  setValue: Setter<UISettings[K]>
+): boolean {
+  return commitUISettingField(field, value, currentValue, setValue);
 }

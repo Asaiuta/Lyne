@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
-import { createApiClient } from "../../../shared/api/client";
+import { createApiClient, type NoiseShaperCurve } from "../../../shared/api/client";
 import type {
   AudioDeviceInfo,
   DevicesResponse,
@@ -11,7 +11,13 @@ import type {
 import { useTranslation } from "../../../shared/i18n";
 import type { TranslationKey } from "../../../shared/i18n";
 import {
-  SettingItem,
+  BooleanSettingItem,
+  ButtonSettingItem,
+  SelectSettingItem,
+  TextSettingItem,
+  type SelectOption
+} from "../components/SettingControls";
+import {
   settingItemBlockBodyClass,
   settingItemBlockClass,
   settingItemClass,
@@ -21,124 +27,39 @@ import {
   settingsSectionClass
 } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import { SelectInput, type SelectOption } from "../components/SelectInput";
+import {
+  AUDIO_ENGINE_BOOLEAN_ITEMS,
+  AUDIO_ENGINE_TEXT_ITEMS,
+  EQ_BANDS,
+  EQ_TYPE_OPTIONS,
+  LOUDNESS_MODE_OPTIONS,
+  NOISE_SHAPER_OPTIONS,
+  OUTPUT_BIT_OPTIONS,
+  RESAMPLE_QUALITY_OPTIONS,
+  audioEngineFormFromSettings,
+  buildEmptyEqBands,
+  defaultAudioEngineForm,
+  eqBandsFromSettings,
+  eqBandsForSettingsUpdate,
+  findAudioEngineBooleanItem,
+  readAudioEngineFormScalarValue,
+  type AudioEngineBooleanItemDescriptor,
+  type AudioEngineTextDisableWhen,
+  type AudioEngineTextItemDescriptor,
+  type EqBandKey,
+  type SettingsFormState
+} from "./audioEngineSettingsModel";
 
 const api = createApiClient();
-
-const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
-type EqBandKey = `${(typeof EQ_BANDS)[number]}`;
-const EQ_BAND_KEYS: ReadonlyArray<EqBandKey> = EQ_BANDS.map((hz) => String(hz) as EqBandKey);
-
-const NOISE_SHAPER_OPTIONS = ["Lipshitz5", "FWeighted9", "ModifiedE9", "ImprovedE9", "TpdfOnly"] as const;
-const LOUDNESS_MODE_OPTIONS = ["track", "album", "streaming", "replaygain_track", "replaygain_album"] as const;
-const RESAMPLE_QUALITY_OPTIONS = ["low", "std", "hq", "uhq"] as const;
-const OUTPUT_BIT_OPTIONS = ["16", "24", "32"] as const;
-
-interface SettingsFormState {
-  deviceId: string;
-  exclusiveMode: boolean;
-  volume: string;
-  eqType: string;
-  firTaps: string;
-  ditherEnabled: boolean;
-  outputBits: string;
-  noiseShaperCurve: string;
-  loudnessEnabled: boolean;
-  loudnessMode: string;
-  targetLufs: string;
-  preampDb: string;
-  saturationEnabled: boolean;
-  saturationDrive: string;
-  saturationMix: string;
-  crossfeedEnabled: boolean;
-  crossfeedMix: string;
-  dynamicLoudnessEnabled: boolean;
-  dynamicLoudnessStrength: string;
-  targetSamplerate: string;
-  resampleQuality: string;
-  useCache: boolean;
-  preemptiveResample: boolean;
-  eqBands: Record<EqBandKey, number>;
-}
 
 interface AudioEngineSectionProps {
   highlightId: string | null;
   onStateRefresh: () => Promise<void>;
 }
 
+type OutputBits = 16 | 24 | 32;
+
 const formatHz = (hz: number) => (hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`);
-
-const buildEmptyEqBands = (): Record<EqBandKey, number> =>
-  EQ_BAND_KEYS.reduce((acc, key) => {
-    acc[key] = 0;
-    return acc;
-  }, {} as Record<EqBandKey, number>);
-
-const eqBandsFromSettings = (settings: PersistentSettings): Record<EqBandKey, number> => {
-  const result = buildEmptyEqBands();
-  if (!settings.eq_bands) return result;
-  for (const key of EQ_BAND_KEYS) {
-    const value = settings.eq_bands[key];
-    if (typeof value === "number" && Number.isFinite(value)) {
-      result[key] = value;
-    }
-  }
-  return result;
-};
-
-const defaultForm = (): SettingsFormState => ({
-  deviceId: "",
-  exclusiveMode: false,
-  volume: "0.7",
-  eqType: "IIR",
-  firTaps: "1023",
-  ditherEnabled: true,
-  outputBits: "24",
-  noiseShaperCurve: "Lipshitz5",
-  loudnessEnabled: true,
-  loudnessMode: "track",
-  targetLufs: "-12",
-  preampDb: "0",
-  saturationEnabled: false,
-  saturationDrive: "0.5",
-  saturationMix: "1.0",
-  crossfeedEnabled: false,
-  crossfeedMix: "0.3",
-  dynamicLoudnessEnabled: false,
-  dynamicLoudnessStrength: "0.5",
-  targetSamplerate: "",
-  resampleQuality: "hq",
-  useCache: false,
-  preemptiveResample: true,
-  eqBands: buildEmptyEqBands()
-});
-
-const toFormState = (settings: PersistentSettings): SettingsFormState => ({
-  deviceId: settings.device_id === null ? "" : String(settings.device_id),
-  exclusiveMode: settings.exclusive_mode,
-  volume: String(settings.volume),
-  eqType: settings.eq_type,
-  firTaps: settings.fir_taps === null ? "" : String(settings.fir_taps),
-  ditherEnabled: settings.dither_enabled,
-  outputBits: String(settings.output_bits),
-  noiseShaperCurve: settings.noise_shaper_curve,
-  loudnessEnabled: settings.loudness_enabled,
-  loudnessMode: settings.loudness_mode,
-  targetLufs: String(settings.target_lufs),
-  preampDb: String(settings.preamp_db),
-  saturationEnabled: settings.saturation_enabled,
-  saturationDrive: String(settings.saturation_drive),
-  saturationMix: String(settings.saturation_mix),
-  crossfeedEnabled: settings.crossfeed_enabled,
-  crossfeedMix: String(settings.crossfeed_mix),
-  dynamicLoudnessEnabled: settings.dynamic_loudness_enabled,
-  dynamicLoudnessStrength: String(settings.dynamic_loudness_strength),
-  targetSamplerate: settings.target_samplerate === null ? "" : String(settings.target_samplerate),
-  resampleQuality: settings.resample_quality,
-  useCache: settings.use_cache,
-  preemptiveResample: settings.preemptive_resample,
-  eqBands: eqBandsFromSettings(settings)
-});
 
 const isOption = <T extends string>(value: string, options: readonly T[]): value is T =>
   options.includes(value as T);
@@ -155,20 +76,12 @@ const eqBandSliderClass =
 
 export function AudioEngineSection(props: AudioEngineSectionProps) {
   const { t } = useTranslation();
-  const eqBandsClass = () =>
-    [
-      settingItemClass,
-      settingItemBlockClass,
-      props.highlightId === "eqBands" ? settingItemHighlightedClass : ""
-    ]
-      .filter(Boolean)
-      .join(" ");
   const [settingsState, setSettingsState] = createSignal<RequestState<PersistentSettings>>({ status: "idle" });
   const [devicesState, setDevicesState] = createSignal<RequestState<DevicesResponse>>({ status: "idle" });
-  const [form, setForm] = createStore<SettingsFormState>(defaultForm());
+  const [form, setForm] = createStore<SettingsFormState>(defaultAudioEngineForm());
+  const [pendingIds, setPendingIds] = createSignal<ReadonlySet<string>>(new Set());
   const [saveMessageKey, setSaveMessageKey] = createSignal<TranslationKey | null>(null);
   const [saveError, setSaveError] = createSignal<string | null>(null);
-  const [isSaving, setIsSaving] = createSignal(false);
 
   const isHi = (id: string) => props.highlightId === id;
   let itemIndex = 0;
@@ -194,6 +107,18 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
     const data = devicesData();
     return data ? [...data.preferred, ...data.other] : [];
   };
+  const isPending = (id: string) => pendingIds().has(id);
+  const isBusy = () => pendingIds().size > 0;
+  const isOutputPending = () => isPending("device") || isPending("exclusive");
+
+  const eqBandsClass = () =>
+    [
+      settingItemClass,
+      settingItemBlockClass,
+      props.highlightId === "eqBands" ? settingItemHighlightedClass : ""
+    ]
+      .filter(Boolean)
+      .join(" ");
 
   const deviceOptions = createMemo<SelectOption[]>(() => {
     const devList = devices();
@@ -207,8 +132,7 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
   });
 
   const eqTypeOptions: SelectOption[] = [
-    { value: "IIR", label: "IIR" },
-    { value: "FIR", label: "FIR" }
+    ...EQ_TYPE_OPTIONS.map((opt) => ({ value: opt, label: opt }))
   ];
 
   const outputBitOptions = createMemo<SelectOption[]>(() =>
@@ -271,6 +195,31 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
     return parsed;
   };
 
+  const parseOutputBits = (value: string): OutputBits => {
+    if (!isOption(value, OUTPUT_BIT_OPTIONS)) {
+      throw new Error(t("settings.error.invalidBits"));
+    }
+    return Number.parseInt(value, 10) as OutputBits;
+  };
+
+  const markPending = (ids: readonly string[], pending: boolean) => {
+    setPendingIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => {
+        if (pending) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  };
+
+  const refreshSettings = async () => {
+    const settings = await api.getSettings();
+    setSettingsState({ status: "success", data: settings });
+    setForm(audioEngineFormFromSettings(settings));
+    return settings;
+  };
+
   const loadPanelData = async () => {
     setSettingsState({ status: "loading" });
     setDevicesState({ status: "loading" });
@@ -278,13 +227,55 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
       const [settings, devices] = await Promise.all([api.getSettings(), api.listDevices()]);
       setSettingsState({ status: "success", data: settings });
       setDevicesState({ status: "success", data: devices });
-      setForm(toFormState(settings));
+      setForm(audioEngineFormFromSettings(settings));
       setSaveError(null);
     } catch (error) {
       const message = readErrorMessage(error);
       setSettingsState({ status: "error", error: message });
       setDevicesState({ status: "error", error: message });
     }
+  };
+
+  const commit = async (
+    ids: readonly string[],
+    action: () => Promise<void>,
+    rollback?: () => void
+  ) => {
+    setSaveMessageKey(null);
+    setSaveError(null);
+    markPending(ids, true);
+    let actionSucceeded = false;
+    try {
+      await action();
+      actionSucceeded = true;
+      await Promise.all([props.onStateRefresh(), refreshSettings()]);
+      setSaveMessageKey("settings.feedback.saved");
+    } catch (error) {
+      if (!actionSucceeded) rollback?.();
+      setSaveError(readErrorMessage(error));
+    } finally {
+      markPending(ids, false);
+    }
+  };
+
+  const savePatch = (
+    id: string,
+    patch: PersistentSettingsUpdate,
+    rollback?: () => void
+  ) => {
+    void commit([id], () => api.saveSettings(patch), rollback);
+  };
+
+  const commitOutput = (ids: readonly string[], nextDeviceId: string, nextExclusive: boolean, rollback: () => void) => {
+    void commit(
+      ids,
+      async () => {
+        const deviceId = parseDeviceId(nextDeviceId);
+        await api.configureOutput(deviceId, nextExclusive);
+        await api.saveSettings({ device_id: deviceId, exclusive_mode: nextExclusive });
+      },
+      rollback
+    );
   };
 
   onMount(() => {
@@ -295,125 +286,252 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
     setForm("eqBands", key, value);
   };
 
-  const handleResetEq = () => {
-    setForm("eqBands", buildEmptyEqBands());
+  const persistedEqBands = () => {
+    const settings = settingsData();
+    return settings ? eqBandsFromSettings(settings) : buildEmptyEqBands();
   };
 
-  const handleSave = async () => {
-    setSaveMessageKey(null);
-    setSaveError(null);
+  const revertEqBands = (bands: Record<EqBandKey, number>) => {
+    setForm("eqBands", { ...bands });
+  };
 
+  const handleEqBandsCommit = () => {
+    const nextBands = { ...form.eqBands };
+    savePatch("eqBands", { eq_bands: eqBandsForSettingsUpdate(nextBands) }, () =>
+      revertEqBands(persistedEqBands())
+    );
+  };
+
+  const handleResetEq = () => {
+    const nextBands = buildEmptyEqBands();
+    setForm("eqBands", nextBands);
+    savePatch("eqBands", { eq_bands: nextBands }, () => revertEqBands(persistedEqBands()));
+  };
+
+  const handleDeviceChange = (value: string) => {
+    const previous = form.deviceId;
+    setForm("deviceId", value);
+    commitOutput(["device"], value, form.exclusiveMode, () => setForm("deviceId", previous));
+  };
+
+  const handleExclusiveModeChange = (checked: boolean) => {
+    const previous = form.exclusiveMode;
+    setForm("exclusiveMode", checked);
+    commitOutput(["exclusive"], form.deviceId, checked, () => setForm("exclusiveMode", previous));
+  };
+
+  const handleEqTypeChange = (value: string) => {
+    if (!isOption(value, EQ_TYPE_OPTIONS)) return;
+    const previous = form.eqType;
     try {
-      const deviceId = parseDeviceId(form.deviceId);
-      const volume = parseRangedNumber(form.volume, t("settings.field.volume"), 0, 4);
-      const firTaps = parseOptionalInteger(form.firTaps, t("settings.field.firTaps"));
-      const outputBits = Number.parseInt(form.outputBits, 10);
-      const targetLufs = parseRequiredNumber(form.targetLufs, t("settings.field.loudnessTarget"));
-      const preampDb = parseRequiredNumber(form.preampDb, t("settings.field.preamp"));
-      const targetSamplerate = parseOptionalInteger(form.targetSamplerate, t("settings.field.upsampling"));
-      const saturationDrive = parseRangedNumber(form.saturationDrive, t("settings.field.saturationDrive"), 0, 4);
-      const saturationMix = parseRangedNumber(form.saturationMix, t("settings.field.saturationMix"), 0, 1);
-      const crossfeedMix = parseRangedNumber(form.crossfeedMix, t("settings.field.crossfeedMix"), 0, 1);
-      const dynamicLoudnessStrength = parseRangedNumber(
-        form.dynamicLoudnessStrength,
-        t("settings.field.dynamicLoudnessStrength"),
-        0,
-        1
-      );
-
-      if (!Number.isInteger(outputBits) || !isOption(form.outputBits, OUTPUT_BIT_OPTIONS)) {
-        throw new Error(t("settings.error.invalidBits"));
-      }
-      if (!isOption(form.noiseShaperCurve, NOISE_SHAPER_OPTIONS)) {
-        throw new Error(t("settings.error.invalidNoiseShaper"));
-      }
-      if (!isOption(form.loudnessMode, LOUDNESS_MODE_OPTIONS)) {
-        throw new Error(t("settings.error.invalidLoudnessMode"));
-      }
-      if (!isOption(form.resampleQuality, RESAMPLE_QUALITY_OPTIONS)) {
-        throw new Error(t("settings.error.invalidResampleQuality"));
-      }
-
-      const eqBandsForUpdate = EQ_BAND_KEYS.reduce((acc, key) => {
-        acc[key] = form.eqBands[key];
-        return acc;
-      }, {} as Record<string, number>);
-
-      const settingsUpdate: PersistentSettingsUpdate = {
-        device_id: deviceId,
-        exclusive_mode: form.exclusiveMode,
-        volume,
-        eq_type: form.eqType,
-        fir_taps: form.eqType === "FIR" ? firTaps ?? 1023 : undefined,
-        eq_bands: eqBandsForUpdate,
-        dither_enabled: form.ditherEnabled,
-        output_bits: outputBits,
-        noise_shaper_curve: form.noiseShaperCurve,
-        loudness_enabled: form.loudnessEnabled,
-        loudness_mode: form.loudnessMode,
-        target_lufs: targetLufs,
-        preamp_db: preampDb,
-        saturation_enabled: form.saturationEnabled,
-        saturation_drive: saturationDrive,
-        saturation_mix: saturationMix,
-        crossfeed_enabled: form.crossfeedEnabled,
-        crossfeed_mix: crossfeedMix,
-        dynamic_loudness_enabled: form.dynamicLoudnessEnabled,
-        dynamic_loudness_strength: dynamicLoudnessStrength,
-        target_samplerate: targetSamplerate,
-        resample_quality: form.resampleQuality,
-        use_cache: form.useCache,
-        preemptive_resample: form.preemptiveResample
-      };
-
-      setIsSaving(true);
-      await api.configureOutput(deviceId, form.exclusiveMode);
-      await api.saveSettings(settingsUpdate);
-      await Promise.all([props.onStateRefresh(), loadPanelData()]);
-      setSaveMessageKey("settings.feedback.saved");
+      const firTaps = value === "FIR"
+        ? parseOptionalInteger(form.firTaps, t("settings.field.firTaps")) ?? 1023
+        : undefined;
+      setForm("eqType", value);
+      savePatch("eqType", { eq_type: value, fir_taps: firTaps }, () => setForm("eqType", previous));
     } catch (error) {
+      setSaveMessageKey(null);
       setSaveError(readErrorMessage(error));
-    } finally {
-      setIsSaving(false);
     }
   };
 
-  const numField = (id: string, label: string, value: () => string, setValue: (next: string) => void, disabled = false) => (
-    <SettingItem id={id} label={label} highlighted={isHi(id)} index={nextIndex()}>
-      <input class="text-input" type="text" value={value()} onInput={(e) => setValue(e.currentTarget.value)} disabled={isSaving() || disabled} />
-    </SettingItem>
+  const handleOutputBitsChange = (value: string) => {
+    const previous = form.outputBits;
+    try {
+      const bits = parseOutputBits(value);
+      setForm("outputBits", value);
+      void commit(
+        ["outputBits"],
+        async () => {
+          await api.configureOutputBits({ bits });
+          await api.saveSettings({ output_bits: bits });
+        },
+        () => setForm("outputBits", previous)
+      );
+    } catch (error) {
+      setSaveError(readErrorMessage(error));
+    }
+  };
+
+  const handleNoiseShaperChange = (value: string) => {
+    if (!isOption(value, NOISE_SHAPER_OPTIONS)) {
+      setSaveError(t("settings.error.invalidNoiseShaper"));
+      return;
+    }
+    const previous = form.noiseShaperCurve;
+    setForm("noiseShaperCurve", value);
+    void commit(
+      ["noiseShaper"],
+      async () => {
+        await api.setNoiseShaperCurve({ curve: value as NoiseShaperCurve });
+        await api.saveSettings({ noise_shaper_curve: value });
+      },
+      () => setForm("noiseShaperCurve", previous)
+    );
+  };
+
+  const handleLoudnessModeChange = (value: string) => {
+    if (!isOption(value, LOUDNESS_MODE_OPTIONS)) {
+      setSaveError(t("settings.error.invalidLoudnessMode"));
+      return;
+    }
+    const previous = form.loudnessMode;
+    setForm("loudnessMode", value);
+    savePatch("loudnessMode", { loudness_mode: value }, () => setForm("loudnessMode", previous));
+  };
+
+  const handleResampleQualityChange = (value: string) => {
+    if (!isOption(value, RESAMPLE_QUALITY_OPTIONS)) {
+      setSaveError(t("settings.error.invalidResampleQuality"));
+      return;
+    }
+    const previous = form.resampleQuality;
+    setForm("resampleQuality", value);
+    savePatch("resampleQuality", { resample_quality: value }, () => setForm("resampleQuality", previous));
+  };
+
+  const handleBooleanChange = (id: string, checked: boolean) => {
+    const { formField, settingsField } = findAudioEngineBooleanItem(id);
+    const previous = form[formField];
+    setForm(formField, checked);
+    savePatch(id, { [settingsField]: checked }, () => setForm(formField, previous));
+  };
+
+  const parseTextSetting = (descriptor: AudioEngineTextItemDescriptor) => {
+    const label = t(descriptor.parser.fieldLabelKey);
+    const value = form[descriptor.formField];
+    switch (descriptor.parser.kind) {
+      case "optionalInteger":
+        return parseOptionalInteger(value, label) ?? descriptor.parser.emptyFallback ?? null;
+      case "requiredNumber":
+        return parseRequiredNumber(value, label);
+      case "rangedNumber":
+        return parseRangedNumber(value, label, descriptor.parser.min, descriptor.parser.max);
+      default: {
+        const exhaustive: never = descriptor.parser;
+        throw new Error(`unhandled text setting parser: ${String(exhaustive)}`);
+      }
+    }
+  };
+
+  const isTextSettingDisabled = (disabledWhen?: AudioEngineTextDisableWhen) => {
+    switch (disabledWhen) {
+      case undefined:
+        return false;
+      case "eqTypeIsNotFir":
+        return form.eqType !== "FIR";
+      case "saturationDisabled":
+        return !form.saturationEnabled;
+      case "crossfeedDisabled":
+        return !form.crossfeedEnabled;
+      case "dynamicLoudnessDisabled":
+        return !form.dynamicLoudnessEnabled;
+      default: {
+        const exhaustive: never = disabledWhen;
+        throw new Error(`unhandled text setting disabled condition: ${String(exhaustive)}`);
+      }
+    }
+  };
+
+  const commitTextField = (
+    id: string,
+    patch: () => PersistentSettingsUpdate,
+    rollback: () => void
+  ) => {
+    try {
+      savePatch(id, patch(), rollback);
+    } catch (error) {
+      setSaveMessageKey(null);
+      setSaveError(readErrorMessage(error));
+    }
+  };
+
+  const textField = (descriptor: AudioEngineTextItemDescriptor) => (
+    <TextSettingItem
+      id={descriptor.id}
+      label={t(descriptor.labelKey)}
+      highlighted={isHi(descriptor.id)}
+      index={nextIndex()}
+      value={form[descriptor.formField]}
+      onInput={(next) => setForm(descriptor.formField, next)}
+      onCommit={() =>
+        commitTextField(
+          descriptor.id,
+          () =>
+            ({
+              [descriptor.settingsField]: parseTextSetting(descriptor)
+            }) as PersistentSettingsUpdate,
+          () =>
+            setForm(
+              descriptor.formField,
+              readAudioEngineFormScalarValue(settingsData(), descriptor.formField)
+            )
+        )
+      }
+      disabled={isTextSettingDisabled(descriptor.disabledWhen) || isPending(descriptor.id)}
+      inputMode="decimal"
+    />
+  );
+
+  const booleanField = (descriptor: AudioEngineBooleanItemDescriptor, label: string) => (
+    <BooleanSettingItem
+      id={descriptor.id}
+      label={label}
+      highlighted={isHi(descriptor.id)}
+      index={nextIndex()}
+      checked={form[descriptor.formField]}
+      onChange={(checked) => handleBooleanChange(descriptor.id, checked)}
+      disabled={isPending(descriptor.id)}
+    />
   );
 
   return (
     <section class={settingsSectionClass}>
       <SettingGroup title={t("settings.title")}>
-        <SettingItem id="device" label={t("settings.device.label")} highlighted={isHi("device")} index={nextIndex()}>
-          <SelectInput value={form.deviceId} options={deviceOptions()} onChange={(v) => setForm("deviceId", v)} disabled={devicesState().status !== "success" || isSaving()} />
-        </SettingItem>
+        <SelectSettingItem
+          id="device"
+          label={t("settings.device.label")}
+          highlighted={isHi("device")}
+          index={nextIndex()}
+          value={form.deviceId}
+          options={deviceOptions()}
+          onChange={handleDeviceChange}
+          disabled={devicesState().status !== "success" || isOutputPending()}
+        />
 
-        <SettingItem id="exclusive" label={t("settings.exclusiveMode")} highlighted={isHi("exclusive")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.exclusiveMode} onChange={(e) => setForm("exclusiveMode", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+        <BooleanSettingItem
+          id="exclusive"
+          label={t("settings.exclusiveMode")}
+          highlighted={isHi("exclusive")}
+          index={nextIndex()}
+          checked={form.exclusiveMode}
+          onChange={handleExclusiveModeChange}
+          disabled={isOutputPending()}
+        />
 
-        {numField("volume", t("settings.volume"), () => form.volume, (n) => setForm("volume", n))}
-        {numField("upsampling", t("settings.upsampling"), () => form.targetSamplerate, (n) => setForm("targetSamplerate", n))}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.volume)}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.upsampling)}
       </SettingGroup>
 
       <SettingGroup title={t("settings.eq.bandsTitle")}>
-        <SettingItem id="eqType" label={t("settings.eq.profile")} highlighted={isHi("eqType")} index={nextIndex()}>
-          <SelectInput value={form.eqType} options={eqTypeOptions} onChange={(v) => setForm("eqType", v)} disabled={isSaving()} />
-        </SettingItem>
-        {numField("firTaps", t("settings.eq.firTaps"), () => form.firTaps, (n) => setForm("firTaps", n), form.eqType !== "FIR")}
+        <SelectSettingItem
+          id="eqType"
+          label={t("settings.eq.profile")}
+          highlighted={isHi("eqType")}
+          index={nextIndex()}
+          value={form.eqType}
+          options={eqTypeOptions}
+          onChange={handleEqTypeChange}
+          disabled={isPending("eqType")}
+        />
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.firTaps)}
 
         <div id="setting-eqBands" class={eqBandsClass()}>
           <div class={settingItemLabelClass}>
             <span class={settingItemNameClass}>{t("settings.eq.bandsTitle")}</span>
           </div>
           <div class={settingItemBlockBodyClass}>
-            <button type="button" class="ghost-button" onClick={handleResetEq} disabled={isSaving()}>
+            <button type="button" class="ghost-button" onClick={handleResetEq} disabled={isPending("eqBands")}>
               {t("settings.eq.reset")}
             </button>
             <div class={eqBandsGridClass}>
@@ -430,8 +548,9 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
                         max={12}
                         step={0.5}
                         value={form.eqBands[key]}
-                        onInput={(e) => updateEqBand(key, Number.parseFloat(e.currentTarget.value))}
-                        disabled={isSaving()}
+                        onInput={(event) => updateEqBand(key, Number.parseFloat(event.currentTarget.value))}
+                        onChange={handleEqBandsCommit}
+                        disabled={isPending("eqBands")}
                         aria-label={t("settings.eq.bandAria", { hz: formatHz(hz) })}
                       />
                       <span class={`eq-band-label ${eqBandTextClass}`}>{formatHz(hz)}</span>
@@ -445,88 +564,85 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
       </SettingGroup>
 
       <SettingGroup title={t("settings.outputBits")}>
-        <SettingItem id="outputBits" label={t("settings.outputBits")} highlighted={isHi("outputBits")} index={nextIndex()}>
-          <SelectInput value={form.outputBits} options={outputBitOptions()} onChange={(v) => setForm("outputBits", v)} disabled={isSaving()} />
-        </SettingItem>
-        <SettingItem id="noiseShaper" label={t("settings.noiseShaper")} highlighted={isHi("noiseShaper")} index={nextIndex()}>
-          <SelectInput value={form.noiseShaperCurve} options={noiseShaperOptions} onChange={(v) => setForm("noiseShaperCurve", v)} disabled={isSaving()} />
-        </SettingItem>
-        <SettingItem id="dither" label={t("settings.dither")} highlighted={isHi("dither")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.ditherEnabled} onChange={(e) => setForm("ditherEnabled", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+        <SelectSettingItem
+          id="outputBits"
+          label={t("settings.outputBits")}
+          highlighted={isHi("outputBits")}
+          index={nextIndex()}
+          value={form.outputBits}
+          options={outputBitOptions()}
+          onChange={handleOutputBitsChange}
+          disabled={isPending("outputBits")}
+        />
+        <SelectSettingItem
+          id="noiseShaper"
+          label={t("settings.noiseShaper")}
+          highlighted={isHi("noiseShaper")}
+          index={nextIndex()}
+          value={form.noiseShaperCurve}
+          options={noiseShaperOptions}
+          onChange={handleNoiseShaperChange}
+          disabled={isPending("noiseShaper")}
+        />
+        {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.dither, t("settings.dither"))}
       </SettingGroup>
 
       <SettingGroup title={t("settings.loudnessEnabled")}>
-        <SettingItem id="loudnessEnabled" label={t("settings.loudnessEnabled")} highlighted={isHi("loudnessEnabled")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.loudnessEnabled} onChange={(e) => setForm("loudnessEnabled", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
-        <SettingItem id="loudnessMode" label={t("settings.loudnessMode")} highlighted={isHi("loudnessMode")} index={nextIndex()}>
-          <SelectInput value={form.loudnessMode} options={loudnessModeOptions} onChange={(v) => setForm("loudnessMode", v)} disabled={isSaving()} />
-        </SettingItem>
-        {numField("targetLufs", t("settings.targetLufs"), () => form.targetLufs, (n) => setForm("targetLufs", n))}
-        {numField("preamp", t("settings.preamp"), () => form.preampDb, (n) => setForm("preampDb", n))}
-        <SettingItem id="resampleQuality" label={t("settings.resampleQuality")} highlighted={isHi("resampleQuality")} index={nextIndex()}>
-          <SelectInput value={form.resampleQuality} options={resampleQualityOptions} onChange={(v) => setForm("resampleQuality", v)} disabled={isSaving()} />
-        </SettingItem>
+        {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.loudnessEnabled, t("settings.loudnessEnabled"))}
+        <SelectSettingItem
+          id="loudnessMode"
+          label={t("settings.loudnessMode")}
+          highlighted={isHi("loudnessMode")}
+          index={nextIndex()}
+          value={form.loudnessMode}
+          options={loudnessModeOptions}
+          onChange={handleLoudnessModeChange}
+          disabled={isPending("loudnessMode")}
+        />
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.targetLufs)}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.preamp)}
+        <SelectSettingItem
+          id="resampleQuality"
+          label={t("settings.resampleQuality")}
+          highlighted={isHi("resampleQuality")}
+          index={nextIndex()}
+          value={form.resampleQuality}
+          options={resampleQualityOptions}
+          onChange={handleResampleQualityChange}
+          disabled={isPending("resampleQuality")}
+        />
       </SettingGroup>
 
       <SettingGroup title={t("settings.saturation.title")}>
-        <SettingItem id="saturationEnabled" label={t("settings.saturation.enabled")} highlighted={isHi("saturationEnabled")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.saturationEnabled} onChange={(e) => setForm("saturationEnabled", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
-        {numField("saturationDrive", t("settings.saturation.drive"), () => form.saturationDrive, (n) => setForm("saturationDrive", n), !form.saturationEnabled)}
-        {numField("saturationMix", t("settings.saturation.mix"), () => form.saturationMix, (n) => setForm("saturationMix", n), !form.saturationEnabled)}
+        {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.saturationEnabled, t("settings.saturation.enabled"))}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.saturationDrive)}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.saturationMix)}
       </SettingGroup>
 
       <SettingGroup title={t("settings.crossfeed.title")}>
-        <SettingItem id="crossfeedEnabled" label={t("settings.crossfeed.enabled")} highlighted={isHi("crossfeedEnabled")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.crossfeedEnabled} onChange={(e) => setForm("crossfeedEnabled", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
-        {numField("crossfeedMix", t("settings.crossfeed.mix"), () => form.crossfeedMix, (n) => setForm("crossfeedMix", n), !form.crossfeedEnabled)}
+        {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.crossfeedEnabled, t("settings.crossfeed.enabled"))}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.crossfeedMix)}
       </SettingGroup>
 
       <SettingGroup title={t("settings.dynamicLoudness.title")}>
-        <SettingItem id="dynamicLoudnessEnabled" label={t("settings.dynamicLoudness.enabled")} highlighted={isHi("dynamicLoudnessEnabled")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.dynamicLoudnessEnabled} onChange={(e) => setForm("dynamicLoudnessEnabled", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
-        {numField("dynamicLoudnessStrength", t("settings.dynamicLoudness.strength"), () => form.dynamicLoudnessStrength, (n) => setForm("dynamicLoudnessStrength", n), !form.dynamicLoudnessEnabled)}
-        <SettingItem id="useCache" label={t("settings.useCache")} highlighted={isHi("useCache")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.useCache} onChange={(e) => setForm("useCache", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
-        <SettingItem id="preemptiveResample" label={t("settings.preemptiveResample")} highlighted={isHi("preemptiveResample")} index={nextIndex()}>
-          <label class="toggle-switch">
-            <input type="checkbox" checked={form.preemptiveResample} onChange={(e) => setForm("preemptiveResample", e.currentTarget.checked)} disabled={isSaving()} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+        {booleanField(
+          AUDIO_ENGINE_BOOLEAN_ITEMS.dynamicLoudnessEnabled,
+          t("settings.dynamicLoudness.enabled")
+        )}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.dynamicLoudnessStrength)}
+        {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.useCache, t("settings.useCache"))}
+        {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.preemptiveResample, t("settings.preemptiveResample"))}
       </SettingGroup>
 
-      <div class="button-row">
-        <button class="primary-button" type="button" onClick={() => void handleSave()} disabled={isSaving()}>
-          {t("settings.save")}
-        </button>
-        <button class="ghost-button" type="button" onClick={() => void loadPanelData()} disabled={isSaving()}>
-          {t("settings.reload")}
-        </button>
-      </div>
+      <ButtonSettingItem
+        id="engineReload"
+        label={t("settings.reload")}
+        highlighted={isHi("engineReload")}
+        index={nextIndex()}
+        buttonLabel={t("settings.reload")}
+        onClick={() => void loadPanelData()}
+        disabled={isBusy()}
+      />
 
       <Show when={settingsError()}>{(error) => <div class="status-error">{error()}</div>}</Show>
       <Show when={devicesError()}>{(error) => <div class="status-error">{error()}</div>}</Show>

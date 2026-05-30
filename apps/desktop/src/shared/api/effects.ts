@@ -1,4 +1,5 @@
 import type { ApiEnvelope, PlayerState } from "./types";
+import { isBoolean, isNumber, isRecord, isString } from "./ncmParserUtils";
 
 export const EFFECTS_API_ROUTES = {
   setEq: { method: "POST", path: "/set_eq" },
@@ -142,16 +143,6 @@ export interface DynamicLoudnessResponse extends StatusMessageResponse {
 export interface NoiseShaperResponse extends StatusMessageResponse {
   noise_shaper: NoiseShaperSettings;
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
-
-const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";
-
-const isNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value);
-
-const isString = (value: unknown): value is string => typeof value === "string";
 
 const parseStatus = (value: unknown): "success" | "error" => {
   if (value === "success" || value === "error") {

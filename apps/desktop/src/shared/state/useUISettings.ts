@@ -170,6 +170,7 @@ export interface UISettings {
   playlistPageElements: PlaylistPageElements;
   contextMenuOptions: ContextMenuOptions;
   customAccentColor: string;
+  themeFollowCover: boolean;
   themeGlobalColor: boolean;
   globalFont: GlobalFont;
   customFontFamily: string;
@@ -198,6 +199,7 @@ export interface UISettings {
   volumeFade: boolean;
   volumeFadeTime: number;
   memoryLastSeek: boolean;
+  localLyricDirectories: string[];
   progressTooltipShow: boolean;
   progressLyricShow: boolean;
   progressAdjustLyric: boolean;
@@ -424,6 +426,15 @@ function createStringField(key: string, defaultValue: string): UISettingField<st
   return createField(key, defaultValue, (runtime) => readString(runtime, key, defaultValue));
 }
 
+function createStringArrayField(key: string, defaultValue: string[]): UISettingField<string[]> {
+  return createField(
+    key,
+    defaultValue,
+    (runtime) => readStringArray(runtime, key, defaultValue),
+    (value) => JSON.stringify(normalizeStringArray(value))
+  );
+}
+
 function createClampedNumberField(
   key: string,
   defaultValue: number,
@@ -481,7 +492,7 @@ function createHomeSectionsField(
         const validKeys = new Set(defaultValue.map((section) => section.key));
         const sections = parsed.filter(
           (section): section is HomeSectionConfig =>
-            isRecord(section) &&
+            isPlainRecord(section) &&
             typeof section.key === "string" &&
             validKeys.has(section.key as HomeSectionKey) &&
             typeof section.order === "number" &&
@@ -626,6 +637,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
     DEFAULT_CONTEXT_MENU_OPTIONS
   ),
   customAccentColor: createStringField("ui.theme.customAccentColor", "#fe7971"),
+  themeFollowCover: createBoolField("ui.theme.followCover", false),
   themeGlobalColor: createBoolField("ui.theme.globalColor", false),
   globalFont: createEnumField("ui.font.global", "default", VALID_GLOBAL_FONTS),
   customFontFamily: createStringField("ui.font.customFamily", ""),
@@ -654,6 +666,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   volumeFade: createBoolField("ui.playback.volumeFade", true),
   volumeFadeTime: createNumberField("ui.playback.volumeFadeTime", 300),
   memoryLastSeek: createBoolField("ui.playback.memoryLastSeek", true),
+  localLyricDirectories: createStringArrayField("ui.local.lyricDirectories", []),
   progressTooltipShow: createBoolField("ui.playback.progressTooltipShow", true),
   progressLyricShow: createBoolField("ui.playback.progressLyricShow", true),
   progressAdjustLyric: createBoolField("ui.playback.progressAdjustLyric", false),
@@ -904,7 +917,37 @@ function readString(runtime: UISettingsRuntime, key: string, fallback: string): 
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function normalizeStringArray(value: readonly string[]): string[] {
+  return Array.from(
+    new Set(
+      value
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    )
+  );
+}
+
+function readStringArray(
+  runtime: UISettingsRuntime,
+  key: string,
+  fallback: string[]
+): string[] {
+  try {
+    const raw = runtime.storage.getItem(key);
+    if (!raw) return [...fallback];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      reportReadError(runtime, key, "invalid_json");
+      return [...fallback];
+    }
+    return normalizeStringArray(parsed.filter((item): item is string => typeof item === "string"));
+  } catch {
+    reportReadError(runtime, key, "invalid_json");
+    return [...fallback];
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -917,7 +960,7 @@ function readBoolRecord<T extends Record<string, boolean>>(
     const raw = runtime.storage.getItem(key);
     if (!raw) return { ...fallback };
     const parsed: unknown = JSON.parse(raw);
-    if (!isRecord(parsed)) {
+    if (!isPlainRecord(parsed)) {
       reportReadError(runtime, key, "invalid_json");
       return { ...fallback };
     }

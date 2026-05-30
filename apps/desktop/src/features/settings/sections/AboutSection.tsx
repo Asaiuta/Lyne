@@ -21,7 +21,7 @@ export function AboutSection(props: AboutSectionProps) {
       <SettingGroup title={t("settings.about.app.title")}>
         <SettingItem
           id="appVersion"
-          label="AudioPlayer"
+          label="Lyne"
           description={t("settings.about.appVersion.desc")}
           highlighted={isHi("appVersion")}
           index={nextIndex()}

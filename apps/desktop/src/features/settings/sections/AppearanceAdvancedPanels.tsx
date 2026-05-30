@@ -3,11 +3,11 @@ import { useTranslation } from "../../../shared/i18n";
 import type { GlobalFont } from "../../../shared/state/useUISettings";
 import {
   BooleanSettingItem,
-  SelectSettingItem
+  SelectSettingItem,
+  type SelectOption
 } from "../components/SettingControls";
 import { SettingItem } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import type { SelectOption } from "../components/SelectInput";
 import type { ManagerConfig } from "./appearanceConfig";
 import type { AppearanceSettings } from "./useAppearanceSettings";
 
@@ -57,13 +57,13 @@ export function ThemeConfigPanel(props: AppearanceAdvancedPanelProps) {
         />
 
         <BooleanSettingItem
-          id="playerFollowCoverColor"
+          id="themeFollowCover"
           label={t("settings.appearance.themeFollowCover")}
           description={t("settings.appearance.themeFollowCover.desc")}
-          highlighted={isHi("playerFollowCoverColor")}
+          highlighted={isHi("themeFollowCover")}
           index={props.nextIndex()}
-          checked={props.settings.playerFollowCoverColor()}
-          onChange={props.settings.handlePlayerFollowCoverColor}
+          checked={props.settings.themeFollowCover()}
+          onChange={props.settings.handleThemeFollowCover}
         />
 
         <SettingItem
@@ -82,7 +82,7 @@ export function ThemeConfigPanel(props: AppearanceAdvancedPanelProps) {
                   style={{ "--swatch-color": color }}
                   onClick={() => props.settings.handleCustomAccentColor(color)}
                   aria-label={color}
-                  disabled={props.settings.playerFollowCoverColor()}
+                  disabled={props.settings.themeFollowCover()}
                 />
               )}
             </For>
@@ -92,7 +92,7 @@ export function ThemeConfigPanel(props: AppearanceAdvancedPanelProps) {
               value={props.settings.customAccentColor()}
               onInput={(event) => props.settings.setCustomAccentColor(event.currentTarget.value)}
               onChange={(event) => props.settings.handleCustomAccentColor(event.currentTarget.value)}
-              disabled={props.settings.playerFollowCoverColor()}
+              disabled={props.settings.themeFollowCover()}
               aria-label={t("settings.appearance.customAccentColor")}
             />
           </div>
@@ -157,7 +157,7 @@ export function CustomCodePanel(props: AppearanceAdvancedPanelProps) {
     null
   );
 
-  const saveCustomCss = () => {
+  const commitCustomCss = () => {
     const ok = props.settings.handleCustomCss(props.settings.customCss());
     setFeedback({
       tone: ok ? "success" : "error",
@@ -167,7 +167,7 @@ export function CustomCodePanel(props: AppearanceAdvancedPanelProps) {
     });
   };
 
-  const saveCustomJs = () => {
+  const commitCustomJs = () => {
     const ok = props.settings.handleCustomJs(props.settings.customJs());
     setFeedback({
       tone: ok ? "success" : "error",
@@ -214,11 +214,9 @@ export function CustomCodePanel(props: AppearanceAdvancedPanelProps) {
               spellcheck={false}
               value={props.settings.customCss()}
               onInput={(event) => props.settings.setCustomCss(event.currentTarget.value)}
+              onBlur={commitCustomCss}
               placeholder={t("settings.appearance.customCss.placeholder")}
             />
-            <button type="button" class="ghost-button" onClick={saveCustomCss}>
-              {t("settings.appearance.customCode.save")}
-            </button>
           </div>
         </SettingItem>
 
@@ -235,12 +233,10 @@ export function CustomCodePanel(props: AppearanceAdvancedPanelProps) {
               spellcheck={false}
               value={props.settings.customJs()}
               onInput={(event) => props.settings.setCustomJs(event.currentTarget.value)}
+              onBlur={commitCustomJs}
               placeholder={t("settings.appearance.customJs.placeholder")}
             />
             <div class="settings-code-actions">
-              <button type="button" class="ghost-button" onClick={saveCustomJs}>
-                {t("settings.appearance.customCode.save")}
-              </button>
               <button type="button" class="ghost-button" onClick={runCustomJs}>
                 {t("settings.appearance.customJs.run")}
               </button>

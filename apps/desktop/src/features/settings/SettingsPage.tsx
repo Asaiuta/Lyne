@@ -3,7 +3,6 @@ import { useTranslation } from "../../shared/i18n";
 import { usePresenceTransition } from "../../shared/ui/usePresenceTransition";
 import { IconClose, IconSPlayerMenu } from "../../components/icons";
 import {
-  SETTINGS_CATEGORIES,
   SettingsCategoryNav,
   type SettingsCategoryKey
 } from "./components/SettingsCategoryNav";
@@ -17,6 +16,7 @@ import { LocalSection } from "./sections/LocalSection";
 import { KeyboardSection } from "./sections/KeyboardSection";
 import { NetworkSection } from "./sections/NetworkSection";
 import { AboutSection } from "./sections/AboutSection";
+import "../../shared/styles/modals/category-load-settings.css";
 
 interface SettingsPageProps {
   isOpen: boolean;
@@ -27,57 +27,73 @@ interface SettingsPageProps {
 
 const HIGHLIGHT_DURATION_MS = 2500;
 
-const settingsModalClass =
-  "settings-modal fixed inset-0 z-modal flex items-center justify-center p-5";
+const settingsModalClass = "settings-modal";
 
-const settingsModalCardClass =
-  "settings-modal-card relative grid grid-cols-[240px_minmax(0,1fr)] w-full max-w-[900px] h-[80vh] min-h-[520px] overflow-hidden text-text scale-100 transition-transform duration-base ease-standard";
+const settingsModalCardClass = "settings-modal-card";
 
-const settingsModalCloseClass =
-  "settings-modal-close absolute right-[14px] top-[14px] z-2 inline-flex h-9 w-9 items-center justify-center rounded-full border-0 bg-[color-mix(in_oklch,var(--surface-2)_60%,transparent)] text-text-soft transition-colors duration-fast ease-standard hover:bg-[color-mix(in_oklch,var(--surface-2)_90%,transparent)] hover:text-text";
+const settingsModalCloseClass = "settings-modal-close";
 
-const settingsModalAsideClass =
-  "settings-modal-aside flex min-h-0 flex-col gap-4 border-r border-border-subtle bg-surface-2 py-5 pl-5 pr-4 pt-6";
+const settingsModalAsideClass = "settings-modal-aside";
 
-const settingsModalMobileHeaderClass =
-  "settings-modal-mobile-header hidden items-center gap-3 border-b border-border-subtle bg-surface-2 px-4 py-3";
+const settingsModalMobileHeaderClass = "settings-modal-mobile-header";
 
-const settingsModalMobileMenuClass =
-  "settings-modal-mobile-menu inline-flex h-9 w-9 items-center justify-center rounded-full border-0 bg-transparent text-text-soft";
+const settingsModalMobileMenuClass = "settings-modal-mobile-menu";
 
-const settingsModalMobileTitleClass = "settings-modal-mobile-title min-w-0 flex-1 text-center text-base font-700 text-text";
+const settingsModalMobileTitleClass = "settings-modal-mobile-title";
 
-const settingsModalMobileCloseClass =
-  "settings-modal-mobile-close hidden h-9 w-9 items-center justify-center rounded-full border-0 bg-transparent text-text-soft";
+const settingsModalMobileSubtitleClass = "settings-modal-mobile-subtitle";
 
-const settingsModalAsideHeaderClass =
-  "settings-modal-aside-header flex flex-col gap-1 px-[6px] pt-1";
+const settingsModalAsideHeaderClass = "settings-modal-aside-header";
 
-const settingsModalAsideTitleClass =
-  "settings-modal-aside-title m-0 text-[26px] font-700 leading-normal text-text";
+const settingsModalAsideTitleClass = "settings-modal-aside-title";
 
-const settingsModalAsideSubtitleClass = "settings-modal-aside-subtitle text-xs text-muted";
+const settingsModalAsideSubtitleClass = "settings-modal-aside-subtitle";
 
-const settingsModalAsideSearchClass = "settings-modal-aside-search px-1";
+const settingsModalAsideSearchClass = "settings-modal-aside-search";
 
-const settingsModalAsideFooterClass =
-  "settings-modal-aside-footer mt-auto flex items-center gap-[6px] px-[6px] pt-2 text-xs text-muted";
+const settingsModalMenuShellBaseClass = "settings-modal-menu-shell";
 
-const settingsModalAsideNameClass = "settings-modal-aside-name font-700 text-text-soft";
+const settingsModalMenuShellHiddenClass = "is-search-active";
 
-const settingsModalAsideVersionClass =
-  "settings-modal-aside-version rounded-pill bg-[color-mix(in_oklch,var(--accent)_16%,transparent)] px-2 py-0.5 font-500 text-accent";
+const settingsModalAsideFooterClass = "settings-modal-aside-footer";
 
-const settingsModalMainClass = "settings-modal-main flex min-h-0 min-w-0 flex-col";
+const settingsModalAsideNameClass = "settings-modal-aside-name";
 
-const settingsModalContentClass =
-  "settings-modal-content min-h-0 flex-1 overflow-y-auto px-[30px] py-10 scroll-smooth";
+const settingsModalAsideVersionClass = "settings-modal-aside-version";
+
+const settingsModalMainClass = "settings-modal-main";
+
+const settingsModalContentClass = "settings-modal-content";
+
+const SETTINGS_FLOATING_SURFACE_SELECTOR = [
+  ".naive-select-menu.n-base-select-menu",
+  ".n-popselect-menu.n-base-select-menu",
+  ".n-dropdown.n-dropdown-menu",
+  ".n-popover.n-popover-shared",
+  ".n-dialog-mask",
+  ".n-modal-mask"
+].join(",");
+
+const hasVisibleFloatingSurface = (): boolean =>
+  Array.from(document.querySelectorAll<HTMLElement>(SETTINGS_FLOATING_SURFACE_SELECTOR)).some(
+    (el) => {
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    }
+  );
 
 export function SettingsPage(props: SettingsPageProps) {
   const { t } = useTranslation();
   const [activeCategory, setActiveCategory] = createSignal<SettingsCategoryKey>("general");
   const [highlightId, setHighlightId] = createSignal<string | null>(null);
-  const [mobileNavOpen, setMobileNavOpen] = createSignal(false);
+  const [mobileNavOpen, setMobileNavOpen] = createSignal(true);
+  const [searchActive, setSearchActive] = createSignal(false);
   const presence = usePresenceTransition(() => props.isOpen);
   let contentRef: HTMLDivElement | undefined;
   let highlightTimer: number | undefined;
@@ -105,14 +121,19 @@ export function SettingsPage(props: SettingsPageProps) {
       contentRef?.scrollTo({ top: 0 });
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") props.onClose();
+      if (event.key !== "Escape") return;
+      if (hasVisibleFloatingSurface()) return;
+      props.onClose();
     };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
+    window.addEventListener("keydown", onKey, { capture: true });
+    onCleanup(() => window.removeEventListener("keydown", onKey, { capture: true }));
   });
 
   createEffect(() => {
-    if (!props.isOpen) setMobileNavOpen(false);
+    if (!props.isOpen) {
+      setMobileNavOpen(true);
+      setSearchActive(false);
+    }
   });
 
   const handleSelect = (key: SettingsCategoryKey) => {
@@ -149,11 +170,6 @@ export function SettingsPage(props: SettingsPageProps) {
     if (props.isOpen && event.target === event.currentTarget) props.onClose();
   };
 
-  const activeCategoryLabel = () => {
-    const category = SETTINGS_CATEGORIES.find((cat) => cat.key === activeCategory());
-    return category ? t(category.labelKey) : t("settings.nav.title");
-  };
-
   return (
     <Show when={presence.rendered()}>
       <div
@@ -173,19 +189,6 @@ export function SettingsPage(props: SettingsPageProps) {
           >
             <IconClose />
           </button>
-          <header class={settingsModalMobileHeaderClass}>
-            <button
-              type="button"
-              class={settingsModalMobileMenuClass}
-              onClick={() => setMobileNavOpen(true)}
-              aria-label={t("settings.nav.title")}
-              aria-expanded={mobileNavOpen()}
-            >
-              <IconSPlayerMenu />
-            </button>
-            <div class={settingsModalMobileTitleClass}>{activeCategoryLabel()}</div>
-            <span aria-hidden="true" class="h-9 w-9" />
-          </header>
           <Show when={mobileNavOpen()}>
             <div
               class="settings-modal-mobile-scrim"
@@ -197,29 +200,37 @@ export function SettingsPage(props: SettingsPageProps) {
             class={`${settingsModalAsideClass}${mobileNavOpen() ? " is-mobile-open" : ""}`}
             aria-label={t("settings.nav.title")}
           >
-            <button
-              type="button"
-              class={settingsModalMobileCloseClass}
-              onClick={() => setMobileNavOpen(false)}
-              aria-label={t("fullPlayer.aria.close")}
-              title={t("fullPlayer.aria.close")}
-            >
-              <IconClose />
-            </button>
             <header class={settingsModalAsideHeaderClass}>
               <h1 class={settingsModalAsideTitleClass}>{t("settings.nav.title")}</h1>
               <span class={settingsModalAsideSubtitleClass}>{t("settings.nav.subtitle")}</span>
             </header>
             <div class={settingsModalAsideSearchClass}>
-              <SettingsSearchBox onJump={handleSearchJump} />
+              <SettingsSearchBox onJump={handleSearchJump} onActiveChange={setSearchActive} />
             </div>
-            <SettingsCategoryNav active={activeCategory()} onSelect={handleSelect} />
+            <div
+              class={`${settingsModalMenuShellBaseClass}${searchActive() ? ` ${settingsModalMenuShellHiddenClass}` : ""}`}
+            >
+              <SettingsCategoryNav active={activeCategory()} onSelect={handleSelect} />
+            </div>
             <footer class={settingsModalAsideFooterClass}>
-              <span class={settingsModalAsideNameClass}>AudioPlayer</span>
+              <span class={settingsModalAsideNameClass}>Lyne</span>
               <span class={settingsModalAsideVersionClass}>v0.1.0</span>
             </footer>
           </aside>
           <div class={settingsModalMainClass}>
+            <header class={settingsModalMobileHeaderClass}>
+              <button
+                type="button"
+                class={settingsModalMobileMenuClass}
+                onClick={() => setMobileNavOpen(!mobileNavOpen())}
+                aria-label={t("settings.nav.title")}
+                aria-expanded={mobileNavOpen()}
+              >
+                <IconSPlayerMenu />
+              </button>
+              <h1 class={settingsModalMobileTitleClass}>{t("settings.nav.title")}</h1>
+              <span class={settingsModalMobileSubtitleClass}>{t("settings.nav.subtitle")}</span>
+            </header>
             <div class={settingsModalContentClass} ref={contentRef}>
               <Switch>
                 <Match when={activeCategory() === "general"}>

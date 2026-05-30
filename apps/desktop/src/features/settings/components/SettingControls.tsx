@@ -1,5 +1,10 @@
 import type { Accessor } from "solid-js";
-import { NaiveSelect, NaiveSwitch, type NaiveSelectOption } from "../../../shared/ui/naive";
+import {
+  NaiveInput,
+  NaiveSelect,
+  NaiveSwitch,
+  type NaiveSelectOption
+} from "../../../shared/ui/naive";
 import { SettingItem, RangeInput } from "./SettingItem";
 import { WipBadge } from "./WipBadge";
 
@@ -17,7 +22,7 @@ interface BaseSettingControlProps {
 
 interface BooleanSettingItemProps extends BaseSettingControlProps {
   checked: boolean;
-  onChange?: () => void;
+  onChange?: (checked: boolean) => void;
 }
 
 export function BooleanSettingItem(props: BooleanSettingItemProps) {
@@ -159,7 +164,55 @@ export function RangeSettingItem(props: RangeSettingItemProps) {
         value={props.value}
         onPreview={props.onPreview}
         onCommit={props.onCommit}
+        disabled={props.disabled || props.wip}
         formatSuffix={props.formatSuffix}
+      />
+    </SettingItem>
+  );
+}
+
+interface TextSettingItemProps extends BaseSettingControlProps {
+  value: string;
+  onInput?: (value: string) => void;
+  onCommit?: (value: string) => void;
+  placeholder?: string;
+  inputMode?: "text" | "decimal" | "numeric";
+}
+
+export function TextSettingItem(props: TextSettingItemProps) {
+  const disabled = () => props.disabled || props.wip;
+  const readCurrentValue = (event: FocusEvent) =>
+    (event.currentTarget as HTMLInputElement).value;
+  const commit = (value: string) => {
+    if (disabled()) return;
+    props.onCommit?.(value);
+  };
+
+  return (
+    <SettingItem
+      id={props.id}
+      label={props.label}
+      description={props.description}
+      highlighted={props.highlighted}
+      index={props.index}
+      badge={props.wip ? <WipBadge /> : undefined}
+    >
+      <NaiveInput
+        type="text"
+        value={props.value}
+        onUpdateValue={(value) => {
+          if (!disabled()) props.onInput?.(value);
+        }}
+        onBlur={(event) => commit(readCurrentValue(event))}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          (event.currentTarget as HTMLInputElement).blur();
+        }}
+        disabled={disabled()}
+        placeholder={props.placeholder}
+        inputProps={{ inputmode: props.inputMode }}
+        ariaLabel={props.label}
       />
     </SettingItem>
   );

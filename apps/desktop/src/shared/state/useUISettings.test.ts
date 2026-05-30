@@ -131,6 +131,12 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
       [STORAGE_KEYS.fullPlayerLayout]: "lyrics",
       [STORAGE_KEYS.dynamicCover]: "true",
       [STORAGE_KEYS.fullPlayerShowCopyLyric]: "false",
+      [STORAGE_KEYS.localLyricDirectories]: JSON.stringify([
+        "D:/Lyrics",
+        " D:/Lyrics ",
+        "E:/MoreLyrics",
+        ""
+      ]),
       [STORAGE_KEYS.contextMenuOptions]: JSON.stringify({ search: false }),
       [STORAGE_KEYS.homeSections]: JSON.stringify([
         { key: "artists", order: 0, visible: false }
@@ -149,6 +155,7 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
   assert.equal(settings.dynamicCover, true);
   assert.equal(settings.fullPlayerShowCopyLyric, false);
   assert.equal(settings.fullPlayerShowLyricOffset, true);
+  assert.deepEqual(settings.localLyricDirectories, ["D:/Lyrics", "E:/MoreLyrics"]);
   assert.equal(settings.contextMenuOptions.search, false);
   assert.equal(settings.contextMenuOptions.play, true);
   assert.equal(settings.contextMenuOptions.more, true);
@@ -341,10 +348,35 @@ test("persistUISettingField serializes structured home sections through schema m
   assert.deepEqual(JSON.parse(values[STORAGE_KEYS.homeSections] ?? "null"), nextSections);
 });
 
+test("persistUISettingField serializes local lyric directories as a normalized array", () => {
+  const values: Record<string, string> = {};
+  const runtime: UISettingsRuntime = {
+    storage: {
+      getItem: (key) => values[key] ?? null,
+      setItem: (key, value) => {
+        values[key] = value;
+      }
+    },
+    events: {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }
+  };
+
+  assert.equal(
+    persistUISettingField("localLyricDirectories", [" D:/Lyrics ", "D:/Lyrics", ""], runtime),
+    true
+  );
+  assert.deepEqual(JSON.parse(values[STORAGE_KEYS.localLyricDirectories] ?? "null"), [
+    "D:/Lyrics"
+  ]);
+});
+
 test("readUISettingsSnapshot reads custom appearance settings from schema", () => {
   const settings = readUISettingsSnapshot(
     runtimeFromValues({
       [STORAGE_KEYS.customAccentColor]: "#57c785",
+      [STORAGE_KEYS.themeFollowCover]: "true",
       [STORAGE_KEYS.themeGlobalColor]: "true",
       [STORAGE_KEYS.globalFont]: "custom",
       [STORAGE_KEYS.customFontFamily]: '"LXGW WenKai", system-ui',
@@ -354,6 +386,7 @@ test("readUISettingsSnapshot reads custom appearance settings from schema", () =
   );
 
   assert.equal(settings.customAccentColor, "#57c785");
+  assert.equal(settings.themeFollowCover, true);
   assert.equal(settings.themeGlobalColor, true);
   assert.equal(settings.globalFont, "custom");
   assert.equal(settings.customFontFamily, '"LXGW WenKai", system-ui');

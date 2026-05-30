@@ -9,13 +9,13 @@ import {
   readUISettingsSnapshot
 } from "../../../shared/state/useUISettings";
 import {
-  SettingItem,
-  RangeInput,
-  settingsSectionClass
-} from "../components/SettingItem";
+  BooleanSettingItem,
+  RangeSettingItem,
+  SelectSettingItem,
+  type SelectOption
+} from "../components/SettingControls";
+import { settingsSectionClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import { SelectInput, type SelectOption } from "../components/SelectInput";
-import { togglePersistedField } from "../storage";
 
 interface LyricsSectionProps {
   highlightId: string | null;
@@ -88,25 +88,36 @@ export function LyricsSection(props: LyricsSectionProps) {
       setLyricRomanizationFontSize
     );
   };
-  const handleShowLyricTranslation = () => {
-    togglePersistedField("showLyricTranslation", showLyricTranslation, setShowLyricTranslation);
+  const handleShowLyricTranslation = (checked: boolean) => {
+    commitUISettingField(
+      "showLyricTranslation",
+      checked,
+      showLyricTranslation,
+      setShowLyricTranslation
+    );
   };
-  const handleShowLyricRomanization = () => {
-    togglePersistedField("showLyricRomanization", showLyricRomanization, setShowLyricRomanization);
+  const handleShowLyricRomanization = (checked: boolean) => {
+    commitUISettingField(
+      "showLyricRomanization",
+      checked,
+      showLyricRomanization,
+      setShowLyricRomanization
+    );
   };
-  const handleShowWordLyrics = () => {
-    togglePersistedField("showWordLyrics", showWordLyrics, setShowWordLyrics);
+  const handleShowWordLyrics = (checked: boolean) => {
+    commitUISettingField("showWordLyrics", checked, showWordLyrics, setShowWordLyrics);
   };
-  const handleLyricsBlur = () => {
-    togglePersistedField("lyricsBlur", lyricsBlur, setLyricsBlur);
+  const handleLyricsBlur = (checked: boolean) => {
+    commitUISettingField("lyricsBlur", checked, lyricsBlur, setLyricsBlur);
   };
   const handleLyricsScrollOffsetPercent = (v: number) => {
     const next = v / 100;
     commitUISettingField("lyricsScrollOffset", next, lyricsScrollOffset, setLyricsScrollOffset);
   };
-  const handleSwapLyricTranslationRomanization = () => {
-    togglePersistedField(
+  const handleSwapLyricTranslationRomanization = (checked: boolean) => {
+    commitUISettingField(
       "swapLyricTranslationRomanization",
+      checked,
       swapLyricTranslationRomanization,
       setSwapLyricTranslationRomanization
     );
@@ -117,8 +128,8 @@ export function LyricsSection(props: LyricsSectionProps) {
   const handleLyricHorizontalOffset = (v: number) => {
     commitUISettingField("lyricHorizontalOffset", v, lyricHorizontalOffset, setLyricHorizontalOffset);
   };
-  const handleLyricAlignRight = () => {
-    togglePersistedField("lyricAlignRight", lyricAlignRight, setLyricAlignRight);
+  const handleLyricAlignRight = (checked: boolean) => {
+    commitUISettingField("lyricAlignRight", checked, lyricAlignRight, setLyricAlignRight);
   };
   const handleLyricsBlendMode = (value: LyricsBlendMode) => {
     commitUISettingField("lyricsBlendMode", value, lyricsBlendMode, setLyricsBlendMode);
@@ -127,227 +138,177 @@ export function LyricsSection(props: LyricsSectionProps) {
   return (
     <section class={settingsSectionClass}>
       <SettingGroup title={t("settings.lyric.displaySettings")}>
-        <SettingItem
+        <RangeSettingItem
           id="lyricFontSize"
           label={t("settings.lyric.fontSize")}
           highlighted={isHi("lyricFontSize")}
           index={nextIndex()}
-        >
-          <RangeInput
-            min={16}
-            max={48}
-            step={1}
-            value={lyricFontSize()}
-            onPreview={setLyricFontSize}
-            onCommit={handleLyricFontSize}
-            formatSuffix="px"
-          />
-        </SettingItem>
+          min={16}
+          max={48}
+          step={1}
+          value={lyricFontSize()}
+          onPreview={setLyricFontSize}
+          onCommit={handleLyricFontSize}
+          formatSuffix="px"
+        />
 
-        <SettingItem
+        <RangeSettingItem
           id="lyricTranslationFontSize"
           label={t("settings.lyric.translationFontSize")}
           description={t("settings.lyric.translationFontSize.desc")}
           highlighted={isHi("lyricTranslationFontSize")}
           index={nextIndex()}
-        >
-          <RangeInput
-            min={5}
-            max={40}
-            step={1}
-            value={lyricTranslationFontSize()}
-            onPreview={setLyricTranslationFontSize}
-            onCommit={handleLyricTranslationFontSize}
-            formatSuffix="px"
-          />
-        </SettingItem>
+          min={5}
+          max={40}
+          step={1}
+          value={lyricTranslationFontSize()}
+          onPreview={setLyricTranslationFontSize}
+          onCommit={handleLyricTranslationFontSize}
+          formatSuffix="px"
+        />
 
-        <SettingItem
+        <RangeSettingItem
           id="lyricRomanizationFontSize"
           label={t("settings.lyric.romanizationFontSize")}
           description={t("settings.lyric.romanizationFontSize.desc")}
           highlighted={isHi("lyricRomanizationFontSize")}
           index={nextIndex()}
-        >
-          <RangeInput
-            min={5}
-            max={40}
-            step={1}
-            value={lyricRomanizationFontSize()}
-            onPreview={setLyricRomanizationFontSize}
-            onCommit={handleLyricRomanizationFontSize}
-            formatSuffix="px"
-          />
-        </SettingItem>
+          min={5}
+          max={40}
+          step={1}
+          value={lyricRomanizationFontSize()}
+          onPreview={setLyricRomanizationFontSize}
+          onCommit={handleLyricRomanizationFontSize}
+          formatSuffix="px"
+        />
 
-        <SettingItem
+        <RangeSettingItem
           id="lyricFontWeight"
           label={t("settings.lyric.fontWeight")}
           description={t("settings.lyric.fontWeight.desc")}
           highlighted={isHi("lyricFontWeight")}
           index={nextIndex()}
-        >
-          <RangeInput
-            min={100}
-            max={900}
-            step={100}
-            value={lyricFontWeight()}
-            onPreview={setLyricFontWeight}
-            onCommit={handleLyricFontWeight}
-          />
-        </SettingItem>
+          min={100}
+          max={900}
+          step={100}
+          value={lyricFontWeight()}
+          onPreview={setLyricFontWeight}
+          onCommit={handleLyricFontWeight}
+        />
 
-        <SettingItem
+        <SelectSettingItem
           id="lyricsPosition"
           label={t("settings.lyric.position")}
           description={t("settings.lyric.position.desc")}
           highlighted={isHi("lyricsPosition")}
           index={nextIndex()}
-        >
-          <SelectInput
-            value={lyricsPosition()}
-            options={lyricsPositionOptions()}
-            onChange={(v) => handleLyricsPosition(v as LyricsPosition)}
-          />
-        </SettingItem>
+          value={lyricsPosition()}
+          options={lyricsPositionOptions()}
+          onChange={(v) => handleLyricsPosition(v as LyricsPosition)}
+        />
 
-        <SettingItem
+        <RangeSettingItem
           id="lyricHorizontalOffset"
           label={t("settings.lyric.horizontalOffset")}
           description={t("settings.lyric.horizontalOffset.desc")}
           highlighted={isHi("lyricHorizontalOffset")}
           index={nextIndex()}
-        >
-          <RangeInput
-            min={0}
-            max={200}
-            step={1}
-            value={lyricHorizontalOffset()}
-            onPreview={setLyricHorizontalOffset}
-            onCommit={handleLyricHorizontalOffset}
-            formatSuffix="px"
-          />
-        </SettingItem>
+          min={0}
+          max={200}
+          step={1}
+          value={lyricHorizontalOffset()}
+          onPreview={setLyricHorizontalOffset}
+          onCommit={handleLyricHorizontalOffset}
+          formatSuffix="px"
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="lyricAlignRight"
           label={t("settings.lyric.alignRight")}
           description={t("settings.lyric.alignRight.desc")}
           highlighted={isHi("lyricAlignRight")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={lyricAlignRight()} onChange={handleLyricAlignRight} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={lyricAlignRight()}
+          onChange={handleLyricAlignRight}
+        />
 
-        <SettingItem
+        <RangeSettingItem
           id="lyricsScrollOffset"
           label={t("settings.lyric.scrollOffset")}
           description={t("settings.lyric.scrollOffset.desc")}
           highlighted={isHi("lyricsScrollOffset")}
           index={nextIndex()}
-        >
-          <RangeInput
-            min={10}
-            max={90}
-            step={5}
-            value={Math.round(lyricsScrollOffset() * 100)}
-            onPreview={(value) => setLyricsScrollOffset(value / 100)}
-            onCommit={handleLyricsScrollOffsetPercent}
-            formatSuffix="%"
-          />
-        </SettingItem>
+          min={10}
+          max={90}
+          step={5}
+          value={Math.round(lyricsScrollOffset() * 100)}
+          onPreview={(value) => setLyricsScrollOffset(value / 100)}
+          onCommit={handleLyricsScrollOffsetPercent}
+          formatSuffix="%"
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="showWordLyrics"
           label={t("settings.lyric.showWordLyrics")}
           description={t("settings.lyric.showWordLyrics.desc")}
           highlighted={isHi("showWordLyrics")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={showWordLyrics()} onChange={handleShowWordLyrics} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={showWordLyrics()}
+          onChange={handleShowWordLyrics}
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="showLyricTranslation"
           label={t("settings.lyric.showTranslation")}
           description={t("settings.lyric.showTranslation.desc")}
           highlighted={isHi("showLyricTranslation")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={showLyricTranslation()} onChange={handleShowLyricTranslation} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={showLyricTranslation()}
+          onChange={handleShowLyricTranslation}
+        />
 
-        <SettingItem
+        <BooleanSettingItem
           id="showLyricRomanization"
           label={t("settings.lyric.showRomanization")}
           description={t("settings.lyric.showRomanization.desc")}
           highlighted={isHi("showLyricRomanization")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              checked={showLyricRomanization()}
-              onChange={handleShowLyricRomanization}
-            />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={showLyricRomanization()}
+          onChange={handleShowLyricRomanization}
+        />
 
         <Show when={showLyricTranslation() && showLyricRomanization()}>
-          <SettingItem
+          <BooleanSettingItem
             id="swapLyricTranslationRomanization"
             label={t("settings.lyric.swapTranslationRomanization")}
             description={t("settings.lyric.swapTranslationRomanization.desc")}
             highlighted={isHi("swapLyricTranslationRomanization")}
             index={nextIndex()}
-          >
-            <label class="toggle-switch">
-              <input
-                type="checkbox"
-                checked={swapLyricTranslationRomanization()}
-                onChange={handleSwapLyricTranslationRomanization}
-              />
-              <span class="toggle-switch-slider" />
-            </label>
-          </SettingItem>
+            checked={swapLyricTranslationRomanization()}
+            onChange={handleSwapLyricTranslationRomanization}
+          />
         </Show>
 
-        <SettingItem
+        <BooleanSettingItem
           id="lyricsBlur"
           label={t("settings.lyric.blur")}
           description={t("settings.lyric.blur.desc")}
           highlighted={isHi("lyricsBlur")}
           index={nextIndex()}
-        >
-          <label class="toggle-switch">
-            <input type="checkbox" checked={lyricsBlur()} onChange={handleLyricsBlur} />
-            <span class="toggle-switch-slider" />
-          </label>
-        </SettingItem>
+          checked={lyricsBlur()}
+          onChange={handleLyricsBlur}
+        />
 
-        <SettingItem
+        <SelectSettingItem
           id="lyricsBlendMode"
           label={t("settings.lyric.blendMode")}
           description={t("settings.lyric.blendMode.desc")}
           highlighted={isHi("lyricsBlendMode")}
           index={nextIndex()}
-        >
-          <SelectInput
-            value={lyricsBlendMode()}
-            options={lyricsBlendModeOptions()}
-            onChange={(v) => handleLyricsBlendMode(v as LyricsBlendMode)}
-          />
-        </SettingItem>
+          value={lyricsBlendMode()}
+          options={lyricsBlendModeOptions()}
+          onChange={(v) => handleLyricsBlendMode(v as LyricsBlendMode)}
+        />
       </SettingGroup>
     </section>
   );

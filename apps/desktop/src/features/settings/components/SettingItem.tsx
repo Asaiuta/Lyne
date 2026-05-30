@@ -1,42 +1,34 @@
 import { Show, createEffect, type JSX } from "solid-js";
 
-export const settingsSectionClass = "settings-section flex flex-col gap-[30px]";
+export const settingsSectionClass = "settings-section";
 
-export const settingItemClass =
-  "set-item flex flex-row items-center justify-between gap-4 w-full min-h-14 p-4 rounded-sm bg-[color-mix(in_oklch,var(--surface-2)_62%,transparent)] border border-[color-mix(in_oklch,var(--border-overlay)_70%,transparent)] transition-colors duration-fast ease-standard";
+export const settingItemClass = "set-item";
 
 export const settingItemSlideInClass =
-  "opacity-0 animate-[settings-slide-up-fade-in_0.26s_cubic-bezier(0.4,0,0.2,1)_both]";
+  "settings-slide-in-item";
 
 export const settingItemHighlightedClass =
-  "is-highlighted outline outline-2 outline-accent outline-offset-2 animate-[settings-highlight-pulse_2.5s_ease-out]";
+  "is-highlighted";
 
-export const settingItemBlockClass = "set-item-block flex-col items-stretch gap-3";
+export const settingItemBlockClass = "set-item-block";
 
-export const settingItemLabelClass =
-  "set-item-label flex flex-col gap-1 min-w-0 flex-1 pr-5";
+export const settingItemLabelClass = "set-item-label";
 
-export const settingItemNameClass =
-  "set-item-name text-[16px] font-500 text-text leading-snug";
+export const settingItemNameClass = "set-item-name";
 
-export const settingItemDescriptionClass =
-  "set-item-desc text-sm text-muted leading-normal";
+export const settingItemDescriptionClass = "set-item-desc";
 
-export const settingItemControlClass =
-  "set-item-control flex items-center justify-end gap-3 shrink-0 min-w-[200px]";
+export const settingItemControlClass = "set-item-control";
 
-export const settingItemBlockBodyClass =
-  "set-item-block-body flex flex-col gap-3 w-full [&_.ghost-button]:self-end";
+export const settingItemBlockBodyClass = "set-item-block-body";
 
-export const settingsHintClass = "settings-hint text-muted";
+export const settingsHintClass = "settings-hint";
 
-export const rangeWithValueClass = "range-with-value flex items-center gap-3 min-w-[180px]";
+export const rangeWithValueClass = "range-with-value";
 
-export const rangeValueClass =
-  "range-value min-w-[48px] text-right text-sm font-600 text-text-soft [font-variant-numeric:tabular-nums]";
+export const rangeValueClass = "range-value";
 
-export const rangeInputClass =
-  "range-with-value-input flex-1 h-[4px] appearance-none rounded-xs outline-none";
+export const rangeInputClass = "range-with-value-input";
 
 function updateRangeFill(el: HTMLInputElement) {
   const min = Number(el.min) || 0;
@@ -134,7 +126,7 @@ export function SettingItem(props: SettingItemProps) {
       data-setting-id={props.id}
     >
       <div class={settingItemLabelClass}>
-        <span class={`${settingItemNameClass} inline-flex items-center gap-2`}>
+        <span class={settingItemNameClass}>
           <span>{props.label}</span>
           <Show when={props.badge}>{props.badge}</Show>
         </span>

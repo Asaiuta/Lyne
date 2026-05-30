@@ -3,11 +3,11 @@ import { useTranslation } from "../../../shared/i18n";
 import {
   BooleanSettingItem,
   ButtonSettingItem,
-  SelectSettingItem
+  SelectSettingItem,
+  type SelectOption
 } from "../components/SettingControls";
 import { settingsSectionClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import type { SelectOption } from "../components/SelectInput";
 
 interface NetworkSectionProps {
   highlightId: string | null;

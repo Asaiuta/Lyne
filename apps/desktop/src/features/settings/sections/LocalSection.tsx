@@ -1,13 +1,21 @@
-import { createMemo } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import { useTranslation } from "../../../shared/i18n";
 import {
   BooleanSettingItem,
   ButtonSettingItem,
-  SelectSettingItem
+  SelectSettingItem,
+  type SelectOption
 } from "../components/SettingControls";
-import { settingsSectionClass } from "../components/SettingItem";
+import {
+  SettingItem,
+  settingsSectionClass
+} from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
-import type { SelectOption } from "../components/SelectInput";
+import {
+  persistUISettingField,
+  useUISettings
+} from "../../../shared/state/useUISettings";
+import { IconDelete, IconFolder, IconFolderPlus } from "../../../components/icons";
 
 interface LocalSectionProps {
   highlightId: string | null;
@@ -15,6 +23,7 @@ interface LocalSectionProps {
 
 export function LocalSection(props: LocalSectionProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
 
   const folderDisplayOptions = createMemo<SelectOption[]>(() => [
     { value: "flat", label: t("settings.local.folderDisplayMode.flat") },
@@ -37,6 +46,25 @@ export function LocalSection(props: LocalSectionProps) {
   const isHi = (id: string) => props.highlightId === id;
   let itemIndex = 0;
   const nextIndex = () => itemIndex++;
+  const localLyricDirectories = () => uiSettings.localLyricDirectories;
+  const commitLocalLyricDirectories = (directories: string[]) => {
+    persistUISettingField("localLyricDirectories", directories);
+  };
+  const normalizeDirectory = (value: string) => value.trim();
+  const addLocalLyricDirectory = () => {
+    if (typeof window === "undefined") return;
+    const value = window.prompt(t("settings.local.localLyricDirectories.prompt"));
+    if (value === null) return;
+    const directory = normalizeDirectory(value);
+    if (!directory) return;
+    const next = Array.from(new Set([...localLyricDirectories(), directory]));
+    commitLocalLyricDirectories(next);
+  };
+  const removeLocalLyricDirectory = (directory: string) => {
+    commitLocalLyricDirectories(
+      localLyricDirectories().filter((candidate) => candidate !== directory)
+    );
+  };
 
   return (
     <section class={settingsSectionClass}>
@@ -78,15 +106,46 @@ export function LocalSection(props: LocalSectionProps) {
       </SettingGroup>
 
       <SettingGroup title={t("settings.local.lyric.title")}>
-        <ButtonSettingItem
+        <SettingItem
           id="localLyricDirectories"
           label={t("settings.local.localLyricDirectories")}
           description={t("settings.local.localLyricDirectories.desc")}
           highlighted={isHi("localLyricDirectories")}
           index={nextIndex()}
-          buttonLabel={t("settings.local.localLyricDirectories.action")}
-          wip
-        />
+        >
+          <div class="local-lyric-directory-control">
+            <button
+              type="button"
+              class="ghost-button local-lyric-directory-add"
+              onClick={addLocalLyricDirectory}
+              title={t("settings.local.localLyricDirectories.action")}
+            >
+              <IconFolderPlus />
+              <span>{t("settings.local.localLyricDirectories.action")}</span>
+            </button>
+            <Show when={localLyricDirectories().length > 0}>
+              <div class="local-lyric-directory-list">
+                <For each={localLyricDirectories()}>
+                  {(directory) => (
+                    <div class="local-lyric-directory-item">
+                      <IconFolder />
+                      <span class="local-lyric-directory-path" title={directory}>{directory}</span>
+                      <button
+                        type="button"
+                        class="local-lyric-directory-remove"
+                        onClick={() => removeLocalLyricDirectory(directory)}
+                        title={t("settings.local.localLyricDirectories.remove")}
+                        aria-label={t("settings.local.localLyricDirectories.remove")}
+                      >
+                        <IconDelete />
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </SettingItem>
       </SettingGroup>
 
       <SettingGroup title={t("settings.local.download.title")}>

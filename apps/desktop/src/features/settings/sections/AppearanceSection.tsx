@@ -73,7 +73,7 @@ export function AppearanceSection(props: AppearanceSectionProps) {
         return (
           highlightedId === "themeConfig" ||
           highlightedId === "themeGlobalColor" ||
-          highlightedId === "playerFollowCoverColor" ||
+          highlightedId === "themeFollowCover" ||
           highlightedId === "customAccentColor"
         );
       case "fontConfig":

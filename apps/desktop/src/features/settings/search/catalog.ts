@@ -28,7 +28,7 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "appearance", itemId: "themeConfig", labelKey: "settings.appearance.themeConfig", descriptionKey: "settings.appearance.themeConfig.desc", keywords: ["theme", "color", "主题", "配色"] },
   { category: "appearance", itemId: "themeGlobalColor", labelKey: "settings.appearance.themeGlobalColor", descriptionKey: "settings.appearance.themeGlobalColor.desc", keywords: ["theme", "global", "accent", "全局着色"] },
   { category: "appearance", itemId: "customAccentColor", labelKey: "settings.appearance.customAccentColor", descriptionKey: "settings.appearance.customAccentColor.desc", keywords: ["theme", "color", "accent", "主题色"] },
-  { category: "appearance", itemId: "playerFollowCoverColor", labelKey: "settings.appearance.themeFollowCover", descriptionKey: "settings.appearance.themeFollowCover.desc", keywords: ["cover", "accent", "dynamic", "动态取色"] },
+  { category: "appearance", itemId: "themeFollowCover", labelKey: "settings.appearance.themeFollowCover", descriptionKey: "settings.appearance.themeFollowCover.desc", keywords: ["cover", "accent", "dynamic", "动态取色"] },
   { category: "appearance", itemId: "fontConfig", labelKey: "settings.appearance.fontConfig", descriptionKey: "settings.appearance.fontConfig.desc", keywords: ["font", "字体"] },
   { category: "appearance", itemId: "globalFont", labelKey: "settings.appearance.globalFont", descriptionKey: "settings.appearance.globalFont.desc", keywords: ["font", "字体"] },
   { category: "appearance", itemId: "customFontFamily", labelKey: "settings.appearance.customFontFamily", descriptionKey: "settings.appearance.customFontFamily.desc", keywords: ["font", "family", "字体栈"] },
@@ -242,7 +242,7 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "network", itemId: "smtcOpen", labelKey: "settings.network.smtcOpen", descriptionKey: "settings.network.smtcOpen.desc", keywords: ["smtc", "windows", "media", "控件", "媒体"] },
 
   // ── about ────────────────────────────────────────────
-  { category: "about", itemId: "appVersion", labelKey: "settings.nav.about", descriptionKey: "settings.about.appVersion.desc", keywords: ["version", "audioplayer", "about", "版本", "关于"] },
+  { category: "about", itemId: "appVersion", labelKey: "settings.nav.about", descriptionKey: "settings.about.appVersion.desc", keywords: ["version", "lyne", "about", "版本", "关于"] },
   { category: "about", itemId: "checkUpdate", labelKey: "settings.about.checkUpdate", descriptionKey: "settings.about.checkUpdate.desc", keywords: ["update", "check", "更新", "检查"] },
   { category: "about", itemId: "changelog", labelKey: "settings.about.changelog", keywords: ["changelog", "release", "notes", "更新日志"] },
   { category: "about", itemId: "projectRepo", labelKey: "settings.about.projectRepo", keywords: ["project", "repo", "github", "source", "项目", "仓库"] },

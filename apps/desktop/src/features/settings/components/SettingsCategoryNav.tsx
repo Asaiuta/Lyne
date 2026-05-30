@@ -40,21 +40,19 @@ const CATEGORIES: ReadonlyArray<CategoryDef> = [
   { key: "about", labelKey: "settings.nav.about", icon: () => <IconLogo /> }
 ];
 
-const settingsNavClass = "settings-nav min-h-0 flex-1 overflow-y-auto";
+const settingsNavClass = "settings-nav n-menu";
 
-const settingsNavListClass =
-  "settings-nav-list m-0 flex list-none flex-col gap-[2px] p-0";
+const settingsNavListClass = "settings-nav-list";
 
-const settingsNavItemBaseClass =
-  "settings-nav-item flex w-full items-center gap-[10px] rounded-md border-0 bg-transparent px-3 py-[10px] text-left text-sm font-500 text-text-soft transition-colors duration-fast ease-standard hover:bg-[color-mix(in_oklch,var(--surface-2)_78%,transparent)] hover:text-text";
+const settingsNavItemWrapperClass = "n-menu-item";
 
-const settingsNavItemActiveClass =
-  "is-active bg-[color-mix(in_oklch,var(--accent)_16%,transparent)] font-600 text-accent";
+const settingsNavItemBaseClass = "settings-nav-item n-menu-item-content";
 
-const settingsNavItemIconClass =
-  "settings-nav-item-icon inline-flex h-5 w-5 shrink-0 items-center justify-center";
+const settingsNavItemActiveClass = "is-active n-menu-item-content--selected";
 
-const settingsNavItemLabelClass = "settings-nav-item-label min-w-0 flex-1";
+const settingsNavItemIconClass = "settings-nav-item-icon n-menu-item-content__icon";
+
+const settingsNavItemLabelClass = "settings-nav-item-label n-menu-item-content-header";
 
 interface SettingsCategoryNavProps {
   active: SettingsCategoryKey;
@@ -76,11 +74,12 @@ export function SettingsCategoryNav(props: SettingsCategoryNavProps) {
                 : settingsNavItemBaseClass;
 
             return (
-              <li>
+              <li class={settingsNavItemWrapperClass}>
                 <button
                   type="button"
                   role="tab"
                   class={className()}
+                  data-setting-category={cat.key}
                   aria-selected={active()}
                   onClick={() => props.onSelect(cat.key)}
                 >

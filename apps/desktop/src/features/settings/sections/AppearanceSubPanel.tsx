@@ -177,9 +177,10 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
             highlighted={isHi("showHomeGreeting")}
             index={props.nextIndex()}
             checked={props.settings.showHomeGreeting()}
-            onChange={() =>
-              props.settings.toggleField(
+            onChange={(checked) =>
+              props.settings.setBooleanField(
                 "showHomeGreeting",
+                checked,
                 props.settings.showHomeGreeting,
                 props.settings.setShowHomeGreeting
               )
@@ -221,9 +222,10 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
                 highlighted={isHi(item.id)}
                 index={props.nextIndex()}
                 checked={item.value(props.settings)()}
-                onChange={() =>
-                  props.settings.toggleField(
+                onChange={(checked) =>
+                  props.settings.setBooleanField(
                     item.field,
+                    checked,
                     item.value(props.settings),
                     item.setValue(props.settings)
                   )
@@ -238,9 +240,10 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
             highlighted={isHi("fullPlayerShowComments")}
             index={props.nextIndex()}
             checked={props.settings.fullPlayerShowComments()}
-            onChange={() =>
-              props.settings.toggleField(
+            onChange={(checked) =>
+              props.settings.setBooleanField(
                 "fullPlayerShowComments",
+                checked,
                 props.settings.fullPlayerShowComments,
                 props.settings.setFullPlayerShowComments
               )
@@ -254,9 +257,10 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
               highlighted={isHi("fullPlayerShowCommentCount")}
               index={props.nextIndex()}
               checked={props.settings.fullPlayerShowCommentCount()}
-              onChange={() =>
-                props.settings.toggleField(
+              onChange={(checked) =>
+                props.settings.setBooleanField(
                   "fullPlayerShowCommentCount",
+                  checked,
                   props.settings.fullPlayerShowCommentCount,
                   props.settings.setFullPlayerShowCommentCount
                 )
@@ -272,9 +276,10 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
                 highlighted={isHi(item.id)}
                 index={props.nextIndex()}
                 checked={item.value(props.settings)()}
-                onChange={() =>
-                  props.settings.toggleField(
+                onChange={(checked) =>
+                  props.settings.setBooleanField(
                     item.field,
+                    checked,
                     item.value(props.settings),
                     item.setValue(props.settings)
                   )
