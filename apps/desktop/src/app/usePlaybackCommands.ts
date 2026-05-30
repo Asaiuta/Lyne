@@ -104,17 +104,6 @@ export function usePlaybackCommands(deps: PlaybackCommandsDeps): PlaybackCommand
 
     void deps.api
       .setVolume(request.target)
-      .then((next) => {
-        if (request.commandId !== volumeCommandId) {
-          return;
-        }
-        if (request.commit) {
-          deps.applyPlayerState({
-            ...next,
-            volume: request.target
-          });
-        }
-      })
       .catch((error) => {
         if (request.commandId !== volumeCommandId) {
           return;
