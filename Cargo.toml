@@ -60,6 +60,18 @@ harness = false
 name = "audio_truepeak_perf"
 harness = false
 
+[[bench]]
+name = "playback_load_budget_perf"
+harness = false
+
+[[bench]]
+name = "backend_ws_event_fanout_perf"
+harness = false
+
+[[bench]]
+name = "backend_library_scan_perf"
+harness = false
+
 [dependencies]
 audio-runtime-paths = { path = "crates/audio-runtime-paths" }
 # --- Core Audio ---
