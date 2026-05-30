@@ -5,10 +5,10 @@ import {
   createMemo,
   createSignal,
   onCleanup,
-  onMount,
   type Accessor,
   type JSX
 } from "solid-js";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export type NaiveTabsActivationMode = "automatic" | "manual";
@@ -72,17 +72,15 @@ export interface NaiveTabsSegmentCapsule {
   capsuleStyle: Accessor<JSX.CSSProperties>;
 }
 
-type IdlePreloadWindow = Window & {
-  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
-
 const defaultRootClass = "naive-tabs";
 const defaultSelectClass = "naive-tabs-select hidden w-full";
 const segmentRailPadding = 3;
 
-let loadedNaiveTabs: NaiveTabsComponent | null = null;
-let naiveTabsImport: Promise<NaiveTabsComponent> | null = null;
+const lazyNaiveTabs = createLazyNaive<NaiveTabsComponent>(() =>
+  import("./NaiveTabsKobalte").then(
+    (module) => module.NaiveTabsKobalte as NaiveTabsComponent
+  )
+);
 
 const tabType = <TValue extends string>(
   props: NaiveTabsProps<TValue>
@@ -237,23 +235,12 @@ export const createNaiveTabsSegmentCapsule = (
   };
 };
 
-const loadNaiveTabs = async (): Promise<NaiveTabsComponent> => {
-  if (loadedNaiveTabs) return loadedNaiveTabs;
-  naiveTabsImport ??= import("./NaiveTabsKobalte").then(
-    (module) => module.NaiveTabsKobalte as NaiveTabsComponent
-  );
-  loadedNaiveTabs = await naiveTabsImport;
-  return loadedNaiveTabs;
-};
-
-const preloadNaiveTabs = (): void => {
-  void loadNaiveTabs();
-};
-
 export function NaiveTabs<TValue extends string>(
   props: NaiveTabsProps<TValue>
 ): JSX.Element {
-  const [LoadedTabs, setLoadedTabs] = createSignal<NaiveTabsComponent | null>(loadedNaiveTabs);
+  const [LoadedTabs, setLoadedTabs] = createSignal<NaiveTabsComponent | null>(
+    lazyNaiveTabs.getLoaded()
+  );
   const resolved = createNaiveTabsResolvedProps(props);
   const segmentCapsule = createNaiveTabsSegmentCapsule(
     () => props.value,
@@ -262,7 +249,7 @@ export function NaiveTabs<TValue extends string>(
   const buttons: Array<HTMLButtonElement | undefined> = [];
 
   const ensureLoaded = (): void => {
-    void loadNaiveTabs().then((component) => setLoadedTabs(() => component));
+    void lazyNaiveTabs.load().then((component) => setLoadedTabs(() => component));
   };
   const focusNext = (currentIndex: number, direction: 1 | -1): void => {
     const items = resolved.items();
@@ -312,19 +299,7 @@ export function NaiveTabs<TValue extends string>(
     }
   };
 
-  onMount(() => {
-    if (loadedNaiveTabs || typeof window === "undefined") return;
-
-    const preloadWindow = window as IdlePreloadWindow;
-    if (preloadWindow.requestIdleCallback) {
-      const id = preloadWindow.requestIdleCallback(preloadNaiveTabs, { timeout: 800 });
-      onCleanup(() => preloadWindow.cancelIdleCallback?.(id));
-      return;
-    }
-
-    const id = preloadWindow.setTimeout(preloadNaiveTabs, 300);
-    onCleanup(() => preloadWindow.clearTimeout(id));
-  });
+  lazyNaiveTabs.useIdlePreload({ idleTimeout: 800, fallbackDelay: 300 });
 
   return (
     <Show
@@ -332,7 +307,7 @@ export function NaiveTabs<TValue extends string>(
       fallback={
         <div
           class={resolved.rootClass()}
-          onPointerEnter={preloadNaiveTabs}
+          onPointerEnter={lazyNaiveTabs.preload}
           onFocusIn={ensureLoaded}
         >
           <div class={resolved.navClass()}>

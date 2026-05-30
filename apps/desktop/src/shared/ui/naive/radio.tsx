@@ -17,6 +17,7 @@ import {
   type NaiveSelectionValue
 } from "./selection-logic";
 import type { NaiveSelectionSize } from "./checkbox";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export interface NaiveRadioGroupProps {
@@ -83,19 +84,13 @@ interface NaiveRadioFamily {
 
 const NaiveRadioGroupContext = createContext<NaiveRadioGroupContextValue | null>(null);
 
-let loadedNaiveRadioFamily: NaiveRadioFamily | null = null;
-let naiveRadioImport: Promise<NaiveRadioFamily> | null = null;
-
-const loadNaiveRadioFamily = async (): Promise<NaiveRadioFamily> => {
-  if (loadedNaiveRadioFamily) return loadedNaiveRadioFamily;
-  naiveRadioImport ??= import("./NaiveRadioKobalte").then((module) => ({
+const lazyNaiveRadioFamily = createLazyNaive<NaiveRadioFamily>(() =>
+  import("./NaiveRadioKobalte").then((module) => ({
     RadioGroup: module.NaiveRadioGroupKobalte,
     Radio: module.NaiveRadioKobalte,
     RadioButton: module.NaiveRadioButtonKobalte
-  }));
-  loadedNaiveRadioFamily = await naiveRadioImport;
-  return loadedNaiveRadioFamily;
-};
+  }))
+);
 
 export const useNaiveRadioGroup = (): NaiveRadioGroupContextValue | null =>
   useContext(NaiveRadioGroupContext);
@@ -248,9 +243,11 @@ function NaiveRadioFallback(props: NaiveRadioProps & { button?: boolean; onWarmu
 }
 
 export function NaiveRadioGroup(props: NaiveRadioGroupProps): JSX.Element {
-  const [Family, setFamily] = createSignal<NaiveRadioFamily | null>(loadedNaiveRadioFamily);
+  const [Family, setFamily] = createSignal<NaiveRadioFamily | null>(
+    lazyNaiveRadioFamily.getLoaded()
+  );
   const ensureLoaded = (): void => {
-    void loadNaiveRadioFamily().then((family) => setFamily(() => family));
+    void lazyNaiveRadioFamily.load().then((family) => setFamily(() => family));
   };
   onMount(ensureLoaded);
 
@@ -268,9 +265,11 @@ export function NaiveRadioGroup(props: NaiveRadioGroupProps): JSX.Element {
 }
 
 export function NaiveRadio(props: NaiveRadioProps): JSX.Element {
-  const [Family, setFamily] = createSignal<NaiveRadioFamily | null>(loadedNaiveRadioFamily);
+  const [Family, setFamily] = createSignal<NaiveRadioFamily | null>(
+    lazyNaiveRadioFamily.getLoaded()
+  );
   const ensureLoaded = (): void => {
-    void loadNaiveRadioFamily().then((family) => setFamily(() => family));
+    void lazyNaiveRadioFamily.load().then((family) => setFamily(() => family));
   };
   onMount(ensureLoaded);
 
@@ -285,9 +284,11 @@ export function NaiveRadio(props: NaiveRadioProps): JSX.Element {
 }
 
 export function NaiveRadioButton(props: NaiveRadioButtonProps): JSX.Element {
-  const [Family, setFamily] = createSignal<NaiveRadioFamily | null>(loadedNaiveRadioFamily);
+  const [Family, setFamily] = createSignal<NaiveRadioFamily | null>(
+    lazyNaiveRadioFamily.getLoaded()
+  );
   const ensureLoaded = (): void => {
-    void loadNaiveRadioFamily().then((family) => setFamily(() => family));
+    void lazyNaiveRadioFamily.load().then((family) => setFamily(() => family));
   };
   onMount(ensureLoaded);
 

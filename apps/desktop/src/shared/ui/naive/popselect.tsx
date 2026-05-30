@@ -4,11 +4,11 @@ import {
   createEffect,
   createSignal,
   onCleanup,
-  onMount,
   type JSX
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { NaiveButton } from "./button";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export interface NaivePopselectOption<TValue extends string> {
@@ -53,11 +53,6 @@ export type NaivePopselectComponent = <TValue extends string>(
   props: NaivePopselectProps<TValue>
 ) => JSX.Element;
 
-type IdlePreloadWindow = Window & {
-  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
-
 type FallbackPopoverPosition = {
   readonly left: number;
   readonly top: number;
@@ -65,8 +60,11 @@ type FallbackPopoverPosition = {
 
 const POPSELECT_LEAVE_PRESENCE_MS = 180;
 
-let loadedNaivePopselect: NaivePopselectComponent | null = null;
-let naivePopselectImport: Promise<NaivePopselectComponent> | null = null;
+const lazyNaivePopselect = createLazyNaive<NaivePopselectComponent>(() =>
+  import("./NaivePopselectKobalte").then(
+    (module) => module.NaivePopselectKobalte as NaivePopselectComponent
+  )
+);
 
 const fallbackClass = (className: string | undefined, fallback: string): string =>
   className ?? fallback;
@@ -74,28 +72,15 @@ const fallbackClass = (className: string | undefined, fallback: string): string 
 const activeClass = (active: boolean, className: string | undefined): string | false =>
   active ? className ?? "is-active" : false;
 
-const loadNaivePopselect = async (): Promise<NaivePopselectComponent> => {
-  if (loadedNaivePopselect) return loadedNaivePopselect;
-  naivePopselectImport ??= import("./NaivePopselectKobalte").then(
-    (module) => module.NaivePopselectKobalte as NaivePopselectComponent
-  );
-  loadedNaivePopselect = await naivePopselectImport;
-  return loadedNaivePopselect;
-};
-
-const preloadNaivePopselect = (): void => {
-  void loadNaivePopselect();
-};
-
 export function NaivePopselect<TValue extends string>(
   props: NaivePopselectProps<TValue>
 ): JSX.Element {
   let fallbackRoot: HTMLDivElement | undefined;
   let fallbackPopover: HTMLDivElement | undefined;
   const [LoadedPopselect, setLoadedPopselect] =
-    createSignal<NaivePopselectComponent | null>(loadedNaivePopselect);
+    createSignal<NaivePopselectComponent | null>(lazyNaivePopselect.getLoaded());
   const [loadedWasRendered, setLoadedWasRendered] =
-    createSignal<boolean>(loadedNaivePopselect != null);
+    createSignal<boolean>(lazyNaivePopselect.getLoaded() != null);
   const [fallbackPosition, setFallbackPosition] = createSignal<FallbackPopoverPosition | null>(
     null
   );
@@ -139,7 +124,7 @@ export function NaivePopselect<TValue extends string>(
     fallbackClass(props.optionCheckClass, "naive-popselect-option-check");
 
   const ensureLoaded = (): void => {
-    void loadNaivePopselect().then((component) => setLoadedPopselect(() => component));
+    void lazyNaivePopselect.load().then((component) => setLoadedPopselect(() => component));
   };
   const updateFallbackPosition = (): void => {
     const trigger = fallbackRoot?.querySelector<HTMLButtonElement>(
@@ -216,19 +201,7 @@ export function NaivePopselect<TValue extends string>(
     });
   });
 
-  onMount(() => {
-    if (loadedNaivePopselect || typeof window === "undefined") return;
-
-    const preloadWindow = window as IdlePreloadWindow;
-    if (preloadWindow.requestIdleCallback) {
-      const id = preloadWindow.requestIdleCallback(preloadNaivePopselect, { timeout: 1200 });
-      onCleanup(() => preloadWindow.cancelIdleCallback?.(id));
-      return;
-    }
-
-    const id = preloadWindow.setTimeout(preloadNaivePopselect, 600);
-    onCleanup(() => preloadWindow.clearTimeout(id));
-  });
+  lazyNaivePopselect.useIdlePreload({ idleTimeout: 1200, fallbackDelay: 600 });
 
   onCleanup(clearFallbackLeaveTimer);
 
@@ -239,8 +212,8 @@ export function NaivePopselect<TValue extends string>(
         <div
           ref={fallbackRoot}
           class={rootClass()}
-          onPointerEnter={preloadNaivePopselect}
-          onFocusIn={preloadNaivePopselect}
+          onPointerEnter={lazyNaivePopselect.preload}
+          onFocusIn={lazyNaivePopselect.preload}
         >
           <NaiveButton
             class={triggerClass()}

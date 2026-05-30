@@ -5,6 +5,7 @@ import {
   onMount,
   type JSX
 } from "solid-js";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export type NaiveInputType =
@@ -78,17 +79,11 @@ export interface NaiveInputRenderState {
 
 export type NaiveInputComponent = (props: NaiveInputProps) => JSX.Element;
 
-let loadedNaiveInput: NaiveInputComponent | null = null;
-let naiveInputImport: Promise<NaiveInputComponent> | null = null;
-
-const loadNaiveInput = async (): Promise<NaiveInputComponent> => {
-  if (loadedNaiveInput) return loadedNaiveInput;
-  naiveInputImport ??= import("./NaiveInputKobalte").then(
+const lazyNaiveInput = createLazyNaive<NaiveInputComponent>(() =>
+  import("./NaiveInputKobalte").then(
     (module) => module.NaiveInputKobalte as NaiveInputComponent
-  );
-  loadedNaiveInput = await naiveInputImport;
-  return loadedNaiveInput;
-};
+  )
+);
 
 const isTextarea = (props: NaiveInputProps): boolean => props.type === "textarea";
 const isBordered = (props: NaiveInputProps): boolean => props.bordered ?? true;
@@ -200,13 +195,13 @@ export function NaiveInputShell(props: {
 export function NaiveInput(props: NaiveInputProps): JSX.Element {
   let fallbackInput: HTMLInputElement | HTMLTextAreaElement | undefined;
   const [LoadedInput, setLoadedInput] =
-    createSignal<NaiveInputComponent | null>(loadedNaiveInput);
+    createSignal<NaiveInputComponent | null>(lazyNaiveInput.getLoaded());
   const [focused, setFocused] = createSignal<boolean>(false);
   const [hovered, setHovered] = createSignal<boolean>(false);
   const [passwordRevealed, setPasswordRevealed] = createSignal<boolean>(false);
 
   const ensureLoaded = (): void => {
-    void loadNaiveInput().then((component) => setLoadedInput(() => component));
+    void lazyNaiveInput.load().then((component) => setLoadedInput(() => component));
   };
   const emitValue = (value: string): void => {
     if (props.allowInput && !props.allowInput(value)) {

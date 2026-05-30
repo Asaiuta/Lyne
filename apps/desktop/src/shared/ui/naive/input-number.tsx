@@ -8,6 +8,7 @@ import {
   type NaiveInputNumberSize,
   type NaiveInputNumberStatus
 } from "./input-number-core";
+import { createLazyNaive } from "./lazy-naive";
 
 export interface NaiveInputNumberProps {
   value?: number | null;
@@ -43,29 +44,23 @@ export interface NaiveInputNumberProps {
 
 export type NaiveInputNumberComponent = (props: NaiveInputNumberProps) => JSX.Element;
 
-let loadedNaiveInputNumber: NaiveInputNumberComponent | null = null;
-let naiveInputNumberImport: Promise<NaiveInputNumberComponent> | null = null;
-
-const loadNaiveInputNumber = async (): Promise<NaiveInputNumberComponent> => {
-  if (loadedNaiveInputNumber) return loadedNaiveInputNumber;
-  naiveInputNumberImport ??= import("./NaiveInputNumberKobalte").then(
+const lazyNaiveInputNumber = createLazyNaive<NaiveInputNumberComponent>(() =>
+  import("./NaiveInputNumberKobalte").then(
     (module) => module.NaiveInputNumberKobalte as NaiveInputNumberComponent
-  );
-  loadedNaiveInputNumber = await naiveInputNumberImport;
-  return loadedNaiveInputNumber;
-};
+  )
+);
 
 const initialDisplayValue = (props: NaiveInputNumberProps): string =>
   formatNaiveInputNumber(props.value ?? props.defaultValue ?? null, props.precision);
 
 export function NaiveInputNumber(props: NaiveInputNumberProps): JSX.Element {
   const [LoadedInputNumber, setLoadedInputNumber] =
-    createSignal<NaiveInputNumberComponent | null>(loadedNaiveInputNumber);
+    createSignal<NaiveInputNumberComponent | null>(lazyNaiveInputNumber.getLoaded());
   const [focused, setFocused] = createSignal<boolean>(false);
   const [hovered, setHovered] = createSignal<boolean>(false);
 
   const ensureLoaded = (): void => {
-    void loadNaiveInputNumber().then((component) => setLoadedInputNumber(() => component));
+    void lazyNaiveInputNumber.load().then((component) => setLoadedInputNumber(() => component));
   };
   const commitValue = (raw: string): void => {
     const parsed = parseNaiveInputNumber(raw);

@@ -4,10 +4,10 @@ import {
   createEffect,
   createSignal,
   onCleanup,
-  onMount,
   type JSX
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export type NaiveDropdownPlacement =
@@ -116,11 +116,6 @@ export interface NaiveDropdownProps {
 
 export type NaiveDropdownComponent = (props: NaiveDropdownProps) => JSX.Element;
 
-type IdlePreloadWindow = Window & {
-  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
-
 type FallbackDropdownPosition = {
   readonly left: number;
   readonly top: number;
@@ -186,21 +181,11 @@ export const naiveDropdownOptionSuffixClass = (): string =>
  */
 export const naiveDropdownDividerClass = (): string => "n-dropdown-divider";
 
-let loadedNaiveDropdown: NaiveDropdownComponent | null = null;
-let naiveDropdownImport: Promise<NaiveDropdownComponent> | null = null;
-
-const loadNaiveDropdown = async (): Promise<NaiveDropdownComponent> => {
-  if (loadedNaiveDropdown) return loadedNaiveDropdown;
-  naiveDropdownImport ??= import("./NaiveDropdownKobalte").then(
+const lazyNaiveDropdown = createLazyNaive<NaiveDropdownComponent>(() =>
+  import("./NaiveDropdownKobalte").then(
     (module) => module.NaiveDropdownKobalte as NaiveDropdownComponent
-  );
-  loadedNaiveDropdown = await naiveDropdownImport;
-  return loadedNaiveDropdown;
-};
-
-const preloadNaiveDropdown = (): void => {
-  void loadNaiveDropdown();
-};
+  )
+);
 
 const fallbackOpenState = (props: NaiveDropdownProps): boolean =>
   props.show ?? props.open ?? props.defaultOpen ?? false;
@@ -462,25 +447,13 @@ function NaiveDropdownFallback(props: NaiveDropdownProps & {
 
 export function NaiveDropdown(props: NaiveDropdownProps): JSX.Element {
   const [LoadedDropdown, setLoadedDropdown] =
-    createSignal<NaiveDropdownComponent | null>(loadedNaiveDropdown);
+    createSignal<NaiveDropdownComponent | null>(lazyNaiveDropdown.getLoaded());
 
   const ensureLoaded = (): void => {
-    void loadNaiveDropdown().then((component) => setLoadedDropdown(() => component));
+    void lazyNaiveDropdown.load().then((component) => setLoadedDropdown(() => component));
   };
 
-  onMount(() => {
-    if (loadedNaiveDropdown || typeof window === "undefined") return;
-
-    const preloadWindow = window as IdlePreloadWindow;
-    if (preloadWindow.requestIdleCallback) {
-      const id = preloadWindow.requestIdleCallback(preloadNaiveDropdown, { timeout: 1200 });
-      onCleanup(() => preloadWindow.cancelIdleCallback?.(id));
-      return;
-    }
-
-    const id = preloadWindow.setTimeout(preloadNaiveDropdown, 600);
-    onCleanup(() => preloadWindow.clearTimeout(id));
-  });
+  lazyNaiveDropdown.useIdlePreload({ idleTimeout: 1200, fallbackDelay: 600 });
 
   return (
     <Show

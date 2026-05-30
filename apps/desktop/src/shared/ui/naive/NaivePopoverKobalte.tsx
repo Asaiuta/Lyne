@@ -52,6 +52,7 @@ export function NaivePopoverKobalte(props: NaivePopoverProps): JSX.Element {
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   let presenceTimer: ReturnType<typeof setTimeout> | undefined;
   let triggerRef: HTMLElement | undefined;
+  let triggerPointerDown = false;
 
   const clearTimers = (): void => {
     if (openTimer !== undefined) {
@@ -147,6 +148,14 @@ export function NaivePopoverKobalte(props: NaivePopoverProps): JSX.Element {
   const isTriggerEventTarget = (target: EventTarget | null): boolean =>
     target instanceof Element && Boolean(triggerRef?.contains(target));
 
+  const markTriggerPointerDown = (): void => {
+    if (triggerMode() === "click") return;
+    triggerPointerDown = true;
+    setTimeout(() => {
+      triggerPointerDown = false;
+    }, 0);
+  };
+
   const renderTrigger = (): JSX.Element => {
     // Click mode: Kobalte's PopoverTrigger handles toggle + aria semantics
     // automatically. Hover/focus/manual modes use Anchor with custom handlers
@@ -179,6 +188,7 @@ export function NaivePopoverKobalte(props: NaivePopoverProps): JSX.Element {
         onPointerLeave={
           triggerMode() === "hover" ? scheduleHoverClose : undefined
         }
+        onPointerDownCapture={markTriggerPointerDown}
         onFocusIn={triggerMode() === "focus" ? handleFocusIn : undefined}
         onFocusOut={triggerMode() === "focus" ? handleFocusOut : undefined}
       >
@@ -193,6 +203,7 @@ export function NaivePopoverKobalte(props: NaivePopoverProps): JSX.Element {
       onOpenChange={(nextOpen) => {
         clearTimers();
         if (props.disabled && nextOpen) return;
+        if (!nextOpen && triggerPointerDown) return;
         setOpen(nextOpen);
       }}
       placement={props.placement ?? "top"}
@@ -216,9 +227,7 @@ export function NaivePopoverKobalte(props: NaivePopoverProps): JSX.Element {
             triggerMode() === "hover" ? scheduleHoverClose : undefined
           }
           onPointerDownOutside={(event) => {
-            if (isTriggerEventTarget(event.target)) {
-              event.preventDefault();
-            }
+            if (isTriggerEventTarget(event.target)) markTriggerPointerDown();
           }}
         >
           <Show when={showArrow()}>

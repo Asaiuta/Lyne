@@ -26,7 +26,7 @@ export interface DismissibleOverlayOptions {
  * Replaces the hand-copied `createEffect(() => { if (!open()) return;
  * window.addEventListener("mousedown", …); window.addEventListener("keydown",
  * …); onCleanup(…) })` block that appeared in PlayerBar, FullPlayer,
- * SelectInput, ContextMenu, and SettingsSearchBox.
+ * select facades, ContextMenu, and SettingsSearchBox.
  */
 export function useDismissibleOverlay(
   isOpen: Accessor<boolean>,

@@ -15,6 +15,7 @@ import {
   resolveNaiveSliderMarks,
   type NaiveSliderOrientation
 } from "./slider-logic";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export type { NaiveSliderOrientation };
@@ -58,17 +59,11 @@ export interface NaiveSliderResolvedValues {
   orientation: NaiveSliderOrientation;
 }
 
-let loadedNaiveSlider: NaiveSliderComponent | null = null;
-let naiveSliderImport: Promise<NaiveSliderComponent> | null = null;
-
-const loadNaiveSlider = async (): Promise<NaiveSliderComponent> => {
-  if (loadedNaiveSlider) return loadedNaiveSlider;
-  naiveSliderImport ??= import("./NaiveSliderKobalte").then(
+const lazyNaiveSlider = createLazyNaive<NaiveSliderComponent>(() =>
+  import("./NaiveSliderKobalte").then(
     (module) => module.NaiveSliderKobalte as NaiveSliderComponent
-  );
-  loadedNaiveSlider = await naiveSliderImport;
-  return loadedNaiveSlider;
-};
+  )
+);
 
 export const resolveNaiveSliderValues = (
   props: Pick<NaiveSliderProps, "value" | "defaultValue" | "min" | "max" | "step" | "orientation">
@@ -195,10 +190,10 @@ export function NaiveSliderFallback(props: NaiveSliderFallbackProps): JSX.Elemen
 
 export function NaiveSlider(props: NaiveSliderProps): JSX.Element {
   const [LoadedSlider, setLoadedSlider] =
-    createSignal<NaiveSliderComponent | null>(loadedNaiveSlider);
+    createSignal<NaiveSliderComponent | null>(lazyNaiveSlider.getLoaded());
 
   const ensureLoaded = (): void => {
-    void loadNaiveSlider().then((component) => setLoadedSlider(() => component));
+    void lazyNaiveSlider.load().then((component) => setLoadedSlider(() => component));
   };
 
   onMount(ensureLoaded);

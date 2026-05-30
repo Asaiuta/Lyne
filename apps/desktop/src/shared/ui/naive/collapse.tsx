@@ -15,6 +15,7 @@ import {
   type NaiveCollapseHeaderClickInfo,
   type NaiveCollapseName
 } from "./collapse-logic";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export type {
@@ -71,18 +72,12 @@ interface NaiveCollapseFamily {
 
 const NaiveCollapseContext = createContext<NaiveCollapseContextValue | null>(null);
 
-let loadedNaiveCollapseFamily: NaiveCollapseFamily | null = null;
-let naiveCollapseImport: Promise<NaiveCollapseFamily> | null = null;
-
-const loadNaiveCollapseFamily = async (): Promise<NaiveCollapseFamily> => {
-  if (loadedNaiveCollapseFamily) return loadedNaiveCollapseFamily;
-  naiveCollapseImport ??= import("./NaiveCollapseKobalte").then((module) => ({
+const lazyNaiveCollapseFamily = createLazyNaive<NaiveCollapseFamily>(() =>
+  import("./NaiveCollapseKobalte").then((module) => ({
     Collapse: module.NaiveCollapseKobalte,
     CollapseItem: module.NaiveCollapseItemKobalte
-  }));
-  loadedNaiveCollapseFamily = await naiveCollapseImport;
-  return loadedNaiveCollapseFamily;
-};
+  }))
+);
 
 export const useNaiveCollapse = (): NaiveCollapseContextValue | null =>
   useContext(NaiveCollapseContext);
@@ -182,9 +177,9 @@ function NaiveCollapseItemFallback(props: NaiveCollapseItemProps): JSX.Element {
 
 export function NaiveCollapse(props: NaiveCollapseProps): JSX.Element {
   const [Family, setFamily] =
-    createSignal<NaiveCollapseFamily | null>(loadedNaiveCollapseFamily);
+    createSignal<NaiveCollapseFamily | null>(lazyNaiveCollapseFamily.getLoaded());
   const ensureLoaded = (): void => {
-    void loadNaiveCollapseFamily().then((family) => setFamily(() => family));
+    void lazyNaiveCollapseFamily.load().then((family) => setFamily(() => family));
   };
   onMount(ensureLoaded);
 
@@ -203,9 +198,9 @@ export function NaiveCollapse(props: NaiveCollapseProps): JSX.Element {
 
 export function NaiveCollapseItem(props: NaiveCollapseItemProps): JSX.Element {
   const [Family, setFamily] =
-    createSignal<NaiveCollapseFamily | null>(loadedNaiveCollapseFamily);
+    createSignal<NaiveCollapseFamily | null>(lazyNaiveCollapseFamily.getLoaded());
   const ensureLoaded = (): void => {
-    void loadNaiveCollapseFamily().then((family) => setFamily(() => family));
+    void lazyNaiveCollapseFamily.load().then((family) => setFamily(() => family));
   };
   onMount(ensureLoaded);
 

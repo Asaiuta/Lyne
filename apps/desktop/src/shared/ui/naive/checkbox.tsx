@@ -14,6 +14,7 @@ import {
   toggleNaiveCheckboxValues,
   type NaiveSelectionValue
 } from "./selection-logic";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export type { NaiveSelectionValue };
@@ -87,17 +88,11 @@ export type NaiveCheckboxComponent = (props: NaiveCheckboxProps) => JSX.Element;
 
 const NaiveCheckboxGroupContext = createContext<NaiveCheckboxGroupContextValue | null>(null);
 
-let loadedNaiveCheckbox: NaiveCheckboxComponent | null = null;
-let naiveCheckboxImport: Promise<NaiveCheckboxComponent> | null = null;
-
-const loadNaiveCheckbox = async (): Promise<NaiveCheckboxComponent> => {
-  if (loadedNaiveCheckbox) return loadedNaiveCheckbox;
-  naiveCheckboxImport ??= import("./NaiveCheckboxKobalte").then(
+const lazyNaiveCheckbox = createLazyNaive<NaiveCheckboxComponent>(() =>
+  import("./NaiveCheckboxKobalte").then(
     (module) => module.NaiveCheckboxKobalte as NaiveCheckboxComponent
-  );
-  loadedNaiveCheckbox = await naiveCheckboxImport;
-  return loadedNaiveCheckbox;
-};
+  )
+);
 
 export const useNaiveCheckboxGroup = (): NaiveCheckboxGroupContextValue | null =>
   useContext(NaiveCheckboxGroupContext);
@@ -210,10 +205,10 @@ function NaiveCheckboxFallback(props: NaiveCheckboxProps & { onWarmup?: () => vo
 
 export function NaiveCheckbox(props: NaiveCheckboxProps): JSX.Element {
   const [LoadedCheckbox, setLoadedCheckbox] =
-    createSignal<NaiveCheckboxComponent | null>(loadedNaiveCheckbox);
+    createSignal<NaiveCheckboxComponent | null>(lazyNaiveCheckbox.getLoaded());
 
   const ensureLoaded = (): void => {
-    void loadNaiveCheckbox().then((component) => setLoadedCheckbox(() => component));
+    void lazyNaiveCheckbox.load().then((component) => setLoadedCheckbox(() => component));
   };
 
   onMount(ensureLoaded);

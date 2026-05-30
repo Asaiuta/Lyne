@@ -17,6 +17,8 @@ This package is an app-local facade layer for SPlayer/NaiveUI parity. The route 
 | `NaiveAlert` | `NAlert` | handwritten display facade, no provider behavior | initial |
 | `NaiveFlex` | `NFlex` | handwritten layout facade; keep layout-specific classes at call sites | initial |
 | `NaiveGrid` / `NaiveGridItem` / `NaiveGi` | `NGrid` / `NGi` | handwritten source-backed CSS grid facade with NaiveUI responsive cols/gaps, item span/offset, collapsed suffix overflow signal | source-backed |
+| `NaiveForm` / `NaiveFormItem` / `NaiveFormItemGi` | `NForm` / `NFormItem` / `NFormItemGi` | handwritten source-backed structural form facade; validation/rules remain app-owned and deferred | source-backed package ready |
+| `NaiveInputGroup` / `NaiveInputGroupLabel` | `NInputGroup` / `NInputGroupLabel` | handwritten joined-control layout facade for input/button/select groups | source-backed package ready |
 | `NaiveCard` | `NCard` | handwritten surface facade; CSS/tokens own the visual shell | initial |
 | `NaiveList` | `NList` | handwritten list container facade; CSS owns hover/border visuals | initial |
 | `NaiveListItem` | `NListItem` | handwritten list row facade with prefix/main/suffix slots | initial |
@@ -69,6 +71,7 @@ This package is an app-local facade layer for SPlayer/NaiveUI parity. The route 
 | `NaiveSkeleton` | `NSkeleton` | handwritten display facade, existing list/grid wrappers compose it | initial |
 | `NaiveSpin` | `NSpin` | handwritten CSS spinner facade, no app icon dependency | initial |
 | `NaiveTag` | `NTag` | handwritten display facade, existing media-row classes remain visual source | initial |
+| `createLazyNaive` (`lazy-naive.ts`) | internal infra | Kobalte-free shared lazy-loader factory (cached dynamic import + `lazy()` warmup + idle/timeout preload) reused by the dropdown/popselect/tabs/input/radio/checkbox/switch/slider/collapse/input-number facades; never imports `@kobalte/core` or a `Naive*Kobalte` module | shared infra |
 
 ## Sidebar Reference
 
@@ -112,7 +115,7 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | 7 | `NScrollbar` | 34 | CSS/browser scrollbar first |
 | 8 | `NTab` | 33 | `NaiveTabs` source-backed/Kobalte facade; migrate focused tab strips first |
 | 9 | `NH3` | 31 | handwritten typography facade; `prefix="bar"` supported |
-| 10 | `NFormItem` | 30 | defer with form-control registry |
+| 10 | `NFormItem` | 30 | `NaiveFormItem` source-backed structural facade; validation/rules remain app-owned |
 | 11 | `NLi` | 28 | handwritten native list facade |
 | 12 | `NEmpty` | 25 | handwritten display facade |
 | 13 | `NSkeleton` | 23 | handwritten display facade |
@@ -142,8 +145,8 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NH3` | 9 | `NaiveH3` handwritten typography facade |
 | `NTab` | 9 | `NaiveTabs` source-backed/Kobalte facade |
 | `NPopover` | 8 | Kobalte popover candidate |
-| `NForm` | 7 | form facade once validation/runtime contract is needed |
-| `NFormItem` | 7 | form facade once validation/runtime contract is needed |
+| `NForm` | 7 | `NaiveForm` source-backed structural facade; validation/runtime contract deferred |
+| `NFormItem` | 7 | `NaiveFormItem` source-backed structural facade; validation/runtime contract deferred |
 | `NGrid` | 6 | `NaiveGrid` source-backed handwritten layout facade |
 | `NNumberAnimation` | 9 occurrences / 6 files | `NaiveNumberAnimation` handwritten source-backed display/tween facade; `StreamingPage` is the first representative AudioPlayer migration |
 | `NSlider` | 6 | `NaiveSlider` source-backed/Kobalte facade; PR-1 migrated PlayerVolumePopover vertical volume, while settings RangeInput, progress sliders, EQ bands, and long-tail range behavior stay deferred |
@@ -152,8 +155,8 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 | `NH1` | 5 | `NaiveH1` handwritten typography facade |
 | `NCollapse` | 5 active occurrences / 6 including commented | `NaiveCollapse` source-backed/Kobalte Accordion facade |
 | `NCollapseItem` | 6 active occurrences / 6 total | `NaiveCollapseItem` source-backed/Kobalte Accordion item facade |
-| `NFormItemGi` | 4 | CSS/grid plus form facade |
-| `NInputGroup` | 4 | CSS/layout only unless behavior appears |
+| `NFormItemGi` | 4 | `NaiveFormItemGi` source-backed structural facade over `NaiveGridItem` |
+| `NInputGroup` | 4 | `NaiveInputGroup` joined-control layout facade; behavior stays with child controls |
 | `NPopconfirm` | 7 instances / 4 files | `NaivePopconfirm` composition facade over `NaivePopover`; first real AudioPlayer call site deferred until a destructive-confirm surface lands |
 | `NEllipsis` | 4 | handwritten display facade |
 | `NBadge` | 3 | handwritten display facade |
@@ -213,6 +216,9 @@ Current tag-occurrence refresh, counted from `D:\AI\SPlayer\src` with `rg --no-f
 
 ## Migration Log
 
+- 2026-05-29: Extracted the duplicated lazy-loader quartet into the Kobalte-free `createLazyNaive()` factory (`lazy-naive.ts`). Ten interaction facades (`dropdown`, `popselect`, `tabs`, `input`, `radio`, `checkbox`, `switch`, `slider`, `collapse`, `input-number`) now build their cached dynamic-import loader, `lazy()` warmup, and the `requestIdleCallback`/`setTimeout` preload dance through the factory instead of copy-pasting `loadedNaiveX` / `naiveXImport` / `loadNaiveX` / `preloadNaiveX`. Each wrapper keeps its inline `import("./Naive<Name>Kobalte")` thunk so Vite still emits one chunk per impl, and preload timings (dropdown/popselect 1200/600, tabs 800/300) are passed as explicit `idleTimeout`/`fallbackDelay`. The factory is added to the no-top-level-Kobalte guardrail list; the startup chunk remains `@kobalte/core`-free and `lazy-naive.test.ts` covers single-resolution caching, in-flight dedup, preload, and idle/timeout scheduling with cleanup.
+
+- 2026-05-29: Added `NaiveForm`, `NaiveFormItem`, `NaiveFormItemGi`, `NaiveInputGroup`, and `NaiveInputGroupLabel` against SPlayer form/copy/cache/modal usage and NaiveUI 2.43.2 form/input-group sources. The facades are handwritten and Kobalte-free; validation/rules remain app-owned/deferred, while focused tests cover class hooks, default resolution, validation-status classes, and input-group label metrics.
 - 2026-05-27: Completed the 05-26 form-control gap pass with four isolated Playwright probes: `naive_input_gaps_probe.mjs`, `naive_input_number_probe.mjs`, `naive_select_multi_probe.mjs`, and `naive_switch_pressed_probe.mjs`. Existing AudioPlayer consumers remain on natural `NaiveInput`, `NaiveSelect`, and `NaiveSwitch` paths; `NaiveInputNumber`, password reveal, and multi/tag select are package-ready probe-backed surfaces until a real business consumer lands. The seed `Form` / `FormItem` / `FormItemGi` / `InputGroup` title is explicitly rescoped to a future form-validation task.
 - 2026-05-27: Completed `NaiveSwitch` tail props against NaiveUI 2.43.2 `Switch.mjs` / `styles/index.cssr.mjs`: the facade now accepts `value` / `defaultValue`, `checkedValue` / `uncheckedValue`, `onUpdateValue`, `id`, `ariaDescribedBy`, and `railStyle`; Kobalte still owns the hidden input semantics while the visible control emits `.n-switch--pressed`, blocks loading/read-only updates, prevents Space scrolling, and renders the loading hook as `.n-base-loading`.
 - 2026-05-27: Added `NaiveSelect` multiple/tag support against SPlayer FontManager and UpdatePlaylist usage plus NaiveUI 2.43.2 `Select.mjs`, `_internal/selection`, `_internal/select-menu`, and `tag` source. The public `select.tsx` prop surface is now a typed single/multiple union; `NaiveSelectKobalte.tsx` renders `.n-base-selection-tags`, `.n-base-selection-tag-wrapper`, `.n-tag--default`, `.n-tag--strong`, close hooks with disabled guards, filterable multiple input-tag hooks, and basic typed-option creation when `tag` is enabled. `maxTagCount`, virtual scroll, remote select, and grouped/header/action menu surfaces remain deferred.

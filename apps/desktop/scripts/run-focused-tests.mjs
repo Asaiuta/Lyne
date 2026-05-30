@@ -6,7 +6,7 @@ import { build } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "src");
-const outDir = path.join(root, ".tmp", "focused-tests");
+const outDir = path.resolve(root, "..", "..", ".tmp", `desktop-focused-tests-${process.pid}`);
 
 const findTests = async (dir) => {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -53,6 +53,10 @@ const outfiles = await Promise.all(
 const result = spawnSync(process.execPath, ["--test", ...outfiles], {
   cwd: root,
   stdio: "inherit"
+});
+
+await rm(outDir, { recursive: true, force: true }).catch((error) => {
+  console.warn("[focused-tests] failed to clean temporary output", error);
 });
 
 process.exit(result.status ?? 1);

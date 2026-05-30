@@ -1,4 +1,5 @@
 import { Show, createSignal, onMount, type JSX } from "solid-js";
+import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
 export type NaiveSwitchSize = "small" | "medium" | "large";
@@ -49,17 +50,11 @@ export interface NaiveSwitchProps {
 
 export type NaiveSwitchComponent = (props: NaiveSwitchProps) => JSX.Element;
 
-let loadedNaiveSwitch: NaiveSwitchComponent | null = null;
-let naiveSwitchImport: Promise<NaiveSwitchComponent> | null = null;
-
-const loadNaiveSwitch = async (): Promise<NaiveSwitchComponent> => {
-  if (loadedNaiveSwitch) return loadedNaiveSwitch;
-  naiveSwitchImport ??= import("./NaiveSwitchKobalte").then(
+const lazyNaiveSwitch = createLazyNaive<NaiveSwitchComponent>(() =>
+  import("./NaiveSwitchKobalte").then(
     (module) => module.NaiveSwitchKobalte as NaiveSwitchComponent
-  );
-  loadedNaiveSwitch = await naiveSwitchImport;
-  return loadedNaiveSwitch;
-};
+  )
+);
 
 const hasSwitchIcon = (props: NaiveSwitchProps): boolean =>
   props.icon != null || props.checkedIcon != null || props.uncheckedIcon != null;
@@ -175,10 +170,10 @@ export function NaiveSwitchRail(props: NaiveSwitchRailProps): JSX.Element {
 
 export function NaiveSwitch(props: NaiveSwitchProps): JSX.Element {
   const [LoadedSwitch, setLoadedSwitch] =
-    createSignal<NaiveSwitchComponent | null>(loadedNaiveSwitch);
+    createSignal<NaiveSwitchComponent | null>(lazyNaiveSwitch.getLoaded());
 
   const ensureLoaded = (): void => {
-    void loadNaiveSwitch().then((component) => setLoadedSwitch(() => component));
+    void lazyNaiveSwitch.load().then((component) => setLoadedSwitch(() => component));
   };
 
   onMount(ensureLoaded);
