@@ -51,8 +51,13 @@ pub(super) async fn analyze_automix_track(
     let credentials_for_job = credentials.clone();
     let options_for_job = options.clone();
 
-    let result = run_analysis_job(&data, move || {
-        crate::processor::analyze_automix(path_for_job, credentials_for_job, options_for_job)
+    let result = run_analysis_job(&data, move |cancel_token| {
+        crate::processor::analyze_automix_with_cancel(
+            path_for_job,
+            credentials_for_job,
+            options_for_job,
+            Some(cancel_token.decode_token()),
+        )
     })
     .await;
 

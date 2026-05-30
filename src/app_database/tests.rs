@@ -235,6 +235,120 @@ fn empty_stream_metadata_does_not_clear_external_metadata() {
 }
 
 #[test]
+fn batch_media_metadata_preserves_external_display_metadata() {
+    let db = AppDatabase::in_memory().unwrap();
+    let path = "https://music.example.test/batch-stream.mp3";
+    db.record_external_media_metadata(
+        path,
+        Some("Batch Song"),
+        Some("Batch Artist"),
+        Some("Batch Album"),
+        Some(200.0),
+        Some("https://img.example.test/batch.jpg"),
+    )
+    .unwrap();
+
+    let inputs = [MediaMetadataScanInput {
+        source_path: path,
+        metadata: &TrackMetadata::default(),
+        duration_secs: Some(201.0),
+        sample_rate: Some(48_000),
+        channels: Some(2),
+        bitrate_bps: Some(900_000.0),
+        bits_per_sample: Some(24),
+        mtime: Some(10.0),
+        size_bytes: Some(4096),
+    }];
+
+    let results = db
+        .record_media_metadata_batch_with_scan_info(&inputs)
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].as_deref(), Ok(media_id_for_path(path).as_str()));
+    let item = db.media_metadata_for_path(path).unwrap().unwrap();
+    assert_eq!(item.title.as_deref(), Some("Batch Song"));
+    assert_eq!(item.artist.as_deref(), Some("Batch Artist"));
+    assert_eq!(item.album.as_deref(), Some("Batch Album"));
+    assert_eq!(item.duration_secs, Some(201.0));
+    assert_eq!(item.sample_rate, Some(48_000));
+    assert_eq!(item.channels, Some(2));
+    assert_eq!(item.bitrate_bps, Some(900_000.0));
+    assert_eq!(item.bits_per_sample, Some(24));
+    assert_eq!(item.size_bytes, Some(4096));
+    assert_eq!(
+        item.external_artwork_url.as_deref(),
+        Some("https://img.example.test/batch.jpg")
+    );
+}
+
+#[test]
+fn batch_media_metadata_merges_legacy_identity_like_single_write() {
+    let db = AppDatabase::in_memory().unwrap();
+    let canonical_path = "https://music.example.test/batch-merge.mp3";
+    let legacy_path = "https://MUSIC.example.test/batch-merge.mp3";
+    let canonical_media_id = media_id_for_path(canonical_path);
+    let legacy_media_id = "legacy-batch-media-id";
+    let now = now_epoch_secs_i64();
+
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES (?1, ?2, 'remote', ?3, ?3)
+            "#,
+            params![canonical_media_id, canonical_path, now],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, title, added_at, updated_at)
+            VALUES (?1, ?2, 'remote', 'Legacy Batch Metadata', ?3, ?3)
+            "#,
+            params![legacy_media_id, legacy_path, now],
+        )
+        .unwrap();
+    }
+
+    let inputs = [MediaMetadataScanInput {
+        source_path: legacy_path,
+        metadata: &TrackMetadata::default(),
+        duration_secs: Some(123.0),
+        sample_rate: Some(44_100),
+        channels: Some(2),
+        bitrate_bps: None,
+        bits_per_sample: None,
+        mtime: Some(20.0),
+        size_bytes: Some(8192),
+    }];
+
+    let results = db
+        .record_media_metadata_batch_with_scan_info(&inputs)
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].as_deref(), Ok(canonical_media_id.as_str()));
+    let item = db.media_metadata_for_path(legacy_path).unwrap().unwrap();
+    assert_eq!(item.media_id, canonical_media_id);
+    assert_eq!(item.source_path, legacy_path);
+    assert_eq!(item.title.as_deref(), Some("Legacy Batch Metadata"));
+    assert_eq!(item.duration_secs, Some(123.0));
+
+    let conn = db.conn.lock().unwrap();
+    let row_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM media_items WHERE media_id IN (?1, ?2)",
+            params![item.media_id, legacy_media_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(row_count, 1);
+}
+
+#[test]
 fn media_item_queries_do_not_stat_files_when_size_is_missing() {
     let db = AppDatabase::in_memory().unwrap();
     let file_path = std::env::temp_dir().join(format!(
@@ -782,6 +896,53 @@ fn deleting_library_root_removes_local_media_and_playlist_refs() {
         .unwrap();
     assert_eq!(detail.playlist.track_count, 1);
     assert_eq!(detail.items[0].media_id, outside_media);
+}
+
+#[test]
+fn local_scan_seen_set_deletes_only_unseen_media_under_root() {
+    let db = AppDatabase::in_memory().unwrap();
+    let metadata = TrackMetadata {
+        title: Some("Kept".to_string()),
+        ..TrackMetadata::default()
+    };
+    let kept_path = "D:/music/kept.flac";
+    let stale_path = "D:/music/nested/stale.flac";
+    let outside_path = "D:/other/outside.flac";
+    let kept_media = db
+        .record_media_metadata_with_scan_info(
+            kept_path,
+            &metadata,
+            Some(180.0),
+            Some(44100),
+            Some(2),
+            None,
+            None,
+            Some(10.0),
+            Some(4096),
+        )
+        .unwrap();
+    let stale_media = db.record_media_stub(stale_path).unwrap();
+    let outside_media = db.record_media_stub(outside_path).unwrap();
+
+    db.begin_local_scan_seen_set(99).unwrap();
+    db.mark_local_scan_seen_paths(99, &[kept_path.to_string()])
+        .unwrap();
+    let removed = db
+        .delete_local_media_not_seen_in_root("D:/music", 99)
+        .unwrap();
+
+    assert_eq!(removed, 1);
+    assert_eq!(
+        db.source_path_for_media_id(&kept_media).unwrap().as_deref(),
+        Some(kept_path)
+    );
+    assert!(db.source_path_for_media_id(&stale_media).unwrap().is_none());
+    assert_eq!(
+        db.source_path_for_media_id(&outside_media)
+            .unwrap()
+            .as_deref(),
+        Some(outside_path)
+    );
 }
 
 #[test]

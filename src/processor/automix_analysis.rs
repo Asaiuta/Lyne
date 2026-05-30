@@ -4,7 +4,7 @@
 //! windows off the realtime callback path and returns a stable DTO for later
 //! transition planning.
 
-use crate::decoder::{HttpCredentials, StreamingDecoder};
+use crate::decoder::{DecodeCancelToken, HttpCredentials, StreamingDecoder};
 use crate::processor::LoudnessMeter;
 use rustfft::{num_complex::Complex32, FftPlanner};
 use serde::{Deserialize, Serialize};
@@ -222,9 +222,23 @@ pub fn analyze_automix(
     credentials: Option<HttpCredentials>,
     options: AutomixAnalysisOptions,
 ) -> Result<AutomixAnalysis, String> {
+    analyze_automix_with_cancel(path, credentials, options, None)
+}
+
+pub fn analyze_automix_with_cancel(
+    path: String,
+    credentials: Option<HttpCredentials>,
+    options: AutomixAnalysisOptions,
+    cancel_token: Option<DecodeCancelToken>,
+) -> Result<AutomixAnalysis, String> {
     let options = options.normalized();
-    let mut decoder = StreamingDecoder::open_with_credentials(&path, credentials.as_ref())
-        .map_err(|e| format!("Failed to open file for AutoMix analysis: {}", e))?;
+    check_cancel(cancel_token.as_ref())?;
+    let mut decoder = StreamingDecoder::open_with_credentials_and_cancel(
+        &path,
+        credentials.as_ref(),
+        cancel_token.clone(),
+    )
+    .map_err(|e| format!("Failed to open file for AutoMix analysis: {}", e))?;
 
     let sample_rate = decoder.info.sample_rate;
     let channels = decoder.info.channels.max(1);
@@ -238,9 +252,11 @@ pub fn analyze_automix(
         &mut meter,
         &mut head,
         options.max_analyze_time_sec,
+        cancel_token.as_ref(),
     )?;
 
     if options.mode.includes_tail() && duration > options.max_analyze_time_sec * 2.0 {
+        check_cancel(cancel_token.as_ref())?;
         decoder
             .seek((duration - options.max_analyze_time_sec).max(0.0))
             .map_err(|e| format!("Failed to seek tail for AutoMix analysis: {}", e))?;
@@ -249,6 +265,7 @@ pub fn analyze_automix(
             &mut meter,
             &mut tail,
             options.max_analyze_time_sec,
+            cancel_token.as_ref(),
         )?;
     }
 
@@ -267,6 +284,7 @@ fn decode_segment(
     meter: &mut LoudnessMeter,
     segment: &mut AnalysisSegment,
     max_time_sec: f64,
+    cancel_token: Option<&DecodeCancelToken>,
 ) -> Result<(), String> {
     let sample_rate = decoder.info.sample_rate;
     let channels = decoder.info.channels.max(1);
@@ -283,6 +301,7 @@ fn decode_segment(
     let mut spectral = SpectralFluxAccumulator::new();
 
     while frames_processed < max_frames {
+        check_cancel(cancel_token)?;
         chunk.clear();
         let Some(sample_count) = decoder
             .decode_next_into(&mut chunk)
@@ -324,6 +343,14 @@ fn decode_segment(
     }
 
     Ok(())
+}
+
+fn check_cancel(cancel_token: Option<&DecodeCancelToken>) -> Result<(), String> {
+    if cancel_token.is_some_and(DecodeCancelToken::is_cancelled) {
+        Err("Analysis task canceled".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn finalize_analysis(

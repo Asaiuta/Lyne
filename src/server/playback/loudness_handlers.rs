@@ -45,8 +45,8 @@ pub(super) async fn scan_track_loudness(
     let path_for_job = path.clone();
     let credentials_for_job = credentials.clone();
 
-    let result = run_analysis_job(&data, move || {
-        analyze_track_loudness(path_for_job, credentials_for_job)
+    let result = run_analysis_job(&data, move |cancel_token| {
+        analyze_track_loudness(path_for_job, credentials_for_job, cancel_token)
     })
     .await;
 
@@ -97,20 +97,41 @@ pub(super) async fn scan_loudness_background(
         .lock()
         .insert(task_id, initial_task.clone());
     upsert_scan_task_record(&data, task_id, &path, &initial_task, store);
+    let task_cancel_token = AnalysisCancelToken::new();
+    register_scan_task_cancel(&data, task_id, task_cancel_token.clone());
 
     let data_for_task = data.clone();
     let path_for_task = path.clone();
     actix_rt::spawn(async move {
-        {
-            if let Some(task) = data_for_task.analysis.scan_tasks.lock().get_mut(&task_id) {
-                task.status = "running".to_string();
-                task.updated_at_epoch_secs = now_epoch_secs();
-                let snapshot = task.clone();
-                upsert_scan_task_record(&data_for_task, task_id, &path_for_task, &snapshot, store);
+        let should_start = {
+            let mut tasks = data_for_task.analysis.scan_tasks.lock();
+            if let Some(task) = tasks.get_mut(&task_id) {
+                if task.status == "canceled" {
+                    false
+                } else {
+                    task.status = "running".to_string();
+                    task.updated_at_epoch_secs = now_epoch_secs();
+                    let snapshot = task.clone();
+                    upsert_scan_task_record(
+                        &data_for_task,
+                        task_id,
+                        &path_for_task,
+                        &snapshot,
+                        store,
+                    );
+                    true
+                }
+            } else {
+                false
             }
+        };
+        if !should_start {
+            remove_scan_task_cancel(&data_for_task, task_id);
+            return;
         }
 
         if task_is_canceled(&data_for_task, task_id) {
+            remove_scan_task_cancel(&data_for_task, task_id);
             return;
         }
 
@@ -130,14 +151,16 @@ pub(super) async fn scan_loudness_background(
                     );
                 }
             }
+            remove_scan_task_cancel(&data_for_task, task_id);
             return;
         }
 
         let path_for_analysis = path_for_task.clone();
-        let result = run_analysis_job(&data_for_task, move || {
-            analyze_track_loudness(path_for_analysis, None)
-        })
-        .await;
+        let result =
+            run_analysis_job_with_token(&data_for_task, task_cancel_token, move |cancel_token| {
+                analyze_track_loudness(path_for_analysis, None, cancel_token)
+            })
+            .await;
 
         match result {
             Ok(track_loudness) => {
@@ -163,7 +186,13 @@ pub(super) async fn scan_loudness_background(
             Err(e) => {
                 if !task_is_canceled(&data_for_task, task_id) {
                     if let Some(task) = data_for_task.analysis.scan_tasks.lock().get_mut(&task_id) {
-                        task.status = "error".to_string();
+                        task.status = if is_analysis_timeout_error(&e) {
+                            "timeout".to_string()
+                        } else if is_analysis_cancelled_error(&e) {
+                            "canceled".to_string()
+                        } else {
+                            "error".to_string()
+                        };
                         task.error = Some(e);
                         task.updated_at_epoch_secs = now_epoch_secs();
                         let snapshot = task.clone();
@@ -179,6 +208,7 @@ pub(super) async fn scan_loudness_background(
             }
         }
 
+        remove_scan_task_cancel(&data_for_task, task_id);
         cleanup_scan_tasks(&data_for_task);
     });
 
@@ -224,6 +254,7 @@ pub(super) async fn cancel_scan_loudness_task(
     cleanup_scan_tasks(&data);
 
     let task_id = path.task_id;
+    cancel_scan_task_token(&data, task_id);
     let mut tasks = data.analysis.scan_tasks.lock();
     if let Some(task) = tasks.get_mut(&task_id) {
         match task.status.as_str() {
@@ -232,7 +263,14 @@ pub(super) async fn cancel_scan_loudness_task(
                 task.error = Some("Canceled by client".to_string());
                 task.updated_at_epoch_secs = now_epoch_secs();
                 let snapshot = task.clone();
-                upsert_scan_task_record(&data, task_id, "", &snapshot, true);
+                let source_path = data
+                    .app_db
+                    .get_analysis_task(task_id)
+                    .ok()
+                    .flatten()
+                    .map(|task| task.source_path)
+                    .unwrap_or_default();
+                upsert_scan_task_record(&data, task_id, &source_path, &snapshot, true);
                 HttpResponse::Ok().json(serde_json::json!({
                     "status": "success",
                     "task_id": task_id,

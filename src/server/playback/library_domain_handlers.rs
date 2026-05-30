@@ -506,15 +506,36 @@ pub(super) async fn get_media_cover_art_by_query(
     get_media_cover_art_by_id(&data, &query.media_id)
 }
 
-pub(super) async fn get_current_lyrics(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let (current_path, runtime_lyrics) = {
+pub(super) async fn resolve_current_lyrics(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<CurrentLyricsRequest>,
+) -> HttpResponse {
+    let request = body.into_inner();
+    let (current_path, runtime_lyrics, title, artist) = {
         let player = data.player.lock();
         let shared = player.shared_state();
         let current_track_path = shared.current_track_path.read().clone();
         let file_path = shared.file_path.read().clone();
-        let lyrics = shared.track_metadata.read().lyrics.clone();
-        (current_track_path.or(file_path), lyrics)
+        let metadata = shared.track_metadata.read();
+        let lyrics = metadata.lyrics.clone();
+        let title = metadata.title.clone();
+        let artist = metadata.artist.clone();
+        (current_track_path.or(file_path), lyrics, title, artist)
     };
+
+    let local_override = match request.song_id {
+        Some(song_id) => match read_local_override_lyrics(&request.lyric_dirs, song_id) {
+            Ok(value) => value,
+            Err(e) => return internal_server_error_response(e),
+        },
+        None => None,
+    };
+    if let Some((lyric_lines, source)) = local_override {
+        return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(
+            lyric_lines,
+            Some(source),
+        ));
+    }
 
     let Some(path) = current_path else {
         return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(Vec::new(), None));
@@ -524,15 +545,44 @@ pub(super) async fn get_current_lyrics(data: web::Data<Arc<AppState>>) -> HttpRe
         return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(Vec::new(), None));
     }
 
-    match read_current_local_lyrics(&path, runtime_lyrics.as_deref()) {
-        Ok(Some((lyric_lines, source))) => HttpResponse::Ok().json(
-            lyrics::CurrentLyricsResponse::success(lyric_lines, Some(source)),
-        ),
-        Ok(None) => {
-            HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(Vec::new(), None))
-        }
-        Err(e) => internal_server_error_response(e),
+    let local_lyrics = match read_current_local_lyrics(&path, runtime_lyrics.as_deref()) {
+        Ok(value) => value,
+        Err(e) => return internal_server_error_response(e),
+    };
+    if let Some((lyric_lines, source)) = local_lyrics {
+        return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(
+            lyric_lines,
+            Some(source),
+        ));
     }
+
+    // Online fallback: local files with no embedded/sidecar lyrics resolve via an
+    // NCM title/artist search, cached on disk so replays are instant and offline.
+    if let Some(title) = title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let cache_dir = &data.runtime_paths.cache_dir;
+        let artist = artist.as_deref();
+        if let Some(lyric_lines) = read_cached_online_lyrics(cache_dir, title, artist) {
+            return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(
+                lyric_lines,
+                Some("ncm-cache".to_string()),
+            ));
+        }
+        let lyric_lines =
+            crate::server::netease::fetch_online_lyrics_for_metadata(&data, title, artist).await;
+        if !lyric_lines.is_empty() {
+            write_cached_online_lyrics(cache_dir, title, artist, &lyric_lines);
+            return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(
+                lyric_lines,
+                Some("ncm".to_string()),
+            ));
+        }
+    }
+
+    HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(Vec::new(), None))
 }
 
 pub(super) async fn get_library_roots(data: web::Data<Arc<AppState>>) -> HttpResponse {
@@ -577,10 +627,71 @@ pub(super) async fn get_library_scan_task(
     }
 }
 
+pub(super) async fn cancel_library_scan_task(
+    data: web::Data<Arc<AppState>>,
+    path: web::Path<ScanTaskPath>,
+) -> HttpResponse {
+    let task_id = path.task_id;
+    cancel_scan_task_token(&data, task_id);
+
+    let task = match data.app_db.get_analysis_task(task_id) {
+        Ok(Some(task)) if task.task_type == "library_scan" => task,
+        Ok(Some(_)) | Ok(None) => return not_found_response("Library scan task not found"),
+        Err(e) => return internal_server_error_response(e),
+    };
+
+    match task.status.as_str() {
+        "queued" | "running" | "scanning" => {
+            let updated_at = now_epoch_secs();
+            if let Some(root_id) = task
+                .result
+                .as_ref()
+                .and_then(|value| value.get("root_id").and_then(|root_id| root_id.as_i64()))
+            {
+                let _ = data.app_db.update_library_root_scan_status(
+                    root_id,
+                    "canceled",
+                    None,
+                    None,
+                    Some(updated_at),
+                );
+            }
+            persist_library_scan_task(
+                &data,
+                task_id,
+                &task.source_path,
+                "canceled",
+                task.created_at_epoch_secs,
+                updated_at,
+                task.result.as_ref(),
+                Some("Canceled by client"),
+            );
+            HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "task_id": task_id,
+                "message": "Library scan task canceled"
+            }))
+        }
+        _ => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "task_id": task_id,
+            "message": "Task already finished"
+        })),
+    }
+}
+
 pub(super) async fn scan_library_root(
     data: web::Data<Arc<AppState>>,
     body: web::Json<LibraryScanRequest>,
 ) -> HttpResponse {
+    let permit = match Arc::clone(&data.analysis.library_scan_semaphore).try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return too_many_requests_response(
+                "Too many library scans in progress, please retry later",
+            );
+        }
+    };
     let started_at = now_epoch_secs();
     let scan_task_id = data
         .analysis
@@ -651,6 +762,9 @@ pub(super) async fn scan_library_root(
         None,
     );
 
+    let cancel_token = AnalysisCancelToken::new();
+    register_scan_task_cancel(&data, scan_task_id, cancel_token.clone());
+
     let data_for_task = data.clone();
     let path_for_task = path.clone();
     let display_name_for_task = display_name.clone();
@@ -658,6 +772,7 @@ pub(super) async fn scan_library_root(
     let source_key_for_task = source_key.clone();
 
     actix_web::rt::task::spawn_blocking(move || {
+        let _permit = permit;
         let result = if source_kind_for_task == "local" {
             scan_local_library(
                 &data_for_task,
@@ -665,6 +780,7 @@ pub(super) async fn scan_library_root(
                 started_at,
                 root_id,
                 &path_for_task,
+                cancel_token.clone(),
             )
         } else {
             scan_webdav_library(
@@ -674,6 +790,7 @@ pub(super) async fn scan_library_root(
                 root_id,
                 &path_for_task,
                 source_key_for_task.as_deref(),
+                cancel_token.clone(),
             )
         };
 
@@ -702,9 +819,14 @@ pub(super) async fn scan_library_root(
             }
             Err(e) => {
                 let finished_at = now_epoch_secs();
+                let status = if is_analysis_cancelled_error(&e) {
+                    "canceled"
+                } else {
+                    "error"
+                };
                 let _ = data_for_task.app_db.update_library_root_scan_status(
                     root_id,
-                    "error",
+                    status,
                     None,
                     None,
                     Some(finished_at),
@@ -713,7 +835,7 @@ pub(super) async fn scan_library_root(
                     &data_for_task,
                     scan_task_id,
                     &path_for_task,
-                    "error",
+                    status,
                     started_at,
                     finished_at,
                     Some(&serde_json::json!({
@@ -726,6 +848,8 @@ pub(super) async fn scan_library_root(
                 );
             }
         }
+        remove_scan_task_cancel(&data_for_task, scan_task_id);
+        clear_local_scan_seen_set(&data_for_task, scan_task_id);
     });
 
     HttpResponse::Ok().json(serde_json::json!({

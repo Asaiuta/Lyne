@@ -5,22 +5,27 @@ pub(super) fn cleanup_scan_tasks(data: &web::Data<Arc<AppState>>) {
     let now = now_epoch_secs();
     let ttl = data.analysis.scan_task_ttl_secs;
     let max_entries = data.analysis.scan_task_max_entries;
+    let mut removed_task_ids = Vec::new();
 
     let mut tasks = data.analysis.scan_tasks.lock();
 
-    tasks.retain(|_, task| {
-        let finished = task.status == "success" || task.status == "error";
+    tasks.retain(|task_id, task| {
+        let finished = is_terminal_scan_status(&task.status);
         if !finished {
             return true;
         }
-        now.saturating_sub(task.updated_at_epoch_secs) <= ttl
+        let keep = now.saturating_sub(task.updated_at_epoch_secs) <= ttl;
+        if !keep {
+            removed_task_ids.push(*task_id);
+        }
+        keep
     });
 
     if tasks.len() > max_entries {
         let mut entries: Vec<(u64, bool, u64)> = tasks
             .iter()
             .map(|(id, task)| {
-                let finished = task.status == "success" || task.status == "error";
+                let finished = is_terminal_scan_status(&task.status);
                 (*id, finished, task.updated_at_epoch_secs)
             })
             .collect();
@@ -29,9 +34,23 @@ pub(super) fn cleanup_scan_tasks(data: &web::Data<Arc<AppState>>) {
         let remove_count = tasks.len().saturating_sub(max_entries);
 
         for (id, _, _) in entries.into_iter().take(remove_count) {
-            tasks.remove(&id);
+            if tasks.remove(&id).is_some() {
+                removed_task_ids.push(id);
+            }
         }
     }
+
+    let live_task_ids: std::collections::HashSet<u64> = tasks.keys().copied().collect();
+    drop(tasks);
+    let mut cancels = data.analysis.scan_task_cancels.lock();
+    for task_id in removed_task_ids {
+        cancels.remove(&task_id);
+    }
+    cancels.retain(|task_id, _| live_task_ids.contains(task_id));
+}
+
+fn is_terminal_scan_status(status: &str) -> bool {
+    matches!(status, "success" | "error" | "canceled" | "timeout")
 }
 
 pub(super) fn upsert_scan_task_record(
@@ -90,8 +109,29 @@ pub(super) fn task_is_canceled(data: &web::Data<Arc<AppState>>, task_id: u64) ->
         .unwrap_or(false)
 }
 
+pub(super) fn register_scan_task_cancel(
+    data: &web::Data<Arc<AppState>>,
+    task_id: u64,
+    token: AnalysisCancelToken,
+) {
+    data.analysis
+        .scan_task_cancels
+        .lock()
+        .insert(task_id, token);
+}
+
+pub(super) fn remove_scan_task_cancel(data: &web::Data<Arc<AppState>>, task_id: u64) {
+    data.analysis.scan_task_cancels.lock().remove(&task_id);
+}
+
+pub(super) fn cancel_scan_task_token(data: &web::Data<Arc<AppState>>, task_id: u64) {
+    if let Some(token) = data.analysis.scan_task_cancels.lock().get(&task_id) {
+        token.cancel();
+    }
+}
+
 pub(super) fn analysis_error_response(e: &str) -> HttpResponse {
-    if e.to_ascii_lowercase().contains("timed out") {
+    if is_analysis_timeout_error(e) {
         gateway_timeout_response(e)
     } else {
         internal_server_error_response(e)
@@ -177,21 +217,39 @@ pub(super) fn try_store_loudness(
 pub(super) fn analyze_track_loudness(
     path: String,
     credentials: Option<crate::decoder::HttpCredentials>,
+    cancel_token: AnalysisCancelToken,
 ) -> Result<crate::processor::TrackLoudness, String> {
     use crate::decoder::StreamingDecoder;
     use crate::processor::{LoudnessMeter, TrackLoudness, DEFAULT_STREAMING_TARGET_LUFS};
 
-    let mut decoder = StreamingDecoder::open_with_credentials(&path, credentials.as_ref())
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+    cancel_token.check()?;
+    let mut decoder = StreamingDecoder::open_with_credentials_and_cancel(
+        &path,
+        credentials.as_ref(),
+        Some(cancel_token.decode_token()),
+    )
+    .map_err(|e| format!("Failed to open file: {}", e))?;
 
     let sample_rate = decoder.info.sample_rate;
     let channels = decoder.info.channels;
     let mut meter = LoudnessMeter::new(channels, sample_rate);
 
     let mut total_samples = 0usize;
-    while let Some(chunk) = decoder.decode_next().map_err(|e| e.to_string())? {
+    let mut chunk = Vec::new();
+    loop {
+        cancel_token.check()?;
+        chunk.clear();
+        let Some(sample_count) = decoder
+            .decode_next_into(&mut chunk)
+            .map_err(|e| e.to_string())?
+        else {
+            break;
+        };
+        if sample_count == 0 {
+            continue;
+        }
         meter.process(&chunk);
-        total_samples += chunk.len();
+        total_samples += sample_count;
     }
 
     let integrated_lufs = meter.integrated_loudness();

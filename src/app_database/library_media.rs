@@ -756,4 +756,128 @@ impl AppDatabase {
             .map_err(|e| format!("Failed to commit media cleanup transaction: {}", e))?;
         Ok(removed)
     }
+
+    pub fn begin_local_scan_seen_set(&self, scan_task_id: u64) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        ensure_local_scan_seen_table(&conn)?;
+        conn.execute(
+            "DELETE FROM temp.local_scan_seen WHERE task_id = ?1",
+            params![scan_task_id as i64],
+        )
+        .map_err(|e| format!("Failed to reset local scan seen set: {}", e))?;
+        Ok(())
+    }
+
+    pub fn mark_local_scan_seen_paths(
+        &self,
+        scan_task_id: u64,
+        source_paths: &[String],
+    ) -> Result<(), String> {
+        if source_paths.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        ensure_local_scan_seen_table(&conn)?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Failed to start local scan seen transaction: {}", e))?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    r#"
+                    INSERT OR IGNORE INTO temp.local_scan_seen (task_id, media_id)
+                    VALUES (?1, ?2)
+                    "#,
+                )
+                .map_err(|e| format!("Failed to prepare local scan seen insert: {}", e))?;
+            for source_path in source_paths {
+                stmt.execute(params![scan_task_id as i64, media_id_for_path(source_path)])
+                    .map_err(|e| {
+                        format!(
+                            "Failed to mark local scan path '{}' seen: {}",
+                            source_path, e
+                        )
+                    })?;
+            }
+        }
+        tx.commit()
+            .map_err(|e| format!("Failed to commit local scan seen paths: {}", e))?;
+        Ok(())
+    }
+
+    pub fn clear_local_scan_seen_set(&self, scan_task_id: u64) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        ensure_local_scan_seen_table(&conn)?;
+        conn.execute(
+            "DELETE FROM temp.local_scan_seen WHERE task_id = ?1",
+            params![scan_task_id as i64],
+        )
+        .map_err(|e| format!("Failed to clear local scan seen set: {}", e))?;
+        Ok(())
+    }
+
+    pub fn delete_local_media_not_seen_in_root(
+        &self,
+        root_path: &str,
+        scan_task_id: u64,
+    ) -> Result<u64, String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        ensure_local_scan_seen_table(&conn)?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Failed to start media cleanup transaction: {}", e))?;
+
+        let root_media_id = media_id_for_path(root_path)
+            .trim_end_matches('/')
+            .to_string();
+        let root_id_prefix = format!("{}/", root_media_id);
+        let removed = tx
+            .execute(
+                r#"
+                DELETE FROM media_items
+                WHERE source_kind = 'local'
+                  AND (
+                    media_id = ?1
+                    OR substr(media_id, 1, ?2) = ?3
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM temp.local_scan_seen seen
+                    WHERE seen.task_id = ?4
+                      AND seen.media_id = media_items.media_id
+                  )
+                "#,
+                params![
+                    root_media_id,
+                    root_id_prefix.len() as i64,
+                    root_id_prefix,
+                    scan_task_id as i64,
+                ],
+            )
+            .map_err(|e| format!("Failed to delete stale local media: {}", e))?;
+
+        tx.execute(
+            "DELETE FROM temp.local_scan_seen WHERE task_id = ?1",
+            params![scan_task_id as i64],
+        )
+        .map_err(|e| format!("Failed to clear local scan seen set: {}", e))?;
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit media cleanup transaction: {}", e))?;
+        Ok(removed as u64)
+    }
+}
+
+fn ensure_local_scan_seen_table(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TEMP TABLE IF NOT EXISTS local_scan_seen (
+            task_id INTEGER NOT NULL,
+            media_id TEXT NOT NULL,
+            PRIMARY KEY (task_id, media_id)
+        );
+        "#,
+    )
+    .map_err(|e| format!("Failed to prepare local scan seen table: {}", e))
 }

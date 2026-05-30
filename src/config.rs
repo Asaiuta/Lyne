@@ -313,6 +313,9 @@ pub struct RuntimeServerConfig {
     pub analysis_max_concurrency: usize,
     pub analysis_max_blocking_threads: usize,
     pub analysis_task_timeout_secs: u64,
+    pub library_scan_max_concurrency: usize,
+    pub library_scan_max_workers: usize,
+    pub library_scan_cover_max_bytes: u64,
     pub scan_task_max_entries: usize,
     pub scan_task_ttl_secs: u64,
     pub cache_max_bytes: u64,
@@ -666,6 +669,11 @@ impl RuntimeServerConfig {
         )
         .max(1);
         let analysis_task_timeout_secs = read_env_u64("ANALYSIS_TASK_TIMEOUT_SECS", 180).max(1);
+        let library_scan_max_concurrency =
+            read_env_usize("LIBRARY_SCAN_MAX_CONCURRENCY", 1).clamp(1, 4);
+        let library_scan_max_workers = read_env_usize("LIBRARY_SCAN_MAX_WORKERS", 2).clamp(1, 8);
+        let library_scan_cover_max_bytes =
+            read_env_u64("LIBRARY_SCAN_COVER_MAX_BYTES", 8 * 1024 * 1024).max(1);
         let scan_task_max_entries = read_env_usize("SCAN_TASK_MAX_ENTRIES", 512).max(1);
         let scan_task_ttl_secs = read_env_u64("SCAN_TASK_TTL_SECS", 600).max(1);
         let cache_max_bytes = read_env_u64(ENV_AUDIO_CACHE_MAX_BYTES, DEFAULT_CACHE_MAX_BYTES);
@@ -676,6 +684,9 @@ impl RuntimeServerConfig {
             analysis_max_concurrency,
             analysis_max_blocking_threads,
             analysis_task_timeout_secs,
+            library_scan_max_concurrency,
+            library_scan_max_workers,
+            library_scan_cover_max_bytes,
             scan_task_max_entries,
             scan_task_ttl_secs,
             cache_max_bytes,
@@ -880,6 +891,9 @@ mod tests {
         env::set_var("ANALYSIS_MAX_CONCURRENCY", "0");
         env::set_var("ANALYSIS_MAX_BLOCKING_THREADS", "4");
         env::set_var("ANALYSIS_TASK_TIMEOUT_SECS", "0");
+        env::set_var("LIBRARY_SCAN_MAX_CONCURRENCY", "0");
+        env::set_var("LIBRARY_SCAN_MAX_WORKERS", "0");
+        env::set_var("LIBRARY_SCAN_COVER_MAX_BYTES", "1048576");
         env::set_var("SCAN_TASK_MAX_ENTRIES", "32");
         env::set_var("SCAN_TASK_TTL_SECS", "90");
         env::set_var(
@@ -895,6 +909,9 @@ mod tests {
         env::remove_var("ANALYSIS_MAX_CONCURRENCY");
         env::remove_var("ANALYSIS_MAX_BLOCKING_THREADS");
         env::remove_var("ANALYSIS_TASK_TIMEOUT_SECS");
+        env::remove_var("LIBRARY_SCAN_MAX_CONCURRENCY");
+        env::remove_var("LIBRARY_SCAN_MAX_WORKERS");
+        env::remove_var("LIBRARY_SCAN_COVER_MAX_BYTES");
         env::remove_var("SCAN_TASK_MAX_ENTRIES");
         env::remove_var("SCAN_TASK_TTL_SECS");
         env::remove_var("AUDIO_ALLOWED_ORIGINS");
@@ -905,6 +922,9 @@ mod tests {
         assert_eq!(config.analysis_max_concurrency, 1);
         assert_eq!(config.analysis_max_blocking_threads, 4);
         assert_eq!(config.analysis_task_timeout_secs, 1);
+        assert_eq!(config.library_scan_max_concurrency, 1);
+        assert_eq!(config.library_scan_max_workers, 1);
+        assert_eq!(config.library_scan_cover_max_bytes, 1_048_576);
         assert_eq!(config.scan_task_max_entries, 32);
         assert_eq!(config.scan_task_ttl_secs, 90);
         assert_eq!(config.allowed_origins.len(), 2);

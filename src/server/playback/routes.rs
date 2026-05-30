@@ -137,7 +137,7 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
         )
         .route(
             "/domain/current_lyrics",
-            web::get().to(super::get_current_lyrics),
+            web::post().to(super::resolve_current_lyrics),
         )
         .route(
             "/domain/library/roots",
@@ -154,6 +154,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/domain/library/scan_tasks/{task_id}",
             web::get().to(super::get_library_scan_task),
+        )
+        .route(
+            "/domain/library/scan_tasks/{task_id}/cancel",
+            web::post().to(super::cancel_library_scan_task),
         )
         .route(
             "/domain/queue_snapshot",

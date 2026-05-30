@@ -130,5 +130,95 @@ fn ncm_upstream_error_response(err: NcmError) -> HttpResponse {
     }
 }
 
+/// Search NCM by `title` (optionally narrowed by `artist`) and return parsed
+/// lyric lines for the best-matching song. Returns an empty vec when nothing is
+/// found or the upstream call fails — callers treat empty as "no online lyrics".
+///
+/// Used as an online fallback for local tracks that ship no embedded/sidecar
+/// lyrics (see `playback::resolve_current_lyrics`).
+pub(crate) async fn fetch_online_lyrics_for_metadata(
+    data: &web::Data<Arc<AppState>>,
+    title: &str,
+    artist: Option<&str>,
+) -> Vec<crate::server::lyrics::LyricLine> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Vec::new();
+    }
+    let artist = artist.map(str::trim).filter(|value| !value.is_empty());
+    let keywords = match artist {
+        Some(artist) => format!("{title} {artist}"),
+        None => title.to_string(),
+    };
+
+    let mut search_query = Query::new()
+        .param("keywords", &keywords)
+        .param("type", "1")
+        .param("limit", "10");
+    inject_active_ncm_cookie(data, &mut search_query);
+
+    let song_id = match data.ncm_client.search(&search_query).await {
+        Ok(response) => {
+            match pick_best_lyrics_match(&read_search_tracks(&response.body), title, artist) {
+                Some(song_id) => song_id,
+                None => return Vec::new(),
+            }
+        }
+        Err(err) => {
+            log::warn!("Online lyric search for '{keywords}' -> ERROR: {err}");
+            return Vec::new();
+        }
+    };
+
+    let mut lyric_query = Query::new().param("id", &song_id.to_string());
+    inject_active_ncm_cookie(data, &mut lyric_query);
+    match data.ncm_client.lyric_new(&lyric_query).await {
+        Ok(response) => crate::server::lyrics::read_lyric_lines_from_payload(&response.body),
+        Err(err) => {
+            log::warn!("Online lyric fetch for song {song_id} -> ERROR: {err}");
+            Vec::new()
+        }
+    }
+}
+
+/// Pick the NCM song id whose title/artist best match the local track. Scores an
+/// exact title match highest, a partial title match next, and adds a point when
+/// the artist also overlaps; falls back to the first usable result on a tie.
+fn pick_best_lyrics_match(
+    tracks: &[types::NcmTrackSummary],
+    title: &str,
+    artist: Option<&str>,
+) -> Option<i64> {
+    let title_lc = title.to_lowercase();
+    let artist_lc = artist.map(str::to_lowercase);
+    let mut best: Option<(i32, i64)> = None;
+    for track in tracks {
+        if track.song_id <= 0 {
+            continue;
+        }
+        let mut score = 0;
+        if let Some(track_title) = track.title.as_deref() {
+            let track_title = track_title.to_lowercase();
+            if track_title == title_lc {
+                score += 4;
+            } else if track_title.contains(&title_lc) || title_lc.contains(&track_title) {
+                score += 2;
+            }
+        }
+        if let (Some(artist_lc), Some(track_artist)) =
+            (artist_lc.as_deref(), track.artist.as_deref())
+        {
+            let track_artist = track_artist.to_lowercase();
+            if track_artist.contains(artist_lc) || artist_lc.contains(&track_artist) {
+                score += 1;
+            }
+        }
+        if best.is_none_or(|(best_score, _)| score > best_score) {
+            best = Some((score, track.song_id));
+        }
+    }
+    best.map(|(_, song_id)| song_id)
+}
+
 #[cfg(test)]
 mod tests;

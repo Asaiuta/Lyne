@@ -51,6 +51,11 @@ struct AnalysisDiagnostics {
     available_permits: usize,
     in_use_permits: usize,
     task_timeout_secs: u64,
+    library_scan_concurrency_limit: usize,
+    library_scan_available_permits: usize,
+    library_scan_in_use_permits: usize,
+    library_scan_max_workers: usize,
+    library_scan_cover_max_bytes: u64,
     scan_task_records: usize,
     scan_task_record_limit: usize,
     scan_task_ttl_secs: u64,
@@ -84,6 +89,7 @@ struct DecodeDiagnostics {
     last_output_samples: Option<u64>,
     last_chunk_count: Option<u64>,
     last_throughput_frames_per_sec: Option<u64>,
+    budget_rejection_count: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -210,12 +216,17 @@ fn build_decode_diagnostics(data: &AppState) -> DecodeDiagnostics {
                 .last_decode_throughput_frames_per_sec
                 .load(Ordering::Relaxed),
         ),
+        budget_rejection_count: shared_state
+            .decode_budget_rejection_count
+            .load(Ordering::Relaxed),
     }
 }
 
 fn build_analysis_diagnostics(data: &AppState) -> AnalysisDiagnostics {
     let available_permits = data.analysis.analysis_semaphore.available_permits();
     let concurrency_limit = data.analysis.analysis_max_concurrency;
+    let library_scan_available_permits = data.analysis.library_scan_semaphore.available_permits();
+    let library_scan_concurrency_limit = data.analysis.library_scan_max_concurrency;
     let scan_task_records = data.analysis.scan_tasks.lock().len();
 
     AnalysisDiagnostics {
@@ -223,6 +234,13 @@ fn build_analysis_diagnostics(data: &AppState) -> AnalysisDiagnostics {
         available_permits,
         in_use_permits: concurrency_limit.saturating_sub(available_permits),
         task_timeout_secs: data.analysis.analysis_task_timeout_secs,
+        library_scan_concurrency_limit: library_scan_concurrency_limit
+            .max(library_scan_available_permits),
+        library_scan_available_permits,
+        library_scan_in_use_permits: library_scan_concurrency_limit
+            .saturating_sub(library_scan_available_permits),
+        library_scan_max_workers: data.analysis.library_scan_max_workers,
+        library_scan_cover_max_bytes: data.analysis.library_scan_cover_max_bytes,
         scan_task_records,
         scan_task_record_limit: data.analysis.scan_task_max_entries,
         scan_task_ttl_secs: data.analysis.scan_task_ttl_secs,
@@ -330,7 +348,12 @@ mod tests {
                 )),
                 analysis_semaphore: Arc::new(Semaphore::new(2)),
                 analysis_max_concurrency: 2,
+                library_scan_semaphore: Arc::new(Semaphore::new(1)),
+                library_scan_max_concurrency: 1,
+                library_scan_max_workers: 1,
+                library_scan_cover_max_bytes: 1024 * 1024,
                 scan_tasks: Mutex::new(HashMap::new()),
+                scan_task_cancels: Mutex::new(HashMap::new()),
                 scan_task_counter: AtomicU64::new(0),
                 scan_task_max_entries: 8,
                 scan_task_ttl_secs: 60,
@@ -344,6 +367,7 @@ mod tests {
             },
             playback: PlaybackDomainState {
                 active_session_id: Mutex::new(None),
+                ws_events: ws_handlers::websocket_event_broadcast_channel(),
                 ncm_scrobble: Mutex::new(NcmScrobbleState::default()),
             },
             runtime_paths,

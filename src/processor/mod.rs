@@ -44,7 +44,8 @@ pub mod traits;
 
 // Public processor API re-exports.
 pub use automix_analysis::{
-    analyze_automix, AutomixAnalysis, AutomixAnalysisMode, AutomixAnalysisOptions,
+    analyze_automix, analyze_automix_with_cancel, AutomixAnalysis, AutomixAnalysisMode,
+    AutomixAnalysisOptions,
 };
 pub use convolver::FFTConvolver;
 pub use crossfeed::{Crossfeed, CrossfeedSettings};

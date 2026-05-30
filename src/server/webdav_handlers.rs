@@ -68,10 +68,13 @@ async fn webdav_browse(
     let cfg_clone = cfg.clone();
     let path_for_block = path.clone();
     let started_at = Instant::now();
-    let result = run_analysis_job(&data, move || {
-        cfg_clone
+    let result = run_analysis_job(&data, move |cancel_token| {
+        cancel_token.check()?;
+        let entries = cfg_clone
             .list(&path_for_block)
-            .map_err(|e| format!("WebDAV list failed: {}", e))
+            .map_err(|e| format!("WebDAV list failed: {}", e))?;
+        cancel_token.check()?;
+        Ok(entries)
     })
     .await;
     record_webdav_probe(data.as_ref().as_ref(), started_at.elapsed(), result.is_ok());
@@ -83,7 +86,7 @@ async fn webdav_browse(
             "entries": entries,
         })),
         Err(e) => {
-            if e.to_ascii_lowercase().contains("timed out") {
+            if is_analysis_timeout_error(&e) {
                 gateway_timeout_response(e)
             } else {
                 internal_server_error_response(e)

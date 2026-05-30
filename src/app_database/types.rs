@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::decoder::TrackMetadata;
 use crate::webdav::WebDavConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,19 @@ pub struct PlaybackHistoryEntry {
     pub duration_secs: Option<f64>,
     pub has_cover_art: bool,
     pub external_artwork_url: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+pub struct MediaMetadataScanInput<'a> {
+    pub source_path: &'a str,
+    pub metadata: &'a TrackMetadata,
+    pub duration_secs: Option<f64>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<usize>,
+    pub bitrate_bps: Option<f64>,
+    pub bits_per_sample: Option<u32>,
+    pub mtime: Option<f64>,
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -250,3 +250,10 @@ pub(super) struct MediaPath {
 pub(super) struct MediaCoverArtQuery {
     pub(super) media_id: String,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CurrentLyricsRequest {
+    pub(super) song_id: Option<i64>,
+    pub(super) lyric_dirs: Vec<String>,
+}

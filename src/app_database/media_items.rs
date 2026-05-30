@@ -1,22 +1,17 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::decoder::TrackMetadata;
 
 use super::ncm_track_sources::ncm_track_source_from_row;
 use super::{
     media_id_for_path, media_item_from_row, now_epoch_secs_i64, AppDatabase, CoverArtRecord,
-    MediaItemRecord,
+    MediaItemRecord, MediaMetadataScanInput,
 };
 
 impl AppDatabase {
     pub fn record_media_stub(&self, source_path: &str) -> Result<String, String> {
         let media_id = media_id_for_path(source_path);
-        let source_kind =
-            if source_path.starts_with("http://") || source_path.starts_with("https://") {
-                "remote"
-            } else {
-                "local"
-            };
+        let source_kind = media_source_kind(source_path);
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = now_epoch_secs_i64();
         record_media_stub_in_conn(&conn, &media_id, source_path, source_kind, now)?;
@@ -56,75 +51,67 @@ impl AppDatabase {
         mtime: Option<f64>,
         size_bytes: Option<u64>,
     ) -> Result<String, String> {
-        let media_id = self.record_media_stub(source_path)?;
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let now = now_epoch_secs_i64();
-        conn.execute(
-            r#"
-            UPDATE media_items
-            SET title = COALESCE(NULLIF(?2, ''), title),
-                artist = COALESCE(NULLIF(?3, ''), artist),
-                album = COALESCE(NULLIF(?4, ''), album),
-                track_number = ?5,
-                disc_number = ?6,
-                genre = ?7,
-                year = ?8,
-                duration_secs = COALESCE(?9, duration_secs),
-                sample_rate = COALESCE(?10, sample_rate),
-                channels = COALESCE(?11, channels),
-                bitrate_bps = COALESCE(?12, bitrate_bps),
-                bits_per_sample = COALESCE(?13, bits_per_sample),
-                mtime = COALESCE(?15, mtime),
-                size_bytes = COALESCE(?16, size_bytes),
-                updated_at = ?14
-            WHERE media_id = ?1
-            "#,
-            params![
-                media_id,
-                metadata.title,
-                metadata.artist,
-                metadata.album,
-                metadata.track_number.map(|v| v as i64),
-                metadata.disc_number.map(|v| v as i64),
-                metadata.genre,
-                metadata.year.map(|v| v as i64),
-                duration_secs,
-                sample_rate.map(|v| v as i64),
-                channels.map(|v| v as i64),
-                bitrate_bps,
-                bits_per_sample.map(|v| v as i64),
-                now,
-                mtime,
-                size_bytes.map(|v| v as i64),
-            ],
-        )
-        .map_err(|e| format!("Failed to update media metadata: {}", e))?;
+        let input = MediaMetadataScanInput {
+            source_path,
+            metadata,
+            duration_secs,
+            sample_rate,
+            channels,
+            bitrate_bps,
+            bits_per_sample,
+            mtime,
+            size_bytes,
+        };
+        let mut results = self.record_media_metadata_batch_with_scan_info(&[input])?;
+        results
+            .pop()
+            .unwrap_or_else(|| Err("Failed to write media metadata: empty batch".to_string()))
+    }
 
-        if let Some(ref art) = metadata.cover_art {
-            let cover_art_id = format!("{}:cover", media_id);
-            conn.execute(
-                r#"
-                INSERT INTO cover_art_cache (cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                ON CONFLICT(cover_art_id) DO UPDATE SET
-                    mime_type = excluded.mime_type,
-                    image_bytes = excluded.image_bytes,
-                    byte_len = excluded.byte_len,
-                    created_at = excluded.created_at
-                "#,
-                params![
-                    cover_art_id,
-                    media_id,
-                    metadata.cover_art_mime,
-                    art,
-                    art.len() as i64,
-                    now,
-                ],
-            )
-            .map_err(|e| format!("Failed to update cover art cache: {}", e))?;
+    pub fn record_media_metadata_batch_with_scan_info(
+        &self,
+        records: &[MediaMetadataScanInput<'_>],
+    ) -> Result<Vec<Result<String, String>>, String> {
+        if records.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(media_id_for_path(source_path))
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| format!("Failed to start media metadata batch transaction: {}", e))?;
+        let now = now_epoch_secs_i64();
+        let mut results = Vec::with_capacity(records.len());
+
+        for record in records {
+            tx.execute_batch("SAVEPOINT media_metadata_record")
+                .map_err(|e| format!("Failed to start media metadata record savepoint: {}", e))?;
+            match record_media_metadata_with_scan_info_in_conn(&tx, record, now) {
+                Ok(media_id) => {
+                    tx.execute_batch("RELEASE SAVEPOINT media_metadata_record")
+                        .map_err(|e| {
+                            format!("Failed to release media metadata record savepoint: {}", e)
+                        })?;
+                    results.push(Ok(media_id));
+                }
+                Err(err) => {
+                    tx.execute_batch(
+                        "ROLLBACK TO SAVEPOINT media_metadata_record; RELEASE SAVEPOINT media_metadata_record;",
+                    )
+                    .map_err(|e| {
+                        format!(
+                            "Failed to roll back media metadata record savepoint after '{}': {}",
+                            err, e
+                        )
+                    })?;
+                    results.push(Err(err));
+                }
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit media metadata batch transaction: {}", e))?;
+        Ok(results)
     }
 
     pub fn record_external_media_metadata(
@@ -243,6 +230,124 @@ impl AppDatabase {
     }
 }
 
+fn media_source_kind(source_path: &str) -> &'static str {
+    if source_path.starts_with("http://") || source_path.starts_with("https://") {
+        "remote"
+    } else {
+        "local"
+    }
+}
+
+fn record_media_metadata_with_scan_info_in_conn(
+    conn: &Connection,
+    record: &MediaMetadataScanInput<'_>,
+    now: i64,
+) -> Result<String, String> {
+    let media_id = media_id_for_path(record.source_path);
+    record_media_stub_statements(
+        conn,
+        &media_id,
+        record.source_path,
+        media_source_kind(record.source_path),
+        now,
+    )?;
+    update_media_metadata_in_conn(
+        conn,
+        &media_id,
+        record.metadata,
+        record.duration_secs,
+        record.sample_rate,
+        record.channels,
+        record.bitrate_bps,
+        record.bits_per_sample,
+        record.mtime,
+        record.size_bytes,
+        now,
+    )?;
+    Ok(media_id)
+}
+
+fn update_media_metadata_in_conn(
+    conn: &Connection,
+    media_id: &str,
+    metadata: &TrackMetadata,
+    duration_secs: Option<f64>,
+    sample_rate: Option<u32>,
+    channels: Option<usize>,
+    bitrate_bps: Option<f64>,
+    bits_per_sample: Option<u32>,
+    mtime: Option<f64>,
+    size_bytes: Option<u64>,
+    now: i64,
+) -> Result<(), String> {
+    conn.execute(
+        r#"
+        UPDATE media_items
+        SET title = COALESCE(NULLIF(?2, ''), title),
+            artist = COALESCE(NULLIF(?3, ''), artist),
+            album = COALESCE(NULLIF(?4, ''), album),
+            track_number = ?5,
+            disc_number = ?6,
+            genre = ?7,
+            year = ?8,
+            duration_secs = COALESCE(?9, duration_secs),
+            sample_rate = COALESCE(?10, sample_rate),
+            channels = COALESCE(?11, channels),
+            bitrate_bps = COALESCE(?12, bitrate_bps),
+            bits_per_sample = COALESCE(?13, bits_per_sample),
+            mtime = COALESCE(?15, mtime),
+            size_bytes = COALESCE(?16, size_bytes),
+            updated_at = ?14
+        WHERE media_id = ?1
+        "#,
+        params![
+            media_id,
+            metadata.title,
+            metadata.artist,
+            metadata.album,
+            metadata.track_number.map(|v| v as i64),
+            metadata.disc_number.map(|v| v as i64),
+            metadata.genre,
+            metadata.year.map(|v| v as i64),
+            duration_secs,
+            sample_rate.map(|v| v as i64),
+            channels.map(|v| v as i64),
+            bitrate_bps,
+            bits_per_sample.map(|v| v as i64),
+            now,
+            mtime,
+            size_bytes.map(|v| v as i64),
+        ],
+    )
+    .map_err(|e| format!("Failed to update media metadata: {}", e))?;
+
+    if let Some(ref art) = metadata.cover_art {
+        let cover_art_id = format!("{}:cover", media_id);
+        conn.execute(
+            r#"
+            INSERT INTO cover_art_cache (cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ON CONFLICT(cover_art_id) DO UPDATE SET
+                mime_type = excluded.mime_type,
+                image_bytes = excluded.image_bytes,
+                byte_len = excluded.byte_len,
+                created_at = excluded.created_at
+            "#,
+            params![
+                cover_art_id,
+                media_id,
+                metadata.cover_art_mime,
+                art,
+                art.len() as i64,
+                now,
+            ],
+        )
+        .map_err(|e| format!("Failed to update cover art cache: {}", e))?;
+    }
+
+    Ok(())
+}
+
 fn record_media_stub_in_conn(
     conn: &Connection,
     media_id: &str,
@@ -253,55 +358,7 @@ fn record_media_stub_in_conn(
     conn.execute_batch("BEGIN IMMEDIATE TRANSACTION;")
         .map_err(|e| format!("Failed to start media item transaction: {}", e))?;
 
-    let result = (|| {
-        let existing_by_id = conn
-            .query_row(
-                "SELECT media_id FROM media_items WHERE media_id = ?1",
-                params![media_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|e| format!("Failed to read media item by id '{}': {}", media_id, e))?;
-        let existing_by_path = conn
-            .query_row(
-                "SELECT media_id FROM media_items WHERE source_path = ?1",
-                params![source_path],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|e| format!("Failed to read media item by path '{}': {}", source_path, e))?;
-
-        match (existing_by_id.as_deref(), existing_by_path.as_deref()) {
-            (Some(_), Some(path_media_id)) if path_media_id != media_id => {
-                merge_media_identity(conn, path_media_id, media_id, now)?;
-            }
-            (None, Some(path_media_id)) if path_media_id != media_id => {
-                rename_media_identity(
-                    conn,
-                    path_media_id,
-                    media_id,
-                    source_path,
-                    source_kind,
-                    now,
-                )?;
-            }
-            _ => {}
-        }
-
-        conn.execute(
-            r#"
-        INSERT INTO media_items (media_id, source_path, source_kind, added_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?4)
-        ON CONFLICT(media_id) DO UPDATE SET
-            source_path = excluded.source_path,
-            source_kind = excluded.source_kind,
-            updated_at = excluded.updated_at
-        "#,
-            params![media_id, source_path, source_kind, now],
-        )
-        .map_err(|e| format!("Failed to record media item: {}", e))?;
-        Ok(())
-    })();
+    let result = record_media_stub_statements(conn, media_id, source_path, source_kind, now);
 
     match result {
         Ok(()) => conn
@@ -312,6 +369,55 @@ fn record_media_stub_in_conn(
             Err(err)
         }
     }
+}
+
+fn record_media_stub_statements(
+    conn: &Connection,
+    media_id: &str,
+    source_path: &str,
+    source_kind: &str,
+    now: i64,
+) -> Result<(), String> {
+    let existing_by_id = conn
+        .query_row(
+            "SELECT media_id FROM media_items WHERE media_id = ?1",
+            params![media_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read media item by id '{}': {}", media_id, e))?;
+    let existing_by_path = conn
+        .query_row(
+            "SELECT media_id FROM media_items WHERE source_path = ?1",
+            params![source_path],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read media item by path '{}': {}", source_path, e))?;
+
+    match (existing_by_id.as_deref(), existing_by_path.as_deref()) {
+        (Some(_), Some(path_media_id)) if path_media_id != media_id => {
+            merge_media_identity(conn, path_media_id, media_id, now)?;
+        }
+        (None, Some(path_media_id)) if path_media_id != media_id => {
+            rename_media_identity(conn, path_media_id, media_id, source_path, source_kind, now)?;
+        }
+        _ => {}
+    }
+
+    conn.execute(
+        r#"
+        INSERT INTO media_items (media_id, source_path, source_kind, added_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?4)
+        ON CONFLICT(media_id) DO UPDATE SET
+            source_path = excluded.source_path,
+            source_kind = excluded.source_kind,
+            updated_at = excluded.updated_at
+        "#,
+        params![media_id, source_path, source_kind, now],
+    )
+    .map_err(|e| format!("Failed to record media item: {}", e))?;
+    Ok(())
 }
 
 fn rename_media_identity(
