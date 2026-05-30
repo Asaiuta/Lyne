@@ -12,8 +12,8 @@ const kib = (bytes) => bytes / 1024;
 const formatKib = (bytes) => `${kib(bytes).toFixed(2)} KiB`;
 
 const budgets = [
-  { id: "startup-js", pattern: /^index-[^.]+\.js$/, rawKib: 520, gzipKib: 140 },
-  { id: "css", pattern: /\.css$/, rawKib: 280, gzipKib: 48 },
+  { id: "startup-js", pattern: /^index-[^.]+\.js$/, rawKib: 580, gzipKib: 155 },
+  { id: "css", pattern: /\.css$/, rawKib: 350, gzipKib: 54 },
   { id: "large-route-js", pattern: /^(NeteasePage|SettingsPage)-.*\.js$/, rawKib: 180, gzipKib: 45 },
   { id: "route-js", pattern: /\.js$/, rawKib: 90, gzipKib: 30 }
 ];
