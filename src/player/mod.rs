@@ -6,6 +6,7 @@
 mod audio_thread;
 mod cache;
 mod callback;
+mod command_handlers;
 mod effects_api;
 mod fir_eq_api;
 mod gapless;
@@ -15,6 +16,8 @@ mod playback_config;
 mod spectrum;
 mod state;
 mod track_loudness;
+#[cfg(windows)]
+mod wasapi_loop;
 
 // Re-exports
 pub use callback::{

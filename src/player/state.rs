@@ -429,7 +429,10 @@ mod tests {
     fn shuffle_mode_parses_and_round_trips_atomic_value() {
         assert_eq!(ShuffleMode::parse("off"), Some(ShuffleMode::Off));
         assert_eq!(ShuffleMode::parse("on"), Some(ShuffleMode::On));
-        assert_eq!(ShuffleMode::parse("heartbeat"), Some(ShuffleMode::Heartbeat));
+        assert_eq!(
+            ShuffleMode::parse("heartbeat"),
+            Some(ShuffleMode::Heartbeat)
+        );
         assert_eq!(ShuffleMode::parse("bogus"), None);
         assert_eq!(ShuffleMode::from_u8(99), ShuffleMode::Off);
         assert_eq!(ShuffleMode::from_u8(2), ShuffleMode::Heartbeat);

@@ -195,6 +195,7 @@ pub(super) struct ResolvedNcmTrackSupplement {
     pub(super) artist: Option<String>,
     pub(super) artists: Vec<NcmArtistSummary>,
     pub(super) album: Option<String>,
+    pub(super) album_id: Option<i64>,
     pub(super) cover_url: Option<String>,
     pub(super) dynamic_cover_url: Option<String>,
     pub(super) lyrics: Vec<LyricLine>,
@@ -209,6 +210,7 @@ pub(super) struct NcmTrackDetail {
     pub(super) artist: Option<String>,
     pub(super) artists: Vec<NcmArtistSummary>,
     pub(super) album: Option<String>,
+    pub(super) album_id: Option<i64>,
     pub(super) cover_url: Option<String>,
 }
 
@@ -332,6 +334,16 @@ pub(super) struct NcmDiscoverCard {
     pub(super) subtitle: Option<String>,
     pub(super) cover_url: Option<String>,
     pub(super) cursor: Option<i64>,
+    pub(super) user_id: Option<i64>,
+    pub(super) creator_id: Option<i64>,
+    pub(super) track_count: Option<i64>,
+    pub(super) play_count: Option<f64>,
+    pub(super) description: Option<String>,
+    pub(super) tags: Vec<String>,
+    pub(super) create_time: Option<i64>,
+    pub(super) update_time: Option<i64>,
+    pub(super) privacy: Option<i64>,
+    pub(super) subscribed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -350,6 +362,15 @@ pub(super) struct NcmDiscoverToplist {
     pub(super) tracks: Vec<NcmDiscoverToplistTrack>,
     pub(super) is_official: bool,
     pub(super) cursor: Option<i64>,
+    pub(super) user_id: Option<i64>,
+    pub(super) creator_id: Option<i64>,
+    pub(super) track_count: Option<i64>,
+    pub(super) play_count: Option<f64>,
+    pub(super) tags: Vec<String>,
+    pub(super) create_time: Option<i64>,
+    pub(super) update_time: Option<i64>,
+    pub(super) privacy: Option<i64>,
+    pub(super) subscribed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]

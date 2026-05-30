@@ -39,6 +39,7 @@ pub(super) struct OutputStreamContext<'a> {
     pub spectrum_tx: &'a Sender<SpectrumBatch>,
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct DspParamRefs<'a> {
     pub eq_params: &'a Arc<AtomicEqParams>,
     pub saturation_params: &'a Arc<AtomicSaturationParams>,

@@ -66,9 +66,7 @@ fn now_epoch_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn emit_playback_event(data: &web::Data<Arc<AppState>>, event: u32) {
-    let player = data.player.lock();
-    let shared = player.shared_state();
+fn emit_playback_event_from_shared(shared: &Arc<SharedState>, event: u32) {
     shared.event_flags.fetch_or(event, Ordering::Release);
 }
 

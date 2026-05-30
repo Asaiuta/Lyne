@@ -26,30 +26,35 @@ pub(super) async fn configure_output(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ConfigureOutputRequest>,
 ) -> HttpResponse {
-    let mut player = data.player.lock();
+    let (exclusive_mode, state_response) = {
+        let mut player = data.player.lock();
 
-    if let Err(e) = player.select_device(body.device_id) {
-        return internal_server_error_response(e);
-    }
+        if let Err(e) = player.select_device(body.device_id) {
+            return internal_server_error_response(e);
+        }
 
-    if let Some(exclusive) = body.exclusive {
-        player.exclusive_mode = exclusive;
-        player
-            .shared_state()
-            .exclusive_mode
-            .store(exclusive, std::sync::atomic::Ordering::Relaxed);
-    }
+        if let Some(exclusive) = body.exclusive {
+            player.exclusive_mode = exclusive;
+            player
+                .shared_state()
+                .exclusive_mode
+                .store(exclusive, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        (player.exclusive_mode, get_player_state(&player))
+    };
 
     if let Err(e) =
         data.app_db
-            .upsert_device_config("active_output", body.device_id, player.exclusive_mode)
+            .upsert_device_config("active_output", body.device_id, exclusive_mode)
     {
         log::warn!("Failed to persist output config: {}", e);
     }
 
+    let state_response = enrich_player_state(&data.app_db, state_response);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Output configured",
-        get_enriched_player_state(&player, &data.app_db),
+        state_response,
     ))
 }
 
@@ -95,41 +100,48 @@ pub(super) async fn configure_resampling(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ConfigureResamplingRequest>,
 ) -> HttpResponse {
-    let mut player = data.player.lock();
+    let (payload, state_response) = {
+        let mut player = data.player.lock();
 
-    if let Some(ref quality_str) = body.quality {
-        let quality = match quality_str.to_lowercase().as_str() {
-            "low" => crate::config::ResampleQuality::Low,
-            "std" | "standard" => crate::config::ResampleQuality::Standard,
-            "hq" | "high" => crate::config::ResampleQuality::High,
-            "uhq" | "ultrahigh" => crate::config::ResampleQuality::UltraHigh,
-            _ => {
-                return bad_request_response("Invalid quality. Use: low, std, hq, uhq");
-            }
-        };
-        player.set_resample_quality(quality);
-    }
+        if let Some(ref quality_str) = body.quality {
+            let quality = match quality_str.to_lowercase().as_str() {
+                "low" => crate::config::ResampleQuality::Low,
+                "std" | "standard" => crate::config::ResampleQuality::Standard,
+                "hq" | "high" => crate::config::ResampleQuality::High,
+                "uhq" | "ultrahigh" => crate::config::ResampleQuality::UltraHigh,
+                _ => {
+                    return bad_request_response("Invalid quality. Use: low, std, hq, uhq");
+                }
+            };
+            player.set_resample_quality(quality);
+        }
 
-    if let Some(cache) = body.use_cache {
-        player.set_use_cache(cache);
-    }
+        if let Some(cache) = body.use_cache {
+            player.set_use_cache(cache);
+        }
 
-    if let Some(preemptive) = body.preemptive_resample {
-        player.set_preemptive_resample(preemptive);
-    }
+        if let Some(preemptive) = body.preemptive_resample {
+            player.set_preemptive_resample(preemptive);
+        }
 
-    let payload = serde_json::json!({
-        "quality": player.get_resample_quality(),
-        "use_cache": player.get_use_cache(),
-        "preemptive_resample": player.get_preemptive_resample(),
-    });
+        (
+            serde_json::json!({
+                "quality": player.get_resample_quality(),
+                "use_cache": player.get_use_cache(),
+                "preemptive_resample": player.get_preemptive_resample(),
+            }),
+            get_player_state(&player),
+        )
+    };
+
     if let Err(e) = data.app_db.upsert_dsp_config("resampling", &payload) {
         log::warn!("Failed to persist resampling config: {}", e);
     }
 
+    let state_response = enrich_player_state(&data.app_db, state_response);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Resampling settings updated",
-        get_enriched_player_state(&player, &data.app_db),
+        state_response,
     ))
 }
 
@@ -137,50 +149,61 @@ pub(super) async fn configure_normalization(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ConfigureNormalizationRequest>,
 ) -> HttpResponse {
-    let mut player = data.player.lock();
+    let (payload, state_response) = {
+        let mut player = data.player.lock();
 
-    if let Some(enabled) = body.enabled {
-        player.set_loudness_enabled(enabled);
-    }
+        if let Some(enabled) = body.enabled {
+            player.set_loudness_enabled(enabled);
+        }
 
-    if let Some(target_lufs) = body.target_lufs {
-        player.set_target_lufs(target_lufs);
-    }
+        if let Some(target_lufs) = body.target_lufs {
+            player.set_target_lufs(target_lufs);
+        }
 
-    if let Some(album_gain_db) = body.album_gain_db {
-        player.set_album_gain(album_gain_db);
-    }
+        if let Some(album_gain_db) = body.album_gain_db {
+            player.set_album_gain(album_gain_db);
+        }
 
-    if let Some(preamp_db) = body.preamp_db {
-        player.set_preamp_gain(preamp_db);
-    }
+        if let Some(preamp_db) = body.preamp_db {
+            player.set_preamp_gain(preamp_db);
+        }
 
-    if let Some(ref mode_str) = body.mode {
-        let mode = match mode_str.to_lowercase().as_str() {
-            "track" => crate::config::NormalizationMode::Track,
-            "album" => crate::config::NormalizationMode::Album,
-            "streaming" => crate::config::NormalizationMode::Streaming,
-            "replaygain_track" | "rg_track" => crate::config::NormalizationMode::ReplayGainTrack,
-            "replaygain_album" | "rg_album" => crate::config::NormalizationMode::ReplayGainAlbum,
-            _ => crate::config::NormalizationMode::Track,
-        };
-        player.set_normalization_mode(mode);
-    }
+        if let Some(ref mode_str) = body.mode {
+            let mode = match mode_str.to_lowercase().as_str() {
+                "track" => crate::config::NormalizationMode::Track,
+                "album" => crate::config::NormalizationMode::Album,
+                "streaming" => crate::config::NormalizationMode::Streaming,
+                "replaygain_track" | "rg_track" => {
+                    crate::config::NormalizationMode::ReplayGainTrack
+                }
+                "replaygain_album" | "rg_album" => {
+                    crate::config::NormalizationMode::ReplayGainAlbum
+                }
+                _ => crate::config::NormalizationMode::Track,
+            };
+            player.set_normalization_mode(mode);
+        }
 
-    let info = player.get_loudness_info();
-    let payload = serde_json::json!({
-        "enabled": player.loudness_enabled,
-        "target_lufs": player.get_target_lufs(),
-        "preamp_db": info.preamp_db,
-        "current_gain_db": info.current_gain_db,
-    });
+        let info = player.get_loudness_info();
+        (
+            serde_json::json!({
+                "enabled": player.loudness_enabled,
+                "target_lufs": player.get_target_lufs(),
+                "preamp_db": info.preamp_db,
+                "current_gain_db": info.current_gain_db,
+            }),
+            get_player_state(&player),
+        )
+    };
+
     if let Err(e) = data.app_db.upsert_dsp_config("normalization", &payload) {
         log::warn!("Failed to persist normalization config: {}", e);
     }
 
+    let state_response = enrich_player_state(&data.app_db, state_response);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Normalization configured",
-        get_enriched_player_state(&player, &data.app_db),
+        state_response,
     ))
 }
 

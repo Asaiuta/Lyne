@@ -119,6 +119,10 @@ pub(in crate::server::netease) fn read_song_detail(
         album: album
             .and_then(|album| album.get("name"))
             .and_then(read_non_empty_string),
+        album_id: album
+            .and_then(|album| album.get("id"))
+            .and_then(Value::as_i64)
+            .filter(|id| *id > 0),
         cover_url: album
             .and_then(|album| album.get("picUrl"))
             .and_then(read_non_empty_string)

@@ -34,6 +34,15 @@ pub struct CallbackScratch {
     spectrum_batch: SpectrumBatch,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CallbackScratchCapacities {
+    process_buffer: usize,
+    resample_leftover: usize,
+    resample_output: usize,
+    final_output: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputPath {
     Direct,
@@ -80,6 +89,16 @@ impl CallbackScratch {
             resample_output: Vec::with_capacity(resample_samples),
             final_output: Vec::with_capacity(resample_samples),
             spectrum_batch: SpectrumBatch::new(),
+        }
+    }
+
+    #[cfg(test)]
+    fn capacities(&self) -> CallbackScratchCapacities {
+        CallbackScratchCapacities {
+            process_buffer: self.process_buffer.capacity(),
+            resample_leftover: self.resample_leftover.capacity(),
+            resample_output: self.resample_output.capacity(),
+            final_output: self.final_output.capacity(),
         }
     }
 }
@@ -634,6 +653,7 @@ fn render_audio_output(
             .min(available_source)
             .min(4096)
             .min(max_frames_from_capacity);
+        debug_assert!(frames_to_read * channels <= scratch.process_buffer.capacity());
 
         let start_sample = *current_pos * channels;
         let end_sample = start_sample + frames_to_read * channels;
@@ -669,6 +689,7 @@ fn render_audio_output(
             if scratch.resample_output.len() < expected_samples {
                 scratch.resample_output.resize(expected_samples, 0.0);
             }
+            debug_assert!(scratch.resample_output.capacity() >= expected_samples);
             let frames_written =
                 rs.process_chunk_into(&scratch.process_buffer, &mut scratch.resample_output);
             let samples_resampled = frames_written * channels;
@@ -852,6 +873,78 @@ pub fn audio_callback_lockfree(
 mod tests {
     use super::*;
 
+    const TEST_CHANNELS: usize = 2;
+    const TEST_SAMPLE_RATE: u32 = 44_100;
+    const TEST_FRAMES: usize = 512;
+
+    fn build_test_buffer(frames: usize, channels: usize) -> Vec<f64> {
+        (0..frames * channels)
+            .map(|sample| (sample as f64 % 17.0) / 17.0 - 0.5)
+            .collect()
+    }
+
+    fn prepare_playing_shared(frames: usize, channels: usize) -> SharedState {
+        let shared = SharedState::new();
+        shared
+            .audio_buffer
+            .store(Arc::new(build_test_buffer(frames, channels)));
+        shared.total_frames.store(frames as u64, Ordering::Relaxed);
+        shared
+            .sample_rate
+            .store(TEST_SAMPLE_RATE as u64, Ordering::Relaxed);
+        shared.channels.store(channels as u64, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared
+    }
+
+    fn run_capacity_probe(
+        scratch: &mut CallbackScratch,
+        use_resampler: bool,
+        use_shaper: bool,
+    ) -> CallbackScratchCapacities {
+        let shared = prepare_playing_shared(TEST_FRAMES, TEST_CHANNELS);
+        let mut chain = DspChain::new(TEST_SAMPLE_RATE as f64);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut out = vec![0.0f32; 256 * TEST_CHANNELS];
+        let mut resampler = use_resampler
+            .then(|| StreamingResampler::new(TEST_CHANNELS, TEST_SAMPLE_RATE, 48_000).unwrap());
+        let noise_shaper_params = Arc::new(AtomicNoiseShaperParams::new());
+        noise_shaper_params.set_enabled(use_shaper);
+        let mut final_noise_shaper = NoiseShaperProcessor::new(
+            TEST_CHANNELS,
+            if use_resampler {
+                48_000
+            } else {
+                TEST_SAMPLE_RATE
+            },
+            Arc::clone(&noise_shaper_params),
+        );
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            Some(&mut final_noise_shaper),
+            &loudness,
+            &tx,
+            TEST_CHANNELS,
+            &mut resampler,
+            scratch,
+        );
+
+        scratch.capacities()
+    }
+
+    fn assert_capacity_stable_after_warmup(use_resampler: bool, use_shaper: bool) {
+        let mut scratch = CallbackScratch::new(TEST_CHANNELS);
+        let warmed = run_capacity_probe(&mut scratch, use_resampler, use_shaper);
+        let steady = run_capacity_probe(&mut scratch, use_resampler, use_shaper);
+
+        assert_eq!(steady, warmed);
+    }
+
     #[test]
     fn test_normalize_channels_mono_to_stereo() {
         let mono = vec![1.0, 2.0, 3.0];
@@ -891,6 +984,26 @@ mod tests {
             AUDIO_RESAMPLE_BUFFER_FRAMES * 2
         );
         assert_eq!(scratch.resample_leftover_pos, 0);
+    }
+
+    #[test]
+    fn callback_direct_path_reuses_scratch_capacity_after_warmup() {
+        assert_capacity_stable_after_warmup(false, false);
+    }
+
+    #[test]
+    fn callback_shaper_only_path_reuses_scratch_capacity_after_warmup() {
+        assert_capacity_stable_after_warmup(false, true);
+    }
+
+    #[test]
+    fn callback_resampler_only_path_reuses_scratch_capacity_after_warmup() {
+        assert_capacity_stable_after_warmup(true, false);
+    }
+
+    #[test]
+    fn callback_full_output_path_reuses_scratch_capacity_after_warmup() {
+        assert_capacity_stable_after_warmup(true, true);
     }
 
     #[test]

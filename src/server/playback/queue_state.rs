@@ -76,6 +76,18 @@ pub(super) fn playback_runtime_snapshot_from_state(
 }
 
 pub(crate) fn mark_current_track_as_played(data: &web::Data<Arc<AppState>>, current_path: &str) {
+    let shared_state = {
+        let player = data.player.lock();
+        player.shared_state()
+    };
+    mark_current_track_as_played_from_shared(data, &shared_state, current_path);
+}
+
+fn mark_current_track_as_played_from_shared(
+    data: &web::Data<Arc<AppState>>,
+    shared_state: &Arc<SharedState>,
+    current_path: &str,
+) {
     if let Err(e) = data
         .app_db
         .mark_queue_entry_played_by_path("active", current_path)
@@ -86,7 +98,7 @@ pub(crate) fn mark_current_track_as_played(data: &web::Data<Arc<AppState>>, curr
             e
         );
     } else {
-        emit_queue_updated(data);
+        emit_queue_updated_from_shared(shared_state);
     }
 }
 
@@ -107,11 +119,9 @@ pub(super) fn load_queue_entry_for_playback(
         } else {
             player.load_with_credentials(&entry.source_path, credentials.as_ref())?;
         }
-        (
-            get_enriched_player_state(&player, &data.app_db),
-            player.shared_state(),
-        )
+        (get_player_state(&player), player.shared_state())
     };
+    let state_response = enrich_player_state(&data.app_db, state_response);
 
     let media_id = data.app_db.record_media_stub(&entry.source_path);
     if let Err(e) = &media_id {
@@ -190,11 +200,9 @@ pub(crate) fn load_validated_path_for_playback(
         } else {
             player.load_with_credentials(path, credentials.as_ref())?;
         }
-        (
-            get_enriched_player_state(&player, &data.app_db),
-            player.shared_state(),
-        )
+        (get_player_state(&player), player.shared_state())
     };
+    let state_response = enrich_player_state(&data.app_db, state_response);
 
     let media_id = data.app_db.record_media_stub(path);
     if let Err(e) = &media_id {
@@ -279,7 +287,7 @@ fn finish_active_session_on_natural_end(data: &web::Data<Arc<AppState>>) {
     };
 
     if let Some(ref path) = current_path {
-        mark_current_track_as_played(data, path);
+        mark_current_track_as_played_from_shared(data, &shared_state, path);
     }
 
     if let Some(session_id) = data.playback.active_session_id.lock().take() {
@@ -310,7 +318,7 @@ fn finish_active_session_on_natural_end(data: &web::Data<Arc<AppState>>) {
         }
     }
 
-    emit_playback_event(data, crate::player::EVENT_PLAYBACK_ENDED);
+    emit_playback_event_from_shared(&shared_state, crate::player::EVENT_PLAYBACK_ENDED);
 }
 
 pub(super) fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
@@ -340,8 +348,8 @@ pub(super) fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
                 );
                 finish_active_session_on_natural_end(data);
             } else {
-                emit_playback_event(
-                    data,
+                emit_playback_event_from_shared(
+                    &shared_state,
                     crate::player::EVENT_PLAYBACK_SEEKED | crate::player::EVENT_PLAYBACK_STARTED,
                 );
             }
@@ -388,11 +396,11 @@ pub(super) fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
 pub(crate) fn queue_next_from_persistent_queue(
     data: &web::Data<Arc<AppState>>,
 ) -> Result<Option<String>, String> {
-    let current_path = {
+    let (current_path, shared_state) = {
         let player = data.player.lock();
         let shared = player.shared_state();
         let current_path = shared.current_track_path.read().clone();
-        current_path
+        (current_path, shared)
     };
 
     let next_entry = data
@@ -405,7 +413,7 @@ pub(crate) fn queue_next_from_persistent_queue(
 
     data.app_db
         .mark_queue_entry_status("active", entry.entry_id, "preloading")?;
-    emit_queue_updated(data);
+    emit_queue_updated_from_shared(&shared_state);
 
     let credentials = {
         let cfg = data.webdav_config.lock();
@@ -428,7 +436,7 @@ pub(crate) fn queue_next_from_persistent_queue(
             let _ = data
                 .app_db
                 .mark_queue_entry_status("active", entry.entry_id, "queued");
-            emit_queue_updated(data);
+            emit_queue_updated_from_shared(&shared_state);
             Err(e)
         }
     }

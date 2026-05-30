@@ -224,9 +224,12 @@ async fn websocket(
                                 Some(shared_state.channels.load(std::sync::atomic::Ordering::Relaxed) as usize),
                             );
                         }
-                        let msg = {
+                        let raw_state = {
                             let player = data.player.lock();
-                            let state = get_enriched_player_state(&player, &data.app_db);
+                            get_player_state(&player)
+                        };
+                        let state = enrich_player_state(&data.app_db, raw_state);
+                        let msg = {
                             ws_events::track_changed(
                                 &state,
                                 file_path.clone(),

@@ -172,7 +172,7 @@ pub mod auth;
 pub(crate) use path_security::validate_path;
 pub(crate) use request_types::*;
 pub(crate) use state_helpers::{
-    apply_settings_to_player, build_runtime_snapshot, get_enriched_player_state,
+    apply_settings_to_player, build_runtime_snapshot, enrich_player_state, get_player_state,
     record_webdav_probe, restore_domain_state,
 };
 

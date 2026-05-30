@@ -39,13 +39,14 @@ pub(super) async fn play(data: web::Data<Arc<AppState>>) -> HttpResponse {
             let shared_state = player.shared_state();
             let snapshot = build_runtime_snapshot(&player);
             let current_path = shared_state.file_path.read().clone();
-            let state_response = get_enriched_player_state(&player, &data.app_db);
+            let state_response = get_player_state(&player);
             (snapshot, current_path, state_response, shared_state)
         })
     };
 
     match play_result {
         Ok((snapshot, current_path, state_response, shared_state)) => {
+            let state_response = enrich_player_state(&data.app_db, state_response);
             let active_session_id = { *data.playback.active_session_id.lock() };
             if let Some(session_id) = active_session_id {
                 sync_ncm_scrobble_segment_from_shared(&data, &shared_state);
@@ -83,13 +84,14 @@ pub(super) async fn pause(data: web::Data<Arc<AppState>>) -> HttpResponse {
             let shared_state = player.shared_state();
             let snapshot = build_runtime_snapshot(&player);
             let current_path = shared_state.file_path.read().clone();
-            let state_response = get_enriched_player_state(&player, &data.app_db);
+            let state_response = get_player_state(&player);
             (snapshot, current_path, state_response, shared_state)
         })
     };
 
     match pause_result {
         Ok((snapshot, current_path, state_response, shared_state)) => {
+            let state_response = enrich_player_state(&data.app_db, state_response);
             let active_session_id = { *data.playback.active_session_id.lock() };
             if let Some(session_id) = active_session_id {
                 sync_ncm_scrobble_segment_from_shared(&data, &shared_state);
@@ -130,10 +132,11 @@ pub(super) async fn stop(data: web::Data<Arc<AppState>>) -> HttpResponse {
         (
             snapshot_before_stop,
             current_path,
-            get_enriched_player_state(&player, &data.app_db),
+            get_player_state(&player),
             shared_state,
         )
     };
+    let state_response = enrich_player_state(&data.app_db, state_response);
     if let Some(session_id) = data.playback.active_session_id.lock().take() {
         finish_ncm_scrobble_session(&data, session_id, "stopped");
         if let Err(e) =
@@ -172,13 +175,14 @@ pub(super) async fn seek(
             let shared_state = player.shared_state();
             let snapshot = build_runtime_snapshot(&player);
             let current_path = shared_state.file_path.read().clone();
-            let state_response = get_enriched_player_state(&player, &data.app_db);
+            let state_response = get_player_state(&player);
             (snapshot, current_path, state_response, shared_state)
         })
     };
 
     match seek_result {
         Ok((snapshot, current_path, state_response, shared_state)) => {
+            let state_response = enrich_player_state(&data.app_db, state_response);
             if let Some(session_id) = *data.playback.active_session_id.lock() {
                 if let Err(e) = data
                     .app_db
@@ -219,11 +223,15 @@ pub(super) async fn set_repeat_mode(
         }
     };
 
-    let player = data.player.lock();
-    player.set_repeat_mode(mode);
+    let state_response = {
+        let player = data.player.lock();
+        player.set_repeat_mode(mode);
+        get_player_state(&player)
+    };
+    let state_response = enrich_player_state(&data.app_db, state_response);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Repeat mode updated",
-        get_enriched_player_state(&player, &data.app_db),
+        state_response,
     ))
 }
 
@@ -247,21 +255,25 @@ pub(super) async fn set_shuffle_mode(
         return internal_server_error_response(e);
     }
 
-    let player = data.player.lock();
-    player.set_shuffle_mode(mode);
-    drop(player);
-    emit_queue_updated(&data);
-
-    let player = data.player.lock();
+    let (state_response, shared_state) = {
+        let player = data.player.lock();
+        player.set_shuffle_mode(mode);
+        (get_player_state(&player), player.shared_state())
+    };
+    emit_queue_updated_from_shared(&shared_state);
+    let state_response = enrich_player_state(&data.app_db, state_response);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Shuffle mode updated",
-        get_enriched_player_state(&player, &data.app_db),
+        state_response,
     ))
 }
 
 pub(super) async fn get_state(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let player = data.player.lock();
-    let state = get_enriched_player_state(&player, &data.app_db);
+    let state = {
+        let player = data.player.lock();
+        get_player_state(&player)
+    };
+    let state = enrich_player_state(&data.app_db, state);
     HttpResponse::Ok().json(ApiResponse {
         status: "success".into(),
         message: None,
@@ -300,9 +312,11 @@ pub(super) async fn set_volume(
     data: web::Data<Arc<AppState>>,
     body: web::Json<VolumeRequest>,
 ) -> HttpResponse {
-    let mut player = data.player.lock();
-    player.set_volume(body.volume as f64);
-    let snapshot = build_runtime_snapshot(&player);
+    let (snapshot, state_response) = {
+        let mut player = data.player.lock();
+        player.set_volume(body.volume as f64);
+        (build_runtime_snapshot(&player), get_player_state(&player))
+    };
     if let Some(session_id) = *data.playback.active_session_id.lock() {
         if let Err(e) = data
             .app_db
@@ -315,8 +329,9 @@ pub(super) async fn set_volume(
             );
         }
     }
+    let state_response = enrich_player_state(&data.app_db, state_response);
     HttpResponse::Ok().json(ApiResponse::success_with_state(
         "Volume set",
-        get_enriched_player_state(&player, &data.app_db),
+        state_response,
     ))
 }

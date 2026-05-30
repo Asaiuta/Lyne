@@ -2,9 +2,8 @@
 //! DTOs served by the HTTP layer, plus the small "apply persisted settings to
 //! player" and "restore in-memory state from db at startup" bridges.
 //!
-//! Kept as a sibling module of [`request_types`] so handlers can pull the
-//! builders via `use super::{get_enriched_player_state, ...};` exactly as they
-//! did when the helpers lived directly in `server.rs`.
+//! Handlers should capture raw player state with [`get_player_state`] while the
+//! player mutex is held, then call [`enrich_player_state`] after that lock drops.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -203,11 +202,7 @@ pub(crate) fn get_player_state(player: &AudioPlayer) -> StateResponse {
     }
 }
 
-pub(crate) fn get_enriched_player_state(
-    player: &AudioPlayer,
-    app_db: &AppDatabase,
-) -> StateResponse {
-    let mut state = get_player_state(player);
+pub(crate) fn enrich_player_state(app_db: &AppDatabase, mut state: StateResponse) -> StateResponse {
     enrich_state_from_media_database(app_db, &mut state);
     state
 }
@@ -337,5 +332,93 @@ pub(crate) fn record_webdav_probe(data: &AppState, latency: Duration, success: b
         data.analysis
             .webdav_error_count
             .fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw_state_for_path(path: &str) -> StateResponse {
+        StateResponse {
+            is_playing: false,
+            is_paused: false,
+            is_loading: false,
+            duration: 0.0,
+            current_time: 0.0,
+            file_path: Some(path.to_string()),
+            media_id: None,
+            ncm_song_id: None,
+            ncm_source_page_url: None,
+            volume: 1.0,
+            device_id: None,
+            exclusive_mode: false,
+            eq_type: "IIR".to_string(),
+            dither_enabled: false,
+            replaygain_enabled: false,
+            loudness_enabled: false,
+            loudness_mode: "track".to_string(),
+            target_lufs: -14.0,
+            preamp_db: 0.0,
+            rg_track_gain: None,
+            rg_album_gain: None,
+            rg_track_peak: None,
+            rg_album_peak: None,
+            saturation_enabled: false,
+            saturation_drive: 0.0,
+            saturation_mix: 0.0,
+            crossfeed_enabled: false,
+            crossfeed_mix: 0.0,
+            dynamic_loudness_enabled: false,
+            dynamic_loudness_strength: 0.0,
+            dynamic_loudness_factor: 1.0,
+            output_bits: 24,
+            noise_shaper_curve: "Lipshitz5".to_string(),
+            target_samplerate: None,
+            resample_quality: "standard".to_string(),
+            use_cache: false,
+            preemptive_resample: false,
+            title: None,
+            artist: None,
+            album: None,
+            track_number: None,
+            disc_number: None,
+            genre: None,
+            year: None,
+            has_cover_art: false,
+            external_artwork_url: None,
+            repeat_mode: "off".to_string(),
+            shuffle_mode: "off".to_string(),
+        }
+    }
+
+    #[test]
+    fn enrich_player_state_adds_database_metadata_without_player_reference() {
+        let db = AppDatabase::in_memory().unwrap();
+        let path = "https://m701.music.126.net/song.mp3";
+        db.record_external_media_metadata(
+            path,
+            Some("NCM Song"),
+            Some("NCM Artist"),
+            Some("NCM Album"),
+            Some(187.0),
+            Some("https://p1.music.126.net/cover.jpg"),
+        )
+        .unwrap();
+        db.record_ncm_track_source(path, 12345, Some("https://music.163.com/#/song?id=12345"))
+            .unwrap();
+
+        let state = enrich_player_state(&db, raw_state_for_path(path));
+
+        assert_eq!(state.title.as_deref(), Some("NCM Song"));
+        assert_eq!(state.artist.as_deref(), Some("NCM Artist"));
+        assert_eq!(state.album.as_deref(), Some("NCM Album"));
+        assert_eq!(state.duration, 187.0);
+        assert!(state.has_cover_art || state.external_artwork_url.is_some());
+        assert_eq!(state.ncm_song_id, Some(12345));
+        assert_eq!(
+            state.ncm_source_page_url.as_deref(),
+            Some("https://music.163.com/#/song?id=12345")
+        );
     }
 }
