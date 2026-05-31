@@ -7,6 +7,7 @@ import type { TranslationKey } from "../../shared/i18n";
 import { copyToClipboard } from "../../shared/utils/clipboard";
 import { type LibraryListItem } from "./libraryViewTypes";
 import {
+  adaptLibraryWorkerRowToListItem,
   adaptTrackSummaryToListItem,
   adaptMediaItemToListItem,
   LibraryTrackDetailResolver
@@ -43,7 +44,7 @@ export type LibraryDataControllerApi = Pick<
   | "getLibraryTrackCoverArtUrl"
   | "getLibraryTrackDetail"
   | "getLibraryTrackGroups"
-  | "getLibraryTrackView"
+  | "getLibraryTrackSummaries"
   | "getLocalPlaylist"
   | "listLocalPlaylists"
   | "playFromQueue"
@@ -71,6 +72,9 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const adaptTrackSummary = (
     row: Parameters<typeof adaptTrackSummaryToListItem>[0]
   ): LibraryListItem => adaptTrackSummaryToListItem(row, urlProvider);
+  const adaptWorkerRow = (
+    row: Parameters<typeof adaptLibraryWorkerRowToListItem>[0]
+  ): LibraryListItem => adaptLibraryWorkerRowToListItem(row, urlProvider);
   const resolveGroupArtworkUrl = (
     group: Awaited<ReturnType<LibraryDataControllerApi["getLibraryTrackGroups"]>>["groups"][number]
   ) =>
@@ -96,9 +100,10 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   const viewState = createLibraryControllerViewState({
     t,
     globalQuery,
-    requestTrackView: (input) => api.getLibraryTrackView(input),
+    requestTrackSummaries: () => api.getLibraryTrackSummaries(),
     requestTrackGroups: (input) => api.getLibraryTrackGroups(input),
     adaptTrackSummary,
+    adaptWorkerRow,
     resolveGroupArtworkUrl,
     readErrorMessage,
     setRawFeedback
@@ -499,6 +504,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     libraryTotalCount: viewState.libraryTotalCount,
     virtualTotal: viewState.virtualTotal,
     virtualRange: viewState.virtualRange,
+    loadedVirtualRange: viewState.loadedVirtualRange,
     setVirtualRange: viewState.setVirtualRange,
     localPlaylists: viewState.localPlaylists,
     selectedPlaylistId: viewState.selectedPlaylistId,

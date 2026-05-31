@@ -5,7 +5,8 @@ import type {
   LibraryTrackGroupsResponse,
   LibraryTrackGroupSummary,
   LibraryRoot,
-  LibraryTrackViewResponse,
+  LibraryTrackSummariesResponse,
+  LibraryTrackSummary,
   LocalPlaylist
 } from "../../shared/api/types";
 import type { TranslationKey } from "../../shared/i18n";
@@ -26,6 +27,12 @@ import {
 } from "./libraryViewModel";
 import type { ScanProgress } from "./libraryScanState";
 import { nextSortForField, nextSortForOrder } from "./librarySortModel";
+import {
+  LibraryWorkerClient,
+  createLibraryWorkerViewInput,
+  type LibraryWorkerViewResult
+} from "./libraryWorkerClient";
+import type { LibraryWorkerRow } from "./libraryWorkerProtocol";
 
 const DEFAULT_LIBRARY_RANGE = { start: 0, end: 80 };
 const FULL_ROW_LIBRARY_TABS: readonly LibraryTab[] = ["folders"];
@@ -33,13 +40,7 @@ const FULL_ROW_LIBRARY_TABS: readonly LibraryTab[] = ["folders"];
 interface LibraryControllerViewStateOptions {
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
   globalQuery: Accessor<string>;
-  requestTrackView: (input: {
-    queries: string[];
-    folderPath: string | null;
-    sort: LibrarySortState;
-    range?: { start: number; end: number };
-    includeMediaIds?: boolean;
-  }) => Promise<LibraryTrackViewResponse>;
+  requestTrackSummaries: () => Promise<LibraryTrackSummariesResponse>;
   requestTrackGroups: (input: {
     kind: "artists" | "albums";
     queries: string[];
@@ -47,7 +48,8 @@ interface LibraryControllerViewStateOptions {
     sort: LibrarySortState;
     selectedGroupKey?: string | null;
   }) => Promise<LibraryTrackGroupsResponse>;
-  adaptTrackSummary: (row: LibraryTrackViewResponse["rows"][number]) => LibraryListItem;
+  adaptTrackSummary: (row: LibraryTrackSummary) => LibraryListItem;
+  adaptWorkerRow: (row: LibraryWorkerRow) => LibraryListItem;
   resolveGroupArtworkUrl: (group: LibraryTrackGroupSummary) => string | null;
   readErrorMessage: (error: unknown) => string;
   setRawFeedback: (tone: "neutral" | "success" | "error", message: string) => void;
@@ -57,9 +59,10 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   const {
     t,
     globalQuery,
-    requestTrackView,
+    requestTrackSummaries,
     requestTrackGroups,
     adaptTrackSummary,
+    adaptWorkerRow,
     resolveGroupArtworkUrl,
     readErrorMessage,
     setRawFeedback
@@ -78,6 +81,8 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   const [albumGroupRows, setAlbumGroupRows] = createSignal<LibraryListItem[]>([]);
   const [virtualTotal, setVirtualTotal] = createSignal<number>(0);
   const [virtualRange, setVirtualRange] =
+    createSignal<{ start: number; end: number }>(DEFAULT_LIBRARY_RANGE);
+  const [loadedVirtualRange, setLoadedVirtualRange] =
     createSignal<{ start: number; end: number }>(DEFAULT_LIBRARY_RANGE);
   const [folderOptions, setFolderOptions] = createSignal<LibraryFolderSummary[]>([]);
   const [viewReady, setViewReady] = createSignal<boolean>(false);
@@ -98,45 +103,45 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   let latestViewRequestId = 0;
   let latestGroupRequestId = 0;
 
-  const currentTrackViewInput = (options?: {
-    range?: { start: number; end: number };
-    includeMediaIds?: boolean;
-  }) => ({
+  const currentTrackViewInput = () => ({
     queries: debouncedQueries(),
     folderPath: selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
-    sort: sort(),
-    range: options?.range,
-    includeMediaIds: options?.includeMediaIds
+    sort: sort()
   });
 
-  const applyTrackView = (payload: LibraryTrackViewResponse) => {
-    setLibraryRevision(payload.revision);
-    setLibraryTotalCount(payload.library_total_count);
-    setVirtualRows(payload.rows.map(adaptTrackSummary));
-    setVirtualTotal(payload.total_count);
-    setVirtualSizeBytes(payload.total_size_bytes);
-    setFolderOptions(payload.folders);
+  const currentWorkerInput = () =>
+    createLibraryWorkerViewInput(
+      debouncedQueries(),
+      selectedFolder() === ALL_FOLDERS_VALUE ? null : selectedFolder(),
+      sort()
+    );
+
+  const applyWorkerView = (result: LibraryWorkerViewResult) => {
+    setLoadedVirtualRange(result.range);
+    setVirtualRows(result.rows.map(adaptWorkerRow));
+    setVirtualTotal(result.total);
+    setVirtualSizeBytes(result.totalSizeBytes);
+    setFolderOptions(result.folders);
     setViewReady(true);
   };
 
-  const requestVisibleTrackView = () => {
-    const requestId = latestViewRequestId + 1;
-    latestViewRequestId = requestId;
-    void requestTrackView(currentTrackViewInput({ range: virtualRange() }))
-      .then((payload) => {
-        if (requestId !== latestViewRequestId) return;
-        applyTrackView(payload);
-      })
-      .catch((error) => {
-        if (requestId !== latestViewRequestId) return;
-        setViewReady(false);
-        setRawFeedback("error", readErrorMessage(error));
-      });
+  const workerClient = new LibraryWorkerClient({
+    onReady: () => {
+      workerClient.requestView(currentWorkerInput(), virtualRange());
+    },
+    onViewResult: applyWorkerView,
+    onError: (error) => {
+      setViewReady(false);
+      setRawFeedback("error", readErrorMessage(error));
+    }
+  });
+
+  const requestVisibleWorkerView = () => {
+    workerClient.requestView(currentWorkerInput(), virtualRange());
   };
 
   const requestViewMediaIds = async (startMediaId?: string | null): Promise<string[]> => {
-    const response = await requestTrackView(currentTrackViewInput({ includeMediaIds: true }));
-    const mediaIds = response.media_ids ?? [];
+    const mediaIds = await workerClient.requestMediaIds(currentWorkerInput());
     if (mediaIds.length === 0) {
       throw new Error(t("library.tracks.emptyFilter"));
     }
@@ -147,8 +152,8 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   };
 
   const requestViewRows = async (): Promise<LibraryListItem[]> => {
-    const response = await requestTrackView(currentTrackViewInput());
-    return response.rows.map(adaptTrackSummary);
+    const rows = await workerClient.requestRows(currentWorkerInput());
+    return rows.map(adaptWorkerRow);
   };
 
   const requestGroupedView = (
@@ -211,12 +216,14 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
 
   onCleanup(() => {
     fullRowsAbortController?.abort();
+    workerClient.dispose();
   });
 
   const reloadLibraryView = async () => {
     const requestId = latestViewRequestId + 1;
     latestViewRequestId = requestId;
     latestGroupRequestId += 1;
+    workerClient.dispose();
     setFullRows([]);
     setArtistGroupOptions([]);
     setAlbumGroupOptions([]);
@@ -224,10 +231,20 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     setSelectedAlbumGroupKey(null);
     setArtistGroupRows([]);
     setAlbumGroupRows([]);
+    setVirtualRows([]);
+    setFullRows([]);
+    setVirtualTotal(0);
+    setVirtualSizeBytes(0);
+    setLoadedVirtualRange(DEFAULT_LIBRARY_RANGE);
     setViewReady(false);
-    const payload = await requestTrackView(currentTrackViewInput({ range: virtualRange() }));
+    const payload = await requestTrackSummaries();
     if (requestId !== latestViewRequestId) return;
-    applyTrackView(payload);
+    setLibraryRevision(payload.revision);
+    setLibraryTotalCount(payload.total_count);
+    setVirtualTotal(payload.total_count);
+    setVirtualSizeBytes(payload.total_size_bytes);
+    setFolderOptions(payload.folders);
+    workerClient.init(payload.tracks, payload.folders);
   };
 
   const updateVirtualRange = (range: { start: number; end: number }) => {
@@ -256,7 +273,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   });
 
   createEffect(on([debouncedQueries, selectedFolder, sort, virtualRange], () => {
-    if (viewReady()) requestVisibleTrackView();
+    if (viewReady()) requestVisibleWorkerView();
   }));
 
   createEffect(() => {
@@ -364,6 +381,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     setVirtualTotal,
     virtualRange,
     setVirtualRange: updateVirtualRange,
+    loadedVirtualRange,
     folderOptions,
     setFolderOptions,
     viewReady,

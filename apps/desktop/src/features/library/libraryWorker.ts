@@ -160,27 +160,27 @@ const rowForTrack = (track: LibraryTrackSummary): LibraryWorkerRow => ({
 
 const viewKeyFor = (
   queries: readonly string[],
-  folderKey: string | null,
+  folderPath: string | null,
   sort: LibrarySortState
-): string => `${queries.join("\u0000")}\u0001${folderKey ?? ""}\u0001${sort.field}:${sort.order}`;
+): string => `${queries.join("\u0000")}\u0001${folderPath ?? ""}\u0001${sort.field}:${sort.order}`;
 
 const snapshotForView = (
   queries: readonly string[],
-  folderKey: string | null,
+  folderPath: string | null,
   sort: LibrarySortState
 ): ViewSnapshot => {
-  const key = viewKeyFor(queries, folderKey, sort);
+  const key = viewKeyFor(queries, folderPath, sort);
   if (currentSnapshot?.key === key) {
     return currentSnapshot;
   }
 
   const queryFiltered = summaries.filter((track) => matchesQueries(track, queries));
   const folders = buildFolders(queryFiltered);
-  const folderFiltered = folderKey
+  const folderFiltered = folderPath
     ? queryFiltered.filter((track) => {
-        if (track.summary.folder_key === folderKey) return true;
+        if (track.summary.folder_key === folderPath) return true;
         const folder = folderByKey.get(track.summary.folder_key);
-        return folder ? pathContainsFolder(folderKey, folder.path) : false;
+        return folder ? pathContainsFolder(folderPath, folder.path) : false;
       })
     : queryFiltered;
   const sortedTracks = sortTracks(folderFiltered, sort);
@@ -201,7 +201,7 @@ const handleView = (
   message: Extract<LibraryWorkerRequest, { type: "VIEW" }>
 ): LibraryWorkerResponse => {
   const queries = message.queries.map(normalizeQuery).filter((query) => query.length > 0);
-  const snapshot = snapshotForView(queries, message.folderKey, message.sort);
+  const snapshot = snapshotForView(queries, message.folderPath, message.sort);
   const start = Math.max(0, Math.min(message.range.start, snapshot.sortedTracks.length));
   const end = Math.max(start, Math.min(message.range.end, snapshot.sortedTracks.length));
   const rows = snapshot.sortedTracks
@@ -210,6 +210,7 @@ const handleView = (
   return {
     type: "VIEW_RESULT",
     requestId: message.requestId,
+    range: { start, end },
     rows,
     total: snapshot.sortedTracks.length,
     totalSizeBytes: snapshot.totalSizeBytes,
@@ -221,7 +222,7 @@ const handleMediaIds = (
   message: Extract<LibraryWorkerRequest, { type: "MEDIA_IDS" }>
 ): LibraryWorkerResponse => {
   const queries = message.queries.map(normalizeQuery).filter((query) => query.length > 0);
-  const snapshot = snapshotForView(queries, message.folderKey, message.sort);
+  const snapshot = snapshotForView(queries, message.folderPath, message.sort);
   return {
     type: "MEDIA_IDS_RESULT",
     requestId: message.requestId,
@@ -235,7 +236,7 @@ const handleRows = (
   message: Extract<LibraryWorkerRequest, { type: "ROWS" }>
 ): LibraryWorkerResponse => {
   const queries = message.queries.map(normalizeQuery).filter((query) => query.length > 0);
-  const snapshot = snapshotForView(queries, message.folderKey, message.sort);
+  const snapshot = snapshotForView(queries, message.folderPath, message.sort);
   return {
     type: "ROWS_RESULT",
     requestId: message.requestId,
@@ -243,8 +244,9 @@ const handleRows = (
   };
 };
 
-self.onmessage = (event: MessageEvent<LibraryWorkerRequest>) => {
-  const message = event.data;
+export const handleLibraryWorkerRequest = (
+  message: LibraryWorkerRequest
+): LibraryWorkerResponse => {
   if (message.type === "INIT") {
     summaries = message.tracks.map((summary) => ({
       summary,
@@ -257,19 +259,22 @@ self.onmessage = (event: MessageEvent<LibraryWorkerRequest>) => {
       requestId: message.requestId,
       total: summaries.length
     };
-    self.postMessage(response);
-    return;
+    return response;
   }
 
   if (message.type === "VIEW") {
-    self.postMessage(handleView(message));
-    return;
+    return handleView(message);
   }
 
   if (message.type === "MEDIA_IDS") {
-    self.postMessage(handleMediaIds(message));
-    return;
+    return handleMediaIds(message);
   }
 
-  self.postMessage(handleRows(message));
+  return handleRows(message);
 };
+
+if (typeof self !== "undefined") {
+  self.onmessage = (event: MessageEvent<LibraryWorkerRequest>) => {
+    self.postMessage(handleLibraryWorkerRequest(event.data));
+  };
+}

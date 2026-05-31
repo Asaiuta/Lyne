@@ -2,6 +2,7 @@ import type { LibraryTrackSummary, MediaItem } from "../../shared/api/types";
 import { audioQualityLabelFromMetadata } from "../../shared/media/audioQuality";
 import { resolveArtworkUrl } from "../../shared/ui/artwork";
 import type { LibraryListItem } from "./libraryViewTypes";
+import type { LibraryWorkerRow } from "./libraryWorkerProtocol";
 
 export interface LibraryItemUrlProvider {
   getCoverArtUrl: (mediaId: string) => string;
@@ -57,6 +58,41 @@ export const adaptTrackSummaryToListItem = (
     externalArtworkUrl: row.external_artwork_url,
     mediaId: String(row.track_key),
     hasCoverArt: row.has_cover_art,
+    urls: {
+      getCoverArtUrl: (trackKey) => urls.getLibraryTrackCoverArtUrl(Number(trackKey))
+    }
+  })
+});
+
+export const adaptLibraryWorkerRowToListItem = (
+  row: LibraryWorkerRow,
+  urls: LibraryItemUrlProvider
+): LibraryListItem => ({
+  id: row.id,
+  trackKey: row.trackKey,
+  media_id: row.media_id,
+  title: row.title ?? row.fileName,
+  artist: row.artist,
+  album: row.album,
+  track_number: row.track_number,
+  duration_secs: row.duration_secs,
+  sample_rate: row.sample_rate,
+  bitrate_bps: row.bitrate_bps,
+  bits_per_sample: row.bits_per_sample,
+  size_bytes: row.size_bytes,
+  added_at_epoch_secs: row.added_at_epoch_secs,
+  updated_at_epoch_secs: row.updated_at_epoch_secs,
+  fileName: row.fileName,
+  qualityLabel: audioQualityLabelFromMetadata({
+    fileName: row.fileName,
+    sampleRate: row.sample_rate,
+    bitsPerSample: row.bits_per_sample,
+    bitrateBps: row.bitrate_bps
+  }),
+  artworkUrl: resolveArtworkUrl({
+    externalArtworkUrl: row.externalArtworkUrl,
+    mediaId: String(row.trackKey),
+    hasCoverArt: row.hasCoverArt,
     urls: {
       getCoverArtUrl: (trackKey) => urls.getLibraryTrackCoverArtUrl(Number(trackKey))
     }

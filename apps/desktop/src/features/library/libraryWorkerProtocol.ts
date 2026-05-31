@@ -32,7 +32,7 @@ export interface LibraryWorkerRow {
 
 export interface LibraryWorkerViewInput {
   queries: string[];
-  folderKey: string | null;
+  folderPath: string | null;
   sort: LibrarySortState;
 }
 
@@ -79,6 +79,7 @@ export type LibraryWorkerResponse =
   | {
       type: "VIEW_RESULT";
       requestId: number;
+      range: LibraryWorkerRange;
       rows: LibraryWorkerRow[];
       total: number;
       totalSizeBytes: number;

@@ -58,7 +58,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
           <MediaList
             items={props.controller.filteredItems()}
             totalCount={props.controller.virtualTotal()}
-            virtualStart={props.controller.virtualRange().start}
+            virtualStart={props.controller.loadedVirtualRange().start}
             currentSourcePath={props.currentTrackPath}
             currentMediaId={props.currentMediaId}
             isPlayingNow={props.isPlaying}

@@ -10,6 +10,7 @@ import type {
 } from "./libraryWorkerProtocol";
 
 export interface LibraryWorkerViewResult {
+  range: LibraryWorkerRange;
   rows: LibraryWorkerRow[];
   total: number;
   totalSizeBytes: number;
@@ -64,7 +65,7 @@ export class LibraryWorkerClient {
       type: "VIEW",
       requestId,
       queries: input.queries,
-      folderKey: input.folderKey,
+      folderPath: input.folderPath,
       sort: input.sort,
       range
     });
@@ -78,7 +79,7 @@ export class LibraryWorkerClient {
       type: "MEDIA_IDS",
       requestId,
       queries: input.queries,
-      folderKey: input.folderKey,
+      folderPath: input.folderPath,
       sort: input.sort
     };
     return new Promise<string[]>((resolve, reject) => {
@@ -94,7 +95,7 @@ export class LibraryWorkerClient {
       type: "ROWS",
       requestId,
       queries: input.queries,
-      folderKey: input.folderKey,
+      folderPath: input.folderPath,
       sort: input.sort
     };
     return new Promise<LibraryWorkerRow[]>((resolve, reject) => {
@@ -166,6 +167,7 @@ export class LibraryWorkerClient {
       case "VIEW_RESULT":
         if (message.requestId === this.latestViewRequestId) {
           this.handlers.onViewResult({
+            range: message.range,
             rows: message.rows,
             total: message.total,
             totalSizeBytes: message.totalSizeBytes,
@@ -194,10 +196,10 @@ export class LibraryWorkerClient {
 
 export const createLibraryWorkerViewInput = (
   queries: string[],
-  folderKey: string | null,
+  folderPath: string | null,
   sort: LibrarySortState
 ): LibraryWorkerViewInput => ({
   queries,
-  folderKey,
+  folderPath,
   sort
 });
