@@ -1,6 +1,5 @@
 import { createMemo, createSignal } from "solid-js";
 import { IconChevronLeft, IconList, IconPlay, IconRefresh } from "../../../components/icons";
-import { ContextMenu, type ContextMenuItem } from "../../../components/media/ContextMenu";
 import type { MediaContextAction } from "../../../components/media/mediaContextActions";
 import { NcmMediaList } from "../NcmMediaList";
 import { BackToTop } from "../../../components/page/BackToTop";
@@ -8,7 +7,7 @@ import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageSurface } from "../../../components/page/PageSurface";
 import { useTranslation } from "../../../shared/i18n";
-import { NaiveH2, NaiveP } from "../../../shared/ui/naive";
+import { NaiveDropdown, NaiveH2, NaiveP, type NaiveDropdownOption } from "../../../shared/ui/naive";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
 import type { NcmProfile, OnlineTrackItem } from "../shared/types";
@@ -47,7 +46,6 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
   const { t } = useTranslation();
   const readErrorMessage = createErrorMessageReader(t);
   const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
-  const [menuPosition, setMenuPosition] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [refreshing, setRefreshing] = createSignal<boolean>(false);
   const [playingAll, setPlayingAll] = createSignal<boolean>(false);
   const [batchOpen, setBatchOpen] = createSignal<boolean>(false);
@@ -60,16 +58,10 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
       : t("ncm.daily.defaultTip");
   });
 
-  const menuItems = (): ContextMenuItem[] => [
+  const menuItems = (): readonly NaiveDropdownOption[] => [
     { key: "refresh", label: t("ncm.daily.refresh"), icon: <IconRefresh /> },
     { key: "batch", label: t("ncm.daily.batch"), icon: <IconList /> }
   ];
-
-  const openMenu = (event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMenuPosition({ x: rect.left, y: rect.bottom + 8 });
-    setMenuOpen(true);
-  };
 
   const handleRefresh = async () => {
     if (refreshing()) return;
@@ -141,15 +133,28 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
               <IconPlay />
               <span>{playingAll() ? t("ncm.daily.playingAll") : t("ncm.daily.playAll")}</span>
             </button>
-            <button
-              type="button"
-              class="ghost-button ncm-daily-more"
-              aria-label={t("ncm.daily.more")}
+            <NaiveDropdown
+              options={menuItems()}
+              triggerMode="click"
+              placement="bottom-start"
+              gutter={8}
+              open={menuOpen()}
+              onOpenChange={setMenuOpen}
+              onSelect={(option) => handleMenuSelect(option.key)}
+              ariaLabel={t("ncm.daily.more")}
               disabled={refreshing()}
-              onClick={openMenu}
             >
-              <IconList />
-            </button>
+              <button
+                type="button"
+                class="ghost-button ncm-daily-more"
+                aria-label={t("ncm.daily.more")}
+                disabled={refreshing()}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen()}
+              >
+                <IconList />
+              </button>
+            </NaiveDropdown>
           </div>
         </header>
       </PageHero>
@@ -184,14 +189,6 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
         />
       </PageBody>
       <BackToTop label={t("media.scroll.top")} />
-      <ContextMenu
-        open={menuOpen()}
-        x={menuPosition().x}
-        y={menuPosition().y}
-        items={menuItems()}
-        onSelect={handleMenuSelect}
-        onClose={() => setMenuOpen(false)}
-      />
       <DailySongsBatchModal
         open={batchOpen()}
         items={props.tracks}

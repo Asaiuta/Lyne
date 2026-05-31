@@ -1,11 +1,11 @@
 import { For } from "solid-js";
+import type { JSX } from "solid-js";
 import { NaiveDivider, NaiveFlex, NaivePopover } from "../../shared/ui/naive";
 import type { MediaSortField, MediaSortOrder, MediaSortState } from "./mediaListTypes";
 
 interface MediaSortPopoverProps {
-  ref?: (element: HTMLDivElement) => void;
-  x: number;
-  y: number;
+  open: boolean;
+  trigger: JSX.Element;
   sort?: MediaSortState;
   dialogLabel: string;
   fieldLabel: string;
@@ -14,6 +14,7 @@ interface MediaSortPopoverProps {
   orders: readonly MediaSortOrder[];
   sortLabel: (field: MediaSortField) => string;
   sortOrderLabel: (order: MediaSortOrder) => string;
+  onOpenChange: (open: boolean) => void;
   onFieldChange: (field: MediaSortField) => void;
   onOrderChange: (order: MediaSortOrder) => void;
 }
@@ -21,17 +22,18 @@ interface MediaSortPopoverProps {
 export function MediaSortPopover(props: MediaSortPopoverProps) {
   return (
     <NaivePopover
-      triggerMode="manual"
-      open={true}
+      triggerMode="click"
+      open={props.open}
+      onOpenChange={props.onOpenChange}
       showArrow={false}
       raw
       placement="bottom-start"
-      getAnchorRect={() => ({ x: props.x, y: props.y, width: 0, height: 0 })}
+      trigger={props.trigger}
       class="media-sort-popover"
       ariaLabel={props.dialogLabel}
       role="dialog"
     >
-      <div ref={props.ref} class="media-sort-popover-body">
+      <div class="media-sort-popover-body">
         <NaiveFlex class="media-sort-group" vertical>
           <div class="media-sort-label">{props.fieldLabel}</div>
           <div class="media-sort-radio-group">

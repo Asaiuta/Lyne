@@ -12,7 +12,6 @@ import {
   IconSearch,
   IconStorage
 } from "../../components/icons";
-import { ContextMenu, type ContextMenuItem } from "../../components/media/ContextMenu";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import type { LocalPlaylist, PlayerState } from "../../shared/api/types";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
@@ -25,7 +24,7 @@ import {
 import { LibraryTabContent } from "./LibraryTabContent";
 import { ALL_FOLDERS_VALUE, type LibraryListItem, type LibraryTab } from "./libraryViewTypes";
 import { createLibraryPlaybackCoordinator } from "./libraryPlaybackCoordinator";
-import { NaiveH1 } from "../../shared/ui/naive";
+import { NaiveDropdown, NaiveH1, type NaiveDropdownOption } from "../../shared/ui/naive";
 import { useLibraryDataController } from "./useLibraryDataController";
 
 interface LibraryPageProps {
@@ -52,7 +51,7 @@ export function LibraryPage(props: LibraryPageProps) {
   const [playlistModalItems, setPlaylistModalItems] = createSignal<LibraryListItem[] | null>(null);
   const [batchModalItems, setBatchModalItems] = createSignal<LibraryListItem[] | null>(null);
   const [confirmAction, setConfirmAction] = createSignal<LibraryConfirmAction | null>(null);
-  const [moreMenu, setMoreMenu] = createSignal({ open: false, x: 0, y: 0 });
+  const [moreMenuOpen, setMoreMenuOpen] = createSignal<boolean>(false);
   const [groupPlaybackItems, setGroupPlaybackItems] = createSignal<LibraryListItem[]>([]);
   const playbackCoordinator = createLibraryPlaybackCoordinator({
     getSnapshot: () => ({
@@ -250,7 +249,7 @@ export function LibraryPage(props: LibraryPageProps) {
     { value: "folders", label: t("library.tabs.folders") }
   ];
 
-  const moreMenuItems = (): ContextMenuItem[] => [
+  const moreMenuItems = (): readonly NaiveDropdownOption[] => [
     {
       key: "manage-roots",
       label: t("library.action.manageRoots"),
@@ -334,18 +333,26 @@ export function LibraryPage(props: LibraryPageProps) {
                 <IconPlus />
               </Show>
             </button>
-            <button
-              type="button"
-              class="ghost-button page-action local-library-circle"
-              onClick={(event) => {
-                const rect = event.currentTarget.getBoundingClientRect();
-                setMoreMenu({ open: true, x: rect.left, y: rect.bottom + 6 });
-              }}
-              aria-label={t("library.action.more")}
-              title={t("library.action.more")}
+            <NaiveDropdown
+              options={moreMenuItems()}
+              triggerMode="click"
+              placement="bottom-start"
+              open={moreMenuOpen()}
+              onOpenChange={setMoreMenuOpen}
+              onSelect={(option) => handleMoreMenuSelect(option.key)}
+              ariaLabel={t("library.action.more")}
             >
-              <IconList />
-            </button>
+              <button
+                type="button"
+                class="ghost-button page-action local-library-circle"
+                aria-label={t("library.action.more")}
+                title={t("library.action.more")}
+                aria-haspopup="menu"
+                aria-expanded={moreMenuOpen()}
+              >
+                <IconList />
+              </button>
+            </NaiveDropdown>
             <Show when={controller.activeTab() !== "folders"}>
               <label class="local-library-folder-select" aria-label={t("library.folderFilter.label")}>
                 <IconFolder />
@@ -410,14 +417,6 @@ export function LibraryPage(props: LibraryPageProps) {
           {controller.feedback().message}
         </div>
       </Show>
-      <ContextMenu
-        open={moreMenu().open}
-        x={moreMenu().x}
-        y={moreMenu().y}
-        items={moreMenuItems()}
-        onSelect={handleMoreMenuSelect}
-        onClose={() => setMoreMenu((current) => ({ ...current, open: false }))}
-      />
       <Show when={controller.scanProgress()}>
         {(progress) => (
           <div class="local-library-scan-progress" role="status">

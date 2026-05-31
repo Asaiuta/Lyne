@@ -3,7 +3,6 @@ import type { JSX } from "solid-js";
 import { useTranslation } from "../../shared/i18n";
 import { copyToClipboard } from "../../shared/utils/clipboard";
 import { useUISettings } from "../../shared/state/useUISettings";
-import { useDismissibleOverlay } from "../../shared/ui/useDismissibleOverlay";
 import { IconChevronDown } from "../icons";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import {
@@ -46,12 +45,6 @@ interface MenuState {
   itemId: string | null;
 }
 
-interface SortMenuState {
-  open: boolean;
-  x: number;
-  y: number;
-}
-
 const closedMenu: MenuState = {
   open: false,
   x: 0,
@@ -59,24 +52,17 @@ const closedMenu: MenuState = {
   itemId: null
 };
 
-const closedSortMenu: SortMenuState = {
-  open: false,
-  x: 0,
-  y: 0
-};
-
 export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [menu, setMenu] = createSignal<MenuState>(closedMenu);
-  const [sortMenu, setSortMenu] = createSignal<SortMenuState>(closedSortMenu);
+  const [sortMenuOpen, setSortMenuOpen] = createSignal<boolean>(false);
   const [scrollTop, setScrollTop] = createSignal<number>(0);
   const [draggedIndex, setDraggedIndex] = createSignal<number | null>(null);
   const [dropIndex, setDropIndex] = createSignal<number | null>(null);
   const [viewportHeight, setViewportHeight] = createSignal<number>(0);
   let viewportRef: HTMLDivElement | undefined;
-  let sortMenuRef: HTMLDivElement | undefined;
   let scrollFrame = 0;
   let pendingScrollTop = 0;
 
@@ -118,28 +104,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
   const closeMenu = () => {
     setMenu((current) => ({ ...current, open: false, itemId: null }));
   };
-
-  const closeSortMenu = () => {
-    setSortMenu((current) => ({ ...current, open: false }));
-  };
-
-  useDismissibleOverlay(() => sortMenu().open, {
-    isInside: (target) => {
-      // NaivePopover renders its Content in a Portal at document.body; the
-      // outer `.media-sort-popover` shell holds the Kobalte Popover.Content
-      // (visible border/background) and the inner `.media-sort-popover-body`
-      // (12px padding flex row). A `closest` lookup covers both surfaces so
-      // clicks on the popover border/radius do not dismiss the overlay.
-      if (sortMenuRef && sortMenuRef.contains(target)) return true;
-      if (target instanceof Element) {
-        return !!target.closest(".media-sort-popover");
-      }
-      return false;
-    },
-    onDismiss: closeSortMenu,
-    scroll: true,
-    blur: true
-  });
 
   const handleRowContextMenu = (event: MouseEvent, itemId: string) => {
     event.preventDefault();
@@ -413,25 +377,35 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     const activeField = props.sort?.field ?? "default";
     const activeLabel = activeField === "default" ? "" : sortLabel(activeField);
     return (
-      <button
-        type="button"
-        class="media-sort-button media-sort-title-button"
-        classList={{ "is-active": activeField !== "default" }}
-        onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          setSortMenu({
-            open: true,
-            x: rect.left,
-            y: rect.bottom + 6
-          });
-        }}
-      >
-        <span>{t("media.column.title")}</span>
-        <Show when={activeLabel}>
-          {(label) => <span class="media-sort-current">({label()})</span>}
-        </Show>
-        <IconChevronDown />
-      </button>
+      <MediaSortPopover
+        open={sortMenuOpen()}
+        onOpenChange={setSortMenuOpen}
+        sort={props.sort}
+        dialogLabel={t("media.sort.dialog")}
+        fieldLabel={t("media.sort.field")}
+        orderLabel={t("media.sort.order")}
+        fields={sortFields()}
+        orders={sortOrders()}
+        sortLabel={sortLabel}
+        sortOrderLabel={sortOrderLabel}
+        onFieldChange={handleSortFieldChange}
+        onOrderChange={handleSortOrderChange}
+        trigger={
+          <button
+            type="button"
+            class="media-sort-button media-sort-title-button"
+            classList={{ "is-active": activeField !== "default" }}
+            aria-haspopup="dialog"
+            aria-expanded={sortMenuOpen()}
+          >
+            <span>{t("media.column.title")}</span>
+            <Show when={activeLabel}>
+              {(label) => <span class="media-sort-current">({label()})</span>}
+            </Show>
+            <IconChevronDown />
+          </button>
+        }
+      />
     );
   };
 
@@ -613,25 +587,6 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
           onSelect={handleMenuSelect}
           onClose={closeMenu}
         />
-        <Show when={sortMenu().open && typeof document !== "undefined"}>
-          <MediaSortPopover
-            ref={(element) => {
-              sortMenuRef = element;
-            }}
-            x={sortMenu().x}
-            y={sortMenu().y}
-            sort={props.sort}
-            dialogLabel={t("media.sort.dialog")}
-            fieldLabel={t("media.sort.field")}
-            orderLabel={t("media.sort.order")}
-            fields={sortFields()}
-            orders={sortOrders()}
-            sortLabel={sortLabel}
-            sortOrderLabel={sortOrderLabel}
-            onFieldChange={handleSortFieldChange}
-            onOrderChange={handleSortOrderChange}
-          />
-        </Show>
       </div>
     </Show>
   );

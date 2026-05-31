@@ -14,7 +14,6 @@ import {
   IconShare,
   IconTag
 } from "../../../components/icons";
-import { ContextMenu, type ContextMenuItem } from "../../../components/media/ContextMenu";
 import type { MediaContextAction } from "../../../components/media/mediaContextActions";
 import { NcmMediaList } from "../NcmMediaList";
 import { BackToTop } from "../../../components/page/BackToTop";
@@ -27,7 +26,7 @@ import { useTranslation } from "../../../shared/i18n";
 import { copyToClipboard } from "../../../shared/utils/clipboard";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
-import { NaiveH2, NaiveP, NaiveSpin } from "../../../shared/ui/naive";
+import { NaiveDropdown, NaiveH2, NaiveP, NaiveSpin, type NaiveDropdownOption } from "../../../shared/ui/naive";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import type { PlaylistDetailInfo } from "../playlistParsers";
 import type { FeedbackSetter } from "../shared/feedback";
@@ -79,7 +78,6 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
   const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
-  const [menuPosition, setMenuPosition] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [batchOpen, setBatchOpen] = createSignal<boolean>(false);
   const [editOpen, setEditOpen] = createSignal<boolean>(false);
   const detailPlaylist = createMemo<PlaylistDetailInfo | OnlinePlaylistSummary | null>(() =>
@@ -129,8 +127,8 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
   const canToggleSubscribe = createMemo<boolean>(() =>
     Boolean(props.onToggleSubscribe) && !canEditPlaylist()
   );
-  const menuItems = (): ContextMenuItem[] => {
-    const items: ContextMenuItem[] = [];
+  const menuItems = (): readonly NaiveDropdownOption[] => {
+    const items: NaiveDropdownOption[] = [];
     if (props.onRefresh) {
       items.push({ key: "refresh", label: t("ncm.playlist.refreshCache"), icon: <IconRefresh /> });
     }
@@ -145,11 +143,6 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
       { key: "open", label: t("ncm.playlist.openSource"), icon: <IconLink /> }
     );
     return items;
-  };
-  const openMenu = (event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMenuPosition({ x: rect.left, y: rect.bottom + 8 });
-    setMenuOpen(true);
   };
   const copyShareLink = async () => {
     const url = playlistUrl();
@@ -259,7 +252,20 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                       </div>
                     </Show>
                     <div class="playlist-detail-copy">
-                      <NaiveH2 title={playlist().name}>{playlist().name}</NaiveH2>
+                      <div class="playlist-detail-title-row">
+                        <Show when={props.onBack !== undefined}>
+                          <button
+                            type="button"
+                            class="ghost-button playlist-detail-back"
+                            aria-label={t("ncm.playlist.backToList")}
+                            title={t("ncm.playlist.backToList")}
+                            onClick={() => props.onBack?.()}
+                          >
+                            <IconChevronLeft />
+                          </button>
+                        </Show>
+                        <NaiveH2 title={playlist().name}>{playlist().name}</NaiveH2>
+                      </div>
                       <div class="playlist-detail-collapse">
                         <Show when={uiSettings.playlistPageElements.description && (playlist().description ?? props.subtitleText)}>
                           {(description) => <NaiveP class="playlist-detail-desc">{description()}</NaiveP>}
@@ -304,16 +310,6 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                             <IconPlay />
                             {props.isLoadingTracks ? t("ncm.playlist.loading") : t("ncm.playlist.play")}
                           </button>
-                          <Show when={props.onBack !== undefined}>
-                            <button
-                              type="button"
-                              class="ghost-button playlist-detail-back"
-                              onClick={() => props.onBack?.()}
-                            >
-                              <IconChevronLeft />
-                              {t("ncm.playlist.backToList")}
-                            </button>
-                          </Show>
                           <Show when={canToggleSubscribe()}>
                             <button
                               type="button"
@@ -327,15 +323,27 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                               {subscribeLabel()}
                             </button>
                           </Show>
-                          <button
-                            type="button"
-                            class="ghost-button playlist-detail-more"
-                            aria-label={t("ncm.playlist.more")}
-                            title={t("ncm.playlist.more")}
-                            onClick={openMenu}
+                          <NaiveDropdown
+                            options={menuItems()}
+                            triggerMode="click"
+                            placement="bottom-start"
+                            gutter={8}
+                            open={menuOpen()}
+                            onOpenChange={setMenuOpen}
+                            onSelect={(option) => handleMenuSelect(option.key)}
+                            ariaLabel={t("ncm.playlist.more")}
                           >
-                            <IconList />
-                          </button>
+                            <button
+                              type="button"
+                              class="ghost-button playlist-detail-more"
+                              aria-label={t("ncm.playlist.more")}
+                              title={t("ncm.playlist.more")}
+                              aria-haspopup="menu"
+                              aria-expanded={menuOpen()}
+                            >
+                              <IconList />
+                            </button>
+                          </NaiveDropdown>
                         </div>
                         <div class="playlist-detail-menu-right">
                           <label class="playlist-detail-search">
@@ -415,14 +423,6 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
             )}
           </PageStickyHeader>
           <BackToTop label={t("media.scroll.top")} />
-          <ContextMenu
-            open={menuOpen()}
-            x={menuPosition().x}
-            y={menuPosition().y}
-            items={menuItems()}
-            onSelect={handleMenuSelect}
-            onClose={() => setMenuOpen(false)}
-          />
           <Show when={props.setFeedback}>
             {(setFeedback) => (
               <>

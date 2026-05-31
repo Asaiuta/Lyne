@@ -1,5 +1,4 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { ContextMenu, type ContextMenuItem } from "../../components/media/ContextMenu";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import {
   IconCloud,
@@ -13,7 +12,7 @@ import {
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
-import { NaiveH2 } from "../../shared/ui/naive";
+import { NaiveDropdown, NaiveH2, type NaiveDropdownOption } from "../../shared/ui/naive";
 import { CloudMatchModal } from "./details/CloudMatchModal";
 import { DailySongsBatchModal } from "./details/DailySongsBatchModal";
 import type { NcmTrackReference } from "./ncmPlayback";
@@ -116,7 +115,6 @@ export function CloudPage(props: CloudPageProps) {
   const [debouncedSearchValue, setDebouncedSearchValue] = createSignal<string>("");
   const [isLoading, setIsLoading] = createSignal<boolean>(false);
   const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
-  const [menuPosition, setMenuPosition] = createSignal<{ x: number; y: number }>({ x: 0, y: 0 });
   const [batchOpen, setBatchOpen] = createSignal<boolean>(false);
   const [matchItem, setMatchItem] = createSignal<OnlineTrackItem | null>(null);
   const [feedback, setFeedback] = createSignal<Feedback>(createInitialFeedback(t));
@@ -261,15 +259,9 @@ export function CloudPage(props: CloudPageProps) {
     });
   });
 
-  const menuItems = (): ContextMenuItem[] => [
+  const menuItems = (): readonly NaiveDropdownOption[] => [
     { key: "batch", label: t("ncm.cloud.batch"), icon: <IconList /> }
   ];
-
-  const openMenu = (event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMenuPosition({ x: rect.left, y: rect.bottom + 8 });
-    setMenuOpen(true);
-  };
 
   const handleMenuSelect = (key: string) => {
     if (key === "batch") {
@@ -432,15 +424,27 @@ export function CloudPage(props: CloudPageProps) {
             >
               <IconRefresh />
             </button>
-            <button
-              type="button"
-              class="ghost-button playlist-detail-icon-button"
-              onClick={openMenu}
-              title={t("ncm.cloud.batch")}
-              aria-label={t("ncm.cloud.batch")}
+            <NaiveDropdown
+              options={menuItems()}
+              triggerMode="click"
+              placement="bottom-start"
+              gutter={8}
+              open={menuOpen()}
+              onOpenChange={setMenuOpen}
+              onSelect={(option) => handleMenuSelect(option.key)}
+              ariaLabel={t("ncm.cloud.batch")}
             >
-              <IconList />
-            </button>
+              <button
+                type="button"
+                class="ghost-button playlist-detail-icon-button"
+                title={t("ncm.cloud.batch")}
+                aria-label={t("ncm.cloud.batch")}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen()}
+              >
+                <IconList />
+              </button>
+            </NaiveDropdown>
           </div>
           <Show when={tracks().length > 0}>
             <label class="playlist-detail-search cloud-search">
@@ -453,15 +457,6 @@ export function CloudPage(props: CloudPageProps) {
             </label>
           </Show>
         </section>
-
-        <ContextMenu
-          open={menuOpen()}
-          x={menuPosition().x}
-          y={menuPosition().y}
-          items={menuItems()}
-          onSelect={handleMenuSelect}
-          onClose={() => setMenuOpen(false)}
-        />
 
         <NcmMediaList
           items={filteredTracks()}
