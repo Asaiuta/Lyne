@@ -37,8 +37,9 @@ export function resolveMediaListVisibleRange(
   const measuredHeight =
     options.viewportHeight > 0 ? options.viewportHeight : rowHeight * FALLBACK_VISIBLE_ROWS;
   const scrollTop = Math.max(0, options.scrollTop);
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const count = Math.ceil(measuredHeight / rowHeight) + overscan * 2;
+  const maxStart = Math.max(0, totalItems - count);
+  const start = Math.min(maxStart, Math.max(0, Math.floor(scrollTop / rowHeight) - overscan));
 
   return { start, end: Math.min(totalItems, start + count) };
 }

@@ -47,3 +47,14 @@ test("MediaList keeps small lists unvirtualized", () => {
     { start: 0, end: 20 }
   );
 });
+
+test("MediaList clamps large-list ranges when scrollTop is beyond the current result set", () => {
+  const range = resolveMediaListVisibleRange({
+    totalItems: 121,
+    scrollTop: 999_999,
+    viewportHeight: MEDIA_LIST_ROW_HEIGHT_PX * 4
+  });
+
+  assert.equal(range.end, 121);
+  assert.equal(range.end > range.start, true);
+});
