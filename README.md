@@ -1,213 +1,172 @@
 <div align="center">
-<h2> AudioPlayer </h2>
-<p> 高性能音频播放器 - Rust 音频引擎 + Tauri 桌面应用 </p>
+  <h1>Lyne</h1>
+  <p>Rust 音频引擎驱动的高保真桌面音乐播放器</p>
 
-[![Stars](https://img.shields.io/github/stars/Asaiuta/AudioPlayer?style=flat)](https://github.com/Asaiuta/AudioPlayer/stargazers)
-[![Version](https://img.shields.io/github/v/release/Asaiuta/AudioPlayer)](https://github.com/Asaiuta/AudioPlayer/releases)
-[![License](https://img.shields.io/github/license/Asaiuta/AudioPlayer)](https://github.com/Asaiuta/AudioPlayer/blob/master/LICENSE)
-[![Issues](https://img.shields.io/github/issues/Asaiuta/AudioPlayer)](https://github.com/Asaiuta/AudioPlayer/issues)
+[![Stars](https://img.shields.io/github/stars/Asaiuta/Lyne?style=flat)](https://github.com/Asaiuta/Lyne/stargazers)
+[![Version](https://img.shields.io/github/v/release/Asaiuta/Lyne)](https://github.com/Asaiuta/Lyne/releases)
+[![License](https://img.shields.io/github/license/Asaiuta/Lyne)](https://github.com/Asaiuta/Lyne/blob/master/LICENSE)
+[![Issues](https://img.shields.io/github/issues/Asaiuta/Lyne)](https://github.com/Asaiuta/Lyne/issues)
 
-> ⚠️ **项目正在积极开发中，API 和功能可能会发生变化**
-
+> 项目正在积极开发中，功能、接口和数据结构仍可能调整。
 </div>
 
-## 说明
+## 介绍
 
-> [!IMPORTANT]
->
-> ### 严肃警告
->
-> - 请务必遵守 [GNU Affero General Public License (AGPL-3.0)](https://www.gnu.org/licenses/agpl-3.0.html) 许可协议
-> - 在您的修改、演绎、分发或派生项目中，必须同样采用 **AGPL-3.0** 许可协议，**并在适当的位置包含本项目的许可和版权信息**
-> - 若您用于售卖或其他盈利用途，**必须提供本项目的源代码及原项目链接**。另外由于本项目涉及第三方，**售卖后可能遭受法律或诉讼风险**。如若发现违反许可协议，作者保留追究法律责任的权利
-> - 禁止在二开项目中修改程序原版权信息（ 您可以添加二开作者信息 ）
-> - 感谢您的尊重与理解
+Lyne 是一个桌面音乐播放器，后端采用 Rust 构建音频播放、DSP、媒体库扫描和本地 HTTP/WebSocket 服务，前端采用 Tauri 2 + SolidJS + TypeScript 构建桌面界面。
 
-> [!NOTE]
->
-> - 本项目采用 [Rust](https://www.rust-lang.org/) + [Tauri](https://tauri.app/) + [SolidJS](https://www.solidjs.com/) + [TypeScript](https://www.typescriptlang.org/) 开发
-> - 音频引擎使用 [symphonia](https://github.com/pdeljanov/symphonia) 解码、[soxr](https://github.com/pegasus-audio/soxr-rs) 重采样、[cpal](https://github.com/RustAudio/cpal) 音频输出
-> - 支持网易云音乐集成（登录、歌单、搜索、播放）
-> - 采用 64-bit 浮点处理管道，实现高保真音频播放
-> - 支持实时音频频谱分析和 DSP 效果处理
+项目目标是提供一个本地音乐体验扎实、音频处理链路可控、同时具备在线音乐扩展能力的播放器。当前重点仍在能力补齐、性能边界和 SPlayer 风格体验对齐上。
+
+## 功能状态
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| 本地音频播放 | 可用 | 支持 MP3、FLAC、WAV、AAC、OGG 等常见格式 |
+| 高保真处理管道 | 可用 | 64-bit 浮点处理、SoX VHQ 重采样、响度测量与 DSP 链路 |
+| 本地音乐库 | 可用 | 本地扫描、SQLite 索引、封面缓存、播放历史与队列管理 |
+| 网易云音乐 | 部分可用 | 登录、歌单、搜索、云盘/在线播放等能力持续补齐中 |
+| 歌词显示 | 部分可用 | 本地歌词、在线歌词和高级歌词能力仍在迭代 |
+| 频谱/DSP 可视化 | 部分可用 | 频谱分析、动态主题色和全屏播放页持续打磨中 |
+| AutoMix | 规划/实验中 | 智能混音、过渡分析和缓存策略仍处于任务规划阶段 |
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 音频引擎 | Rust (symphonia, soxr, cpal, rustfft) |
+| 音频引擎 | Rust, symphonia, soxr, cpal, rustfft |
 | 桌面框架 | Tauri 2.x |
-| 前端 | SolidJS + TypeScript |
+| 前端 | SolidJS, TypeScript |
 | 样式 | UnoCSS |
-| 数据库 | SQLite (rusqlite) |
-| HTTP 服务器 | Actix-web |
+| 数据库 | SQLite, rusqlite |
+| 服务端 | Actix-web, WebSocket |
 | 异步运行时 | Tokio |
-| 构建 | Vite + Cargo |
+| 构建 | Cargo, Vite, npm |
 
 ## 项目结构
 
-```
-AudioPlayer/
-├── src/                    # Rust 音频引擎
-│   ├── player/             # 播放器核心（音频线程、回调、频谱）
-│   ├── processor/          # DSP 处理器（均衡器、响度、重采样）
-│   ├── server/             # HTTP/WebSocket 服务器
-│   ├── app_database/       # SQLite 数据库操作
-│   └── main.rs             # 服务器入口点
+```text
+Lyne/
+├── src/                    # Rust 音频引擎、播放器运行时和本地服务
+│   ├── player/             # 播放器核心、音频线程、回调和频谱
+│   ├── processor/          # DSP 处理器、响度、重采样和限制器
+│   ├── server/             # HTTP/WebSocket 服务、网易云代理和扫描任务
+│   ├── app_database/       # SQLite 数据库访问与迁移辅助
+│   └── main.rs             # audio_server 入口
 ├── apps/desktop/           # Tauri 桌面应用
 │   ├── src/                # SolidJS 前端
-│   └── src-tauri/          # Tauri 配置
+│   └── src-tauri/          # Tauri 配置与桌面壳
 ├── crates/                 # Rust 子 crate
-│   └── audio-runtime-paths/ # 运行时路径处理
-├── packages/               # 协议定义
-│   └── protocol/           # OpenAPI 规范
+├── packages/               # 协议与共享定义
 ├── migrations/             # 数据库迁移
 ├── benches/                # 性能基准测试
-└── scripts/                # 构建脚本
+└── scripts/                # 构建和维护脚本
 ```
 
-## 开发
+## 开发环境
 
-### 环境要求
-
-- Rust 1.70+ (推荐 1.75+)
+- Windows 10/11
+- Rust stable，建议使用较新的 stable 工具链
 - Node.js 18+
-- soxr 库 (通过 vcpkg 或 MSYS2 安装)
+- npm
+- soxr 运行库/开发库
 
-#### Windows 依赖安装
+### Windows soxr 安装
 
-**方法 1: 使用 vcpkg (推荐)**
-```bash
-# 安装 vcpkg
+使用 vcpkg：
+
+```powershell
 git clone https://github.com/microsoft/vcpkg.git
 cd vcpkg
 .\bootstrap-vcpkg.bat
-
-# 安装 soxr
 .\vcpkg install soxr:x64-windows-static-md
 ```
 
-**方法 2: 使用 MSYS2**
-```bash
-# 安装 MSYS2
-# 下载并安装 https://www.msys2.org/
+或使用 MSYS2：
 
-# 在 MSYS2 MinGW 64-bit 终端中
+```bash
 pacman -S mingw-w64-x86_64-soxr
 ```
 
-### 快速开始
+## 快速开始
 
-1. 克隆仓库
+```powershell
+git clone https://github.com/Asaiuta/Lyne.git
+cd Lyne
+```
 
-   ```bash
-   git clone https://github.com/Asaiuta/AudioPlayer.git
-   cd AudioPlayer
-   ```
+安装前端依赖：
 
-2. 构建后端
+```powershell
+cd apps/desktop
+npm install
+```
 
-   ```bash
-   set RUSTFLAGS=-C target-cpu=native
-   cargo build --release --bin audio_server
-   ```
+启动 Tauri 桌面开发环境：
 
-3. 启动前端开发
+```powershell
+npm run tauri dev
+```
 
-   ```bash
-   cd apps/desktop
-   npm install
-   npm run dev
-   ```
+只启动 Web 前端预览：
 
-4. 构建桌面应用
+```powershell
+npm run dev
+```
 
-   ```bash
-   cd apps/desktop
-   npm run tauri build
-   ```
+单独构建后端 sidecar：
 
-## 功能
-
-- ✨ 高保真音频播放（64-bit 浮点处理）
-- 🎵 实时音频频谱分析 (开发中)
-- 🎛️ 均衡器和 DSP 效果（响度标准化、限幅器、交叉馈送）
-- 📁 本地音乐库管理
-- ☁️ 网易云音乐集成 (开发中)
-  - 扫码/手机号登录
-  - 歌单同步
-  - 音乐搜索
-  - 在线播放
-- 📝 歌词显示 (开发中)
-- 🎨 封面主题色自适应
-- 🌚 Light / Dark 模式切换
-- 🔄 播放队列管理
-- 📊 响度测量（EBU R128）
-- 🎶 AutoMix 智能混音 (开发中)
-
-## 性能优化
-
-- **SIMD 加速**：通过 `target-cpu=native` 开启，提升 FFT 卷积和噪声整形性能
-- **锁无关参数更新**：使用 atomic 操作实现音频参数的实时安全更新
-- **实时安全音频线程**：避免音频回调中的内存分配和阻塞操作
-- **高效缓冲区管理**：复用音频缓冲区，减少内存分配开销
-- **并行处理**：使用 rayon 进行并行 DSP 处理
+```powershell
+cd ../..
+cargo build --release --bin audio_server
+```
 
 ## 构建
 
-### 开发构建
+完整桌面打包：
 
-1. 构建音频引擎后端
-
-   ```bash
-   # 设置 CPU 优化 (可选)
-   set RUSTFLAGS=-C target-cpu=native
-   
-   # 构建
-   cargo build --release --bin audio_server
-   ```
-
-2. 启动前端开发
-
-   ```bash
-   cd apps/desktop
-   npm install
-   npm run dev
-   ```
-
-### 生产构建
-
-1. 完整构建 (包含 Tauri 打包)
-
-   ```bash
-   cd apps/desktop
-   npm run tauri build
-   ```
-
-2. 仅构建 Web 前端
-
-   ```bash
-   cd apps/desktop
-   npm run build:web
-   ```
-
-3. 构建多版本音频引擎 (需要 PowerShell)
-
-   ```bash
-   .\scripts\build_all.ps1
-   ```
-
-### 测试
-
-```bash
-# 运行前端测试
+```powershell
 cd apps/desktop
-npm test
+npm run tauri build
+```
 
-# 运行 Rust 测试
+仅构建 Web 前端：
+
+```powershell
+cd apps/desktop
+npm run build:web
+```
+
+构建前端与后端 sidecar：
+
+```powershell
+cd apps/desktop
+npm run build:bundle
+```
+
+构建多版本音频引擎：
+
+```powershell
+# 在仓库根目录执行
+.\scripts\build_all.ps1
+```
+
+## 验证
+
+```powershell
+# Rust 编译检查
+cargo check --bin audio_server
+
+# Rust 测试
 cargo test
 
-# 运行性能基准测试
+# 前端类型检查
+cd apps/desktop
+npm run typecheck
+
+# 前端聚焦测试
+npm test
+
+# 性能基准
+cd ../..
 cargo bench
 ```
 
@@ -216,106 +175,79 @@ cargo bench
 ### 音频引擎
 
 - 模块化 DSP 处理管道
-- 支持多种音频格式（MP3, FLAC, WAV, AAC, OGG 等）
-- 无缝播放（gapless playback）
-- 动态响度标准化
-- 实时频谱分析
+- 多格式解码与 gapless playback
+- 响度测量、限制器、交叉馈送和重采样链路
+- 面向实时音频线程的低分配、低阻塞设计
+- 性能基准覆盖播放、扫描、WebSocket 和 DSP 热路径
 
-### 服务器
+### 本地服务
 
-- HTTP API 供前端调用
-- WebSocket 实时状态推送
-- 网易云音乐 API 代理
-- 路径安全验证
+- HTTP API 供桌面前端调用
+- WebSocket 推送播放、队列、扫描和分析状态
+- SQLite 持久化媒体库、播放历史、封面缓存和网易云账户摘要
+- 网易云音乐 API 代理与领域化客户端接口
 
-### 前端
+### 桌面前端
 
-- SolidJS 响应式框架
-- UnoCSS 原子化 CSS
-- Tauri IPC 通信
-- 响应式播放状态管理
+- SolidJS 响应式状态和路由
+- Tauri 桌面壳与 sidecar 后端协同
+- SPlayer 风格的页面、设置、播放器和媒体列表体验
+- 可复用的 NaiveUI-like Solid 组件门面
 
-### 架构图
+## 性能方向
 
-#### 音频引擎架构
+- `target-cpu=native` 可用于本地优化构建
+- 音频参数更新尽量使用 atomic/lock-free 模式
+- 音频回调路径避免阻塞操作和不必要分配
+- 本地扫描使用批量写入、文件封面引用和受控内存批次
+- 关键路径通过 `benches/` 下的基准测试持续约束
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   音频线程       │    │   处理管道       │    │   输出设备       │
-│  (实时回调)      │───▶│  (DSP 处理)      │───▶│  (WASAPI/cpal)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                     │                      │
-         ▼                     ▼                      ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   频谱分析       │    │   响度测量       │    │   参数更新       │
-│  (FFT)          │    │  (EBU R128)     │    │  (Atomic)       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+## 致谢
 
-#### 前端架构
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   SolidJS       │    │   Tauri IPC     │    │   WebSocket     │
-│  (响应式UI)     │◀──▶│  (命令调用)      │◀──▶│  (实时状态)     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-## 😘 鸣谢
-
-特此感谢为本项目提供支持与灵感的项目：
-
-- [SPlayer](https://github.com/imsyy/SPlayer) - 简约的音乐播放器，本项目前端设计参考
-- [NeteaseCloudMusicApi](https://github.com/neteasecloudmusicapienhanced/api-enhanced) - 网易云音乐 API 服务
+- [SPlayer](https://github.com/imsyy/SPlayer) - 前端体验与交互参考
+- [NeteaseCloudMusicApi](https://github.com/neteasecloudmusicapienhanced/api-enhanced) - 网易云音乐 API 参考
 - [applemusic-like-lyrics](https://github.com/Steve-xmh/applemusic-like-lyrics) - Apple Music 风格歌词显示
 
 ## 贡献
 
-欢迎贡献！请遵循以下步骤：
+欢迎提交 issue 和 pull request。建议在提交前至少运行与改动相关的检查：
 
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-### 代码规范
-
-- Rust: 使用 `cargo fmt` 和 `cargo clippy`
-- TypeScript: 使用项目配置的 ESLint 规则
-- 提交信息: 遵循 [Conventional Commits](https://www.conventionalcommits.org/)
+- Rust：`cargo fmt`、`cargo check --bin audio_server`、相关 `cargo test`
+- 前端：`npm run typecheck`、`npm test`
+- 提交信息：建议遵循 [Conventional Commits](https://www.conventionalcommits.org/)
 
 ## 常见问题
 
-### Q: 构建时找不到 soxr 库
+### 构建时找不到 soxr
 
-A: 确保已通过 vcpkg 或 MSYS2 安装 soxr，并设置正确的 `PKG_CONFIG_PATH`。
+请确认已通过 vcpkg 或 MSYS2 安装 soxr，并确保构建环境能找到对应库文件。桌面打包时还需要 `libsoxr.dll` 能被复制到 Tauri bundle 资源中。
 
-### Q: 音频播放卡顿
+### 音频播放卡顿
 
-A: 尝试设置 `RUSTFLAGS=-C target-cpu=native` 以启用 CPU 特定优化。
+可以尝试使用本机 CPU 优化构建：
 
-### Q: 如何启用 AVX-512 优化
+```powershell
+$env:RUSTFLAGS = "-C target-cpu=native"
+cargo build --release --bin audio_server
+```
 
-A: 使用 `scripts\build_all.ps1` 脚本，它会自动构建 AVX2 和 AVX-512 两个版本。
+### 如何启用 AVX2 / AVX-512 构建
 
-## 📢 免责声明
+使用 PowerShell 构建脚本：
 
-本项目部分功能使用了网易云音乐的第三方 API 服务，**仅供个人学习研究使用，禁止用于商业及非法用途**
+```powershell
+# 在仓库根目录执行
+.\scripts\build_all.ps1
+```
 
-同时，本项目开发者承诺 **严格遵守相关法律法规和网易云音乐 API 使用协议，不会利用本项目进行任何违法活动。** 如因使用本项目而引起的任何纠纷或责任，均由使用者自行承担。**本项目开发者不承担任何因使用本项目而导致的任何直接或间接责任，并保留追究使用者违法行为的权利**
+## 免责声明
 
-请使用者在使用本项目时遵守相关法律法规，**不要将本项目用于任何商业及非法用途。如有违反，一切后果由使用者自负。** 同时，使用者应该自行承担因使用本项目而带来的风险和责任。本项目开发者不对本项目所提供的服务和内容做出任何保证
+Lyne 的网易云音乐相关能力依赖第三方接口或协议行为，仅供个人学习、研究和互操作性探索。使用者需要自行确认所在地区、平台协议和使用场景的合法性，不得将本项目用于违法、侵权、绕过平台限制或损害第三方权益的用途。
 
-感谢您的理解
+本项目按现状提供，不对可用性、稳定性、数据准确性或第三方服务可访问性作出保证。因使用本项目产生的账号、数据、版权、服务条款或其他风险，由使用者自行承担。
 
-## 📜 开源许可
+## 开源许可
 
-- **本项目仅供个人学习研究使用，禁止用于商业及非法用途**
-- 本项目基于 [GNU Affero General Public License (AGPL-3.0)](https://www.gnu.org/licenses/agpl-3.0.html) 许可进行开源
-  1. **修改和分发：** 任何对本项目的修改和分发都必须基于 AGPL-3.0 进行，源代码必须一并提供
-  2. **派生作品：** 任何派生作品必须同样采用 AGPL-3.0，并在适当的地方注明原始项目的许可证
-  3. **注明原作者：** 在任何修改、派生作品或其他分发中，必须在适当的位置明确注明原作者及其贡献
-  4. **免责声明：** 根据 AGPL-3.0，本项目不提供任何明示或暗示的担保。请详细阅读 [GNU Affero General Public License (AGPL-3.0)](https://www.gnu.org/licenses/agpl-3.0.html) 以了解完整的免责声明内容
-  5. **社区参与：** 欢迎社区的参与和贡献，我们鼓励开发者一同改进和维护本项目
-  6. **许可证链接：** 请阅读 [GNU Affero General Public License (AGPL-3.0)](https://www.gnu.org/licenses/agpl-3.0.html) 了解更多详情
+本项目基于 [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html) 开源。修改、分发、部署网络服务或派生项目时，请遵守 AGPL-3.0 的源代码提供、许可证保留和版权声明要求。
+
+详情请阅读 [LICENSE](LICENSE)。
