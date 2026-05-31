@@ -12,7 +12,9 @@ use std::time::Duration;
 
 const UNKNOWN_SONG_TITLE: &str = "Unknown Song";
 const LOCAL_SCAN_CHANNEL_CAPACITY: usize = 64;
-const LOCAL_SCAN_DB_BATCH_SIZE: usize = 50;
+const LOCAL_SCAN_DB_BATCH_SIZE: usize = 500;
+const LOCAL_SCAN_DB_BATCH_MAX_BYTES: usize = 64 * 1024 * 1024;
+const LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES: usize = 64 * 1024;
 const LOCAL_SCAN_PROGRESS_INTERVAL: u64 = 25;
 const LOCAL_SCAN_CHANNEL_RETRY_MS: u64 = 100;
 
@@ -25,6 +27,7 @@ pub(super) struct LibraryScanOutcome {
 struct ParsedTrack {
     canonical_path: String,
     metadata: crate::decoder::TrackMetadata,
+    cover_art_file: Option<LocalCoverArtFile>,
     duration_secs: Option<f64>,
     sample_rate: Option<u32>,
     channels: Option<usize>,
@@ -32,6 +35,18 @@ struct ParsedTrack {
     bits_per_sample: Option<u32>,
     mtime: f64,
     size: u64,
+}
+
+struct LocalCoverArtFile {
+    path: String,
+    mime_type: Option<String>,
+    byte_len: u64,
+}
+
+struct ExternalCoverFile {
+    path: PathBuf,
+    mime_type: String,
+    byte_len: u64,
 }
 
 struct LocalScanWriteSummary {
@@ -49,7 +64,40 @@ enum LocalScanWriteItem {
     Parsed(ParsedTrack),
 }
 
-fn external_cover_for_media(path: &Path, max_bytes: u64) -> Option<(Vec<u8>, String)> {
+impl ParsedTrack {
+    fn estimated_batch_bytes(&self) -> usize {
+        self.canonical_path.len()
+            + estimated_metadata_bytes(&self.metadata)
+            + self.cover_art_file.as_ref().map_or(0, |cover| {
+                cover.path.len()
+                    + cover.mime_type.as_ref().map_or(0, String::len)
+                    + std::mem::size_of::<LocalCoverArtFile>()
+            })
+            + std::mem::size_of::<Self>()
+    }
+}
+
+impl LocalScanWriteItem {
+    fn estimated_batch_bytes(&self) -> usize {
+        match self {
+            LocalScanWriteItem::Seen(path) => path.len() + std::mem::size_of::<String>(),
+            LocalScanWriteItem::Parsed(track) => track.estimated_batch_bytes(),
+        }
+    }
+}
+
+fn estimated_metadata_bytes(metadata: &crate::decoder::TrackMetadata) -> usize {
+    metadata.title.as_ref().map_or(0, String::len)
+        + metadata.artist.as_ref().map_or(0, String::len)
+        + metadata.album.as_ref().map_or(0, String::len)
+        + metadata.genre.as_ref().map_or(0, String::len)
+        + metadata.cover_art.as_ref().map_or(0, Vec::len)
+        + metadata.cover_art_mime.as_ref().map_or(0, String::len)
+        + metadata.lyrics.as_ref().map_or(0, String::len)
+        + std::mem::size_of::<crate::decoder::TrackMetadata>()
+}
+
+fn external_cover_file_for_media(path: &Path, max_bytes: u64) -> Option<ExternalCoverFile> {
     const COVER_NAMES: &[&str] = &["cover", "folder", "front", "album"];
     const COVER_EXTENSIONS: &[(&str, &str)] = &[
         ("jpg", "image/jpeg"),
@@ -83,7 +131,7 @@ fn external_cover_for_media(path: &Path, max_bytes: u64) -> Option<(Vec<u8>, Str
         if !candidate.is_file() {
             continue;
         }
-        match std::fs::metadata(&candidate) {
+        let byte_len = match std::fs::metadata(&candidate) {
             Ok(metadata) if metadata.len() > max_bytes => {
                 log::warn!(
                     "Skipping external cover '{}' because it is {} bytes (limit: {} bytes)",
@@ -93,7 +141,7 @@ fn external_cover_for_media(path: &Path, max_bytes: u64) -> Option<(Vec<u8>, Str
                 );
                 continue;
             }
-            Ok(_) => {}
+            Ok(metadata) => metadata.len(),
             Err(e) => {
                 log::warn!(
                     "Failed to read external cover metadata '{}': {}",
@@ -102,7 +150,7 @@ fn external_cover_for_media(path: &Path, max_bytes: u64) -> Option<(Vec<u8>, Str
                 );
                 continue;
             }
-        }
+        };
         let ext = candidate
             .extension()
             .and_then(|value| value.to_str())
@@ -113,17 +161,109 @@ fn external_cover_for_media(path: &Path, max_bytes: u64) -> Option<(Vec<u8>, Str
             .find(|(candidate_ext, _)| *candidate_ext == ext)
             .map(|(_, mime)| (*mime).to_string())
             .unwrap_or_else(|| "application/octet-stream".to_string());
-        match std::fs::read(&candidate) {
-            Ok(bytes) => return Some((bytes, mime)),
-            Err(e) => log::warn!(
-                "Failed to read external cover '{}': {}",
-                candidate.display(),
-                e
-            ),
-        }
+        return Some(ExternalCoverFile {
+            path: candidate,
+            mime_type: mime,
+            byte_len,
+        });
     }
 
     None
+}
+
+fn external_cover_for_media(path: &Path, max_bytes: u64) -> Option<(Vec<u8>, String)> {
+    let cover = external_cover_file_for_media(path, max_bytes)?;
+    match std::fs::read(&cover.path) {
+        Ok(bytes) => Some((bytes, cover.mime_type)),
+        Err(e) => {
+            log::warn!(
+                "Failed to read external cover '{}': {}",
+                cover.path.display(),
+                e
+            );
+            None
+        }
+    }
+}
+
+fn persist_local_scan_cover_art(
+    cache_dir: &Path,
+    canonical_path: &str,
+    metadata: &mut crate::decoder::TrackMetadata,
+) -> Option<LocalCoverArtFile> {
+    let bytes = metadata.cover_art.as_ref()?;
+    if bytes.len() < LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES {
+        return None;
+    }
+    let mime_type = metadata.cover_art_mime.clone();
+    let extension = cover_cache_extension(mime_type.as_deref());
+    let file_name = format!("{}.{}", cover_cache_key(canonical_path), extension);
+    let file_path = cache_dir.join(file_name);
+    if let Err(e) = std::fs::create_dir_all(cache_dir) {
+        log::warn!(
+            "Falling back to database cover storage because cover cache dir '{}' could not be created: {}",
+            cache_dir.display(),
+            e
+        );
+        return None;
+    }
+    if let Err(e) = std::fs::write(&file_path, bytes) {
+        log::warn!(
+            "Falling back to database cover storage because cover cache file '{}' could not be written: {}",
+            file_path.display(),
+            e
+        );
+        return None;
+    }
+
+    let byte_len = bytes.len() as u64;
+    metadata.cover_art = None;
+    Some(LocalCoverArtFile {
+        path: file_path.to_string_lossy().to_string(),
+        mime_type,
+        byte_len,
+    })
+}
+
+fn scan_cover_art_file_reference(
+    path: &Path,
+    canonical_path: &str,
+    metadata: &mut crate::decoder::TrackMetadata,
+    max_bytes: u64,
+    cache_dir: &Path,
+) -> Option<LocalCoverArtFile> {
+    if metadata.cover_art.is_some() {
+        return persist_local_scan_cover_art(cache_dir, canonical_path, metadata);
+    }
+    let cover = external_cover_file_for_media(path, max_bytes)?;
+    metadata.cover_art_mime = Some(cover.mime_type.clone());
+    Some(LocalCoverArtFile {
+        path: cover.path.to_string_lossy().to_string(),
+        mime_type: Some(cover.mime_type),
+        byte_len: cover.byte_len,
+    })
+}
+
+fn cover_cache_key(canonical_path: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let media_id = crate::app_database::media_id_for_path(canonical_path);
+    let mut hasher = Sha256::new();
+    hasher.update(media_id.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn cover_cache_extension(mime_type: Option<&str>) -> &'static str {
+    match mime_type.unwrap_or("").to_ascii_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        _ => "bin",
+    }
+}
+
+fn cached_cover_file_is_available(file_path: Option<&str>) -> bool {
+    file_path.map_or(true, |path| Path::new(path).is_file())
 }
 
 pub(super) fn metadata_with_external_cover(
@@ -164,6 +304,7 @@ pub(super) fn scan_local_library(
     let scanned_count = Arc::new(AtomicU64::new(0));
     let worker_count = data.analysis.library_scan_max_workers.max(1);
     let cover_max_bytes = data.analysis.library_scan_cover_max_bytes.max(1);
+    let cover_cache_dir = data.runtime_paths.cache_dir.join("local-cover-art");
     let (path_tx, path_rx) = bounded::<PathBuf>(LOCAL_SCAN_CHANNEL_CAPACITY);
     let (write_tx, write_rx) = bounded::<LocalScanWriteItem>(LOCAL_SCAN_CHANNEL_CAPACITY);
 
@@ -185,6 +326,7 @@ pub(super) fn scan_local_library(
         Arc::clone(&scanned_count),
         cancel_token.clone(),
         cover_max_bytes,
+        cover_cache_dir,
     );
     drop(write_tx);
 
@@ -264,41 +406,21 @@ fn walk_supported_local_media_paths(
     tx: &Sender<PathBuf>,
     cancel_token: &AnalysisCancelToken,
 ) -> Result<(), String> {
-    let mut stack = vec![PathBuf::from(root_path)];
-    let mut visited_dirs = HashSet::new();
-    while let Some(dir) = stack.pop() {
+    for entry in jwalk::WalkDir::new(root_path).skip_hidden(true).into_iter() {
         cancel_token.check()?;
-        let canonical_dir = dir.canonicalize().map_err(|e| {
-            format!(
-                "Failed to canonicalize directory '{}': {}",
-                dir.display(),
-                e
-            )
-        })?;
-        if !visited_dirs.insert(canonical_dir) {
+        let entry =
+            entry.map_err(|e| format!("Failed to walk local library '{}': {}", root_path, e))?;
+        let path = entry.path();
+        let file_type = entry.file_type();
+        if file_type.is_symlink() {
+            log::warn!(
+                "Skipping symlink during local library scan: '{}'",
+                path.display()
+            );
             continue;
         }
-        let entries = std::fs::read_dir(&dir)
-            .map_err(|e| format!("Failed to read directory '{}': {}", dir.display(), e))?;
-        for entry in entries {
-            cancel_token.check()?;
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-            let path = entry.path();
-            let file_type = entry
-                .file_type()
-                .map_err(|e| format!("Failed to read file type for '{}': {}", path.display(), e))?;
-            if file_type.is_symlink() {
-                log::warn!(
-                    "Skipping symlink during local library scan: '{}'",
-                    path.display()
-                );
-                continue;
-            }
-            if file_type.is_dir() {
-                stack.push(path);
-            } else if file_type.is_file() && is_supported_media_path(&path) {
-                send_with_cancel(tx, path, cancel_token)?;
-            }
+        if file_type.is_file() && is_supported_media_path(&path) {
+            send_with_cancel(tx, path, cancel_token)?;
         }
     }
     Ok(())
@@ -308,10 +430,11 @@ fn spawn_local_scan_workers(
     worker_count: usize,
     path_rx: Receiver<PathBuf>,
     write_tx: Sender<LocalScanWriteItem>,
-    snapshot: Arc<HashMap<String, (Option<f64>, Option<u64>, bool)>>,
+    snapshot: Arc<HashMap<String, (Option<f64>, Option<u64>, Option<String>)>>,
     scanned_count: Arc<AtomicU64>,
     cancel_token: AnalysisCancelToken,
     cover_max_bytes: u64,
+    cover_cache_dir: PathBuf,
 ) -> Vec<std::thread::JoinHandle<Result<(), String>>> {
     (0..worker_count)
         .map(|_| {
@@ -320,6 +443,7 @@ fn spawn_local_scan_workers(
             let snapshot = Arc::clone(&snapshot);
             let scanned_count = Arc::clone(&scanned_count);
             let cancel_token = cancel_token.clone();
+            let cover_cache_dir = cover_cache_dir.clone();
             std::thread::spawn(move || {
                 for path in path_rx.iter() {
                     cancel_token.check()?;
@@ -329,6 +453,7 @@ fn spawn_local_scan_workers(
                         &scanned_count,
                         &cancel_token,
                         cover_max_bytes,
+                        &cover_cache_dir,
                     )? {
                         send_with_cancel(&write_tx, item, &cancel_token)?;
                     }
@@ -341,10 +466,11 @@ fn spawn_local_scan_workers(
 
 fn process_local_scan_path(
     path: &Path,
-    snapshot: &HashMap<String, (Option<f64>, Option<u64>, bool)>,
+    snapshot: &HashMap<String, (Option<f64>, Option<u64>, Option<String>)>,
     scanned_count: &AtomicU64,
     cancel_token: &AnalysisCancelToken,
     cover_max_bytes: u64,
+    cover_cache_dir: &Path,
 ) -> Result<Option<LocalScanWriteItem>, String> {
     cancel_token.check()?;
     scanned_count.fetch_add(1, Ordering::Relaxed);
@@ -376,10 +502,13 @@ fn process_local_scan_path(
         .map(|duration| duration.as_millis() as f64)
         .unwrap_or(0.0);
 
-    if let Some((old_mtime, old_size, _has_cover)) = snapshot.get(&canonical_path) {
+    if let Some((old_mtime, old_size, cover_file_path)) = snapshot.get(&canonical_path) {
         let mtime_unchanged = old_mtime.map_or(false, |old| (old - mtime).abs() < 1.0);
         let size_unchanged = old_size.map_or(false, |old| old == size);
-        if mtime_unchanged && size_unchanged {
+        if mtime_unchanged
+            && size_unchanged
+            && cached_cover_file_is_available(cover_file_path.as_deref())
+        {
             return Ok(Some(LocalScanWriteItem::Seen(canonical_path)));
         }
     }
@@ -403,8 +532,14 @@ fn process_local_scan_path(
     }
 
     cancel_token.check()?;
-    let mut metadata =
-        metadata_with_external_cover(path, &local_metadata.metadata, cover_max_bytes);
+    let mut metadata = local_metadata.metadata;
+    let cover_art_file = scan_cover_art_file_reference(
+        path,
+        &canonical_path,
+        &mut metadata,
+        cover_max_bytes,
+        cover_cache_dir,
+    );
     cancel_token.check()?;
 
     let file_stem = path
@@ -436,6 +571,7 @@ fn process_local_scan_path(
     Ok(Some(LocalScanWriteItem::Parsed(ParsedTrack {
         canonical_path,
         metadata,
+        cover_art_file,
         duration_secs,
         sample_rate,
         channels,
@@ -460,7 +596,8 @@ fn spawn_local_scan_writer(
     let writer_data = data.clone();
     let writer_root_path = root_path.to_string();
     std::thread::spawn(move || {
-        let mut batch = Vec::with_capacity(LOCAL_SCAN_DB_BATCH_SIZE);
+        let mut batch = Vec::with_capacity(LOCAL_SCAN_CHANNEL_CAPACITY);
+        let mut batch_bytes = 0_usize;
         let mut indexed_count = 0_u64;
         let mut write_failures = Vec::new();
         let mut last_progress_scanned = 0_u64;
@@ -468,10 +605,16 @@ fn spawn_local_scan_writer(
         loop {
             match rx.recv() {
                 Ok(item) => {
+                    batch_bytes += item.estimated_batch_bytes();
                     batch.push(item);
-                    while batch.len() < LOCAL_SCAN_DB_BATCH_SIZE {
+                    while batch.len() < LOCAL_SCAN_DB_BATCH_SIZE
+                        && batch_bytes < LOCAL_SCAN_DB_BATCH_MAX_BYTES
+                    {
                         match rx.try_recv() {
-                            Ok(item) => batch.push(item),
+                            Ok(item) => {
+                                batch_bytes += item.estimated_batch_bytes();
+                                batch.push(item);
+                            }
                             Err(_) => break,
                         }
                     }
@@ -484,6 +627,7 @@ fn spawn_local_scan_writer(
             indexed_count += result.indexed_delta;
             write_failures.extend(result.failures);
             batch.clear();
+            batch_bytes = 0;
 
             let scanned = scanned_count.load(Ordering::Relaxed);
             if scanned.saturating_sub(last_progress_scanned) >= LOCAL_SCAN_PROGRESS_INTERVAL {
@@ -544,14 +688,28 @@ fn write_local_scan_batch(
                     bits_per_sample: track.bits_per_sample,
                     mtime: Some(track.mtime),
                     size_bytes: Some(track.size),
+                    cover_art_file: track.cover_art_file.as_ref().map(|cover| {
+                        crate::app_database::MediaMetadataCoverArtFileInput {
+                            path: cover.path.as_str(),
+                            mime_type: cover.mime_type.as_deref(),
+                            byte_len: cover.byte_len,
+                        }
+                    }),
                 });
             }
         }
     }
 
     cancel_token.check()?;
-    let parsed_results = db.record_media_metadata_batch_with_scan_info(&parsed_records)?;
-    for (path, result) in parsed_paths.into_iter().zip(parsed_results) {
+    let parsed_report = db.record_local_scan_metadata_batch(&parsed_records)?;
+    if parsed_report.fallback_count > 0 {
+        log::debug!(
+            "Local scan metadata batch used safe identity fallback for {} of {} records",
+            parsed_report.fallback_count,
+            parsed_report.results.len()
+        );
+    }
+    for (path, result) in parsed_paths.into_iter().zip(parsed_report.results) {
         match result {
             Ok(_) => {
                 seen_paths.push(path.to_string());
@@ -776,13 +934,16 @@ pub(super) fn scan_webdav_library(
 #[cfg(test)]
 mod tests {
     use super::{
-        external_cover_for_media, metadata_with_external_cover, walk_supported_local_media_paths,
-        UNKNOWN_SONG_TITLE,
+        external_cover_for_media, metadata_with_external_cover, persist_local_scan_cover_art,
+        process_local_scan_path, walk_supported_local_media_paths, LocalScanWriteItem,
+        LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES, UNKNOWN_SONG_TITLE,
     };
     use crate::server::{analysis_cancelled_error, AnalysisCancelToken};
     use crossbeam::channel::bounded;
+    use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -842,6 +1003,129 @@ mod tests {
     }
 
     #[test]
+    fn persist_local_scan_cover_art_writes_cache_file_and_strips_db_blob_payload() {
+        let temp_dir = unique_temp_dir("cover_cache");
+        let cache_dir = temp_dir.join("cache");
+        let cover_bytes = vec![5_u8; LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES];
+        let mut metadata = crate::decoder::TrackMetadata {
+            cover_art: Some(cover_bytes.clone()),
+            cover_art_mime: Some("image/png".to_string()),
+            ..crate::decoder::TrackMetadata::default()
+        };
+
+        let cover = persist_local_scan_cover_art(
+            &cache_dir,
+            "D:/Music/Artist/Album/Track.flac",
+            &mut metadata,
+        )
+        .expect("cover file should be cached");
+
+        assert!(metadata.cover_art.is_none());
+        assert_eq!(metadata.cover_art_mime.as_deref(), Some("image/png"));
+        assert_eq!(
+            cover.byte_len,
+            LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES as u64
+        );
+        assert_eq!(cover.mime_type.as_deref(), Some("image/png"));
+        assert!(cover.path.ends_with(".png"));
+        assert_eq!(fs::read(&cover.path).unwrap(), cover_bytes);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn unchanged_local_scan_marks_seen_when_file_backed_cover_exists() {
+        let temp_dir = unique_temp_dir("cover_seen");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let track_path = temp_dir.join("song.flac");
+        fs::write(&track_path, vec![0_u8; 2048]).unwrap();
+        let cover_path = temp_dir.join("cover.jpg");
+        fs::write(&cover_path, [1_u8, 2, 3]).unwrap();
+        let canonical_path = track_path
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let metadata = fs::metadata(&track_path).unwrap();
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as f64)
+            .unwrap_or(0.0);
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            canonical_path.clone(),
+            (
+                Some(mtime),
+                Some(metadata.len()),
+                Some(cover_path.to_string_lossy().to_string()),
+            ),
+        );
+
+        let scanned_count = AtomicU64::new(0);
+        let token = AnalysisCancelToken::new();
+        let result = process_local_scan_path(
+            &track_path,
+            &snapshot,
+            &scanned_count,
+            &token,
+            1024,
+            &temp_dir.join("cache"),
+        )
+        .unwrap();
+
+        assert!(matches!(result, Some(LocalScanWriteItem::Seen(path)) if path == canonical_path));
+        assert_eq!(scanned_count.load(Ordering::Relaxed), 1);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn unchanged_local_scan_reprocesses_missing_file_backed_cover() {
+        let temp_dir = unique_temp_dir("cover_missing");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let track_path = temp_dir.join("song.flac");
+        fs::write(&track_path, vec![0_u8; 2048]).unwrap();
+        let canonical_path = track_path
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let metadata = fs::metadata(&track_path).unwrap();
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as f64)
+            .unwrap_or(0.0);
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            canonical_path,
+            (
+                Some(mtime),
+                Some(metadata.len()),
+                Some(temp_dir.join("missing.jpg").to_string_lossy().to_string()),
+            ),
+        );
+
+        let scanned_count = AtomicU64::new(0);
+        let token = AnalysisCancelToken::new();
+        let result = process_local_scan_path(
+            &track_path,
+            &snapshot,
+            &scanned_count,
+            &token,
+            1024,
+            &temp_dir.join("cache"),
+        )
+        .unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(scanned_count.load(Ordering::Relaxed), 1);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn local_scan_walker_skips_symlink_directories() {
         let temp_dir = unique_temp_dir("walk");
         let nested_dir = temp_dir.join("nested");
@@ -862,6 +1146,28 @@ mod tests {
         paths.sort();
 
         assert_eq!(paths, vec![track_path]);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn local_scan_walker_skips_hidden_directories() {
+        let temp_dir = unique_temp_dir("hidden_walk");
+        let visible_dir = temp_dir.join("visible");
+        let hidden_dir = temp_dir.join(".hidden");
+        fs::create_dir_all(&visible_dir).unwrap();
+        fs::create_dir_all(&hidden_dir).unwrap();
+        let visible_track = visible_dir.join("song.flac");
+        fs::write(&visible_track, b"fake audio").unwrap();
+        fs::write(hidden_dir.join("hidden.flac"), b"fake audio").unwrap();
+
+        let (tx, rx) = bounded(8);
+        let token = AnalysisCancelToken::new();
+        walk_supported_local_media_paths(temp_dir.to_str().unwrap(), &tx, &token).unwrap();
+        drop(tx);
+        let paths = rx.iter().collect::<Vec<_>>();
+
+        assert_eq!(paths, vec![visible_track]);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

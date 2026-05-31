@@ -223,6 +223,13 @@ fn prepare_connection(conn: Connection, enable_wal: bool) -> Result<Connection, 
     if enable_wal {
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| format!("Failed to enable app database WAL mode: {}", e))?;
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(|e| {
+                format!(
+                    "Failed to set app database WAL synchronous mode to NORMAL: {}",
+                    e
+                )
+            })?;
     }
     Ok(conn)
 }

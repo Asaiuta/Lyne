@@ -46,6 +46,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
     if current < 10 {
         apply_audio_quality_metadata_migration(conn)?;
     }
+    if current < 11 {
+        apply_cover_art_file_cache_migration(conn)?;
+    }
 
     Ok(())
 }
@@ -143,6 +146,16 @@ fn apply_audio_quality_metadata_migration(conn: &mut Connection) -> Result<(), S
         if !column_exists(tx, "media_items", "bits_per_sample")? {
             tx.execute_batch("ALTER TABLE media_items ADD COLUMN bits_per_sample INTEGER")
                 .map_err(|e| format!("Failed to add media_items.bits_per_sample: {}", e))?;
+        }
+        Ok(())
+    })
+}
+
+fn apply_cover_art_file_cache_migration(conn: &mut Connection) -> Result<(), String> {
+    apply_migration_tx(conn, 11, |tx| {
+        if !column_exists(tx, "cover_art_cache", "file_path")? {
+            tx.execute_batch("ALTER TABLE cover_art_cache ADD COLUMN file_path TEXT")
+                .map_err(|e| format!("Failed to add cover_art_cache.file_path: {}", e))?;
         }
         Ok(())
     })
@@ -580,5 +593,80 @@ mod tests {
             })
             .unwrap();
         assert_eq!(version, 10);
+    }
+
+    #[test]
+    fn cover_art_file_cache_migration_adds_file_path_column() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE media_items (
+                media_id       TEXT PRIMARY KEY,
+                source_path    TEXT NOT NULL UNIQUE,
+                source_kind    TEXT NOT NULL,
+                added_at       INTEGER NOT NULL,
+                updated_at     INTEGER NOT NULL
+            );
+            CREATE TABLE cover_art_cache (
+                cover_art_id  TEXT PRIMARY KEY,
+                media_id       TEXT NOT NULL,
+                mime_type      TEXT,
+                image_bytes    BLOB,
+                byte_len       INTEGER NOT NULL,
+                created_at     INTEGER NOT NULL,
+                FOREIGN KEY(media_id) REFERENCES media_items(media_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (version, applied_at) VALUES (10, 100);
+            "#,
+        )
+        .unwrap();
+
+        apply_cover_art_file_cache_migration(&mut conn).unwrap();
+
+        assert!(column_exists(&conn, "cover_art_cache", "file_path").unwrap());
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 11);
+    }
+
+    #[test]
+    fn cover_art_file_cache_migration_succeeds_when_column_already_exists() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE cover_art_cache (
+                cover_art_id  TEXT PRIMARY KEY,
+                media_id       TEXT NOT NULL,
+                mime_type      TEXT,
+                image_bytes    BLOB,
+                file_path      TEXT,
+                byte_len       INTEGER NOT NULL,
+                created_at     INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (version, applied_at) VALUES (10, 100);
+            "#,
+        )
+        .unwrap();
+
+        apply_cover_art_file_cache_migration(&mut conn).unwrap();
+
+        assert!(column_exists(&conn, "cover_art_cache", "file_path").unwrap());
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 11);
     }
 }

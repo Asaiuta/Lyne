@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS cover_art_cache (
     media_id       TEXT NOT NULL,
     mime_type      TEXT,
     image_bytes    BLOB,
+    file_path      TEXT,
     byte_len       INTEGER NOT NULL,
     created_at     INTEGER NOT NULL,
     FOREIGN KEY(media_id) REFERENCES media_items(media_id) ON DELETE CASCADE

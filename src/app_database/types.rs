@@ -56,6 +56,13 @@ pub struct PlaybackHistoryEntry {
 }
 
 #[derive(Clone, Copy)]
+pub struct MediaMetadataCoverArtFileInput<'a> {
+    pub path: &'a str,
+    pub mime_type: Option<&'a str>,
+    pub byte_len: u64,
+}
+
+#[derive(Clone, Copy)]
 pub struct MediaMetadataScanInput<'a> {
     pub source_path: &'a str,
     pub metadata: &'a TrackMetadata,
@@ -66,6 +73,13 @@ pub struct MediaMetadataScanInput<'a> {
     pub bits_per_sample: Option<u32>,
     pub mtime: Option<f64>,
     pub size_bytes: Option<u64>,
+    pub cover_art_file: Option<MediaMetadataCoverArtFileInput<'a>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaMetadataBatchWriteReport {
+    pub results: Vec<Result<String, String>>,
+    pub fallback_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

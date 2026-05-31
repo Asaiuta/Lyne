@@ -5,7 +5,8 @@ use crate::decoder::TrackMetadata;
 use super::ncm_track_sources::ncm_track_source_from_row;
 use super::{
     media_id_for_path, media_item_from_row, now_epoch_secs_i64, AppDatabase, CoverArtRecord,
-    MediaItemRecord, MediaMetadataScanInput,
+    MediaItemRecord, MediaMetadataBatchWriteReport, MediaMetadataCoverArtFileInput,
+    MediaMetadataScanInput,
 };
 
 impl AppDatabase {
@@ -61,6 +62,7 @@ impl AppDatabase {
             bits_per_sample,
             mtime,
             size_bytes,
+            cover_art_file: None,
         };
         let mut results = self.record_media_metadata_batch_with_scan_info(&[input])?;
         results
@@ -84,34 +86,53 @@ impl AppDatabase {
         let mut results = Vec::with_capacity(records.len());
 
         for record in records {
-            tx.execute_batch("SAVEPOINT media_metadata_record")
-                .map_err(|e| format!("Failed to start media metadata record savepoint: {}", e))?;
-            match record_media_metadata_with_scan_info_in_conn(&tx, record, now) {
-                Ok(media_id) => {
-                    tx.execute_batch("RELEASE SAVEPOINT media_metadata_record")
-                        .map_err(|e| {
-                            format!("Failed to release media metadata record savepoint: {}", e)
-                        })?;
-                    results.push(Ok(media_id));
-                }
-                Err(err) => {
-                    tx.execute_batch(
-                        "ROLLBACK TO SAVEPOINT media_metadata_record; RELEASE SAVEPOINT media_metadata_record;",
-                    )
-                    .map_err(|e| {
-                        format!(
-                            "Failed to roll back media metadata record savepoint after '{}': {}",
-                            err, e
-                        )
-                    })?;
-                    results.push(Err(err));
-                }
-            }
+            results.push(record_media_metadata_savepoint(&tx, |conn| {
+                record_media_metadata_with_scan_info_in_conn(conn, record, now)
+            })?);
         }
 
         tx.commit()
             .map_err(|e| format!("Failed to commit media metadata batch transaction: {}", e))?;
         Ok(results)
+    }
+
+    pub fn record_local_scan_metadata_batch(
+        &self,
+        records: &[MediaMetadataScanInput<'_>],
+    ) -> Result<MediaMetadataBatchWriteReport, String> {
+        if records.is_empty() {
+            return Ok(MediaMetadataBatchWriteReport {
+                results: Vec::new(),
+                fallback_count: 0,
+            });
+        }
+
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| {
+                format!(
+                    "Failed to start local scan metadata batch transaction: {}",
+                    e
+                )
+            })?;
+        let now = now_epoch_secs_i64();
+        let (results, fallback_count) =
+            match record_local_scan_fast_batch_savepoint(&tx, records, now)? {
+                Ok(results) => (results, 0),
+                Err(_) => record_local_scan_metadata_batch_with_fallback(&tx, records, now)?,
+            };
+
+        tx.commit().map_err(|e| {
+            format!(
+                "Failed to commit local scan metadata batch transaction: {}",
+                e
+            )
+        })?;
+        Ok(MediaMetadataBatchWriteReport {
+            results,
+            fallback_count,
+        })
     }
 
     pub fn record_external_media_metadata(
@@ -185,31 +206,56 @@ impl AppDatabase {
         media_id: &str,
     ) -> Result<Option<(CoverArtRecord, Vec<u8>)>, String> {
         let normalized_media_id = media_id_for_path(media_id);
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.query_row(
-            r#"
-            SELECT cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at
-            FROM cover_art_cache
-            WHERE media_id = ?1 OR media_id = ?2
-            ORDER BY created_at DESC, cover_art_id DESC
-            LIMIT 1
-            "#,
-            params![media_id, normalized_media_id],
-            |row| {
-                Ok((
-                    CoverArtRecord {
-                        cover_art_id: row.get(0)?,
-                        media_id: row.get(1)?,
-                        mime_type: row.get(2)?,
-                        byte_len: row.get::<_, i64>(4)? as u64,
-                        created_at_epoch_secs: row.get::<_, i64>(5)? as u64,
-                    },
-                    row.get(3)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|e| format!("Failed to read cover art cache: {}", e))
+        let cover_row = {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            conn.query_row(
+                r#"
+                SELECT cover_art_id, media_id, mime_type, image_bytes, file_path, byte_len, created_at
+                FROM cover_art_cache
+                WHERE media_id = ?1 OR media_id = ?2
+                ORDER BY created_at DESC, cover_art_id DESC
+                LIMIT 1
+                "#,
+                params![media_id, normalized_media_id],
+                |row| {
+                    Ok((
+                        CoverArtRecord {
+                            cover_art_id: row.get(0)?,
+                            media_id: row.get(1)?,
+                            mime_type: row.get(2)?,
+                            byte_len: row.get::<_, i64>(5)? as u64,
+                            created_at_epoch_secs: row.get::<_, i64>(6)? as u64,
+                        },
+                        row.get::<_, Option<Vec<u8>>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| format!("Failed to read cover art cache: {}", e))?
+        };
+
+        let Some((record, image_bytes, file_path)) = cover_row else {
+            return Ok(None);
+        };
+        if let Some(bytes) = image_bytes {
+            return Ok(Some((record, bytes)));
+        }
+        let Some(file_path) = file_path else {
+            return Ok(None);
+        };
+        match std::fs::read(&file_path) {
+            Ok(bytes) => Ok(Some((record, bytes))),
+            Err(e) => {
+                log::warn!(
+                    "Ignoring unreadable file-backed cover art '{}': {}",
+                    file_path,
+                    e
+                );
+                self.delete_cover_art_cache_entry(&record.cover_art_id);
+                Ok(None)
+            }
+        }
     }
 
     pub fn source_path_for_media_id(&self, media_id: &str) -> Result<Option<String>, String> {
@@ -228,6 +274,24 @@ impl AppDatabase {
         .optional()
         .map_err(|e| format!("Failed to read source path for media '{}': {}", media_id, e))
     }
+
+    fn delete_cover_art_cache_entry(&self, cover_art_id: &str) {
+        let result = self
+            .conn
+            .lock()
+            .map_err(|e| e.to_string())
+            .and_then(|conn| {
+                conn.execute(
+                    "DELETE FROM cover_art_cache WHERE cover_art_id = ?1",
+                    params![cover_art_id],
+                )
+                .map(|_| ())
+                .map_err(|e| format!("Failed to delete stale cover art cache entry: {}", e))
+            });
+        if let Err(e) = result {
+            log::warn!("{}", e);
+        }
+    }
 }
 
 fn media_source_kind(source_path: &str) -> &'static str {
@@ -235,6 +299,104 @@ fn media_source_kind(source_path: &str) -> &'static str {
         "remote"
     } else {
         "local"
+    }
+}
+
+fn record_local_scan_fast_batch_savepoint(
+    conn: &Connection,
+    records: &[MediaMetadataScanInput<'_>],
+    now: i64,
+) -> Result<Result<Vec<Result<String, String>>, String>, String> {
+    conn.execute_batch("SAVEPOINT local_scan_metadata_batch")
+        .map_err(|e| format!("Failed to start local scan metadata batch savepoint: {}", e))?;
+
+    let mut results = Vec::with_capacity(records.len());
+    for record in records {
+        match record_local_scan_metadata_fast_in_conn(conn, record, now) {
+            Ok(media_id) => results.push(Ok(media_id)),
+            Err(err) => {
+                conn.execute_batch(
+                    "ROLLBACK TO SAVEPOINT local_scan_metadata_batch; RELEASE SAVEPOINT local_scan_metadata_batch;",
+                )
+                .map_err(|e| {
+                    format!(
+                        "Failed to roll back local scan metadata batch savepoint after '{}': {}",
+                        err, e
+                    )
+                })?;
+                return Ok(Err(err));
+            }
+        }
+    }
+
+    conn.execute_batch("RELEASE SAVEPOINT local_scan_metadata_batch")
+        .map_err(|e| {
+            format!(
+                "Failed to release local scan metadata batch savepoint: {}",
+                e
+            )
+        })?;
+    Ok(Ok(results))
+}
+
+fn record_local_scan_metadata_batch_with_fallback(
+    conn: &Connection,
+    records: &[MediaMetadataScanInput<'_>],
+    now: i64,
+) -> Result<(Vec<Result<String, String>>, usize), String> {
+    let mut results = Vec::with_capacity(records.len());
+    let mut fallback_count = 0_usize;
+
+    for record in records {
+        match record_media_metadata_savepoint(conn, |conn| {
+            record_local_scan_metadata_fast_in_conn(conn, record, now)
+        })? {
+            Ok(media_id) => results.push(Ok(media_id)),
+            Err(fast_err) => {
+                fallback_count += 1;
+                let fallback_result = record_media_metadata_savepoint(conn, |conn| {
+                    record_media_metadata_with_scan_info_in_conn(conn, record, now)
+                })?;
+                results.push(fallback_result.map_err(|fallback_err| {
+                    format!(
+                        "Fast local scan metadata write failed: {}; fallback metadata write failed: {}",
+                        fast_err, fallback_err
+                    )
+                }));
+            }
+        }
+    }
+
+    Ok((results, fallback_count))
+}
+
+fn record_media_metadata_savepoint<F>(
+    conn: &Connection,
+    write: F,
+) -> Result<Result<String, String>, String>
+where
+    F: FnOnce(&Connection) -> Result<String, String>,
+{
+    conn.execute_batch("SAVEPOINT media_metadata_record")
+        .map_err(|e| format!("Failed to start media metadata record savepoint: {}", e))?;
+    match write(conn) {
+        Ok(media_id) => {
+            conn.execute_batch("RELEASE SAVEPOINT media_metadata_record")
+                .map_err(|e| format!("Failed to release media metadata record savepoint: {}", e))?;
+            Ok(Ok(media_id))
+        }
+        Err(err) => {
+            conn.execute_batch(
+                "ROLLBACK TO SAVEPOINT media_metadata_record; RELEASE SAVEPOINT media_metadata_record;",
+            )
+            .map_err(|e| {
+                format!(
+                    "Failed to roll back media metadata record savepoint after '{}': {}",
+                    err, e
+                )
+            })?;
+            Ok(Err(err))
+        }
     }
 }
 
@@ -262,6 +424,47 @@ fn record_media_metadata_with_scan_info_in_conn(
         record.bits_per_sample,
         record.mtime,
         record.size_bytes,
+        record.cover_art_file,
+        now,
+    )?;
+    Ok(media_id)
+}
+
+fn record_local_scan_metadata_fast_in_conn(
+    conn: &Connection,
+    record: &MediaMetadataScanInput<'_>,
+    now: i64,
+) -> Result<String, String> {
+    let media_id = media_id_for_path(record.source_path);
+    conn.execute(
+        r#"
+        INSERT INTO media_items (media_id, source_path, source_kind, added_at, updated_at)
+        VALUES (?1, ?2, 'local', ?3, ?3)
+        ON CONFLICT(media_id) DO UPDATE SET
+            source_path = excluded.source_path,
+            source_kind = 'local',
+            updated_at = excluded.updated_at
+        "#,
+        params![media_id, record.source_path, now],
+    )
+    .map_err(|e| {
+        format!(
+            "Failed to fast-record local scan media item '{}': {}",
+            record.source_path, e
+        )
+    })?;
+    update_media_metadata_in_conn(
+        conn,
+        &media_id,
+        record.metadata,
+        record.duration_secs,
+        record.sample_rate,
+        record.channels,
+        record.bitrate_bps,
+        record.bits_per_sample,
+        record.mtime,
+        record.size_bytes,
+        record.cover_art_file,
         now,
     )?;
     Ok(media_id)
@@ -278,6 +481,7 @@ fn update_media_metadata_in_conn(
     bits_per_sample: Option<u32>,
     mtime: Option<f64>,
     size_bytes: Option<u64>,
+    cover_art_file: Option<MediaMetadataCoverArtFileInput<'_>>,
     now: i64,
 ) -> Result<(), String> {
     conn.execute(
@@ -321,15 +525,39 @@ fn update_media_metadata_in_conn(
     )
     .map_err(|e| format!("Failed to update media metadata: {}", e))?;
 
-    if let Some(ref art) = metadata.cover_art {
+    if let Some(cover_art_file) = cover_art_file {
         let cover_art_id = format!("{}:cover", media_id);
         conn.execute(
             r#"
-            INSERT INTO cover_art_cache (cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO cover_art_cache (cover_art_id, media_id, mime_type, image_bytes, file_path, byte_len, created_at)
+            VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)
             ON CONFLICT(cover_art_id) DO UPDATE SET
                 mime_type = excluded.mime_type,
                 image_bytes = excluded.image_bytes,
+                file_path = excluded.file_path,
+                byte_len = excluded.byte_len,
+                created_at = excluded.created_at
+            "#,
+            params![
+                cover_art_id,
+                media_id,
+                cover_art_file.mime_type,
+                cover_art_file.path,
+                cover_art_file.byte_len as i64,
+                now,
+            ],
+        )
+        .map_err(|e| format!("Failed to update cover art cache: {}", e))?;
+    } else if let Some(ref art) = metadata.cover_art {
+        let cover_art_id = format!("{}:cover", media_id);
+        conn.execute(
+            r#"
+            INSERT INTO cover_art_cache (cover_art_id, media_id, mime_type, image_bytes, file_path, byte_len, created_at)
+            VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)
+            ON CONFLICT(cover_art_id) DO UPDATE SET
+                mime_type = excluded.mime_type,
+                image_bytes = excluded.image_bytes,
+                file_path = excluded.file_path,
                 byte_len = excluded.byte_len,
                 created_at = excluded.created_at
             "#,

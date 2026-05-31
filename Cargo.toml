@@ -83,6 +83,7 @@ soxr = "0.6.0"   # Restored for f64 Hi-Fi SoX VHQ resampling
 # --- Parallelism ---
 rayon = "1.10"
 crossbeam = "0.8"
+jwalk = "0.8"
 parking_lot = "0.12"
 
 # --- WASAPI Exclusive Mode (Windows only) ---
@@ -129,6 +130,9 @@ serde_urlencoded = "0.7"
 # --- Optional: PyO3 for backward compat ---
 pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
 numpy = { version = "0.23", optional = true }
+
+[dev-dependencies]
+image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
 
 [features]
 default = []

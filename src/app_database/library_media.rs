@@ -660,19 +660,22 @@ impl AppDatabase {
     }
 
     /// Load a snapshot of existing local media items for incremental scanning.
-    /// Returns a map of source_path -> (mtime, size_bytes, has_cover_art).
+    /// Returns a map of source_path -> (mtime, size_bytes, file-backed cover path).
     pub fn load_scan_snapshot(
         &self,
-    ) -> Result<HashMap<String, (Option<f64>, Option<u64>, bool)>, String> {
+    ) -> Result<HashMap<String, (Option<f64>, Option<u64>, Option<String>)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
                 r#"
                 SELECT source_path, mtime, size_bytes,
-                       EXISTS (
-                           SELECT 1 FROM cover_art_cache
-                           WHERE cover_art_cache.media_id = media_items.media_id LIMIT 1
-                       ) AS has_cover
+                       (
+                           SELECT file_path FROM cover_art_cache
+                           WHERE cover_art_cache.media_id = media_items.media_id
+                             AND file_path IS NOT NULL
+                           ORDER BY created_at DESC, cover_art_id DESC
+                           LIMIT 1
+                       ) AS cover_file_path
                 FROM media_items
                 WHERE source_kind = 'local'
                 "#,
@@ -684,8 +687,8 @@ impl AppDatabase {
                 let path: String = row.get(0)?;
                 let mtime: Option<f64> = row.get(1)?;
                 let size: Option<i64> = row.get(2)?;
-                let has_cover: i64 = row.get(3)?;
-                Ok((path, (mtime, size.map(|v| v as u64), has_cover != 0)))
+                let cover_file_path: Option<String> = row.get(3)?;
+                Ok((path, (mtime, size.map(|v| v as u64), cover_file_path)))
             })
             .map_err(|e| format!("Failed to query scan snapshot: {}", e))?;
 

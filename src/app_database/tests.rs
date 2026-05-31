@@ -258,6 +258,7 @@ fn batch_media_metadata_preserves_external_display_metadata() {
         bits_per_sample: Some(24),
         mtime: Some(10.0),
         size_bytes: Some(4096),
+        cover_art_file: None,
     }];
 
     let results = db
@@ -323,6 +324,7 @@ fn batch_media_metadata_merges_legacy_identity_like_single_write() {
         bits_per_sample: None,
         mtime: Some(20.0),
         size_bytes: Some(8192),
+        cover_art_file: None,
     }];
 
     let results = db
@@ -342,6 +344,232 @@ fn batch_media_metadata_merges_legacy_identity_like_single_write() {
         .query_row(
             "SELECT COUNT(*) FROM media_items WHERE media_id IN (?1, ?2)",
             params![item.media_id, legacy_media_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(row_count, 1);
+}
+
+#[test]
+fn local_scan_metadata_fast_batch_writes_without_fallback() {
+    let db = AppDatabase::in_memory().unwrap();
+    let path = "D:/Music/Artist/Album/Fast Local.flac";
+    let media_id = media_id_for_path(path);
+    let metadata = TrackMetadata {
+        title: Some("Fast Local".to_string()),
+        artist: Some("Scanner".to_string()),
+        album: Some("Batch".to_string()),
+        track_number: Some(7),
+        disc_number: Some(1),
+        genre: Some("Bench".to_string()),
+        year: Some(2026),
+        ..TrackMetadata::default()
+    };
+    let inputs = [MediaMetadataScanInput {
+        source_path: path,
+        metadata: &metadata,
+        duration_secs: Some(245.0),
+        sample_rate: Some(96_000),
+        channels: Some(2),
+        bitrate_bps: Some(1_200_000.0),
+        bits_per_sample: Some(24),
+        mtime: Some(42.0),
+        size_bytes: Some(65_536),
+        cover_art_file: None,
+    }];
+
+    let report = db.record_local_scan_metadata_batch(&inputs).unwrap();
+
+    assert_eq!(report.fallback_count, 0);
+    assert_eq!(report.results.len(), 1);
+    assert_eq!(report.results[0].as_deref(), Ok(media_id.as_str()));
+    let item = db.media_metadata_for_path(path).unwrap().unwrap();
+    assert_eq!(item.media_id, media_id);
+    assert_eq!(item.source_path, path);
+    assert_eq!(item.source_kind, "local");
+    assert_eq!(item.title.as_deref(), Some("Fast Local"));
+    assert_eq!(item.artist.as_deref(), Some("Scanner"));
+    assert_eq!(item.album.as_deref(), Some("Batch"));
+    assert_eq!(item.duration_secs, Some(245.0));
+    assert_eq!(item.sample_rate, Some(96_000));
+    assert_eq!(item.channels, Some(2));
+    assert_eq!(item.bitrate_bps, Some(1_200_000.0));
+    assert_eq!(item.bits_per_sample, Some(24));
+    assert_eq!(item.size_bytes, Some(65_536));
+}
+
+#[test]
+fn local_scan_metadata_can_store_file_backed_cover_art() {
+    let db = AppDatabase::in_memory().unwrap();
+    let path = "D:/Music/Artist/Album/File Backed Cover.flac";
+    let media_id = media_id_for_path(path);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "audio_engine_cover_cache_{}_{}",
+        std::process::id(),
+        now_epoch_secs_i64()
+    ));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let cover_path = temp_dir.join("cover.jpg");
+    fs::write(&cover_path, [9_u8, 8, 7, 6]).unwrap();
+    let cover_path_string = cover_path.to_string_lossy().to_string();
+    let metadata = TrackMetadata {
+        title: Some("File Backed Cover".to_string()),
+        ..TrackMetadata::default()
+    };
+    let inputs = [MediaMetadataScanInput {
+        source_path: path,
+        metadata: &metadata,
+        duration_secs: Some(180.0),
+        sample_rate: Some(48_000),
+        channels: Some(2),
+        bitrate_bps: None,
+        bits_per_sample: None,
+        mtime: Some(70.0),
+        size_bytes: Some(65_536),
+        cover_art_file: Some(MediaMetadataCoverArtFileInput {
+            path: &cover_path_string,
+            mime_type: Some("image/jpeg"),
+            byte_len: 4,
+        }),
+    }];
+
+    let report = db.record_local_scan_metadata_batch(&inputs).unwrap();
+
+    assert_eq!(report.fallback_count, 0);
+    assert_eq!(report.results[0].as_deref(), Ok(media_id.as_str()));
+    let item = db.media_metadata_for_path(path).unwrap().unwrap();
+    assert!(item.has_cover_art);
+    let (image_is_null, stored_path): (i64, String) = {
+        let conn = db.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT image_bytes IS NULL, file_path FROM cover_art_cache WHERE media_id = ?1",
+            params![media_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(image_is_null, 1);
+    assert_eq!(stored_path, cover_path_string);
+    let cover = db
+        .get_cover_art_for_media(&media_id)
+        .unwrap()
+        .expect("file backed cover");
+    assert_eq!(cover.0.mime_type.as_deref(), Some("image/jpeg"));
+    assert_eq!(cover.0.byte_len, 4);
+    assert_eq!(cover.1, vec![9, 8, 7, 6]);
+
+    fs::remove_file(&cover_path).unwrap();
+    assert!(db.get_cover_art_for_media(&media_id).unwrap().is_none());
+    let item = db.media_metadata_for_path(path).unwrap().unwrap();
+    assert!(!item.has_cover_art);
+
+    let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn local_scan_metadata_fast_batch_preserves_external_display_metadata() {
+    let db = AppDatabase::in_memory().unwrap();
+    let path = "D:/Music/Artist/Album/Preserve Local.flac";
+    db.record_external_media_metadata(
+        path,
+        Some("Existing Local Title"),
+        Some("Existing Local Artist"),
+        Some("Existing Local Album"),
+        Some(200.0),
+        Some("https://img.example.test/local.jpg"),
+    )
+    .unwrap();
+    let inputs = [MediaMetadataScanInput {
+        source_path: path,
+        metadata: &TrackMetadata::default(),
+        duration_secs: Some(201.0),
+        sample_rate: Some(48_000),
+        channels: Some(2),
+        bitrate_bps: None,
+        bits_per_sample: None,
+        mtime: Some(50.0),
+        size_bytes: Some(8192),
+        cover_art_file: None,
+    }];
+
+    let report = db.record_local_scan_metadata_batch(&inputs).unwrap();
+
+    assert_eq!(report.fallback_count, 0);
+    assert_eq!(
+        report.results[0].as_deref(),
+        Ok(media_id_for_path(path).as_str())
+    );
+    let item = db.media_metadata_for_path(path).unwrap().unwrap();
+    assert_eq!(item.title.as_deref(), Some("Existing Local Title"));
+    assert_eq!(item.artist.as_deref(), Some("Existing Local Artist"));
+    assert_eq!(item.album.as_deref(), Some("Existing Local Album"));
+    assert_eq!(item.duration_secs, Some(201.0));
+    assert_eq!(
+        item.external_artwork_url.as_deref(),
+        Some("https://img.example.test/local.jpg")
+    );
+}
+
+#[test]
+fn local_scan_metadata_fast_batch_fallback_reconciles_legacy_source_path_identity() {
+    let db = AppDatabase::in_memory().unwrap();
+    let canonical_path = "D:/Music/Artist/Album/Legacy Local.flac";
+    let canonical_media_id = media_id_for_path(canonical_path);
+    let legacy_media_id = "legacy-local-media-id";
+    let now = now_epoch_secs_i64();
+
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, title, external_artwork_url, added_at, updated_at)
+            VALUES (?1, ?2, 'local', 'Legacy Local Metadata', 'https://img.example.test/legacy-local.jpg', ?3, ?3)
+            "#,
+            params![legacy_media_id, canonical_path, now],
+        )
+        .unwrap();
+    }
+
+    let inputs = [MediaMetadataScanInput {
+        source_path: canonical_path,
+        metadata: &TrackMetadata::default(),
+        duration_secs: Some(321.0),
+        sample_rate: Some(44_100),
+        channels: Some(2),
+        bitrate_bps: Some(800_000.0),
+        bits_per_sample: Some(16),
+        mtime: Some(60.0),
+        size_bytes: Some(16_384),
+        cover_art_file: None,
+    }];
+
+    let report = db.record_local_scan_metadata_batch(&inputs).unwrap();
+
+    assert_eq!(report.fallback_count, 1);
+    assert_eq!(
+        report.results[0].as_deref(),
+        Ok(canonical_media_id.as_str())
+    );
+    let item = db.media_metadata_for_path(canonical_path).unwrap().unwrap();
+    assert_eq!(item.media_id, canonical_media_id);
+    assert_eq!(item.source_path, canonical_path);
+    assert_eq!(item.source_kind, "local");
+    assert_eq!(item.title.as_deref(), Some("Legacy Local Metadata"));
+    assert_eq!(
+        item.external_artwork_url.as_deref(),
+        Some("https://img.example.test/legacy-local.jpg")
+    );
+    assert_eq!(item.duration_secs, Some(321.0));
+    assert_eq!(item.sample_rate, Some(44_100));
+    assert_eq!(item.channels, Some(2));
+    assert_eq!(item.size_bytes, Some(16_384));
+
+    let conn = db.conn.lock().unwrap();
+    let row_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM media_items WHERE media_id IN (?1, ?2)",
+            params![canonical_media_id, legacy_media_id],
             |row| row.get(0),
         )
         .unwrap();
@@ -773,6 +1001,7 @@ fn migrations_create_schema_version_and_expected_columns() {
         .unwrap());
     assert!(db.has_column("media_items", "bitrate_bps").unwrap());
     assert!(db.has_column("media_items", "bits_per_sample").unwrap());
+    assert!(db.has_column("cover_art_cache", "file_path").unwrap());
 
     let conn = db.conn.lock().unwrap();
     let versions = conn
@@ -782,7 +1011,7 @@ fn migrations_create_schema_version_and_expected_columns() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
     let index_count: i64 = conn
             .query_row(
@@ -1378,7 +1607,7 @@ fn startup_gc_removes_old_rows_and_marks_stale_sessions() {
 }
 
 #[test]
-fn file_backed_database_enables_wal() {
+fn file_backed_database_enables_wal_with_normal_synchronous_mode() {
     let db_path = std::env::temp_dir().join(format!(
         "audio_engine_app_db_wal_{}_{}.db",
         std::process::id(),
@@ -1390,6 +1619,10 @@ fn file_backed_database_enables_wal() {
         .pragma_query_value(None, "journal_mode", |row| row.get(0))
         .unwrap();
     assert_eq!(mode.to_lowercase(), "wal");
+    let synchronous: i64 = conn
+        .pragma_query_value(None, "synchronous", |row| row.get(0))
+        .unwrap();
+    assert_eq!(synchronous, 1);
     drop(conn);
     drop(db);
     let _ = fs::remove_file(&db_path);
