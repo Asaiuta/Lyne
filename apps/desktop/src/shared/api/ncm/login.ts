@@ -56,7 +56,19 @@ export interface NcmLoginCellphoneParams {
   countrycode?: string;
 }
 
-export const QR_CHECK_ALLOWED_CODES = [800, 801, 802, 803] as const;
+export const QR_STATUS = {
+  EXPIRED: 800,
+  WAITING: 801,
+  SCANNED: 802,
+  CONFIRMED: 803
+} as const;
+
+export const QR_CHECK_ALLOWED_CODES = [
+  QR_STATUS.EXPIRED,
+  QR_STATUS.WAITING,
+  QR_STATUS.SCANNED,
+  QR_STATUS.CONFIRMED
+] as const;
 
 const requestAnonymousLogin = <T = unknown>(
   endpoint: string,

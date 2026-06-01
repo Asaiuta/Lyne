@@ -3,7 +3,7 @@ import { IconPlaylist } from "../../../components/icons";
 import { Modal } from "../../../components/Modal";
 import { createApiClient } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
-import { updatePlaylist } from "../../../shared/api/ncm";
+import { assertNcmOk, updatePlaylist } from "../../../shared/api/ncm";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 
@@ -85,15 +85,7 @@ export function UpdatePlaylistModal(props: UpdatePlaylistModalProps) {
         desc: desc().trim(),
         tags: selectedTags()
       });
-      if (typeof result.code === "number" && result.code !== 200) {
-        throw new Error(
-          typeof result.message === "string"
-            ? result.message
-            : typeof result.msg === "string"
-              ? result.msg
-              : t("ncm.playlist.updateFailed")
-        );
-      }
+      assertNcmOk(result, t("ncm.playlist.updateFailed"));
       props.onUpdated({
         ...playlist,
         name: nextName,

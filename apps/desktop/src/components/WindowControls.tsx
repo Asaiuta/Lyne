@@ -29,7 +29,8 @@ export function WindowControls(props: WindowControlsProps) {
     let currentWindow: ReturnType<typeof getCurrentWindow>;
     try {
       currentWindow = getCurrentWindow();
-    } catch {
+    } catch (error) {
+      console.debug("[WindowControls] Tauri window API unavailable; controls hidden", error);
       return;
     }
 

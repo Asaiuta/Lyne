@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
 import { createApiClient } from "../../shared/api/client";
+import { assertNcmOk } from "../../shared/api/ncm";
 import { likeSong } from "../../shared/api/ncm/user";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
@@ -70,15 +71,7 @@ export function createNcmFavoriteRowAction<T extends MediaListItem>(): Accessor<
     setSongLikeBusy(songId, true);
     try {
       const result = await likeSong(songId, nextFavorite);
-      if (typeof result.code === "number" && result.code !== 200) {
-        throw new Error(
-          typeof result.message === "string"
-            ? result.message
-            : typeof result.msg === "string"
-              ? result.msg
-              : t("media.favorite.failed")
-        );
-      }
+      assertNcmOk(result, t("media.favorite.failed"));
       message.success(t(nextFavorite ? "media.favorite.added" : "media.favorite.removed"));
     } catch (error) {
       setSongLiked(songId, wasLiked);

@@ -5,7 +5,8 @@ import {
   checkLoginQr,
   createLoginQr,
   getLoginQrKey,
-  ncmQrLoginUrl
+  ncmQrLoginUrl,
+  QR_STATUS
 } from "../../shared/api/ncm";
 import { isNumber, isRecord, isString } from "../../shared/jsonReaders";
 
@@ -140,16 +141,16 @@ export function useQrLoginSession(options: UseQrLoginSessionOptions) {
         if (cancelled) return;
 
         const code = readQrNumber(response.code);
-        if (code === 800) {
+        if (code === QR_STATUS.EXPIRED) {
           setSession(null);
           options.onFeedback({ tone: "error", message: options.expiredMessage });
           return;
         }
-        if (code === 801) {
+        if (code === QR_STATUS.WAITING) {
           setSession((prev) => (prev ? { ...prev, phase: "waiting" } : prev));
           return;
         }
-        if (code === 802) {
+        if (code === QR_STATUS.SCANNED) {
           const nickname = readQrString(response.nickname);
           const avatarUrl = readQrString(response.avatarUrl);
           setSession((prev) =>
@@ -157,7 +158,7 @@ export function useQrLoginSession(options: UseQrLoginSessionOptions) {
           );
           return;
         }
-        if (code === 803) {
+        if (code === QR_STATUS.CONFIRMED) {
           const cookie = readQrString(response.cookie) ?? "";
           if (!cookie) {
             throw new Error(options.missingQrMessage);

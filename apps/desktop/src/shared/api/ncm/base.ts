@@ -25,8 +25,33 @@ export interface NcmResponseEnvelope<T = unknown> {
   [key: string]: unknown;
 }
 
+export const NCM_OK_CODE = 200;
+
 const NCM_BASE_PATH = "/api/netease";
 const SUPPRESS_ACTIVE_COOKIE_KEY = "_ncm_no_active_cookie";
+
+export const readNcmEnvelopeMessage = (
+  result: NcmResponseEnvelope,
+  fallbackMessage: string
+): string => {
+  const message = result.message;
+  if (typeof message === "string" && message.trim()) {
+    return message;
+  }
+  if (typeof result.msg === "string" && result.msg.trim()) {
+    return result.msg;
+  }
+  return fallbackMessage;
+};
+
+export const assertNcmOk = (
+  result: NcmResponseEnvelope,
+  fallbackMessage: string
+): void => {
+  if (typeof result.code === "number" && result.code !== NCM_OK_CODE) {
+    throw new Error(readNcmEnvelopeMessage(result, fallbackMessage));
+  }
+};
 
 const appendParams = (
   search: URLSearchParams,

@@ -3,7 +3,7 @@ import { Modal } from "./Modal";
 import { IconPlus } from "./icons";
 import type { ApiClient } from "../shared/api/client";
 import type { LocalPlaylist } from "../shared/api/types";
-import { createPlaylist, type NcmCreatePlaylistType } from "../shared/api/ncm";
+import { assertNcmOk, createPlaylist, type NcmCreatePlaylistType } from "../shared/api/ncm";
 import { useTranslation } from "../shared/i18n";
 
 type FeedbackTone = "success" | "error";
@@ -71,15 +71,7 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
         await props.onCreated("local", playlist);
       } else {
         const result = await createPlaylist(trimmedName, privacy(), type());
-        if (typeof result.code === "number" && result.code !== 200) {
-          throw new Error(
-            typeof result.message === "string"
-              ? result.message
-              : typeof result.msg === "string"
-                ? result.msg
-                : t("playlist.create.feedback.failed")
-          );
-        }
+        assertNcmOk(result, t("playlist.create.feedback.failed"));
         await props.onCreated("online");
       }
       setFeedback({
