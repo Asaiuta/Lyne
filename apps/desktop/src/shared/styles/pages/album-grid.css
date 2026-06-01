@@ -16,6 +16,19 @@
     aspect-ratio: 1 / 1;
   }
 
+  .album-grid[data-virtualized="true"] {
+    contain: layout paint;
+    overflow-anchor: none;
+  }
+
+  .virtualized-grid-spacer {
+    grid-column: 1 / -1;
+    min-width: 0;
+    pointer-events: none;
+    overflow-anchor: none;
+    contain: layout paint;
+  }
+
   .local-playlist-grid.album-grid {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 20px;

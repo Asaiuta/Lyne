@@ -1,4 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
+import type { JSX } from "solid-js";
 import {
   IconChat,
   IconFire,
@@ -7,7 +8,11 @@ import {
   IconThumbUp,
   IconThumbUpFilled
 } from "../../../components/icons";
+import {
+  resolveQueueVisibleRange
+} from "../../queue/queueVirtualization";
 import { SImage } from "../../../components/SImage";
+import { resolveNearestScrollRoot } from "../../../shared/ui/scrollRoot";
 import {
   commentHugList,
   commentLike,
@@ -39,6 +44,10 @@ export interface ResourceCommentsPanelProps {
 }
 
 const PAGE_SIZE = 20;
+const COMMENT_VIRTUALIZE_THRESHOLD = 80;
+const COMMENT_ROW_HEIGHT_PX = 160;
+const COMMENT_ROW_GAP_PX = 16;
+const COMMENT_OVERSCAN = 4;
 
 const formatNumber = (value: number | null): string => {
   if (value === null) return "0";
@@ -86,6 +95,137 @@ const isValidResourceId = (value: number | string | null): value is number | str
   if (typeof value === "number") return value > 0;
   return typeof value === "string" && value.trim().length > 0;
 };
+
+interface VirtualizedCommentListProps {
+  items: readonly NcmSongComment[];
+  renderComment: (comment: NcmSongComment) => JSX.Element;
+}
+
+interface CommentVisibleRange {
+  start: number;
+  end: number;
+}
+
+const shouldVirtualizeComments = (count: number): boolean =>
+  count > COMMENT_VIRTUALIZE_THRESHOLD;
+
+function VirtualizedCommentList(props: VirtualizedCommentListProps) {
+  const [scrollTop, setScrollTop] = createSignal<number>(0);
+  const [viewportHeight, setViewportHeight] = createSignal<number>(0);
+  let listRef: HTMLDivElement | undefined;
+  let scrollRoot: HTMLElement | null = null;
+  let resizeObserver: ResizeObserver | undefined;
+  let scrollFrame = 0;
+
+  const commitMeasure = () => {
+    scrollFrame = 0;
+    if (!listRef || typeof window === "undefined") return;
+    const rootRect = scrollRoot?.getBoundingClientRect() ?? null;
+    const listRect = listRef.getBoundingClientRect();
+    setViewportHeight(scrollRoot?.clientHeight ?? window.innerHeight);
+    setScrollTop(Math.max(0, (rootRect?.top ?? 0) - listRect.top));
+  };
+
+  const scheduleMeasure = () => {
+    if (scrollFrame !== 0) return;
+    if (typeof window === "undefined") {
+      commitMeasure();
+      return;
+    }
+    scrollFrame = window.requestAnimationFrame(commitMeasure);
+  };
+
+  onMount(() => {
+    if (!listRef || typeof window === "undefined") return;
+    scrollRoot = resolveNearestScrollRoot(listRef);
+    const scrollTarget: HTMLElement | Window = scrollRoot ?? window;
+    scrollTarget.addEventListener("scroll", scheduleMeasure, { passive: true });
+    window.addEventListener("resize", scheduleMeasure);
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(scheduleMeasure);
+      resizeObserver.observe(listRef);
+      if (scrollRoot) {
+        resizeObserver.observe(scrollRoot);
+      }
+    }
+    scheduleMeasure();
+
+    onCleanup(() => {
+      scrollTarget.removeEventListener("scroll", scheduleMeasure);
+      window.removeEventListener("resize", scheduleMeasure);
+      resizeObserver?.disconnect();
+      resizeObserver = undefined;
+      scrollRoot = null;
+    });
+  });
+
+  onCleanup(() => {
+    if (scrollFrame !== 0 && typeof window !== "undefined") {
+      window.cancelAnimationFrame(scrollFrame);
+    }
+  });
+
+  createEffect(() => {
+    props.items.length;
+    scheduleMeasure();
+  });
+
+  const useVirtualRows = createMemo<boolean>(() => shouldVirtualizeComments(props.items.length));
+  const visibleRange = createMemo<CommentVisibleRange>((previous) => {
+    if (!useVirtualRows()) {
+      return previous.start === 0 && previous.end === props.items.length
+        ? previous
+        : { start: 0, end: props.items.length };
+    }
+    const next = resolveQueueVisibleRange({
+      totalItems: props.items.length,
+      scrollTop: scrollTop(),
+      viewportHeight: viewportHeight(),
+      rowHeight: COMMENT_ROW_HEIGHT_PX,
+      overscan: COMMENT_OVERSCAN
+    });
+    return previous.start === next.start && previous.end === next.end ? previous : next;
+  }, { start: 0, end: 0 });
+
+  const renderedComments = createMemo<readonly NcmSongComment[]>(() => {
+    const range = visibleRange();
+    return props.items.slice(range.start, range.end);
+  });
+  const virtualOffset = createMemo<number>(() =>
+    useVirtualRows() ? visibleRange().start * COMMENT_ROW_HEIGHT_PX : 0
+  );
+  const bottomOffset = createMemo<number>(() =>
+    useVirtualRows() ? Math.max(0, props.items.length - visibleRange().end) * COMMENT_ROW_HEIGHT_PX : 0
+  );
+  const spacerHeight = (height: number): number =>
+    height > 0 ? Math.max(0, height - COMMENT_ROW_GAP_PX) : 0;
+
+  return (
+    <div
+      ref={listRef}
+      class="ncm-resource-comment-list"
+      data-virtualized={useVirtualRows() ? "true" : undefined}
+    >
+      <Show when={useVirtualRows() && virtualOffset() > 0}>
+        <div
+          class="ncm-resource-comment-spacer"
+          style={{ height: `${spacerHeight(virtualOffset())}px` }}
+          aria-hidden="true"
+        />
+      </Show>
+      <For each={renderedComments()}>
+        {(comment) => props.renderComment(comment)}
+      </For>
+      <Show when={useVirtualRows() && bottomOffset() > 0}>
+        <div
+          class="ncm-resource-comment-spacer"
+          style={{ height: `${spacerHeight(bottomOffset())}px` }}
+          aria-hidden="true"
+        />
+      </Show>
+    </div>
+  );
+}
 
 export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
   const { t, td } = useTranslation();
@@ -326,82 +466,87 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
     }
   };
 
-  const renderCommentList = (items: readonly NcmSongComment[]) => (
-    <div class="ncm-resource-comment-list">
-      <For each={items}>
-        {(comment) => (
-          <article class="ncm-resource-comment">
-            <Show when={comment.user.avatarUrl} fallback={<span class="ncm-resource-comment-avatar" />}>
-              {(avatarUrl) => (
-                <SImage
-                  src={avatarUrl()}
-                  alt={comment.user.nickname}
-                  class="ncm-resource-comment-avatar"
-                  observeVisibility={true}
-                  shape="circle"
-                  aspect="square"
-                />
-              )}
-            </Show>
-            <div>
-              <header>
-                <strong>{comment.user.nickname}</strong>
-                <div class="ncm-resource-comment-actions">
-                  <button
-                    type="button"
-                    class={comment.liked ? "ncm-resource-comment-action is-active" : "ncm-resource-comment-action"}
-                    title={comment.liked ? t("ncm.comments.unlike") : t("ncm.comments.like")}
-                    aria-label={comment.liked ? t("ncm.comments.unlike") : t("ncm.comments.like")}
-                    disabled={likeBusyIds().includes(comment.commentId)}
-                    onClick={() => void handleLikeComment(comment)}
-                  >
-                    <Show
-                      when={likeBusyIds().includes(comment.commentId)}
-                      fallback={comment.liked ? <IconThumbUpFilled /> : <IconThumbUp />}
-                    >
-                      <NaiveSpin size={15} ariaHidden />
-                    </Show>
-                    <span>{formatNumber(comment.likedCount)}</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="ncm-resource-comment-action"
-                    title={t("ncm.comments.hug")}
-                    aria-label={t("ncm.comments.hug")}
-                    disabled={hugBusyIds().includes(comment.commentId)}
-                    onClick={() => void handleHugComment(comment)}
-                  >
-                    <Show when={hugBusyIds().includes(comment.commentId)} fallback={<IconHeart />}>
-                      <NaiveSpin size={15} ariaHidden />
-                    </Show>
-                  </button>
-                </div>
-              </header>
-              <NaiveP>{comment.content}</NaiveP>
-              <Show when={comment.beReplied}>
-                {(reply) => (
-                  <div class="ncm-resource-comment-reply">
-                    <IconMessage />
-                    <span>
-                      @{reply().user.nickname}: {reply().content}
-                    </span>
-                  </div>
-                )}
-              </Show>
-              <div class="ncm-resource-comment-meta">
-                <Show when={formatDate(comment.time)}>
-                  {(date) => <small>{date()}</small>}
-                </Show>
-                <Show when={comment.ip?.location}>
-                  {(location) => <small>{td("ncm.comments.ipLocation", { location: location() })}</small>}
-                </Show>
-              </div>
-            </div>
-          </article>
+  const renderComment = (comment: NcmSongComment) => (
+    <article class="ncm-resource-comment">
+      <Show when={comment.user.avatarUrl} fallback={<span class="ncm-resource-comment-avatar" />}>
+        {(avatarUrl) => (
+          <SImage
+            src={avatarUrl()}
+            alt={comment.user.nickname}
+            class="ncm-resource-comment-avatar"
+            observeVisibility={true}
+            shape="circle"
+            aspect="square"
+          />
         )}
-      </For>
-    </div>
+      </Show>
+      <div>
+        <header>
+          <strong>{comment.user.nickname}</strong>
+          <div class="ncm-resource-comment-actions">
+            <button
+              type="button"
+              class={comment.liked ? "ncm-resource-comment-action is-active" : "ncm-resource-comment-action"}
+              title={comment.liked ? t("ncm.comments.unlike") : t("ncm.comments.like")}
+              aria-label={comment.liked ? t("ncm.comments.unlike") : t("ncm.comments.like")}
+              disabled={likeBusyIds().includes(comment.commentId)}
+              onClick={() => void handleLikeComment(comment)}
+            >
+              <Show
+                when={likeBusyIds().includes(comment.commentId)}
+                fallback={comment.liked ? <IconThumbUpFilled /> : <IconThumbUp />}
+              >
+                <NaiveSpin size={15} ariaHidden />
+              </Show>
+              <span>{formatNumber(comment.likedCount)}</span>
+            </button>
+            <button
+              type="button"
+              class="ncm-resource-comment-action"
+              title={t("ncm.comments.hug")}
+              aria-label={t("ncm.comments.hug")}
+              disabled={hugBusyIds().includes(comment.commentId)}
+              onClick={() => void handleHugComment(comment)}
+            >
+              <Show when={hugBusyIds().includes(comment.commentId)} fallback={<IconHeart />}>
+                <NaiveSpin size={15} ariaHidden />
+              </Show>
+            </button>
+          </div>
+        </header>
+        <NaiveP>{comment.content}</NaiveP>
+        <Show when={comment.beReplied}>
+          {(reply) => (
+            <div class="ncm-resource-comment-reply">
+              <IconMessage />
+              <span>
+                @{reply().user.nickname}: {reply().content}
+              </span>
+            </div>
+          )}
+        </Show>
+        <div class="ncm-resource-comment-meta">
+          <Show when={formatDate(comment.time)}>
+            {(date) => <small>{date()}</small>}
+          </Show>
+          <Show when={comment.ip?.location}>
+            {(location) => <small>{td("ncm.comments.ipLocation", { location: location() })}</small>}
+          </Show>
+        </div>
+      </div>
+    </article>
   );
+
+  const renderCommentList = (items: readonly NcmSongComment[], virtualized: boolean) =>
+    virtualized ? (
+      <VirtualizedCommentList items={items} renderComment={renderComment} />
+    ) : (
+      <div class="ncm-resource-comment-list">
+        <For each={items}>
+          {(comment) => renderComment(comment)}
+        </For>
+      </div>
+    );
 
   return (
     <section
@@ -445,7 +590,7 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
               </div>
             }
           >
-            {renderCommentList(comments())}
+            {renderCommentList(comments(), true)}
           </Show>
         }
       >
@@ -459,7 +604,7 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
               when={hotComments().length > 0}
               fallback={<div class="ncm-resource-comments-empty">{t("ncm.comments.loading")}</div>}
             >
-              {renderCommentList(hotComments())}
+              {renderCommentList(hotComments(), false)}
             </Show>
           </section>
         </Show>
@@ -479,7 +624,7 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
               </div>
             }
           >
-            {renderCommentList(comments())}
+            {renderCommentList(comments(), true)}
           </Show>
         </section>
       </Show>

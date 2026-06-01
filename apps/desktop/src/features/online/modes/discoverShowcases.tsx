@@ -3,6 +3,7 @@ import type { Resource } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { EmptyState } from "../../../components/EmptyState";
 import { IconPlay } from "../../../components/icons";
+import { VirtualizedGrid } from "../../../components/media/VirtualizedGrid";
 import { NcmMediaList } from "../NcmMediaList";
 import { CoverGridSkeleton } from "../../../components/page/Skeleton";
 import { SImage } from "../../../components/SImage";
@@ -108,23 +109,23 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
           )
         }
       >
-        <div class="album-grid content-fade-in">
-          <For each={props.allPlaylists}>
-            {(item) => (
-              <AlbumCard
-                title={item.title}
-                subtitle={item.subtitle}
-                coverUrl={item.coverUrl}
-                playCount={item.playCount}
-                description={item.description}
-                coverVisible={!uiSettings.hiddenCovers.playlist}
-                onClick={() =>
-                  void props.onLoadPlaylist(playlistSummaryFromDiscoverCard(item))
-                }
-              />
-            )}
-          </For>
-        </div>
+        <VirtualizedGrid
+          class="album-grid content-fade-in"
+          items={props.allPlaylists}
+          renderItem={(item) => (
+            <AlbumCard
+              title={item.title}
+              subtitle={item.subtitle}
+              coverUrl={item.coverUrl}
+              playCount={item.playCount}
+              description={item.description}
+              coverVisible={!uiSettings.hiddenCovers.playlist}
+              onClick={() =>
+                void props.onLoadPlaylist(playlistSummaryFromDiscoverCard(item))
+              }
+            />
+          )}
+        />
       </Show>
       <Show when={props.hasMorePlaylists && props.allPlaylists.length > 0}>
         <LoadMoreButton
@@ -191,21 +192,22 @@ export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
           )
         }
       >
-        <div class="album-grid content-fade-in">
-          <For each={props.allArtists}>
-            {(item) => (
-              <AlbumCard
-                title={item.title}
-                subtitle={item.subtitle}
-                coverUrl={item.coverUrl}
-                coverVisible={!uiSettings.hiddenCovers.artist}
-                shape="round"
-                size="sm"
-                onClick={() => void props.onLoadArtist(item)}
-              />
-            )}
-          </For>
-        </div>
+        <VirtualizedGrid
+          class="album-grid content-fade-in"
+          items={props.allArtists}
+          estimatedRowHeight={180}
+          renderItem={(item) => (
+            <AlbumCard
+              title={item.title}
+              subtitle={item.subtitle}
+              coverUrl={item.coverUrl}
+              coverVisible={!uiSettings.hiddenCovers.artist}
+              shape="round"
+              size="sm"
+              onClick={() => void props.onLoadArtist(item)}
+            />
+          )}
+        />
       </Show>
       <Show when={props.hasMoreArtists && props.allArtists.length > 0}>
         <LoadMoreButton
@@ -428,19 +430,20 @@ export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
           )
         }
       >
-        <div class="album-grid online-search-card-grid--videos content-fade-in">
-          <For each={props.allVideos}>
-            {(item) => (
-              <AlbumCard
-                title={item.title}
-                subtitle={item.subtitle}
-                coverUrl={item.coverUrl}
-                coverVisible={!uiSettings.hiddenCovers.video}
-                onClick={() => void props.onLoadVideo(item)}
-              />
-            )}
-          </For>
-        </div>
+        <VirtualizedGrid
+          class="album-grid online-search-card-grid--videos content-fade-in"
+          items={props.allVideos}
+          estimatedRowHeight={220}
+          renderItem={(item) => (
+            <AlbumCard
+              title={item.title}
+              subtitle={item.subtitle}
+              coverUrl={item.coverUrl}
+              coverVisible={!uiSettings.hiddenCovers.video}
+              onClick={() => void props.onLoadVideo(item)}
+            />
+          )}
+        />
       </Show>
       <Show when={props.hasMoreVideos && props.allVideos.length > 0}>
         <LoadMoreButton
@@ -510,19 +513,19 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
           </div>
         }>
           <div class="online-discover-card-stack content-fade-in">
-            <div class="album-grid">
-              <For each={props.allAlbums}>
-                {(item) => (
-                  <AlbumCard
-                    title={item.title}
-                    subtitle={item.subtitle}
-                    coverUrl={item.coverUrl}
-                    coverVisible={!uiSettings.hiddenCovers.new}
-                    onClick={() => void props.onLoadAlbum(item)}
-                  />
-                )}
-              </For>
-            </div>
+            <VirtualizedGrid
+              class="album-grid"
+              items={props.allAlbums}
+              renderItem={(item) => (
+                <AlbumCard
+                  title={item.title}
+                  subtitle={item.subtitle}
+                  coverUrl={item.coverUrl}
+                  coverVisible={!uiSettings.hiddenCovers.new}
+                  onClick={() => void props.onLoadAlbum(item)}
+                />
+              )}
+            />
             <Show when={props.hasMoreAlbums}>
               <LoadMoreButton
                 isLoading={props.isLoadingAlbums}

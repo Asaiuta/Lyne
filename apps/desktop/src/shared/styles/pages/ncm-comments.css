@@ -54,6 +54,16 @@
     gap: 16px;
   }
 
+  .ncm-resource-comment-list[data-virtualized="true"] {
+    contain: layout;
+    overflow-anchor: none;
+  }
+
+  .ncm-resource-comment-list[data-virtualized="true"] .ncm-resource-comment-spacer {
+    flex: none;
+    overflow-anchor: none;
+  }
+
   .ncm-resource-comment-section {
     display: flex;
     flex-direction: column;
