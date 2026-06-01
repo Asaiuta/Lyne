@@ -91,6 +91,19 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     t,
     initialKey: "library.feedback.initial"
   });
+  const withFeedback = async <T>(
+    fn: () => Promise<T>,
+    onSuccess?: (result: T) => void | Promise<void>
+  ): Promise<T> => {
+    try {
+      const result = await fn();
+      await onSuccess?.(result);
+      return result;
+    } catch (error) {
+      setRawFeedback("error", readErrorMessage(error));
+      throw error;
+    }
+  };
 
   const detailResolver = new LibraryTrackDetailResolver(async (trackKey) => {
     const detail = await api.getLibraryTrackDetail(trackKey);
@@ -244,14 +257,14 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   });
 
   const deleteLibraryRoot = async (root: LibraryRoot) => {
-    try {
-      await api.deleteLibraryRoot(root.root_id);
-      await Promise.all([refreshRoots(), refreshItems(), refreshPlaylists({ force: true })]);
-      setRawFeedback("success", t("library.roots.feedback.deleted", { name: root.display_name }));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    await withFeedback(
+      async () => {
+        await api.deleteLibraryRoot(root.root_id);
+        await Promise.all([refreshRoots(), refreshItems(), refreshPlaylists({ force: true })]);
+      },
+      () =>
+        setRawFeedback("success", t("library.roots.feedback.deleted", { name: root.display_name }))
+    );
   };
 
   const playItem = async (
@@ -259,86 +272,84 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     contextItems: readonly LibraryListItem[] = viewState.filteredItems()
   ): Promise<PlayerState> => {
     setKeyedFeedback("neutral", "library.feedback.initial");
-    try {
-      if (viewState.activeTab() === "playlists") {
-        const state = await replaceQueueFromSelectedPlaylist(item, contextItems);
-        setKeyedFeedback("neutral", "library.feedback.initial");
-        return state;
-      } else if (item.media_id) {
-        const mediaIds = await resolveMediaIdsForPlaybackContext(item, contextItems);
-        const playback = await api.replaceQueueFromMediaIds({
-          mediaIds,
-          startMediaId: item.media_id
-        });
-        setKeyedFeedback("neutral", "library.feedback.initial");
-        return playback.state;
-      } else {
-        const paths = contextItems
-          .map((contextItem) => contextItem.source_path)
-          .filter((path): path is string => Boolean(path));
-        const itemPath = item.source_path;
-        if (!itemPath) {
-          throw new Error(t("common.error.requestFailed"));
+    return withFeedback(
+      async () => {
+        if (viewState.activeTab() === "playlists") {
+          return replaceQueueFromSelectedPlaylist(item, contextItems);
+        } else if (item.media_id) {
+          const mediaIds = await resolveMediaIdsForPlaybackContext(item, contextItems);
+          const playback = await api.replaceQueueFromMediaIds({
+            mediaIds,
+            startMediaId: item.media_id
+          });
+          return playback.state;
+        } else {
+          const paths = contextItems
+            .map((contextItem) => contextItem.source_path)
+            .filter((path): path is string => Boolean(path));
+          const itemPath = item.source_path;
+          if (!itemPath) {
+            throw new Error(t("common.error.requestFailed"));
+          }
+          const queue = await api.replaceQueue(paths.length > 0 ? paths : [itemPath]);
+          const contextIndex = contextItems.findIndex((contextItem) => contextItem.id === item.id);
+          const entry = contextIndex >= 0 ? queue[contextIndex] : undefined;
+          if (!entry) {
+            throw new Error(t("common.error.requestFailed"));
+          }
+          const state = await api.playFromQueue({
+            entryId: entry.entry_id,
+            sourcePath: entry.source_path
+          });
+          return state;
         }
-        const queue = await api.replaceQueue(paths.length > 0 ? paths : [itemPath]);
-        const contextIndex = contextItems.findIndex((contextItem) => contextItem.id === item.id);
-        const entry = contextIndex >= 0 ? queue[contextIndex] : undefined;
-        if (!entry) {
-          throw new Error(t("common.error.requestFailed"));
-        }
-        const state = await api.playFromQueue({
-          entryId: entry.entry_id,
-          sourcePath: entry.source_path
-        });
-        setKeyedFeedback("neutral", "library.feedback.initial");
-        return state;
-      }
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+      },
+      () => setKeyedFeedback("neutral", "library.feedback.initial")
+    );
   };
 
   const playCurrentSongView = async (): Promise<PlayerState> => {
     setKeyedFeedback("neutral", "library.feedback.initial");
-    try {
-      const mediaIds = await viewState.requestViewMediaIds();
-      const playback = await api.replaceQueueFromMediaIds({ mediaIds, startMediaId: null });
-      setKeyedFeedback("neutral", "library.feedback.initial");
-      return playback.state;
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    return withFeedback(
+      async () => {
+        const mediaIds = await viewState.requestViewMediaIds();
+        const playback = await api.replaceQueueFromMediaIds({ mediaIds, startMediaId: null });
+        return playback.state;
+      },
+      () => setKeyedFeedback("neutral", "library.feedback.initial")
+    );
   };
 
   const enqueueItem = async (item: LibraryListItem) => {
-    try {
-      const result = await enqueueLibraryItem({
-        api,
-        ensureItemDetail,
-        requestFailedMessage: () => t("common.error.requestFailed")
-      }, item);
-      setRawFeedback("success", t("library.feedback.added", { title: result.title }));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    await withFeedback(
+      async () =>
+        enqueueLibraryItem(
+          {
+            api,
+            ensureItemDetail,
+            requestFailedMessage: () => t("common.error.requestFailed")
+          },
+          item
+        ),
+      (result) => setRawFeedback("success", t("library.feedback.added", { title: result.title }))
+    );
   };
 
   const enqueueItems = async (items: readonly LibraryListItem[]) => {
     if (items.length === 0) return;
-    try {
-      const result = await enqueueLibraryItems({
-        api,
-        ensureItemDetail,
-        requestFailedMessage: () => t("common.error.requestFailed")
-      }, items);
-      setRawFeedback("success", t("library.feedback.addedMany", { count: result.enqueuedCount }));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    await withFeedback(
+      async () =>
+        enqueueLibraryItems(
+          {
+            api,
+            ensureItemDetail,
+            requestFailedMessage: () => t("common.error.requestFailed")
+          },
+          items
+        ),
+      (result) =>
+        setRawFeedback("success", t("library.feedback.addedMany", { count: result.enqueuedCount }))
+    );
   };
 
   const selectLocalPlaylist = async (playlistId: string) => {
@@ -351,50 +362,48 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     await refreshSelectedPlaylist(playlistId);
   };
 
-  const createLocalPlaylist = async (name: string, description?: string | null) => {
-    try {
-      const playlist = await api.createLocalPlaylist({ name, description });
-      await refreshPlaylists({ force: true });
-      await selectLocalPlaylist(playlist.playlist_id);
-      setRawFeedback("success", t("library.playlists.feedback.created", { name: playlist.name }));
-      return playlist;
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
-  };
+  const createLocalPlaylist = async (name: string, description?: string | null) =>
+    withFeedback(
+      async () => {
+        const playlist = await api.createLocalPlaylist({ name, description });
+        await refreshPlaylists({ force: true });
+        await selectLocalPlaylist(playlist.playlist_id);
+        return playlist;
+      },
+      (playlist) =>
+        setRawFeedback("success", t("library.playlists.feedback.created", { name: playlist.name }))
+    );
 
   const deleteLocalPlaylist = async (playlistId: string) => {
-    try {
-      await api.deleteLocalPlaylist(playlistId);
-      if (viewState.selectedPlaylistId() === playlistId) {
-        viewState.setSelectedPlaylistId(null);
-        viewState.setSelectedPlaylistItems([]);
-      }
-      await refreshPlaylists({ force: true });
-      setRawFeedback("success", t("library.playlists.feedback.deleted"));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    await withFeedback(
+      async () => {
+        await api.deleteLocalPlaylist(playlistId);
+        if (viewState.selectedPlaylistId() === playlistId) {
+          viewState.setSelectedPlaylistId(null);
+          viewState.setSelectedPlaylistItems([]);
+        }
+        await refreshPlaylists({ force: true });
+      },
+      () => setRawFeedback("success", t("library.playlists.feedback.deleted"))
+    );
   };
 
   const addItemsToPlaylist = async (playlistId: string, items: readonly LibraryListItem[]) => {
     const details = await Promise.all(items.map(ensureItemDetail));
     const mediaIds = uniqueMediaIds(details);
     if (mediaIds.length === 0) return 0;
-    try {
-      const addedCount = await api.addMediaToLocalPlaylist(playlistId, mediaIds);
-      await refreshPlaylists({ force: true });
-      if (viewState.selectedPlaylistId() === playlistId) {
-        await refreshSelectedPlaylist(playlistId);
-      }
-      setRawFeedback("success", t("library.playlists.feedback.added", { count: addedCount }));
-      return addedCount;
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    return withFeedback(
+      async () => {
+        const addedCount = await api.addMediaToLocalPlaylist(playlistId, mediaIds);
+        await refreshPlaylists({ force: true });
+        if (viewState.selectedPlaylistId() === playlistId) {
+          await refreshSelectedPlaylist(playlistId);
+        }
+        return addedCount;
+      },
+      (addedCount) =>
+        setRawFeedback("success", t("library.playlists.feedback.added", { count: addedCount }))
+    );
   };
 
   const removeItemsFromSelectedPlaylist = async (items: readonly LibraryListItem[]) => {
@@ -402,32 +411,32 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     if (!playlistId || items.length === 0) return 0;
     const details = await Promise.all(items.map(ensureItemDetail));
     const mediaIds = uniqueMediaIds(details);
-    try {
-      const removedCount = await api.removeMediaFromLocalPlaylist(playlistId, mediaIds);
-      await refreshPlaylists({ force: true });
-      await refreshSelectedPlaylist(playlistId);
-      setRawFeedback("success", t("library.playlists.feedback.removed", { count: removedCount }));
-      return removedCount;
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    return withFeedback(
+      async () => {
+        const removedCount = await api.removeMediaFromLocalPlaylist(playlistId, mediaIds);
+        await refreshPlaylists({ force: true });
+        await refreshSelectedPlaylist(playlistId);
+        return removedCount;
+      },
+      (removedCount) =>
+        setRawFeedback("success", t("library.playlists.feedback.removed", { count: removedCount }))
+    );
   };
 
   const deleteItemsFromLibrary = async (items: readonly LibraryListItem[]) => {
     const details = await Promise.all(items.map(ensureItemDetail));
     const mediaIds = uniqueMediaIds(details);
     if (mediaIds.length === 0) return 0;
-    try {
-      const deletedCount = await api.deleteMediaItems(mediaIds);
-      await Promise.all([refreshItems(), refreshPlaylists({ force: true })]);
-      await refreshSelectedPlaylist();
-      setRawFeedback("success", t("library.feedback.deleted", { count: deletedCount }));
-      return deletedCount;
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    return withFeedback(
+      async () => {
+        const deletedCount = await api.deleteMediaItems(mediaIds);
+        await Promise.all([refreshItems(), refreshPlaylists({ force: true })]);
+        await refreshSelectedPlaylist();
+        return deletedCount;
+      },
+      (deletedCount) =>
+        setRawFeedback("success", t("library.feedback.deleted", { count: deletedCount }))
+    );
   };
 
   const getCurrentBatchItems = async (): Promise<LibraryListItem[]> => {
@@ -457,32 +466,31 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
   };
 
   const revealItemInFolder = async (item: LibraryListItem) => {
-    try {
-      const detail = await ensureItemDetail(item);
-      if (!detail) {
-        throw new Error(t("common.error.requestFailed"));
-      }
-      await revealPathInFolder(detail.source_path);
-      setRawFeedback("success", t("media.context.showInFolder.success"));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    await withFeedback(
+      async () => {
+        const detail = await ensureItemDetail(item);
+        if (!detail) {
+          throw new Error(t("common.error.requestFailed"));
+        }
+        await revealPathInFolder(detail.source_path);
+      },
+      () => setRawFeedback("success", t("media.context.showInFolder.success"))
+    );
   };
 
   const deleteItemFromLocalDisk = async (item: LibraryListItem) => {
-    try {
-      const detail = await ensureItemDetail(item);
-      if (!detail || !detail.source_path) {
-        throw new Error(t("common.error.requestFailed"));
-      }
-      await deleteFile(detail.source_path);
-      await deleteItemsFromLibrary([item]);
-      setRawFeedback("success", t("library.feedback.deletedFromDisk", { name: item.title ?? "" }));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-      throw error;
-    }
+    await withFeedback(
+      async () => {
+        const detail = await ensureItemDetail(item);
+        if (!detail || !detail.source_path) {
+          throw new Error(t("common.error.requestFailed"));
+        }
+        await deleteFile(detail.source_path);
+        await deleteItemsFromLibrary([item]);
+      },
+      () =>
+        setRawFeedback("success", t("library.feedback.deletedFromDisk", { name: item.title ?? "" }))
+    );
   };
 
   const handleRefresh = () => {
