@@ -5,6 +5,7 @@ import type { ActivePage } from "../shared/ui/navigation";
 interface PageTransitionProps {
   activePage: ActivePage;
   animation: RouteAnimation;
+  onDisplayedPageChange?: (page: ActivePage) => void;
   /** Render function — receives the displayed page signal, which only updates after leave completes */
   children: (displayedPage: () => ActivePage) => JSX.Element;
 }
@@ -91,6 +92,10 @@ export function PageTransition(props: PageTransitionProps) {
   function getPanel(): Element | null {
     return containerRef?.querySelector(".panel") ?? containerRef?.firstElementChild ?? null;
   }
+
+  createEffect(() => {
+    props.onDisplayedPageChange?.(displayedPage());
+  });
 
   // React to page changes
   createEffect(() => {

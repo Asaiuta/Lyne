@@ -34,11 +34,14 @@ interface NeteasePageProps {
   selectedPlaylistId?: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   onNavigate?: (page: "recommend" | "discover" | "radio") => void;
+  onNavigateToRecommend?: () => void;
   onNavigateToDiscover?: (tab: string) => void;
+  onDiscoverTabChange?: (tab: string) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   discoverTabRequest?: { tab: string; version: number };
   likedCollectionTabRequest?: { tab: "playlists" | "albums" | "artists"; version: number };
+  onLikedCollectionTabChange?: (tab: "playlists" | "albums" | "artists") => void;
   artistDetailRequest?: { artist: FeedCardItem | null; version: number };
   albumDetailRequest?: { album: FeedCardItem | null; version: number };
   radioSubscribeEvent?: RadioSubscribeEvent | null;
@@ -152,6 +155,7 @@ export function NeteasePage(props: NeteasePageProps) {
             pendingDiscoverSearch={pendingDiscoverSearch}
             clearPendingDiscoverSearch={() => setPendingDiscoverSearch(false)}
             discoverTabRequest={props.discoverTabRequest}
+            onDiscoverTabChange={props.onDiscoverTabChange}
             artistDetailRequest={props.artistDetailRequest}
             albumDetailRequest={props.albumDetailRequest}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
@@ -189,6 +193,7 @@ export function NeteasePage(props: NeteasePageProps) {
             onBeginLogin={props.onRequireNcmLogin}
             onLogout={handleLogout}
             tabRequest={props.likedCollectionTabRequest}
+            onTabChange={props.onLikedCollectionTabChange}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={playback}
@@ -212,6 +217,10 @@ export function NeteasePage(props: NeteasePageProps) {
             onLogout={handleLogout}
             selectedPlaylistId={props.selectedPlaylistId ?? null}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
+            onStaleSelectedPlaylist={() => {
+              props.onSelectedPlaylistChange?.(null);
+              props.onNavigateToRecommend?.();
+            }}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             setFeedback={setRawFeedback}
             playback={playback}

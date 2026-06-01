@@ -89,6 +89,8 @@ type NeteasePageMode = (typeof NETEASE_PAGES)[number];
 const isNeteasePageMode = (page: ActivePage): page is NeteasePageMode =>
   (NETEASE_PAGES as readonly ActivePage[]).includes(page);
 
+const topLevelScrollKey = (page: ActivePage): string => `page:${page}`;
+
 function RouteLoadingFallback(): JSX.Element {
   const { t } = useTranslation();
   return (
@@ -111,6 +113,8 @@ function AppContent() {
   const [hasRequestedQueueDrawer, setHasRequestedQueueDrawer] = createSignal<boolean>(false);
   const [hasRequestedSettingsPage, setHasRequestedSettingsPage] = createSignal<boolean>(false);
   const [hasRequestedLoginModal, setHasRequestedLoginModal] = createSignal<boolean>(false);
+  const [displayedContentPage, setDisplayedContentPage] =
+    createSignal<ActivePage>(controller.activePage());
   const [settingsInitialCategory, setSettingsInitialCategory] =
     createSignal<SettingsCategoryKey | undefined>(undefined);
   const refreshPlayback = async (expectedPath?: string | null) => {
@@ -273,10 +277,12 @@ function AppContent() {
               queueOpen={controller.queueDrawerOpen()}
             />
           }
+          contentPersistKey={topLevelScrollKey(displayedContentPage())}
         >
           <PageTransition
             activePage={controller.activePage()}
             animation={controller.uiSettings.routeAnimation}
+            onDisplayedPageChange={setDisplayedContentPage}
           >
             {(displayedPage) => {
               const displayedNeteaseMode = () => {
@@ -315,11 +321,14 @@ function AppContent() {
                           selectedPlaylistId={controller.selectedPlaylistId()}
                           onSelectedPlaylistChange={controller.handleSelectedPlaylistChange}
                           onNavigate={controller.handleActivePageChange}
+                          onNavigateToRecommend={() => controller.handleActivePageChange("recommend")}
                           onNavigateToDiscover={controller.handleNavigateToDiscover}
+                          onDiscoverTabChange={controller.handleDiscoverTabChange}
                           onNavigateToRadioDetail={controller.handleNavigateToRadioDetail}
                           onNavigateToSongWiki={controller.handleNavigateToSongWiki}
                           discoverTabRequest={controller.discoverTabRequest()}
                           likedCollectionTabRequest={controller.likedCollectionTabRequest()}
+                          onLikedCollectionTabChange={controller.handleLikedCollectionTabChange}
                           artistDetailRequest={controller.artistDetailRequest()}
                           albumDetailRequest={controller.albumDetailRequest()}
                           radioSubscribeEvent={controller.radioSubscribeEvent()}

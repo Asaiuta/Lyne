@@ -110,7 +110,7 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
   };
 
   return (
-    <PageSurface class="ncm-daily-detail" resetKey={props.updatedAt}>
+    <PageSurface class="ncm-daily-detail" persistKey="discover:daily" resetKey={props.updatedAt}>
       <PageHero size="lg">
         <button
           type="button"

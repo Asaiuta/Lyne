@@ -209,7 +209,12 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
   return (
     <Show when={detailPlaylist()}>
       {(playlist) => (
-        <PageSurface class="playlist-detail playlist-detail-shell" floatingHero resetKey={playlist().id}>
+        <PageSurface
+          class="playlist-detail playlist-detail-shell"
+          floatingHero
+          persistKey={`playlist:${playlist().id}`}
+          resetKey={playlist().id}
+        >
           <PageStickyHeader threshold={10}>
             {({ compact }) => (
               <>

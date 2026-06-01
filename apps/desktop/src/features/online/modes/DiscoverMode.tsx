@@ -96,6 +96,7 @@ export interface DiscoverModeProps extends OnlineDetailViewReporterProps {
   pendingDiscoverSearch: Accessor<boolean>;
   clearPendingDiscoverSearch: () => void;
   discoverTabRequest?: { tab: string; version: number };
+  onDiscoverTabChange?: (tab: DiscoverTab) => void;
   artistDetailRequest?: { artist: FeedCardItem | null; version: number };
   albumDetailRequest?: { album: FeedCardItem | null; version: number };
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
@@ -474,6 +475,10 @@ export function DiscoverMode(props: DiscoverModeProps) {
   });
 
   const pageTitle = () => t("ncm.title.discover");
+  const setDiscoverTabAndPersist = (tab: DiscoverTab) => {
+    setDiscoverTab(tab);
+    props.onDiscoverTabChange?.(tab);
+  };
   const closeCatModal = () => {
     setCatModalOpen(false);
     queueMicrotask(() => catButtonRef?.focus());
@@ -505,7 +510,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
           tabs={
             <SegmentedTabs
               value={discoverTab()}
-              onChange={(next) => setDiscoverTab(next as DiscoverTab)}
+              onChange={(next) => setDiscoverTabAndPersist(next as DiscoverTab)}
               items={discoverTabs()}
               ariaLabel={t("ncm.discover.tabs.aria")}
             />

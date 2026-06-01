@@ -1,6 +1,10 @@
-import { createMemo, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
 import type { UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
 import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "../features/online/shared/types";
+import {
+  persistNavigationStateSnapshot,
+  readNavigationStateSnapshot
+} from "../shared/state/navigationPersistence";
 import { isPlaylistPage, type ActivePage } from "../shared/ui/navigation";
 
 export interface DiscoverTabRequest {
@@ -56,12 +60,14 @@ export interface NavigationController {
   handleSidebarLocalPlaylistSelect: (playlistId: string) => void;
   handleSelectedPlaylistChange: (playlistId: number | null) => void;
   handleNavigateToDiscover: (tab: string) => void;
+  handleDiscoverTabChange: (tab: string) => void;
   handleNavigateToArtistDetail: (artist: FeedCardItem) => void;
   handleNavigateToAlbumDetail: (album: FeedCardItem) => void;
   handleNavigateToRadioDetail: (radio: FeedCardItem) => void;
   handleNavigateToSongWiki: (track: OnlineTrackItem) => void;
   handleRadioSubscribeChange: (radio: FeedCardItem, subscribed: boolean) => void;
   handleNavigateToLikedCollectionTab: (tab: LikedCollectionTabRequest["tab"]) => void;
+  handleLikedCollectionTabChange: (tab: LikedCollectionTabRequest["tab"]) => void;
   handleGoBack: () => void;
   handleGoForward: () => void;
 }
@@ -77,11 +83,14 @@ export interface NavigationController {
  * to the queue) on top of these primitives.
  */
 export function useNavigationController(): NavigationController {
-  const [activePage, setActivePage] = createSignal<ActivePage>("recommend");
-  const [selectedPlaylistId, setSelectedPlaylistId] = createSignal<number | null>(null);
+  const restoredNavigation = readNavigationStateSnapshot();
+  const [activePage, setActivePage] =
+    createSignal<ActivePage>(restoredNavigation.activePage);
+  const [selectedPlaylistId, setSelectedPlaylistId] =
+    createSignal<number | null>(restoredNavigation.selectedPlaylistId);
   const [discoverTabRequest, setDiscoverTabRequest] = createSignal<DiscoverTabRequest>({
-    tab: "playlists",
-    version: 0
+    tab: restoredNavigation.discoverTab,
+    version: restoredNavigation.discoverTab === "playlists" ? 0 : 1
   });
   const [artistDetailRequest, setArtistDetailRequest] = createSignal<ArtistDetailRequest>({
     artist: null,
@@ -102,14 +111,15 @@ export function useNavigationController(): NavigationController {
   const [radioSubscribeEvent, setRadioSubscribeEvent] = createSignal<RadioSubscribeEvent | null>(null);
   const [likedCollectionTabRequest, setLikedCollectionTabRequest] =
     createSignal<LikedCollectionTabRequest>({
-      tab: "playlists",
-      version: 0
+      tab: restoredNavigation.likedCollectionTab,
+      version: restoredNavigation.likedCollectionTab === "playlists" ? 0 : 1
     });
   const [localPlaylistRequest, setLocalPlaylistRequest] = createSignal<LocalPlaylistRequest>({
     playlistId: null,
     version: 0
   });
-  const [historyStack, setHistoryStack] = createSignal<ActivePage[]>(["recommend"]);
+  const [historyStack, setHistoryStack] =
+    createSignal<ActivePage[]>([restoredNavigation.activePage]);
   const [historyIndex, setHistoryIndex] = createSignal(0);
 
   const commitPageChange = (page: ActivePage) => {
@@ -163,6 +173,10 @@ export function useNavigationController(): NavigationController {
     pushNavigation("discover");
   };
 
+  const handleDiscoverTabChange = (tab: string) => {
+    setDiscoverTabRequest((prev) => ({ tab, version: prev.version }));
+  };
+
   const handleNavigateToArtistDetail = (artist: FeedCardItem) => {
     setArtistDetailRequest((prev) => ({ artist, version: prev.version + 1 }));
     pushNavigation("discover");
@@ -196,6 +210,10 @@ export function useNavigationController(): NavigationController {
     pushNavigation("liked");
   };
 
+  const handleLikedCollectionTabChange = (tab: LikedCollectionTabRequest["tab"]) => {
+    setLikedCollectionTabRequest((prev) => ({ tab, version: prev.version }));
+  };
+
   const handleGoBack = () => {
     const nextIndex = historyIndex() - 1;
     if (nextIndex < 0) return;
@@ -216,6 +234,15 @@ export function useNavigationController(): NavigationController {
   const canGoBack = createMemo(() => historyIndex() > 0);
   const canGoForward = createMemo(() => historyIndex() < historyStack().length - 1);
 
+  createEffect(() => {
+    persistNavigationStateSnapshot({
+      activePage: activePage(),
+      selectedPlaylistId: selectedPlaylistId(),
+      discoverTab: discoverTabRequest().tab,
+      likedCollectionTab: likedCollectionTabRequest().tab
+    });
+  });
+
   return {
     activePage,
     selectedPlaylistId,
@@ -234,12 +261,14 @@ export function useNavigationController(): NavigationController {
     handleSidebarLocalPlaylistSelect,
     handleSelectedPlaylistChange,
     handleNavigateToDiscover,
+    handleDiscoverTabChange,
     handleNavigateToArtistDetail,
     handleNavigateToAlbumDetail,
     handleNavigateToRadioDetail,
     handleNavigateToSongWiki,
     handleRadioSubscribeChange,
     handleNavigateToLikedCollectionTab,
+    handleLikedCollectionTabChange,
     handleGoBack,
     handleGoForward
   };

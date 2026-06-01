@@ -111,7 +111,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
   };
   if (!artist()) return null;
   return (
-    <PageSurface class="ncm-daily-detail" resetKey={artistId()}>
+    <PageSurface class="ncm-daily-detail" persistKey={`discover:artist:${artistId()}`} resetKey={artistId()}>
       <PageStickyHeader threshold={10}>
         {({ compact }) => (
           <>

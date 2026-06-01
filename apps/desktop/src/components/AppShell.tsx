@@ -6,6 +6,7 @@ interface AppShellProps {
   topNav: JSX.Element;
   playerBar: JSX.Element;
   backgroundLayer: JSX.Element;
+  contentPersistKey?: string;
   children: JSX.Element;
 }
 
@@ -23,7 +24,7 @@ export function AppShell(props: AppShellProps) {
           <div class="app-main">
             <div class="app-main-layout">
               {props.topNav}
-              <ContentArea>{props.children}</ContentArea>
+              <ContentArea persistKey={props.contentPersistKey}>{props.children}</ContentArea>
             </div>
           </div>
         </div>

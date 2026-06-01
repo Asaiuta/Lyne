@@ -39,6 +39,7 @@ export interface UserPlaylistsModeProps extends OnlineDetailViewReporterProps {
   onLogout: () => void | Promise<void>;
   selectedPlaylistId: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
+  onStaleSelectedPlaylist?: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
@@ -135,6 +136,9 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
 
     const matchedPlaylist = userPlaylistsState().find((item) => item.id === playlistId) ?? null;
     if (!matchedPlaylist) {
+      if (!isLoadingUserPlaylists()) {
+        props.onStaleSelectedPlaylist?.();
+      }
       return;
     }
 

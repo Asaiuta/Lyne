@@ -67,6 +67,7 @@ interface LikedCollectionModeProps extends OnlineDetailViewReporterProps {
   onBeginLogin: () => void;
   onLogout: () => void | Promise<void>;
   tabRequest?: { tab: "playlists" | "albums" | "artists"; version: number };
+  onTabChange?: (tab: "playlists" | "albums" | "artists") => void;
   radioSubscribeEvent?: RadioSubscribeEvent | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   setFeedback: FeedbackSetter;
@@ -502,6 +503,13 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
     void detailNav.loadPlaylistTracks(playlist);
   };
 
+  const setActiveTabAndPersist = (tab: CollectionTab) => {
+    setActiveTab(tab);
+    if (tab === "playlists" || tab === "albums" || tab === "artists") {
+      props.onTabChange?.(tab);
+    }
+  };
+
   const hasDetailView = createMemo<boolean>(() =>
     detailNav.selectedAlbum() !== null ||
     detailNav.selectedArtist() !== null ||
@@ -560,7 +568,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
                       <button
                         type="button"
                         class={`liked-collection-status-item${activeTab() === item.key ? " is-active" : ""}`}
-                        onClick={() => setActiveTab(item.key)}
+                        onClick={() => setActiveTabAndPersist(item.key)}
                       >
                         <Icon />
                         <span>{t(item.labelKey, { count: item.count })}</span>
@@ -598,7 +606,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
           <Show when={props.loginProfile() !== null} fallback={<NaiveP class="panel-note">{t("ncm.empty.loginRequired")}</NaiveP>}>
             <SegmentedTabs
               value={activeTab()}
-              onChange={(next) => setActiveTab(next as CollectionTab)}
+              onChange={(next) => setActiveTabAndPersist(next as CollectionTab)}
               items={collectionTabs.map((item) => ({ value: item.value, label: t(item.labelKey) }))}
               ariaLabel={t("ncm.collection.title")}
             />

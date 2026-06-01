@@ -74,7 +74,7 @@ export function AlbumDetail(props: AlbumDetailProps) {
   });
   if (!album()) return null;
   return (
-    <PageSurface class="ncm-daily-detail" resetKey={albumId()}>
+    <PageSurface class="ncm-daily-detail" persistKey={`discover:album:${albumId()}`} resetKey={albumId()}>
       <PageStickyHeader threshold={10}>
         {({ compact }) => (
           <>

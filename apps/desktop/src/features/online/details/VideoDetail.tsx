@@ -114,7 +114,7 @@ export function VideoDetail(props: VideoDetailProps) {
   }));
 
   return (
-    <PageSurface class="ncm-video-detail" resetKey={currentVideoId()}>
+    <PageSurface class="ncm-video-detail" persistKey={`discover:video:${currentVideoId()}`} resetKey={currentVideoId()}>
       <PageHero size="md">
         <button type="button" class="ghost-button ncm-daily-detail-back" onClick={props.onBack}>
           <IconChevronLeft />

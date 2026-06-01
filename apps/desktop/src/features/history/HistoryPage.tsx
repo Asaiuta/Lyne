@@ -245,7 +245,11 @@ export function HistoryPage(props: HistoryPageProps) {
   const isBusy = () => isFetching() || isSubmitting();
 
   return (
-    <PageSurface class="panel panel-history panel-page" resetKey={props.refreshVersion}>
+    <PageSurface
+      class="panel panel-history panel-page"
+      persistKey="recent"
+      resetKey={props.refreshVersion}
+    >
       <PageHero size="md">
         <header class="history-page-head">
           <div class="history-page-title">

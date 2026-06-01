@@ -119,12 +119,14 @@ export interface AppController {
   handleSidebarLocalPlaylistSelect: (playlistId: string) => void;
   handleSelectedPlaylistChange: (playlistId: number | null) => void;
   handleNavigateToDiscover: (tab: string) => void;
+  handleDiscoverTabChange: (tab: string) => void;
   handleNavigateToArtistDetail: (artist: FeedCardItem) => void;
   handleNavigateToAlbumDetail: (album: FeedCardItem) => void;
   handleNavigateToRadioDetail: (radio: FeedCardItem) => void;
   handleNavigateToSongWiki: (track: OnlineTrackItem) => void;
   handleRadioSubscribeChange: (radio: FeedCardItem, subscribed: boolean) => void;
   handleNavigateToLikedCollectionTab: (tab: "playlists" | "albums" | "artists") => void;
+  handleLikedCollectionTabChange: (tab: "playlists" | "albums" | "artists") => void;
   handleChangeCurrentNcmQuality: (level: NcmSongLevel) => Promise<void>;
   handleGoBack: () => void;
   handleGoForward: () => void;
@@ -404,12 +406,14 @@ export function useAppController(api: ApiClient): AppController {
     handleSidebarLocalPlaylistSelect: navigation.handleSidebarLocalPlaylistSelect,
     handleSelectedPlaylistChange: navigation.handleSelectedPlaylistChange,
     handleNavigateToDiscover: navigation.handleNavigateToDiscover,
+    handleDiscoverTabChange: navigation.handleDiscoverTabChange,
     handleNavigateToArtistDetail: navigation.handleNavigateToArtistDetail,
     handleNavigateToAlbumDetail: navigation.handleNavigateToAlbumDetail,
     handleNavigateToRadioDetail: navigation.handleNavigateToRadioDetail,
     handleNavigateToSongWiki: navigation.handleNavigateToSongWiki,
     handleRadioSubscribeChange: navigation.handleRadioSubscribeChange,
     handleNavigateToLikedCollectionTab: navigation.handleNavigateToLikedCollectionTab,
+    handleLikedCollectionTabChange: navigation.handleLikedCollectionTabChange,
     handleChangeCurrentNcmQuality,
     handleGoBack: navigation.handleGoBack,
     handleGoForward: navigation.handleGoForward,
