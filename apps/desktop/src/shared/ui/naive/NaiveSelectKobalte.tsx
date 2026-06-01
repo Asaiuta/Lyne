@@ -2,7 +2,7 @@ import { Combobox } from "@kobalte/core/combobox";
 import { Select } from "@kobalte/core/select";
 import { For, Show, createSignal, type JSX } from "solid-js";
 import type { CollectionNode } from "@kobalte/core";
-import type { NaiveSelectOption, NaiveSelectProps, NaiveSelectValue } from "./select";
+import type { NaiveSelectOption, NaiveSelectProps, NaiveSelectValue } from "./select.types";
 import {
   NaiveSelectShell,
   naiveSelectMenuClass,

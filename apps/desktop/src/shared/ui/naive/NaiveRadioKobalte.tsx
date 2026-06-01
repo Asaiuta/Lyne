@@ -1,6 +1,6 @@
 import { RadioGroup as KobalteRadioGroup } from "@kobalte/core/radio-group";
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import type { NaiveRadioButtonProps, NaiveRadioGroupProps, NaiveRadioProps } from "./radio";
+import type { NaiveRadioButtonProps, NaiveRadioGroupProps, NaiveRadioProps } from "./radio.shared";
 import {
   NaiveRadioGroupContext,
   createNaiveRadioGroupContext,
@@ -11,7 +11,7 @@ import {
   naiveRadioItemValue,
   naiveRadioSplitorClass,
   useNaiveRadioGroup
-} from "./radio";
+} from "./radio.shared";
 import { naiveSelectionValueKey } from "./selection-logic";
 import { joinClassNames } from "./utils";
 

@@ -4,45 +4,18 @@ import {
   nativeInputNumberStyle,
   naiveInputNumberClass,
   naiveInputNumberInputClass,
-  parseNaiveInputNumber,
-  type NaiveInputNumberSize,
-  type NaiveInputNumberStatus
+  parseNaiveInputNumber
 } from "./input-number-core";
+import type {
+  NaiveInputNumberComponent,
+  NaiveInputNumberProps
+} from "./input-number.types";
 import { createLazyNaive } from "./lazy-naive";
 
-export interface NaiveInputNumberProps {
-  value?: number | null;
-  defaultValue?: number | null;
-  onUpdateValue?: (value: number | null) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  precision?: number;
-  placeholder?: string;
-  disabled?: boolean;
-  readonly?: boolean;
-  clearable?: boolean;
-  showButton?: boolean;
-  updateValueOnInput?: boolean;
-  passivelyActivated?: boolean;
-  status?: NaiveInputNumberStatus;
-  size?: NaiveInputNumberSize;
-  name?: string;
-  id?: string;
-  required?: boolean;
-  autofocus?: boolean;
-  inputProps?: Record<string, string | number | boolean | undefined>;
-  ariaLabel?: string;
-  ariaLabelledBy?: string;
-  ariaDescribedBy?: string;
-  class?: string;
-  style?: JSX.CSSProperties;
-  width?: string | number;
-  prefix?: JSX.Element;
-  suffix?: JSX.Element;
-}
-
-export type NaiveInputNumberComponent = (props: NaiveInputNumberProps) => JSX.Element;
+export type {
+  NaiveInputNumberComponent,
+  NaiveInputNumberProps
+} from "./input-number.types";
 
 const lazyNaiveInputNumber = createLazyNaive<NaiveInputNumberComponent>(() =>
   import("./NaiveInputNumberKobalte").then(

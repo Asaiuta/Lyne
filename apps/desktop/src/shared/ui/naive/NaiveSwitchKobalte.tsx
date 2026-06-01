@@ -1,6 +1,6 @@
 import { Switch as KobalteSwitch } from "@kobalte/core/switch";
 import { createSignal, type JSX } from "solid-js";
-import type { NaiveSwitchProps } from "./switch";
+import type { NaiveSwitchProps } from "./switch.shared";
 import {
   NaiveSwitchRail,
   naiveSwitchCheckedValue,
@@ -8,7 +8,7 @@ import {
   naiveSwitchResolvedChecked,
   naiveSwitchRootClass,
   naiveSwitchUncheckedValue
-} from "./switch";
+} from "./switch.shared";
 
 export function NaiveSwitchKobalte(props: NaiveSwitchProps): JSX.Element {
   const [pressed, setPressed] = createSignal<boolean>(false);

@@ -1,11 +1,11 @@
 import { Tabs as KobalteTabs } from "@kobalte/core/tabs";
 import { For, Show, type JSX } from "solid-js";
-import type { NaiveTabsProps } from "./tabs";
+import type { NaiveTabsProps } from "./tabs.shared";
 import {
   createNaiveTabsResolvedProps,
   createNaiveTabsSegmentCapsule,
   naiveTabsTabClass
-} from "./tabs";
+} from "./tabs.shared";
 
 export function NaiveTabsKobalte<TValue extends string>(
   props: NaiveTabsProps<TValue>

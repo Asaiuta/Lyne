@@ -1,12 +1,12 @@
 import { Checkbox as KobalteCheckbox } from "@kobalte/core/checkbox";
 import { Show, createSignal, type JSX } from "solid-js";
-import type { NaiveCheckboxProps } from "./checkbox";
+import type { NaiveCheckboxProps } from "./checkbox.shared";
 import {
   naiveCheckboxClass,
   naiveCheckboxHasLabel,
   naiveCheckboxItemValue,
   useNaiveCheckboxGroup
-} from "./checkbox";
+} from "./checkbox.shared";
 
 export function NaiveCheckboxKobalte(props: NaiveCheckboxProps): JSX.Element {
   const group = useNaiveCheckboxGroup();

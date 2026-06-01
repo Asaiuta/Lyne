@@ -4,7 +4,7 @@ import type {
   NaiveDropdownOption,
   NaiveDropdownProps,
   NaiveDropdownTriggerMode
-} from "./dropdown";
+} from "./dropdown.shared";
 import {
   naiveDropdownDividerClass,
   naiveDropdownMenuClass,
@@ -12,7 +12,7 @@ import {
   naiveDropdownOptionLabelClass,
   naiveDropdownOptionPrefixClass,
   naiveDropdownOptionSuffixClass
-} from "./dropdown";
+} from "./dropdown.shared";
 import { joinClassNames } from "./utils";
 
 const HOVER_OPEN_DELAY = 100;

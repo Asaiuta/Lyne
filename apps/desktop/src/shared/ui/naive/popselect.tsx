@@ -8,50 +8,20 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { NaiveButton } from "./button";
+import {
+  naivePopselectOptionCheckClass,
+  naivePopselectOptionClass,
+  naivePopselectOptionContentClass,
+  naivePopselectPopoverClass,
+  naivePopselectRootClass,
+  naivePopselectTriggerClass,
+  type NaivePopselectComponent,
+  type NaivePopselectProps
+} from "./popselect.shared";
 import { createLazyNaive } from "./lazy-naive";
 import { joinClassNames } from "./utils";
 
-export interface NaivePopselectOption<TValue extends string> {
-  value: TValue;
-  label: string;
-}
-
-export type NaivePopselectPlacement =
-  | "bottom"
-  | "bottom-start"
-  | "bottom-end"
-  | "top"
-  | "top-start"
-  | "top-end"
-  | "left"
-  | "right";
-
-export interface NaivePopselectProps<TValue extends string> {
-  label: string;
-  open: boolean;
-  value: TValue;
-  options: ReadonlyArray<NaivePopselectOption<TValue>>;
-  triggerContent: JSX.Element;
-  class?: string;
-  triggerClass?: string;
-  triggerOpenClass?: string;
-  popoverClass?: string;
-  optionClass?: string;
-  optionActiveClass?: string;
-  optionContentClass?: string;
-  optionCheckClass?: string;
-  placement?: NaivePopselectPlacement;
-  gutter?: number;
-  fallbackPopoverWidth?: number;
-  stopTriggerPropagation?: boolean;
-  onOpenChange: (open: boolean) => void;
-  onChange: (value: TValue) => void;
-  renderCheck?: (option: NaivePopselectOption<TValue>) => JSX.Element;
-}
-
-export type NaivePopselectComponent = <TValue extends string>(
-  props: NaivePopselectProps<TValue>
-) => JSX.Element;
+export * from "./popselect.shared";
 
 type FallbackPopoverPosition = {
   readonly left: number;
@@ -65,12 +35,6 @@ const lazyNaivePopselect = createLazyNaive<NaivePopselectComponent>(() =>
     (module) => module.NaivePopselectKobalte as NaivePopselectComponent
   )
 );
-
-const fallbackClass = (className: string | undefined, fallback: string): string =>
-  className ?? fallback;
-
-const activeClass = (active: boolean, className: string | undefined): string | false =>
-  active ? className ?? "is-active" : false;
 
 export function NaivePopselect<TValue extends string>(
   props: NaivePopselectProps<TValue>
@@ -95,33 +59,12 @@ export function NaivePopselect<TValue extends string>(
     if (!loadedWasRendered() && !props.open && fallbackPresent()) return null;
     return Loaded;
   };
-  const rootClass = () => fallbackClass(props.class, "naive-popselect");
-  const triggerClass = () =>
-    joinClassNames(
-      fallbackClass(props.triggerClass, "naive-popselect-trigger"),
-      props.open ? props.triggerOpenClass ?? "is-open" : false
-    );
-  const popoverClass = () => fallbackClass(props.popoverClass, "naive-popselect-popover");
-  const popoverPresenceClass = () =>
-    joinClassNames(
-      "n-popselect-menu",
-      "n-base-select-menu",
-      popoverClass(),
-      props.open ? "is-open" : "is-closing",
-      "is-naive-popselect-transition"
-    );
-  const optionClass = (active: boolean) =>
-    joinClassNames(
-      "n-base-select-option",
-      "n-base-select-option--show-checkmark",
-      fallbackClass(props.optionClass, "naive-popselect-option"),
-      activeClass(active, "n-base-select-option--selected"),
-      activeClass(active, props.optionActiveClass)
-    );
-  const optionContentClass = () =>
-    fallbackClass(props.optionContentClass, "naive-popselect-option-content");
-  const optionCheckClass = () =>
-    fallbackClass(props.optionCheckClass, "naive-popselect-option-check");
+  const rootClass = () => naivePopselectRootClass(props);
+  const triggerClass = () => naivePopselectTriggerClass(props, props.open);
+  const popoverPresenceClass = () => naivePopselectPopoverClass(props, props.open);
+  const optionClass = (active: boolean) => naivePopselectOptionClass(props, active);
+  const optionContentClass = () => naivePopselectOptionContentClass(props);
+  const optionCheckClass = () => naivePopselectOptionCheckClass(props);
 
   const ensureLoaded = (): void => {
     void lazyNaivePopselect.load().then((component) => setLoadedPopselect(() => component));

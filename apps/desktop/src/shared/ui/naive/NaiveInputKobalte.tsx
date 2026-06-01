@@ -1,13 +1,12 @@
 import { TextField } from "@kobalte/core/text-field";
 import { Show, createSignal, type JSX } from "solid-js";
-import type { NaiveInputProps } from "./input";
+import type { NaiveInputProps } from "./input.shared";
 import {
   NaiveInputShell,
+  isNaiveInputTextarea,
   naiveInputAutosizeStyle,
   naiveInputElementClass
-} from "./input";
-
-const isTextarea = (props: NaiveInputProps): boolean => props.type === "textarea";
+} from "./input.shared";
 
 export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
   let inputEl: HTMLInputElement | HTMLTextAreaElement | undefined;
@@ -84,8 +83,8 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
         onClear={handleClear}
         passwordReveal={passwordReveal()}
       >
-        <div class={isTextarea(props) ? "n-input__textarea" : "n-input__input"}>
-          {isTextarea(props) ? (
+        <div class={isNaiveInputTextarea(props) ? "n-input__textarea" : "n-input__input"}>
+          {isNaiveInputTextarea(props) ? (
             <TextField.TextArea
               {...props.inputProps}
               ref={(el: HTMLTextAreaElement) => {

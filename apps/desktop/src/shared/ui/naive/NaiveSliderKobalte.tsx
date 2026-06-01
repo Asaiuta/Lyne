@@ -1,6 +1,6 @@
 import { Slider as KobalteSlider } from "@kobalte/core/slider";
 import { For, Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import type { NaiveSliderProps } from "./slider";
+import type { NaiveSliderProps } from "./slider.shared";
 import {
   createNaiveSliderMarkModels,
   formatNaiveSliderTooltip,
@@ -10,7 +10,7 @@ import {
   naiveSliderPercentStyle,
   naiveSliderRailClass,
   resolveNaiveSliderValues
-} from "./slider";
+} from "./slider.shared";
 import { isNaiveSliderStepKey } from "./slider-logic";
 import { joinClassNames } from "./utils";
 

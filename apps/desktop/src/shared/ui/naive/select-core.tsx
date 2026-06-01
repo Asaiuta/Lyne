@@ -4,7 +4,7 @@ import type {
   NaiveSelectProps,
   NaiveSelectRenderState,
   NaiveSelectValue
-} from "./select";
+} from "./select.types";
 import { joinClassNames } from "./utils";
 
 export const naiveSelectSelectedOption = <TValue extends NaiveSelectValue>(

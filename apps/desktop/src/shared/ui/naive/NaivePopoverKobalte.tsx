@@ -4,11 +4,11 @@ import type {
   NaivePopoverAnchorRect,
   NaivePopoverProps,
   NaivePopoverTrigger
-} from "./popover";
+} from "./popover.shared";
 import {
   naivePopoverArrowClass,
   naivePopoverContentClass
-} from "./popover";
+} from "./popover.shared";
 import { joinClassNames } from "./utils";
 
 const HOVER_OPEN_DELAY = 100;

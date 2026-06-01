@@ -1,4 +1,5 @@
 export type NaiveSelectionValue = string | number;
+export type NaiveSelectionSize = "small" | "medium" | "large";
 
 export interface NaiveCheckboxToggleOptions {
   readonly min?: number;

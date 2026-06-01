@@ -7,16 +7,17 @@ import {
   onCleanup
 } from "solid-js";
 import type { JSX } from "solid-js";
-import type { NaivePopselectOption, NaivePopselectProps } from "./popselect";
-import { joinClassNames } from "./utils";
-
-const fallbackClass = (className: string | undefined, fallback: string): string =>
-  className ?? fallback;
+import type { NaivePopselectOption, NaivePopselectProps } from "./popselect.shared";
+import {
+  naivePopselectOptionCheckClass,
+  naivePopselectOptionClass,
+  naivePopselectOptionContentClass,
+  naivePopselectPopoverClass,
+  naivePopselectRootClass,
+  naivePopselectTriggerClass
+} from "./popselect.shared";
 
 const POPSELECT_LEAVE_PRESENCE_MS = 180;
-
-const activeClass = (active: boolean, className: string | undefined): string | false =>
-  active ? className ?? "is-active" : false;
 
 interface NaivePopselectOptionProps<TValue extends string> {
   option: NaivePopselectOption<TValue>;
@@ -31,18 +32,9 @@ interface NaivePopselectOptionProps<TValue extends string> {
 function NaivePopselectRadioOption<TValue extends string>(
   props: NaivePopselectOptionProps<TValue>
 ): JSX.Element {
-  const optionClass = () =>
-    joinClassNames(
-      "n-base-select-option",
-      "n-base-select-option--show-checkmark",
-      fallbackClass(props.optionClass, "naive-popselect-option"),
-      activeClass(props.active, "n-base-select-option--selected"),
-      activeClass(props.active, props.optionActiveClass)
-    );
-  const optionContentClass = () =>
-    fallbackClass(props.optionContentClass, "naive-popselect-option-content");
-  const optionCheckClass = () =>
-    fallbackClass(props.optionCheckClass, "naive-popselect-option-check");
+  const optionClass = () => naivePopselectOptionClass(props, props.active);
+  const optionContentClass = () => naivePopselectOptionContentClass(props);
+  const optionCheckClass = () => naivePopselectOptionCheckClass(props);
 
   return (
     <DropdownMenu.RadioItem
@@ -51,12 +43,12 @@ function NaivePopselectRadioOption<TValue extends string>(
       textValue={props.option.label}
       class={optionClass()}
     >
-      <span class={joinClassNames("n-base-select-option__content", optionContentClass())}>
+      <span class={`n-base-select-option__content ${optionContentClass()}`}>
         {props.option.label}
       </span>
       <Show when={props.active && props.renderCheck}>
         <span
-          class={joinClassNames("n-base-select-option__check", optionCheckClass())}
+          class={`n-base-select-option__check ${optionCheckClass()}`}
           aria-hidden="true"
         >
           {props.renderCheck?.(props.option)}
@@ -72,20 +64,9 @@ export function NaivePopselectKobalte<TValue extends string>(
   const [contentPresent, setContentPresent] = createSignal<boolean>(props.open);
   let leaveTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const rootClass = () => fallbackClass(props.class, "naive-popselect");
-  const triggerClass = () =>
-    joinClassNames(
-      fallbackClass(props.triggerClass, "naive-popselect-trigger"),
-      props.open ? props.triggerOpenClass ?? "is-open" : false
-    );
-  const popoverClass = () =>
-    joinClassNames(
-      "n-popselect-menu",
-      "n-base-select-menu",
-      fallbackClass(props.popoverClass, "naive-popselect-popover"),
-      props.open ? "is-open" : "is-closing",
-      "is-naive-popselect-transition"
-    );
+  const rootClass = () => naivePopselectRootClass(props);
+  const triggerClass = () => naivePopselectTriggerClass(props, props.open);
+  const popoverClass = () => naivePopselectPopoverClass(props, props.open);
   const clearLeaveTimer = (): void => {
     if (leaveTimer === undefined) return;
     clearTimeout(leaveTimer);

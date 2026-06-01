@@ -1,6 +1,6 @@
 import { NumberField as KobalteNumberField } from "@kobalte/core/number-field";
 import { Show, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import type { NaiveInputNumberProps } from "./input-number";
+import type { NaiveInputNumberProps } from "./input-number.types";
 import {
   clampNaiveInputNumber,
   formatNaiveInputNumber,

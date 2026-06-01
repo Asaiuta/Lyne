@@ -1,6 +1,6 @@
 import { Accordion as KobalteAccordion } from "@kobalte/core/accordion";
 import { Show, createSignal, type JSX } from "solid-js";
-import type { NaiveCollapseItemProps, NaiveCollapseProps } from "./collapse";
+import type { NaiveCollapseItemProps, NaiveCollapseProps } from "./collapse.shared";
 import {
   NaiveCollapseContext,
   createNaiveCollapseContext,
@@ -8,7 +8,7 @@ import {
   naiveCollapseItemClass,
   renderNaiveCollapseHeader,
   useNaiveCollapse
-} from "./collapse";
+} from "./collapse.shared";
 import {
   naiveCollapseNameKey,
   normalizeNaiveCollapseNames,
