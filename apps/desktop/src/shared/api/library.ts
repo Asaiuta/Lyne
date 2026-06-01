@@ -16,10 +16,8 @@ import type {
   ScanResult
 } from "./types";
 import {
-  isBoolean,
+  defineParser,
   isInteger,
-  isNullableInteger,
-  isNullableNumber,
   isNullableString,
   isRecord,
   isString
@@ -133,82 +131,34 @@ const parseStatusMessage = (value: unknown) => {
   };
 };
 
-const parseLocalPlaylist = (value: unknown): LocalPlaylist | null => {
-  if (!isRecord(value)) {
-    return null;
-  }
+const parseLocalPlaylist = defineParser<LocalPlaylist>({
+  boolean: ["cover_has_cover_art"],
+  integer: ["track_count", "created_at_epoch_secs", "updated_at_epoch_secs"],
+  nullableString: ["description", "cover_media_id", "cover_external_artwork_url"],
+  string: ["playlist_id", "name"]
+});
 
-  if (
-    !isString(value.playlist_id) ||
-    !isString(value.name) ||
-    !isNullableString(value.description) ||
-    !isNullableString(value.cover_media_id) ||
-    !isBoolean(value.cover_has_cover_art) ||
-    !isNullableString(value.cover_external_artwork_url) ||
-    !isInteger(value.track_count) ||
-    !isInteger(value.created_at_epoch_secs) ||
-    !isInteger(value.updated_at_epoch_secs)
-  ) {
-    return null;
-  }
+const parseLibraryTrackSummary = defineParser<LibraryTrackSummary>({
+  boolean: ["has_cover_art"],
+  integer: ["track_key", "added_at_epoch_secs", "updated_at_epoch_secs"],
+  nullableInteger: ["track_number", "sample_rate", "bits_per_sample", "size_bytes"],
+  nullableNumber: ["duration_secs", "bitrate_bps"],
+  nullableString: ["title", "artist", "album", "external_artwork_url"],
+  string: ["media_id", "file_name", "folder_key", "folder_label"]
+});
 
-  return value as unknown as LocalPlaylist;
-};
+const parseLibraryFolderSummary = defineParser<LibraryFolderSummary>({
+  integer: ["count"],
+  string: ["key", "label", "path"]
+});
 
-const parseLibraryTrackSummary = (value: unknown): LibraryTrackSummary | null => {
-  if (!isRecord(value)) return null;
-  if (
-    !isInteger(value.track_key) ||
-    !isString(value.media_id) ||
-    !isNullableString(value.title) ||
-    !isNullableString(value.artist) ||
-    !isNullableString(value.album) ||
-    !isNullableInteger(value.track_number) ||
-    !isString(value.file_name) ||
-    !isString(value.folder_key) ||
-    !isString(value.folder_label) ||
-    !isNullableNumber(value.duration_secs) ||
-    !isNullableInteger(value.sample_rate) ||
-    !isNullableNumber(value.bitrate_bps) ||
-    !isNullableInteger(value.bits_per_sample) ||
-    !isBoolean(value.has_cover_art) ||
-    !isNullableString(value.external_artwork_url) ||
-    !isNullableInteger(value.size_bytes) ||
-    !isInteger(value.added_at_epoch_secs) ||
-    !isInteger(value.updated_at_epoch_secs)
-  ) {
-    return null;
-  }
-  return value as unknown as LibraryTrackSummary;
-};
-
-const parseLibraryFolderSummary = (value: unknown): LibraryFolderSummary | null => {
-  if (!isRecord(value)) return null;
-  if (
-    !isString(value.key) ||
-    !isString(value.label) ||
-    !isString(value.path) ||
-    !isInteger(value.count)
-  ) {
-    return null;
-  }
-  return value as unknown as LibraryFolderSummary;
-};
-
-const parseLibraryTrackGroupSummary = (value: unknown): LibraryTrackGroupSummary | null => {
-  if (!isRecord(value)) return null;
-  if (
-    !isString(value.key) ||
-    !isNullableString(value.label) ||
-    !isInteger(value.count) ||
-    !isNullableInteger(value.artwork_track_key) ||
-    !isBoolean(value.has_cover_art) ||
-    !isNullableString(value.external_artwork_url)
-  ) {
-    return null;
-  }
-  return value as unknown as LibraryTrackGroupSummary;
-};
+const parseLibraryTrackGroupSummary = defineParser<LibraryTrackGroupSummary>({
+  boolean: ["has_cover_art"],
+  integer: ["count"],
+  nullableInteger: ["artwork_track_key"],
+  nullableString: ["label", "external_artwork_url"],
+  string: ["key"]
+});
 
 const parseLibraryTrackSummariesResponse = (value: unknown): LibraryTrackSummariesResponse => {
   if (!isRecord(value)) {

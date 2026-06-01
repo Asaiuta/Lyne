@@ -28,6 +28,55 @@ export const isStringRecord = (value: unknown): value is Record<string, string> 
   return Object.values(value).every(isString);
 };
 
+type ParserFieldKind =
+  | "boolean"
+  | "integer"
+  | "nullableInteger"
+  | "nullableNumber"
+  | "nullableString"
+  | "number"
+  | "optionalInteger"
+  | "optionalNullableString"
+  | "optionalString"
+  | "string";
+
+type ParserSchema = Partial<Record<ParserFieldKind, readonly string[]>>;
+
+const fieldPredicates: Record<ParserFieldKind, (value: unknown) => boolean> = {
+  boolean: isBoolean,
+  integer: isInteger,
+  nullableInteger: isNullableInteger,
+  nullableNumber: isNullableNumber,
+  nullableString: isNullableString,
+  number: isNumber,
+  optionalInteger: (value) => value === undefined || isInteger(value),
+  optionalNullableString: (value) => value === undefined || isNullableString(value),
+  optionalString: (value) => value === undefined || isString(value),
+  string: isString
+};
+
+export const defineParser =
+  <T>(schema: ParserSchema) =>
+  (value: unknown): T | null => {
+    if (!isRecord(value)) {
+      return null;
+    }
+
+    for (const [kind, fields] of Object.entries(schema) as Array<
+      [ParserFieldKind, readonly string[] | undefined]
+    >) {
+      if (!fields) {
+        continue;
+      }
+      const predicate = fieldPredicates[kind];
+      if (!fields.every((field) => predicate(value[field]))) {
+        return null;
+      }
+    }
+
+    return value as unknown as T;
+  };
+
 export const parseStatus = (value: unknown): "success" | "error" => {
   if (value === "success" || value === "error") {
     return value;
