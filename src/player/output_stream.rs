@@ -388,6 +388,7 @@ pub(super) fn activate_started_stream(
     shared_state: &SharedState,
 ) {
     let _ = started_stream.play();
+    shared_state.mark_stream_play_returned();
     *stream_slot = Some(started_stream);
 
     // Only transition to Playing if the user has not paused during stream

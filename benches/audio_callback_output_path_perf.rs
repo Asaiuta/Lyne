@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use audio_engine::player::bench_support::{spectrum_channel_for_bench, SpectrumBenchSender};
 use audio_engine::player::{audio_callback_lockfree, CallbackScratch, PlayerState, SharedState};
 use audio_engine::processor::{
     AtomicLoudnessState, AtomicNoiseShaperParams, DspChain, NoiseShaperCurve, NoiseShaperProcessor,
@@ -56,7 +57,7 @@ struct BenchFixture {
     chain: DspChain,
     final_noise_shaper: NoiseShaperProcessor,
     loudness: Arc<AtomicLoudnessState>,
-    spectrum_tx: crossbeam::channel::Sender<audio_engine::player::SpectrumBatch>,
+    spectrum_tx: SpectrumBenchSender,
     resampler: Option<StreamingResampler>,
     scratch: CallbackScratch,
     output: Vec<f32>,
@@ -200,7 +201,7 @@ fn build_fixture(scenario: Scenario, frames: usize, callback_count: usize) -> Be
         None
     };
 
-    let (spectrum_tx, _spectrum_rx) = crossbeam::channel::bounded(16);
+    let (spectrum_tx, _spectrum_rx) = spectrum_channel_for_bench(16);
 
     BenchFixture {
         shared,

@@ -52,6 +52,7 @@ pub(super) fn decode_file_internal(
     loudness_db: Option<Arc<LoudnessDatabase>>,
 ) -> Result<LoadResult, String> {
     let decode_started_at = std::time::Instant::now();
+    shared_state.mark_decode_started();
     let cancel_token = DecodeCancelToken::new(Arc::clone(load_cancel));
     let mut decoder =
         StreamingDecoder::open_with_credentials_and_cancel(path, credentials, Some(cancel_token))
@@ -323,6 +324,7 @@ pub(super) fn decode_file_internal(
     shared_state
         .last_decode_throughput_frames_per_sec
         .store(throughput, Ordering::Relaxed);
+    shared_state.mark_decode_finished();
 
     log::info!(
         "Streaming decode complete: {} chunks, {} output samples ({}→{} Hz)",

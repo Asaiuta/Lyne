@@ -61,6 +61,7 @@ impl GaplessManager {
 
         // Reset cancel signal before starting new preload (Defect 31 fix)
         shared.cancel_preload_signal.store(false, Ordering::Release);
+        *shared.pending_file_path.write() = Some(path.clone());
 
         let shared_for_error = Arc::clone(shared);
 
@@ -133,7 +134,6 @@ impl GaplessManager {
                     shared_clone
                         .pending_channels
                         .store(channels as u64, Ordering::Relaxed);
-                    *shared_clone.pending_file_path.write() = Some(path.clone());
                     *shared_clone.pending_metadata.write() = Some(metadata);
                     *shared_clone.pending_cached_loudness.write() = cached_loudness_for_state;
 

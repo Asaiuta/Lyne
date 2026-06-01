@@ -49,13 +49,14 @@ impl AudioCommandBackend for WasapiCommandBackend<'_> {
     fn play(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
         if shared_state.state.load() == PlayerState::Paused {
             let _ = self.player.play();
+            shared_state.mark_stream_play_returned();
             mark_playback_started(shared_state);
         }
 
         AudioCommandFlow::Continue
     }
 
-    fn pause(&mut self) {
+    fn pause(&mut self, _shared_state: &SharedState) {
         let _ = self.player.pause();
     }
 
@@ -130,6 +131,7 @@ pub(super) fn handle_wasapi_exclusive(
     );
     let wasapi_device_id = selected_wasapi_device_id(shared_state);
 
+    shared_state.mark_stream_build_started();
     match WasapiExclusivePlayer::new(
         wasapi_device_id,
         sample_rate,
@@ -138,17 +140,21 @@ pub(super) fn handle_wasapi_exclusive(
         Arc::clone(&dsp_ctx.noise_shaper_params),
         dsp_callback,
     ) {
-        Ok(wasapi_player) => run_wasapi_player_loop(
-            cmd_rx,
-            shared_state,
-            dsp_ctx,
-            loudness_state,
-            dynamic_loudness_telemetry,
-            target_lufs,
-            replaygain_reference_lufs,
-            wasapi_player,
-        ),
+        Ok(wasapi_player) => {
+            shared_state.mark_stream_build_finished();
+            run_wasapi_player_loop(
+                cmd_rx,
+                shared_state,
+                dsp_ctx,
+                loudness_state,
+                dynamic_loudness_telemetry,
+                target_lufs,
+                replaygain_reference_lufs,
+                wasapi_player,
+            )
+        }
         Err(e) => {
+            shared_state.mark_stream_build_finished();
             log::error!(
                 "Failed to create WASAPI player: {}. Falling back to cpal.",
                 e
@@ -231,6 +237,7 @@ fn run_wasapi_player_loop(
         shared_state.state.store(PlayerState::Stopped);
         return WasapiPlaybackOutcome::Handled;
     }
+    shared_state.mark_stream_play_returned();
 
     if shared_state.state.load() == PlayerState::Paused {
         let _ = wasapi_player.pause();

@@ -6,6 +6,14 @@
 use super::buffer_budget::{
     decoded_buffer_estimate, ensure_decoded_samples_fit_budget, DecodedBufferKind,
 };
+use super::spectrum::SpectrumBatch;
+
+pub type SpectrumBenchSender = crossbeam::channel::Sender<SpectrumBatch>;
+pub type SpectrumBenchReceiver = crossbeam::channel::Receiver<SpectrumBatch>;
+
+pub fn spectrum_channel_for_bench(capacity: usize) -> (SpectrumBenchSender, SpectrumBenchReceiver) {
+    crossbeam::channel::bounded(capacity)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodedBudgetBenchEstimate {

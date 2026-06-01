@@ -121,6 +121,23 @@ pub(super) async fn play_next_queue_entry(data: web::Data<Arc<AppState>>) -> Htt
         Err(e) => return internal_server_error_response(e),
     };
 
+    match promote_pending_queue_entry_for_playback(&data, entry.clone()).await {
+        Ok(Some((state, _shared_state))) => {
+            return HttpResponse::Ok().json(ApiResponse::success_with_state(
+                "Next queue entry started from preload",
+                state,
+            ));
+        }
+        Ok(None) => {}
+        Err(e) => {
+            log::warn!(
+                "Failed to promote pending queue entry '{}', falling back to load: {}",
+                entry.source_path,
+                e
+            );
+        }
+    }
+
     match load_queue_entry_for_playback(&data, entry, true) {
         Ok((state, _shared_state)) => HttpResponse::Ok().json(ApiResponse::success_with_state(
             "Next queue entry started",

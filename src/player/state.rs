@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // ============ Event Flag Constants (Task E) ============
 
@@ -27,6 +28,13 @@ pub const EVENT_PLAYBACK_SEEKED: u32 = 1 << 11;
 pub const EVENT_PLAYBACK_HISTORY_UPDATED: u32 = 1 << 12;
 
 // ============ Commands & State ============
+
+pub(crate) fn playback_phase_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
 
 /// Load result for async loading
 #[derive(Debug, Clone)]
@@ -274,6 +282,21 @@ pub struct SharedState {
     pub last_decode_output_samples: AtomicU64,
     pub last_decode_chunk_count: AtomicU64,
     pub last_decode_throughput_frames_per_sec: AtomicU64,
+    pub load_request_started_ms: AtomicU64,
+    pub load_request_returned_ms: AtomicU64,
+    pub decode_started_ms: AtomicU64,
+    pub decode_finished_ms: AtomicU64,
+    pub loudness_started_ms: AtomicU64,
+    pub loudness_finished_ms: AtomicU64,
+    pub background_loudness_started_ms: AtomicU64,
+    pub background_loudness_finished_ms: AtomicU64,
+    pub background_loudness_applied_ms: AtomicU64,
+    pub load_complete_applied_ms: AtomicU64,
+    pub stream_build_started_ms: AtomicU64,
+    pub stream_build_finished_ms: AtomicU64,
+    pub stream_play_returned_ms: AtomicU64,
+    pub first_callback_after_play_ms: AtomicU64,
+    pub first_position_advanced_ms: AtomicU64,
     pub decode_budget_rejection_count: AtomicU64,
     pub audio_underrun_count: AtomicU64,
     pub audio_underrun_silence_frames: AtomicU64,
@@ -350,6 +373,21 @@ impl SharedState {
             last_decode_output_samples: AtomicU64::new(0),
             last_decode_chunk_count: AtomicU64::new(0),
             last_decode_throughput_frames_per_sec: AtomicU64::new(0),
+            load_request_started_ms: AtomicU64::new(0),
+            load_request_returned_ms: AtomicU64::new(0),
+            decode_started_ms: AtomicU64::new(0),
+            decode_finished_ms: AtomicU64::new(0),
+            loudness_started_ms: AtomicU64::new(0),
+            loudness_finished_ms: AtomicU64::new(0),
+            background_loudness_started_ms: AtomicU64::new(0),
+            background_loudness_finished_ms: AtomicU64::new(0),
+            background_loudness_applied_ms: AtomicU64::new(0),
+            load_complete_applied_ms: AtomicU64::new(0),
+            stream_build_started_ms: AtomicU64::new(0),
+            stream_build_finished_ms: AtomicU64::new(0),
+            stream_play_returned_ms: AtomicU64::new(0),
+            first_callback_after_play_ms: AtomicU64::new(0),
+            first_position_advanced_ms: AtomicU64::new(0),
             decode_budget_rejection_count: AtomicU64::new(0),
             audio_underrun_count: AtomicU64::new(0),
             audio_underrun_silence_frames: AtomicU64::new(0),
@@ -384,6 +422,122 @@ impl SharedState {
         let total = self.total_frames.load(Ordering::Relaxed);
         let sr = self.sample_rate.load(Ordering::Relaxed).max(1);
         total as f64 / sr as f64
+    }
+
+    pub fn reset_load_phase_timestamps(&self) {
+        self.load_request_started_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+        self.load_request_returned_ms.store(0, Ordering::Relaxed);
+        self.decode_started_ms.store(0, Ordering::Relaxed);
+        self.decode_finished_ms.store(0, Ordering::Relaxed);
+        self.loudness_started_ms.store(0, Ordering::Relaxed);
+        self.loudness_finished_ms.store(0, Ordering::Relaxed);
+        self.background_loudness_started_ms
+            .store(0, Ordering::Relaxed);
+        self.background_loudness_finished_ms
+            .store(0, Ordering::Relaxed);
+        self.background_loudness_applied_ms
+            .store(0, Ordering::Relaxed);
+        self.load_complete_applied_ms.store(0, Ordering::Relaxed);
+        self.stream_build_started_ms.store(0, Ordering::Relaxed);
+        self.stream_build_finished_ms.store(0, Ordering::Relaxed);
+        self.stream_play_returned_ms.store(0, Ordering::Relaxed);
+        self.first_callback_after_play_ms
+            .store(0, Ordering::Relaxed);
+        self.first_position_advanced_ms.store(0, Ordering::Relaxed);
+    }
+
+    pub fn mark_load_request_returned(&self) {
+        self.load_request_returned_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_decode_started(&self) {
+        self.decode_started_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_decode_finished(&self) {
+        self.decode_finished_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_loudness_started(&self) {
+        self.loudness_started_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_loudness_finished(&self) {
+        self.loudness_finished_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_background_loudness_started(&self) {
+        self.background_loudness_started_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_background_loudness_finished(&self) {
+        self.background_loudness_finished_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_background_loudness_applied(&self) {
+        self.background_loudness_applied_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_load_complete_applied(&self) {
+        self.load_complete_applied_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_stream_build_started(&self) {
+        self.stream_build_started_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_stream_build_finished(&self) {
+        self.stream_build_finished_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_stream_play_returned(&self) {
+        self.first_callback_after_play_ms
+            .store(0, Ordering::Relaxed);
+        self.first_position_advanced_ms.store(0, Ordering::Relaxed);
+        self.stream_play_returned_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_first_callback_after_play(&self) {
+        if self.stream_play_returned_ms.load(Ordering::Relaxed) == 0
+            || self.first_callback_after_play_ms.load(Ordering::Relaxed) != 0
+        {
+            return;
+        }
+
+        let _ = self.first_callback_after_play_ms.compare_exchange(
+            0,
+            playback_phase_time_ms(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    pub fn mark_first_position_advanced_after_play(&self) {
+        if self.stream_play_returned_ms.load(Ordering::Relaxed) == 0
+            || self.first_position_advanced_ms.load(Ordering::Relaxed) != 0
+        {
+            return;
+        }
+
+        let _ = self.first_position_advanced_ms.compare_exchange(
+            0,
+            playback_phase_time_ms(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 
     pub fn repeat_mode(&self) -> RepeatMode {
@@ -444,6 +598,34 @@ mod tests {
         let shared = SharedState::new();
         shared.set_shuffle_mode(ShuffleMode::Heartbeat);
         assert_eq!(shared.shuffle_mode(), ShuffleMode::Heartbeat);
+    }
+
+    #[test]
+    fn load_phase_reset_clears_previous_timestamps() {
+        let shared = SharedState::new();
+        shared.mark_decode_started();
+        shared.mark_stream_play_returned();
+
+        shared.reset_load_phase_timestamps();
+
+        assert!(shared.load_request_started_ms.load(Ordering::Relaxed) > 0);
+        assert_eq!(shared.decode_started_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.stream_play_returned_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn first_callback_phase_requires_stream_play_marker() {
+        let shared = SharedState::new();
+        shared.mark_first_callback_after_play();
+        assert_eq!(
+            shared.first_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
+
+        shared.mark_stream_play_returned();
+        shared.mark_first_callback_after_play();
+        assert!(shared.first_callback_after_play_ms.load(Ordering::Relaxed) > 0);
     }
 }
 

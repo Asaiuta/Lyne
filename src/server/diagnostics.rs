@@ -32,6 +32,7 @@ struct RuntimeDiagnosticsSnapshot {
     webdav: WebDavDiagnostics,
     storage: StorageDiagnostics,
     decode: DecodeDiagnostics,
+    playback_phases: PlaybackPhaseDiagnostics,
     playback: PlaybackDiagnostics,
     websocket: WebSocketDiagnostics,
     policies: DiagnosticsPolicies,
@@ -111,6 +112,50 @@ struct PlaybackDiagnostics {
 }
 
 #[derive(Debug, Serialize)]
+struct PlaybackPhaseDiagnostics {
+    timestamps_ms: PlaybackPhaseTimestamps,
+    durations_ms: PlaybackPhaseDurations,
+}
+
+#[derive(Debug, Serialize)]
+struct PlaybackPhaseTimestamps {
+    load_request_started: Option<u64>,
+    load_request_returned: Option<u64>,
+    decode_started: Option<u64>,
+    decode_finished: Option<u64>,
+    loudness_started: Option<u64>,
+    loudness_finished: Option<u64>,
+    background_loudness_started: Option<u64>,
+    background_loudness_finished: Option<u64>,
+    background_loudness_applied: Option<u64>,
+    load_complete_applied: Option<u64>,
+    stream_build_started: Option<u64>,
+    stream_build_finished: Option<u64>,
+    stream_play_returned: Option<u64>,
+    first_callback_after_play: Option<u64>,
+    first_position_advanced: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct PlaybackPhaseDurations {
+    load_request_ms: Option<u64>,
+    request_returned_to_decode_start_ms: Option<u64>,
+    decode_ms: Option<u64>,
+    decode_finished_to_loudness_start_ms: Option<u64>,
+    loudness_ms: Option<u64>,
+    background_loudness_ms: Option<u64>,
+    background_loudness_finish_to_apply_ms: Option<u64>,
+    loudness_finished_to_load_complete_applied_ms: Option<u64>,
+    load_complete_applied_to_stream_build_start_ms: Option<u64>,
+    stream_build_ms: Option<u64>,
+    stream_play_to_first_callback_ms: Option<u64>,
+    stream_play_to_first_position_advanced_ms: Option<u64>,
+    request_started_to_first_position_advanced_ms: Option<u64>,
+    request_returned_to_first_position_advanced_ms: Option<u64>,
+    decode_finished_to_first_position_advanced_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
 struct WebSocketDiagnostics {
     tick_interval_ms: u64,
     idle_after_ticks: u32,
@@ -147,6 +192,7 @@ fn build_runtime_diagnostics(data: &AppState) -> RuntimeDiagnosticsResponse {
             webdav: build_webdav_diagnostics(data),
             storage: build_storage_diagnostics(data),
             decode: build_decode_diagnostics(data),
+            playback_phases: build_playback_phase_diagnostics(data),
             playback: build_playback_diagnostics(data),
             websocket: build_websocket_diagnostics(data),
             policies: DiagnosticsPolicies {
@@ -187,6 +233,14 @@ fn non_zero_u64(value: u64) -> Option<u64> {
     (value > 0).then_some(value)
 }
 
+fn phase_delta_ms(start: u64, end: u64) -> Option<u64> {
+    if start > 0 && end >= start {
+        Some(end - start)
+    } else {
+        None
+    }
+}
+
 fn build_decode_diagnostics(data: &AppState) -> DecodeDiagnostics {
     let shared_state = {
         let player = data.player.lock();
@@ -219,6 +273,112 @@ fn build_decode_diagnostics(data: &AppState) -> DecodeDiagnostics {
         budget_rejection_count: shared_state
             .decode_budget_rejection_count
             .load(Ordering::Relaxed),
+    }
+}
+
+fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics {
+    let shared_state = {
+        let player = data.player.lock();
+        player.shared_state()
+    };
+
+    let load_request_started = shared_state.load_request_started_ms.load(Ordering::Relaxed);
+    let load_request_returned = shared_state
+        .load_request_returned_ms
+        .load(Ordering::Relaxed);
+    let decode_started = shared_state.decode_started_ms.load(Ordering::Relaxed);
+    let decode_finished = shared_state.decode_finished_ms.load(Ordering::Relaxed);
+    let loudness_started = shared_state.loudness_started_ms.load(Ordering::Relaxed);
+    let loudness_finished = shared_state.loudness_finished_ms.load(Ordering::Relaxed);
+    let background_loudness_started = shared_state
+        .background_loudness_started_ms
+        .load(Ordering::Relaxed);
+    let background_loudness_finished = shared_state
+        .background_loudness_finished_ms
+        .load(Ordering::Relaxed);
+    let background_loudness_applied = shared_state
+        .background_loudness_applied_ms
+        .load(Ordering::Relaxed);
+    let load_complete_applied = shared_state
+        .load_complete_applied_ms
+        .load(Ordering::Relaxed);
+    let stream_build_started = shared_state.stream_build_started_ms.load(Ordering::Relaxed);
+    let stream_build_finished = shared_state
+        .stream_build_finished_ms
+        .load(Ordering::Relaxed);
+    let stream_play_returned = shared_state.stream_play_returned_ms.load(Ordering::Relaxed);
+    let first_callback_after_play = shared_state
+        .first_callback_after_play_ms
+        .load(Ordering::Relaxed);
+    let first_position_advanced = shared_state
+        .first_position_advanced_ms
+        .load(Ordering::Relaxed);
+
+    PlaybackPhaseDiagnostics {
+        timestamps_ms: PlaybackPhaseTimestamps {
+            load_request_started: non_zero_u64(load_request_started),
+            load_request_returned: non_zero_u64(load_request_returned),
+            decode_started: non_zero_u64(decode_started),
+            decode_finished: non_zero_u64(decode_finished),
+            loudness_started: non_zero_u64(loudness_started),
+            loudness_finished: non_zero_u64(loudness_finished),
+            background_loudness_started: non_zero_u64(background_loudness_started),
+            background_loudness_finished: non_zero_u64(background_loudness_finished),
+            background_loudness_applied: non_zero_u64(background_loudness_applied),
+            load_complete_applied: non_zero_u64(load_complete_applied),
+            stream_build_started: non_zero_u64(stream_build_started),
+            stream_build_finished: non_zero_u64(stream_build_finished),
+            stream_play_returned: non_zero_u64(stream_play_returned),
+            first_callback_after_play: non_zero_u64(first_callback_after_play),
+            first_position_advanced: non_zero_u64(first_position_advanced),
+        },
+        durations_ms: PlaybackPhaseDurations {
+            load_request_ms: phase_delta_ms(load_request_started, load_request_returned),
+            request_returned_to_decode_start_ms: phase_delta_ms(
+                load_request_returned,
+                decode_started,
+            ),
+            decode_ms: phase_delta_ms(decode_started, decode_finished),
+            decode_finished_to_loudness_start_ms: phase_delta_ms(decode_finished, loudness_started),
+            loudness_ms: phase_delta_ms(loudness_started, loudness_finished),
+            background_loudness_ms: phase_delta_ms(
+                background_loudness_started,
+                background_loudness_finished,
+            ),
+            background_loudness_finish_to_apply_ms: phase_delta_ms(
+                background_loudness_finished,
+                background_loudness_applied,
+            ),
+            loudness_finished_to_load_complete_applied_ms: phase_delta_ms(
+                loudness_finished,
+                load_complete_applied,
+            ),
+            load_complete_applied_to_stream_build_start_ms: phase_delta_ms(
+                load_complete_applied,
+                stream_build_started,
+            ),
+            stream_build_ms: phase_delta_ms(stream_build_started, stream_build_finished),
+            stream_play_to_first_callback_ms: phase_delta_ms(
+                stream_play_returned,
+                first_callback_after_play,
+            ),
+            stream_play_to_first_position_advanced_ms: phase_delta_ms(
+                stream_play_returned,
+                first_position_advanced,
+            ),
+            request_started_to_first_position_advanced_ms: phase_delta_ms(
+                load_request_started,
+                first_position_advanced,
+            ),
+            request_returned_to_first_position_advanced_ms: phase_delta_ms(
+                load_request_returned,
+                first_position_advanced,
+            ),
+            decode_finished_to_first_position_advanced_ms: phase_delta_ms(
+                decode_finished,
+                first_position_advanced,
+            ),
+        },
     }
 }
 
@@ -384,6 +544,9 @@ mod tests {
         let json = serde_json::to_string(&response).unwrap();
 
         assert!(json.contains("\"sensitive_paths_redacted\":true"));
+        assert!(json.contains("\"playback_phases\""));
+        assert!(json.contains("\"load_request_started\""));
+        assert!(json.contains("\"stream_play_to_first_position_advanced_ms\""));
         assert!(!json.contains(&temp_dir.to_string_lossy().to_string()));
 
         let _ = std::fs::remove_dir_all(&temp_dir);

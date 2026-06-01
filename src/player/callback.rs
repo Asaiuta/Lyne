@@ -471,6 +471,32 @@ fn rebuild_dsp_chain_if_requested(
     }
 }
 
+fn reset_dsp_state_if_requested(
+    shared: &SharedState,
+    dsp_chain: &mut DspChain,
+    mut final_noise_shaper: Option<&mut NoiseShaperProcessor>,
+    resampler: &mut Option<StreamingResampler>,
+    scratch: &mut CallbackScratch,
+) {
+    if shared
+        .dsp_reset_pending
+        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+
+    dsp_chain.reset();
+    if let Some(noise_shaper) = final_noise_shaper.as_deref_mut() {
+        noise_shaper.reset();
+    }
+    if let Some(ref mut rs) = resampler {
+        rs.reset();
+    }
+    scratch.resample_leftover.clear();
+    scratch.resample_leftover_pos = 0;
+}
+
 fn request_gapless_preload_if_needed(shared: &SharedState, total: usize, current_pos: usize) {
     // Signal preload early enough to allow full decode + optional resampling
     // before EOF. Five seconds also covers slower remote streams.
@@ -676,6 +702,7 @@ fn render_audio_output(
         shared
             .position_frames
             .store(*current_pos as u64, Ordering::Relaxed);
+        shared.mark_first_position_advanced_after_play();
 
         let frames_in_chunk = scratch.process_buffer.len() / channels;
         let linear_gain = loudness_state.process_gain(frames_in_chunk);
@@ -803,6 +830,13 @@ pub fn audio_callback_lockfree(
         final_noise_shaper.as_deref_mut(),
         resampler,
     );
+    reset_dsp_state_if_requested(
+        shared,
+        dsp_chain,
+        final_noise_shaper.as_deref_mut(),
+        resampler,
+        scratch,
+    );
 
     let shaper_enabled = match final_noise_shaper.as_deref_mut() {
         Some(noise_shaper) => noise_shaper.refresh_is_enabled(),
@@ -814,6 +848,7 @@ pub fn audio_callback_lockfree(
         data.fill(0.0);
         return;
     }
+    shared.mark_first_callback_after_play();
 
     let total = shared.total_frames.load(Ordering::Relaxed) as usize;
     let mut current_pos = shared.position_frames.load(Ordering::Relaxed) as usize;

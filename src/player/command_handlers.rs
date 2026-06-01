@@ -29,7 +29,7 @@ pub(super) enum AudioCommandFlow {
 
 pub(super) trait AudioCommandBackend {
     fn play(&mut self, shared_state: &SharedState) -> AudioCommandFlow;
-    fn pause(&mut self);
+    fn pause(&mut self, shared_state: &SharedState);
     fn seek(&mut self, frame: u64);
     fn stop(&mut self);
     fn stop_for_load(&mut self);
@@ -58,18 +58,22 @@ impl<'a> CpalCommandBackend<'a> {
 
 impl AudioCommandBackend for CpalCommandBackend<'_> {
     fn play(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
-        if shared_state.state.load() == PlayerState::Paused {
-            if let Some(stream) = self.stream {
+        if let Some(stream) = self.stream {
+            if shared_state.exclusive_mode.load(Ordering::Relaxed) {
                 let _ = stream.play();
-                mark_playback_started(shared_state);
-                return AudioCommandFlow::Continue;
+                shared_state.mark_stream_play_returned();
             }
+            mark_playback_started(shared_state);
+            return AudioCommandFlow::Continue;
         }
 
         AudioCommandFlow::StartPlayback
     }
 
-    fn pause(&mut self) {
+    fn pause(&mut self, shared_state: &SharedState) {
+        if !shared_state.exclusive_mode.load(Ordering::Relaxed) {
+            return;
+        }
         if let Some(stream) = self.stream {
             let _ = stream.pause();
         }
@@ -100,8 +104,8 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
     match command {
         AudioCommand::Play => backend.play(context.shared_state),
         AudioCommand::Pause => {
-            backend.pause();
             context.shared_state.state.store(PlayerState::Paused);
+            backend.pause(context.shared_state);
             AudioCommandFlow::Continue
         }
         AudioCommand::Seek(time) => {
@@ -374,6 +378,7 @@ fn apply_loaded_track_result(
     );
     *shared_state.current_cached_loudness.write() = cached_loudness.clone();
     apply_loaded_track_loudness(
+        shared_state,
         loudness_state,
         &metadata,
         cached_loudness.as_ref(),
@@ -383,6 +388,7 @@ fn apply_loaded_track_result(
         target_lufs,
         replaygain_reference_lufs,
     );
+    shared_state.mark_load_complete_applied();
 
     shared_state
         .event_flags

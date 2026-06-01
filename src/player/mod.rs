@@ -27,6 +27,7 @@ pub use callback::{
     audio_callback_lockfree, normalize_channels, CallbackScratch, LockfreeDspContext,
 };
 pub use gapless::GaplessManager;
+pub(crate) use playback_config::{pending_promotion_readiness, PendingPromotionReadiness};
 pub use spectrum::SpectrumBatch;
 pub use state::{
     AtomicPlayerState, AudioCommand, AudioDeviceInfo, CachedLoudness, PlayerState, RepeatMode,
@@ -442,6 +443,7 @@ impl AudioPlayer {
             }
         });
 
+        self.shared_state.mark_load_request_returned();
         Ok(())
     }
 
@@ -465,6 +467,7 @@ impl AudioPlayer {
     }
 
     fn begin_loading_track(&self, path: &str, autoplay: bool) {
+        self.shared_state.reset_load_phase_timestamps();
         self.shared_state
             .position_frames
             .store(0, Ordering::Relaxed);
@@ -501,6 +504,9 @@ impl AudioPlayer {
     pub fn play(&mut self) -> Result<(), String> {
         let previous = self.shared_state.state.load();
         if previous == PlayerState::Paused {
+            if !self.shared_state.exclusive_mode.load(Ordering::Relaxed) {
+                self.shared_state.mark_stream_play_returned();
+            }
             self.shared_state.state.store(PlayerState::Playing);
             self.shared_state
                 .event_flags

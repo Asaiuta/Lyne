@@ -47,6 +47,7 @@ Desktop.ini
 # QA
 qa-screenshots/
 output/playwright/
+apps/desktop/output/
 test-results/
 
 # Local agent config / migration backups

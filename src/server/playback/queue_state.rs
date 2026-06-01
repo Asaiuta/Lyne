@@ -1,9 +1,14 @@
 use super::*;
 use crate::app_database::{media_id_for_path, QueueEntryRecord};
-use crate::player::{RepeatMode, SharedState};
+use crate::player::{
+    pending_promotion_readiness, PendingPromotionReadiness, RepeatMode, SharedState,
+};
 use actix_web::web;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
+
+const MANUAL_NEXT_PRELOAD_WAIT: Duration = Duration::from_secs(4);
 
 pub(super) fn sync_queue_snapshot_from_shared(
     data: &web::Data<Arc<AppState>>,
@@ -121,6 +126,60 @@ pub(super) fn load_queue_entry_for_playback(
         }
         (get_player_state(&player), player.shared_state())
     };
+    finish_queue_entry_playback_start(data, &entry, autoplay, state_response, shared_state)
+}
+
+pub(super) async fn promote_pending_queue_entry_for_playback(
+    data: &web::Data<Arc<AppState>>,
+    entry: QueueEntryRecord,
+) -> Result<Option<(StateResponse, Arc<SharedState>)>, String> {
+    let shared_state = {
+        let player = data.player.lock();
+        player.shared_state()
+    };
+
+    if !wait_for_pending_promotion_ready(&shared_state, &entry.source_path).await {
+        return Ok(None);
+    }
+
+    let (promoted, state_response, shared_state) = {
+        let mut player = data.player.lock();
+        let promoted = player.promote_pending_if_matching(&entry.source_path)?;
+        (promoted, get_player_state(&player), player.shared_state())
+    };
+
+    if !promoted {
+        return Ok(None);
+    }
+
+    finish_queue_entry_playback_start(data, &entry, true, state_response, shared_state).map(Some)
+}
+
+async fn wait_for_pending_promotion_ready(shared: &SharedState, expected_path: &str) -> bool {
+    let deadline = std::time::Instant::now() + MANUAL_NEXT_PRELOAD_WAIT;
+    loop {
+        match pending_promotion_readiness(shared, expected_path) {
+            PendingPromotionReadiness::Ready => return true,
+            PendingPromotionReadiness::Mismatch | PendingPromotionReadiness::Unavailable => {
+                return false;
+            }
+            PendingPromotionReadiness::Waiting => {
+                if std::time::Instant::now() >= deadline {
+                    return false;
+                }
+                actix_web::rt::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
+}
+
+fn finish_queue_entry_playback_start(
+    data: &web::Data<Arc<AppState>>,
+    entry: &QueueEntryRecord,
+    autoplay: bool,
+    state_response: StateResponse,
+    shared_state: Arc<SharedState>,
+) -> Result<(StateResponse, Arc<SharedState>), String> {
     let state_response = enrich_player_state(&data.app_db, state_response);
 
     let media_id = data.app_db.record_media_stub(&entry.source_path);

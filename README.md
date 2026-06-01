@@ -202,6 +202,12 @@ cargo bench
 - 本地扫描使用批量写入、文件封面引用和受控内存批次
 - 关键路径通过 `benches/` 下的基准测试持续约束
 
+### 真实曲库基准
+
+在一组 594 个文件、约 23.14 GB 的真实本地曲库 warm-cache 基准中，Lyne 默认 2-worker 扫描用时约 1.18 秒，索引 593 个条目，峰值 RSS 约 33 MB。作为对照，SPlayer native scanner baseline 本轮用时约 2.18 秒，索引 590 个条目，峰值 RSS 约 93 MB。
+
+这些数字只代表该语料与该环境，不等同于所有磁盘、冷缓存、WebDAV 或异常标签文件的通用结论。完整命令、数据和限制见 [Real Library Benchmark](docs/performance/real-library-benchmark.md)。
+
 ## 致谢
 
 - [SPlayer](https://github.com/imsyy/SPlayer) - 前端体验与交互参考

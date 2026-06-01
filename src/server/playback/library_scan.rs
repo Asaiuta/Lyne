@@ -475,10 +475,7 @@ fn process_local_scan_path(
     cancel_token.check()?;
     scanned_count.fetch_add(1, Ordering::Relaxed);
 
-    let canonical_path = match path.canonicalize() {
-        Ok(value) => value.to_string_lossy().to_string(),
-        Err(_) => path.to_string_lossy().to_string(),
-    };
+    let canonical_path = local_scan_source_path(path, snapshot);
 
     let file_meta = match std::fs::metadata(path) {
         Ok(value) => value,
@@ -580,6 +577,28 @@ fn process_local_scan_path(
         mtime,
         size,
     })))
+}
+
+fn local_scan_source_path(
+    path: &Path,
+    snapshot: &HashMap<String, (Option<f64>, Option<u64>, Option<String>)>,
+) -> String {
+    let source_path = path.to_string_lossy().to_string();
+    if snapshot.is_empty() || snapshot.contains_key(&source_path) {
+        return source_path;
+    }
+
+    match path.canonicalize() {
+        Ok(value) => {
+            let canonical_path = value.to_string_lossy().to_string();
+            if snapshot.contains_key(&canonical_path) {
+                canonical_path
+            } else {
+                source_path
+            }
+        }
+        Err(_) => source_path,
+    }
 }
 
 fn spawn_local_scan_writer(
@@ -934,9 +953,9 @@ pub(super) fn scan_webdav_library(
 #[cfg(test)]
 mod tests {
     use super::{
-        external_cover_for_media, metadata_with_external_cover, persist_local_scan_cover_art,
-        process_local_scan_path, walk_supported_local_media_paths, LocalScanWriteItem,
-        LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES, UNKNOWN_SONG_TITLE,
+        external_cover_for_media, local_scan_source_path, metadata_with_external_cover,
+        persist_local_scan_cover_art, process_local_scan_path, walk_supported_local_media_paths,
+        LocalScanWriteItem, LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES, UNKNOWN_SONG_TITLE,
     };
     use crate::server::{analysis_cancelled_error, AnalysisCancelToken};
     use crossbeam::channel::bounded;
@@ -1077,6 +1096,39 @@ mod tests {
 
         assert!(matches!(result, Some(LocalScanWriteItem::Seen(path)) if path == canonical_path));
         assert_eq!(scanned_count.load(Ordering::Relaxed), 1);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn local_scan_source_path_skips_canonicalize_for_empty_snapshot() {
+        let path = Path::new("D:/Music/Artist/Track.flac");
+        let snapshot = HashMap::new();
+
+        assert_eq!(
+            local_scan_source_path(path, &snapshot),
+            path.to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn local_scan_source_path_falls_back_to_snapshot_canonical_identity() {
+        let temp_dir = unique_temp_dir("canonical_fallback");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let track_path = temp_dir.join("song.flac");
+        fs::write(&track_path, vec![0_u8; 2048]).unwrap();
+        let canonical_path = track_path
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let mut snapshot = HashMap::new();
+        snapshot.insert(canonical_path.clone(), (Some(0.0), Some(2048), None));
+
+        assert_eq!(
+            local_scan_source_path(&track_path, &snapshot),
+            canonical_path
+        );
+
         let _ = fs::remove_dir_all(temp_dir);
     }
 

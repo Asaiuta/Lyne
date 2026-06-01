@@ -168,6 +168,7 @@ impl AudioThreadRuntime {
         };
         let dsp_params = self.dsp_params.refs();
 
+        self.shared_state.mark_stream_build_started();
         match build_requested_output_stream(
             &output_plan,
             &mut self.owned_dsp_chain,
@@ -179,6 +180,7 @@ impl AudioThreadRuntime {
             },
         ) {
             Ok(s) => {
+                self.shared_state.mark_stream_build_finished();
                 activate_started_stream(&mut self.stream, s, &self.shared_state);
                 let detected_bits = detect_output_bits(&output_plan.device, self.noise_shaper_bits);
 
@@ -207,6 +209,7 @@ impl AudioThreadRuntime {
                     },
                 ) {
                     Ok(s) => {
+                        self.shared_state.mark_stream_build_finished();
                         activate_started_stream(&mut self.stream, s, &self.shared_state);
                         let detected_bits =
                             detect_output_bits(&output_plan.device, self.noise_shaper_bits);
@@ -221,6 +224,7 @@ impl AudioThreadRuntime {
                     }
                     Err(e2) => {
                         log::error!("Failed to start stream even with device default: {}", e2);
+                        self.shared_state.mark_stream_build_finished();
                         self.shared_state.state.store(PlayerState::Stopped);
                     }
                 }

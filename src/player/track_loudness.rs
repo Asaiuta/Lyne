@@ -2,6 +2,7 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::thread;
 
 use super::state::{CachedLoudness, SharedState};
 use crate::processor::AtomicLoudnessState;
@@ -38,20 +39,31 @@ fn calc_safe_replay_gain_db(target_gain_db: f64, peak: Option<f64>, preamp_db: f
     target_gain_db
 }
 
-fn analyze_ebu_r128_gain(
+fn analyze_ebu_r128_loudness(
+    samples: &Arc<Vec<f64>>,
+    channels: usize,
+    sample_rate: u32,
+) -> Option<f64> {
+    let mut meter = crate::processor::LoudnessMeter::new(channels, sample_rate);
+    meter.process(samples);
+    let loudness = meter.integrated_loudness();
+    loudness.is_finite().then_some(loudness)
+}
+
+fn ebu_r128_gain_for_target(
     samples: &Arc<Vec<f64>>,
     channels: usize,
     sample_rate: u32,
     target_lufs: f64,
 ) -> Option<f64> {
-    let mut meter = crate::processor::LoudnessMeter::new(channels, sample_rate);
-    meter.process(samples);
-    let loudness = meter.integrated_loudness();
-    loudness.is_finite().then_some(target_lufs - loudness)
+    analyze_ebu_r128_loudness(samples, channels, sample_rate)
+        .map(|loudness| target_lufs - loudness)
+        .filter(|gain| gain.is_finite())
 }
 
 pub(super) fn apply_loaded_track_loudness(
-    loudness_state: &AtomicLoudnessState,
+    shared_state: &Arc<SharedState>,
+    loudness_state: &Arc<AtomicLoudnessState>,
     metadata: &crate::decoder::TrackMetadata,
     cached_loudness: Option<&CachedLoudness>,
     samples: &Arc<Vec<f64>>,
@@ -60,12 +72,16 @@ pub(super) fn apply_loaded_track_loudness(
     target_lufs: f64,
     replaygain_reference_lufs: f64,
 ) {
+    shared_state.mark_loudness_started();
     loudness_state.set_smoothing(200.0, sample_rate);
 
     let preamp = loudness_state.preamp_gain_db.load(Ordering::Relaxed);
     match loudness_state.get_mode() {
         crate::config::NormalizationMode::Track | crate::config::NormalizationMode::Streaming => {}
-        crate::config::NormalizationMode::Album => return,
+        crate::config::NormalizationMode::Album => {
+            shared_state.mark_loudness_finished();
+            return;
+        }
         crate::config::NormalizationMode::ReplayGainTrack => {
             if let Some(rg_gain) = metadata.rg_track_gain {
                 let peak = metadata.rg_track_peak;
@@ -81,10 +97,11 @@ pub(super) fn apply_loaded_track_loudness(
                     effective_gain + preamp,
                     peak
                 );
+                shared_state.mark_loudness_finished();
                 return;
             }
 
-            log::warn!("No ReplayGain track gain found, falling back to EBU R128 analysis");
+            log::warn!("No ReplayGain track gain found, scheduling EBU R128 analysis");
         }
         crate::config::NormalizationMode::ReplayGainAlbum => {
             let rg_gain = metadata.rg_album_gain.or(metadata.rg_track_gain);
@@ -102,10 +119,11 @@ pub(super) fn apply_loaded_track_loudness(
                     effective_gain + preamp,
                     peak
                 );
+                shared_state.mark_loudness_finished();
                 return;
             }
 
-            log::warn!("No ReplayGain gain found, falling back to EBU R128 analysis");
+            log::warn!("No ReplayGain gain found, scheduling EBU R128 analysis");
         }
     }
 
@@ -120,29 +138,27 @@ pub(super) fn apply_loaded_track_loudness(
                 .unwrap_or(-70.0),
             target_lufs
         );
+        shared_state.mark_loudness_finished();
         return;
     }
 
-    if let Some(gain) = analyze_ebu_r128_gain(samples, channels, sample_rate, target_lufs) {
-        loudness_state.set_target_gain(gain);
-        log::info!(
-            "EBU R128 target gain {:.2} dB, preamp {:.2} dB (target: {:.2} LUFS)",
-            gain,
-            preamp,
-            target_lufs
-        );
-    } else {
-        loudness_state.set_target_gain(0.0);
-        log::warn!(
-            "EBU R128 analysis failed, using target gain 0.0 dB plus preamp {:.2} dB",
-            preamp
-        );
-    }
+    loudness_state.set_target_gain(0.0);
+    shared_state.mark_loudness_finished();
+    spawn_background_ebu_r128_analysis(
+        Arc::clone(shared_state),
+        Arc::clone(loudness_state),
+        Arc::clone(samples),
+        channels,
+        sample_rate,
+        target_lufs,
+        shared_state.load_generation.load(Ordering::Acquire),
+        preamp,
+    );
 }
 
 pub(super) fn refresh_loaded_loudness(
-    shared_state: &SharedState,
-    loudness_state: &AtomicLoudnessState,
+    shared_state: &Arc<SharedState>,
+    loudness_state: &Arc<AtomicLoudnessState>,
     target_lufs: f64,
     replaygain_reference_lufs: f64,
 ) {
@@ -156,6 +172,7 @@ pub(super) fn refresh_loaded_loudness(
     let metadata = shared_state.track_metadata.read().clone();
     let cached_loudness = shared_state.current_cached_loudness.read().clone();
     apply_loaded_track_loudness(
+        shared_state,
         loudness_state,
         &metadata,
         cached_loudness.as_ref(),
@@ -167,12 +184,78 @@ pub(super) fn refresh_loaded_loudness(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
+fn spawn_background_ebu_r128_analysis(
+    shared_state: Arc<SharedState>,
+    loudness_state: Arc<AtomicLoudnessState>,
+    samples: Arc<Vec<f64>>,
+    channels: usize,
+    sample_rate: u32,
+    target_lufs: f64,
+    generation: u64,
+    preamp: f64,
+) {
+    thread::spawn(move || {
+        if shared_state.load_generation.load(Ordering::Acquire) != generation {
+            return;
+        }
+
+        shared_state.mark_background_loudness_started();
+        let gain = ebu_r128_gain_for_target(&samples, channels, sample_rate, target_lufs);
+
+        if shared_state.load_generation.load(Ordering::Acquire) != generation {
+            return;
+        }
+        shared_state.mark_background_loudness_finished();
+
+        if apply_background_loudness_gain_if_current(
+            &shared_state,
+            &loudness_state,
+            generation,
+            gain,
+        ) {
+            if let Some(gain) = gain {
+                log::info!(
+                    "Background EBU R128 target gain {:.2} dB, preamp {:.2} dB (target: {:.2} LUFS)",
+                    gain,
+                    preamp,
+                    target_lufs
+                );
+            } else {
+                log::warn!(
+                    "Background EBU R128 analysis failed, keeping target gain 0.0 dB plus preamp {:.2} dB",
+                    preamp
+                );
+            }
+        }
+    });
+}
+
+fn apply_background_loudness_gain_if_current(
+    shared_state: &SharedState,
+    loudness_state: &AtomicLoudnessState,
+    generation: u64,
+    gain: Option<f64>,
+) -> bool {
+    if shared_state.load_generation.load(Ordering::Acquire) != generation {
+        return false;
+    }
+
+    loudness_state.set_target_gain(gain.unwrap_or(0.0));
+    shared_state.mark_background_loudness_applied();
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::NormalizationMode;
     use crate::decoder::TrackMetadata;
     use crate::processor::AtomicLoudnessState;
+
+    fn test_shared_state() -> Arc<SharedState> {
+        Arc::new(SharedState::new())
+    }
 
     #[test]
     fn replay_gain_is_converted_to_configured_target_lufs() {
@@ -192,7 +275,7 @@ mod tests {
 
     #[test]
     fn replay_gain_track_mode_stores_target_gain_without_preamp() {
-        let loudness_state = AtomicLoudnessState::default();
+        let loudness_state = Arc::new(AtomicLoudnessState::default());
         loudness_state.set_mode(NormalizationMode::ReplayGainTrack as u8);
         loudness_state.set_preamp_gain(-2.0);
 
@@ -203,8 +286,10 @@ mod tests {
         };
 
         let samples = Arc::new(vec![0.0; 1024]);
+        let shared_state = test_shared_state();
 
         apply_loaded_track_loudness(
+            &shared_state,
             &loudness_state,
             &metadata,
             None,
@@ -221,7 +306,7 @@ mod tests {
 
     #[test]
     fn cached_loudness_sets_track_target_gain_without_full_analysis() {
-        let loudness_state = AtomicLoudnessState::default();
+        let loudness_state = Arc::new(AtomicLoudnessState::default());
         loudness_state.set_mode(NormalizationMode::Track as u8);
         let metadata = TrackMetadata::default();
         let cached = CachedLoudness {
@@ -230,8 +315,10 @@ mod tests {
             loudness_range: None,
         };
         let samples = Arc::new(vec![0.0; 1024]);
+        let shared_state = test_shared_state();
 
         apply_loaded_track_loudness(
+            &shared_state,
             &loudness_state,
             &metadata,
             Some(&cached),
@@ -248,7 +335,7 @@ mod tests {
 
     #[test]
     fn replay_gain_tag_takes_priority_over_cached_loudness() {
-        let loudness_state = AtomicLoudnessState::default();
+        let loudness_state = Arc::new(AtomicLoudnessState::default());
         loudness_state.set_mode(NormalizationMode::ReplayGainTrack as u8);
         let metadata = TrackMetadata {
             rg_track_gain: Some(0.0),
@@ -261,8 +348,10 @@ mod tests {
             loudness_range: None,
         };
         let samples = Arc::new(vec![0.0; 1024]);
+        let shared_state = test_shared_state();
 
         apply_loaded_track_loudness(
+            &shared_state,
             &loudness_state,
             &metadata,
             Some(&cached),
@@ -279,7 +368,7 @@ mod tests {
 
     #[test]
     fn replay_gain_missing_tag_falls_back_to_cached_loudness() {
-        let loudness_state = AtomicLoudnessState::default();
+        let loudness_state = Arc::new(AtomicLoudnessState::default());
         loudness_state.set_mode(NormalizationMode::ReplayGainTrack as u8);
         let metadata = TrackMetadata::default();
         let cached = CachedLoudness {
@@ -288,8 +377,10 @@ mod tests {
             loudness_range: None,
         };
         let samples = Arc::new(vec![0.0; 1024]);
+        let shared_state = test_shared_state();
 
         apply_loaded_track_loudness(
+            &shared_state,
             &loudness_state,
             &metadata,
             Some(&cached),
@@ -302,5 +393,40 @@ mod tests {
 
         let target_gain = loudness_state.target_gain_db.load(Ordering::Relaxed);
         assert!((target_gain - 7.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn background_loudness_apply_is_generation_guarded() {
+        let shared_state = SharedState::new();
+        let loudness_state = AtomicLoudnessState::default();
+        shared_state.load_generation.store(2, Ordering::Release);
+
+        assert!(!apply_background_loudness_gain_if_current(
+            &shared_state,
+            &loudness_state,
+            1,
+            Some(6.0),
+        ));
+        assert_eq!(loudness_state.target_gain_db.load(Ordering::Relaxed), 0.0);
+        assert_eq!(
+            shared_state
+                .background_loudness_applied_ms
+                .load(Ordering::Relaxed),
+            0
+        );
+
+        assert!(apply_background_loudness_gain_if_current(
+            &shared_state,
+            &loudness_state,
+            2,
+            Some(6.0),
+        ));
+        assert_eq!(loudness_state.target_gain_db.load(Ordering::Relaxed), 6.0);
+        assert!(
+            shared_state
+                .background_loudness_applied_ms
+                .load(Ordering::Relaxed)
+                > 0
+        );
     }
 }
