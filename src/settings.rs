@@ -43,6 +43,8 @@ pub struct PersistentSettings {
     pub resample_quality: String,
     pub use_cache: bool,
     pub preemptive_resample: bool,
+    #[serde(default)]
+    pub streaming_first_buffer: bool,
     pub use_next_prefetch: bool,
 }
 
@@ -73,6 +75,7 @@ impl From<EngineSettings> for PersistentSettings {
             resample_quality: resample_quality_to_string(settings.resample_quality),
             use_cache: settings.use_cache,
             preemptive_resample: settings.preemptive_resample,
+            streaming_first_buffer: settings.streaming_first_buffer,
             use_next_prefetch: settings.use_next_prefetch,
         }
     }
@@ -105,6 +108,7 @@ impl From<PersistentSettings> for EngineSettings {
         engine.resample_quality = parse_resample_quality(&settings.resample_quality);
         engine.use_cache = settings.use_cache;
         engine.preemptive_resample = settings.preemptive_resample;
+        engine.streaming_first_buffer = settings.streaming_first_buffer;
         engine.use_next_prefetch = settings.use_next_prefetch;
         engine.normalized()
     }

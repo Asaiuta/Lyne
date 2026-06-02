@@ -156,8 +156,16 @@ impl AudioThreadRuntime {
             }
         }
 
-        let Some(output_plan) = prepare_playback_output(&self.shared_state, use_exclusive) else {
-            return ThreadControl::Continue;
+        self.shared_state.mark_output_prepare_started();
+        let output_plan = match prepare_playback_output(&self.shared_state, use_exclusive) {
+            Some(output_plan) => {
+                self.shared_state.mark_output_prepare_finished();
+                output_plan
+            }
+            None => {
+                self.shared_state.mark_output_prepare_finished();
+                return ThreadControl::Continue;
+            }
         };
 
         let stream_context = OutputStreamContext {

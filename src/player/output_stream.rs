@@ -84,8 +84,16 @@ pub(super) fn prepare_playback_output(
         return None;
     }
 
-    let (actual_sample_rate, buffer_size) =
-        negotiate_output_config(&device, requested_sample_rate, channels, use_exclusive);
+    let prefer_default_output_config = shared_state
+        .prefer_default_output_config
+        .load(Ordering::Relaxed);
+    let (actual_sample_rate, buffer_size) = negotiate_output_config(
+        &device,
+        requested_sample_rate,
+        channels,
+        use_exclusive,
+        prefer_default_output_config,
+    );
 
     log::info!(
         "Opening stream: {} Hz (requested {}), {} channels, exclusive={}",
@@ -295,7 +303,32 @@ fn negotiate_output_config(
     requested_sample_rate: u32,
     channels: u16,
     use_exclusive: bool,
+    prefer_default_output_config: bool,
 ) -> (u32, cpal::BufferSize) {
+    if !use_exclusive {
+        if let Ok(default_config) = device.default_output_config() {
+            let default_rate = default_config.sample_rate().0;
+            let default_channels = default_config.channels();
+            if default_channels == channels && prefer_default_output_config {
+                log::info!(
+                    "Using device default output config for quick start: {} Hz, {} channels (source {} Hz)",
+                    default_rate,
+                    channels,
+                    requested_sample_rate
+                );
+                return (default_rate, cpal::BufferSize::Default);
+            }
+            if default_rate == requested_sample_rate && default_channels == channels {
+                log::info!(
+                    "Using device default output config directly: {} Hz, {} channels",
+                    requested_sample_rate,
+                    channels
+                );
+                return (requested_sample_rate, cpal::BufferSize::Default);
+            }
+        }
+    }
+
     match device.supported_output_configs() {
         Ok(configs) => {
             let configs: Vec<_> = configs.collect();

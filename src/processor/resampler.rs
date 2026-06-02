@@ -350,6 +350,15 @@ impl StreamingResampler {
         (input_frames as f64 * ratio).ceil() as usize * self.channels + self.channels * 64
     }
 
+    pub fn input_frames_for_output_frames(&self, output_frames: usize) -> usize {
+        if output_frames == 0 || self.to_rate == 0 {
+            return 0;
+        }
+
+        let ratio = self.from_rate as f64 / self.to_rate as f64;
+        (output_frames as f64 * ratio).ceil() as usize + 64
+    }
+
     /// Create a new streaming resampler with default (linear) phase and High quality
     pub fn new(channels: usize, from_rate: u32, to_rate: u32) -> Result<Self, ResamplerError> {
         Self::with_phase(channels, from_rate, to_rate, PhaseResponse::default())
@@ -727,6 +736,17 @@ mod tests {
 
         assert_eq!(result.frames, 2);
         assert_eq!(result.samples, input.as_slice());
+    }
+
+    #[test]
+    fn input_frames_for_output_frames_tracks_rate_ratio_with_margin() {
+        let upsampler = StreamingResampler::new(2, 44_100, 384_000).unwrap();
+        let expected_up = ((512.0_f64 * 44_100.0 / 384_000.0).ceil() as usize) + 64;
+        assert_eq!(upsampler.input_frames_for_output_frames(512), expected_up);
+
+        let downsampler = StreamingResampler::new(2, 96_000, 48_000).unwrap();
+        assert_eq!(downsampler.input_frames_for_output_frames(2112), 4288);
+        assert_eq!(downsampler.input_frames_for_output_frames(0), 0);
     }
 
     #[test]

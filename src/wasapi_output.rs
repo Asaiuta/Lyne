@@ -669,7 +669,11 @@ pub mod wasapi_exclusive {
                         break;
                     }
 
-                    let source_frames_to_request = 4096;
+                    let output_frames_remaining = (samples_to_write - samples_written) / channels;
+                    let source_frames_to_request = rs
+                        .input_frames_for_output_frames(output_frames_remaining)
+                        .max(256)
+                        .min(8192);
                     // P1-9 fix: Reuse pre-allocated temp buffer instead of allocating per iteration
                     let temp_samples = source_frames_to_request * channels;
                     if temp_f32_buffer.len() < temp_samples {
@@ -693,13 +697,8 @@ pub mod wasapi_exclusive {
                     }
                     let temp_f64 = &resample_output_f64[..temp_samples];
 
-                    let needed_output = rs.max_output_len_for_input(temp_f64.len());
-                    if resample_scratch.len() < needed_output {
-                        resample_scratch.resize(needed_output, 0.0);
-                    }
-                    let written_frames = rs.process_chunk_into(temp_f64, &mut resample_scratch);
-
-                    let new_samples = written_frames * channels;
+                    let resampled = rs.process_chunk_borrowed(temp_f64);
+                    let new_samples = resampled.samples.len();
                     if resample_leftover_pos >= resample_leftover.len() {
                         resample_leftover.clear();
                         resample_leftover_pos = 0;
@@ -708,7 +707,7 @@ pub mod wasapi_exclusive {
                     resample_leftover.resize(append_start + new_samples, 0.0);
                     for (dst, src) in resample_leftover[append_start..]
                         .iter_mut()
-                        .zip(resample_scratch[..new_samples].iter())
+                        .zip(resampled.samples.iter())
                     {
                         *dst = *src as f32;
                     }

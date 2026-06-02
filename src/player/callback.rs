@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use super::spectrum::SpectrumBatch;
 use super::state::{
-    PlayerState, SharedState, EVENT_NEEDS_PRELOAD_RESET, EVENT_TRACK_CHANGED, EVENT_TRACK_EOF,
+    PlayerState, SharedState, StreamingAudioChunk, EVENT_NEEDS_PRELOAD_RESET, EVENT_TRACK_CHANGED,
+    EVENT_TRACK_EOF,
 };
 use crate::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
@@ -24,12 +25,14 @@ use crate::processor::{
 
 pub const AUDIO_PROCESS_BUFFER_FRAMES: usize = 8192;
 pub const AUDIO_RESAMPLE_BUFFER_FRAMES: usize = 16384;
+const MIN_RESAMPLE_SOURCE_FRAMES: usize = 256;
 
 pub struct CallbackScratch {
     process_buffer: Vec<f64>,
     resample_leftover: Vec<f64>,
     resample_leftover_pos: usize,
-    resample_output: Vec<f64>,
+    streaming_chunk: Option<StreamingAudioChunk>,
+    streaming_chunk_pos: usize,
     final_output: Vec<f64>,
     spectrum_batch: SpectrumBatch,
 }
@@ -39,7 +42,6 @@ pub struct CallbackScratch {
 struct CallbackScratchCapacities {
     process_buffer: usize,
     resample_leftover: usize,
-    resample_output: usize,
     final_output: usize,
 }
 
@@ -86,7 +88,8 @@ impl CallbackScratch {
             process_buffer,
             resample_leftover: Vec::with_capacity(resample_samples),
             resample_leftover_pos: 0,
-            resample_output: Vec::with_capacity(resample_samples),
+            streaming_chunk: None,
+            streaming_chunk_pos: 0,
             final_output: Vec::with_capacity(resample_samples),
             spectrum_batch: SpectrumBatch::new(),
         }
@@ -97,7 +100,6 @@ impl CallbackScratch {
         CallbackScratchCapacities {
             process_buffer: self.process_buffer.capacity(),
             resample_leftover: self.resample_leftover.capacity(),
-            resample_output: self.resample_output.capacity(),
             final_output: self.final_output.capacity(),
         }
     }
@@ -495,6 +497,8 @@ fn reset_dsp_state_if_requested(
     }
     scratch.resample_leftover.clear();
     scratch.resample_leftover_pos = 0;
+    scratch.streaming_chunk = None;
+    scratch.streaming_chunk_pos = 0;
 }
 
 fn request_gapless_preload_if_needed(shared: &SharedState, total: usize, current_pos: usize) {
@@ -509,6 +513,55 @@ fn request_gapless_preload_if_needed(shared: &SharedState, total: usize, current
     {
         shared.needs_preload.store(true, Ordering::Release);
     }
+}
+
+fn streaming_has_buffered_samples(
+    shared: &SharedState,
+    scratch: &mut CallbackScratch,
+    generation: u64,
+) -> bool {
+    let stale_current = scratch
+        .streaming_chunk
+        .as_ref()
+        .is_some_and(|chunk| chunk.generation != generation);
+    if stale_current {
+        scratch.streaming_chunk = None;
+        scratch.streaming_chunk_pos = 0;
+    }
+
+    let current_chunk_has_samples = scratch.streaming_chunk.as_ref().is_some_and(|chunk| {
+        scratch.streaming_chunk_pos < chunk.samples.len()
+    });
+    if current_chunk_has_samples {
+        return true;
+    }
+
+    while let Some(chunk) = shared.streaming_chunks.pop() {
+        if chunk.generation == generation {
+            scratch.streaming_chunk = Some(chunk);
+            scratch.streaming_chunk_pos = 0;
+            return true;
+        }
+    }
+
+    false
+}
+
+fn finish_streaming_if_drained(shared: &SharedState, scratch: &mut CallbackScratch) -> bool {
+    if !shared.streaming_active.load(Ordering::Acquire) {
+        return false;
+    }
+    if !shared.streaming_decode_finished.load(Ordering::Acquire) {
+        return true;
+    }
+
+    let generation = shared.streaming_generation.load(Ordering::Acquire);
+    if streaming_has_buffered_samples(shared, scratch, generation) {
+        return true;
+    }
+
+    shared.streaming_active.store(false, Ordering::Release);
+    false
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -663,8 +716,10 @@ fn render_audio_output(
             break;
         }
 
-        let source_frames_needed = if output_path.uses_resampler() {
-            4096
+        let source_frames_needed = if let Some(rs) = resampler.as_ref() {
+            rs.input_frames_for_output_frames(frames_needed_out)
+                .max(MIN_RESAMPLE_SOURCE_FRAMES)
+                .min(AUDIO_PROCESS_BUFFER_FRAMES)
         } else {
             frames_needed_out
         };
@@ -677,7 +732,6 @@ fn render_audio_output(
         let max_frames_from_capacity = scratch.process_buffer.capacity() / channels;
         let frames_to_read = source_frames_needed
             .min(available_source)
-            .min(4096)
             .min(max_frames_from_capacity);
         debug_assert!(frames_to_read * channels <= scratch.process_buffer.capacity());
 
@@ -712,30 +766,24 @@ fn render_audio_output(
         dsp_chain.process(&mut scratch.process_buffer, channels);
 
         if let Some(rs) = resampler.as_mut() {
-            let expected_samples = rs.max_output_len_for_input(scratch.process_buffer.len());
-            if scratch.resample_output.len() < expected_samples {
-                scratch.resample_output.resize(expected_samples, 0.0);
-            }
-            debug_assert!(scratch.resample_output.capacity() >= expected_samples);
-            let frames_written =
-                rs.process_chunk_into(&scratch.process_buffer, &mut scratch.resample_output);
-            let samples_resampled = frames_written * channels;
+            let resampled = rs.process_chunk_borrowed(&scratch.process_buffer);
+            let resampled_samples = resampled.samples;
 
             let mut chunk_idx = 0;
-            while samples_written < output_len && chunk_idx < samples_resampled {
+            while samples_written < output_len && chunk_idx < resampled_samples.len() {
                 if matches!(output_path, OutputPath::ResamplerOnly) {
-                    data[samples_written] = scratch.resample_output[chunk_idx] as f32;
+                    data[samples_written] = resampled_samples[chunk_idx] as f32;
                 } else {
-                    scratch.final_output[samples_written] = scratch.resample_output[chunk_idx];
+                    scratch.final_output[samples_written] = resampled_samples[chunk_idx];
                 }
                 samples_written += 1;
                 chunk_idx += 1;
             }
 
-            if chunk_idx < samples_resampled {
+            if chunk_idx < resampled_samples.len() {
                 scratch
                     .resample_leftover
-                    .extend_from_slice(&scratch.resample_output[chunk_idx..samples_resampled]);
+                    .extend_from_slice(&resampled_samples[chunk_idx..]);
                 scratch.resample_leftover_pos = 0;
             }
         } else {
@@ -768,6 +816,209 @@ fn render_audio_output(
             ((output_len - samples_written) / channels) as u64,
             Ordering::Relaxed,
         );
+        if output_path.uses_final_buffer() {
+            scratch.final_output[samples_written..output_len].fill(0.0);
+        } else {
+            data[samples_written..output_len].fill(0.0);
+        }
+    }
+
+    samples_written
+}
+
+fn fill_streaming_process_buffer(
+    shared: &SharedState,
+    scratch: &mut CallbackScratch,
+    generation: u64,
+    channels: usize,
+    frames_to_read: usize,
+) -> usize {
+    scratch.process_buffer.clear();
+    let target_samples = frames_to_read * channels;
+
+    while scratch.process_buffer.len() < target_samples {
+        let stale_current = scratch
+            .streaming_chunk
+            .as_ref()
+            .is_some_and(|chunk| chunk.generation != generation);
+        if stale_current {
+            scratch.streaming_chunk = None;
+            scratch.streaming_chunk_pos = 0;
+        }
+
+        if let Some(chunk) = scratch.streaming_chunk.as_ref() {
+            let available = chunk
+                .samples
+                .len()
+                .saturating_sub(scratch.streaming_chunk_pos);
+            if available > 0 {
+                let take = available.min(target_samples - scratch.process_buffer.len());
+                let start = scratch.streaming_chunk_pos;
+                let end = start + take;
+                scratch
+                    .process_buffer
+                    .extend_from_slice(&chunk.samples[start..end]);
+                scratch.streaming_chunk_pos += take;
+                if scratch.streaming_chunk_pos >= chunk.samples.len() {
+                    scratch.streaming_chunk = None;
+                    scratch.streaming_chunk_pos = 0;
+                }
+                continue;
+            }
+        }
+
+        match shared.streaming_chunks.pop() {
+            Some(chunk) if chunk.generation == generation => {
+                scratch.streaming_chunk = Some(chunk);
+                scratch.streaming_chunk_pos = 0;
+            }
+            Some(_) => continue,
+            None => break,
+        }
+    }
+
+    scratch.process_buffer.len() / channels
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_streaming_audio_output(
+    data: &mut [f32],
+    shared: &SharedState,
+    dsp_chain: &mut DspChain,
+    loudness_state: &Arc<AtomicLoudnessState>,
+    channels: usize,
+    resampler: &mut Option<StreamingResampler>,
+    scratch: &mut CallbackScratch,
+    output_path: OutputPath,
+    current_pos: &mut usize,
+) -> usize {
+    let output_len = data.len();
+    let mut samples_written = 0;
+    let generation = shared.streaming_generation.load(Ordering::Acquire);
+
+    if output_path.uses_final_buffer() && scratch.final_output.len() < output_len {
+        scratch.final_output.resize(output_len, 0.0);
+    }
+
+    if output_path.uses_resampler()
+        && scratch.resample_leftover_pos < scratch.resample_leftover.len()
+    {
+        let available = scratch.resample_leftover.len() - scratch.resample_leftover_pos;
+        let take = available.min(output_len);
+        let start = scratch.resample_leftover_pos;
+        let end = start + take;
+        if matches!(output_path, OutputPath::ResamplerOnly) {
+            for (dst, src) in data[..take]
+                .iter_mut()
+                .zip(scratch.resample_leftover[start..end].iter())
+            {
+                *dst = *src as f32;
+            }
+        } else {
+            for (dst, src) in scratch.final_output[..take]
+                .iter_mut()
+                .zip(scratch.resample_leftover[start..end].iter())
+            {
+                *dst = *src;
+            }
+        }
+        scratch.resample_leftover_pos += take;
+        if scratch.resample_leftover_pos >= scratch.resample_leftover.len() {
+            scratch.resample_leftover.clear();
+            scratch.resample_leftover_pos = 0;
+        }
+        samples_written = take;
+    }
+
+    while samples_written < output_len {
+        let frames_needed_out = (output_len - samples_written) / channels;
+        if frames_needed_out == 0 {
+            break;
+        }
+
+        let source_frames_needed = if let Some(rs) = resampler.as_ref() {
+            rs.input_frames_for_output_frames(frames_needed_out)
+                .max(MIN_RESAMPLE_SOURCE_FRAMES)
+                .min(AUDIO_PROCESS_BUFFER_FRAMES)
+        } else {
+            frames_needed_out
+        };
+        let max_frames_from_capacity = scratch.process_buffer.capacity() / channels;
+        let frames_to_read = source_frames_needed.min(max_frames_from_capacity);
+        let frames_read =
+            fill_streaming_process_buffer(shared, scratch, generation, channels, frames_to_read);
+
+        if frames_read == 0 {
+            if shared.streaming_decode_finished.load(Ordering::Acquire) {
+                shared.streaming_active.store(false, Ordering::Release);
+            } else {
+                shared.audio_underrun_count.fetch_add(1, Ordering::Relaxed);
+                shared.audio_underrun_silence_frames.fetch_add(
+                    ((output_len - samples_written) / channels) as u64,
+                    Ordering::Relaxed,
+                );
+            }
+            break;
+        }
+
+        *current_pos += frames_read;
+        shared
+            .position_frames
+            .store(*current_pos as u64, Ordering::Relaxed);
+        shared.mark_first_position_advanced_after_play();
+
+        let linear_gain = loudness_state.process_gain(frames_read);
+        for sample in scratch.process_buffer.iter_mut() {
+            *sample *= linear_gain;
+        }
+        dsp_chain.process(&mut scratch.process_buffer, channels);
+
+        if let Some(rs) = resampler.as_mut() {
+            let resampled = rs.process_chunk_borrowed(&scratch.process_buffer);
+            let resampled_samples = resampled.samples;
+
+            let mut chunk_idx = 0;
+            while samples_written < output_len && chunk_idx < resampled_samples.len() {
+                if matches!(output_path, OutputPath::ResamplerOnly) {
+                    data[samples_written] = resampled_samples[chunk_idx] as f32;
+                } else {
+                    scratch.final_output[samples_written] = resampled_samples[chunk_idx];
+                }
+                samples_written += 1;
+                chunk_idx += 1;
+            }
+
+            if chunk_idx < resampled_samples.len() {
+                scratch
+                    .resample_leftover
+                    .extend_from_slice(&resampled_samples[chunk_idx..]);
+                scratch.resample_leftover_pos = 0;
+            }
+        } else {
+            let take = scratch
+                .process_buffer
+                .len()
+                .min(output_len - samples_written);
+            if matches!(output_path, OutputPath::Direct) {
+                for (dst, src) in data[samples_written..samples_written + take]
+                    .iter_mut()
+                    .zip(scratch.process_buffer[..take].iter())
+                {
+                    *dst = *src as f32;
+                }
+            } else {
+                for (dst, src) in scratch.final_output[samples_written..samples_written + take]
+                    .iter_mut()
+                    .zip(scratch.process_buffer[..take].iter())
+                {
+                    *dst = *src;
+                }
+            }
+            samples_written += take;
+        }
+    }
+
+    if samples_written < output_len {
         if output_path.uses_final_buffer() {
             scratch.final_output[samples_written..output_len].fill(0.0);
         } else {
@@ -852,34 +1103,53 @@ pub fn audio_callback_lockfree(
 
     let total = shared.total_frames.load(Ordering::Relaxed) as usize;
     let mut current_pos = shared.position_frames.load(Ordering::Relaxed) as usize;
-    request_gapless_preload_if_needed(shared, total, current_pos);
-
-    if handle_eof_or_gapless(
-        data,
-        shared,
-        dsp_chain,
-        final_noise_shaper.as_deref_mut(),
-        loudness_state,
-        resampler,
-        scratch,
-        total,
-        current_pos,
-    ) {
-        return;
+    let streaming_active = finish_streaming_if_drained(shared, scratch);
+    if !streaming_active {
+        request_gapless_preload_if_needed(shared, total, current_pos);
     }
 
-    let samples_written = render_audio_output(
-        data,
-        shared,
-        dsp_chain,
-        loudness_state,
-        channels,
-        resampler,
-        scratch,
-        output_path,
-        total,
-        &mut current_pos,
-    );
+    if !streaming_active {
+        if handle_eof_or_gapless(
+            data,
+            shared,
+            dsp_chain,
+            final_noise_shaper.as_deref_mut(),
+            loudness_state,
+            resampler,
+            scratch,
+            total,
+            current_pos,
+        ) {
+            return;
+        }
+    }
+
+    let samples_written = if streaming_active {
+        render_streaming_audio_output(
+            data,
+            shared,
+            dsp_chain,
+            loudness_state,
+            channels,
+            resampler,
+            scratch,
+            output_path,
+            &mut current_pos,
+        )
+    } else {
+        render_audio_output(
+            data,
+            shared,
+            dsp_chain,
+            loudness_state,
+            channels,
+            resampler,
+            scratch,
+            output_path,
+            total,
+            &mut current_pos,
+        )
+    };
 
     let output_len = data.len();
     if output_path.uses_final_buffer() && output_len > 0 {
@@ -972,10 +1242,80 @@ mod tests {
         scratch.capacities()
     }
 
+    fn run_streaming_capacity_probe(
+        scratch: &mut CallbackScratch,
+        use_resampler: bool,
+        use_shaper: bool,
+        generation: u64,
+    ) -> CallbackScratchCapacities {
+        let shared = SharedState::new();
+        shared.total_frames.store(10_000, Ordering::Relaxed);
+        shared
+            .sample_rate
+            .store(TEST_SAMPLE_RATE as u64, Ordering::Relaxed);
+        shared
+            .channels
+            .store(TEST_CHANNELS as u64, Ordering::Relaxed);
+        shared.streaming_generation.store(generation, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(false, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared
+            .streaming_chunks
+            .push(StreamingAudioChunk {
+                generation,
+                samples: Arc::new(build_test_buffer(TEST_FRAMES, TEST_CHANNELS)),
+            })
+            .expect("streaming queue should have capacity");
+
+        let mut chain = DspChain::new(TEST_SAMPLE_RATE as f64);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut out = vec![0.0f32; 256 * TEST_CHANNELS];
+        let mut resampler = use_resampler
+            .then(|| StreamingResampler::new(TEST_CHANNELS, TEST_SAMPLE_RATE, 48_000).unwrap());
+        let noise_shaper_params = Arc::new(AtomicNoiseShaperParams::new());
+        noise_shaper_params.set_enabled(use_shaper);
+        let mut final_noise_shaper = NoiseShaperProcessor::new(
+            TEST_CHANNELS,
+            if use_resampler {
+                48_000
+            } else {
+                TEST_SAMPLE_RATE
+            },
+            Arc::clone(&noise_shaper_params),
+        );
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            Some(&mut final_noise_shaper),
+            &loudness,
+            &tx,
+            TEST_CHANNELS,
+            &mut resampler,
+            scratch,
+        );
+
+        scratch.capacities()
+    }
+
     fn assert_capacity_stable_after_warmup(use_resampler: bool, use_shaper: bool) {
         let mut scratch = CallbackScratch::new(TEST_CHANNELS);
         let warmed = run_capacity_probe(&mut scratch, use_resampler, use_shaper);
         let steady = run_capacity_probe(&mut scratch, use_resampler, use_shaper);
+
+        assert_eq!(steady, warmed);
+    }
+
+    fn assert_streaming_capacity_stable_after_warmup(use_resampler: bool, use_shaper: bool) {
+        let mut scratch = CallbackScratch::new(TEST_CHANNELS);
+        let warmed = run_streaming_capacity_probe(&mut scratch, use_resampler, use_shaper, 21);
+        let steady = run_streaming_capacity_probe(&mut scratch, use_resampler, use_shaper, 22);
 
         assert_eq!(steady, warmed);
     }
@@ -1011,10 +1351,6 @@ mod tests {
             AUDIO_RESAMPLE_BUFFER_FRAMES * 2
         );
         assert_eq!(
-            scratch.resample_output.capacity(),
-            AUDIO_RESAMPLE_BUFFER_FRAMES * 2
-        );
-        assert_eq!(
             scratch.final_output.capacity(),
             AUDIO_RESAMPLE_BUFFER_FRAMES * 2
         );
@@ -1039,6 +1375,281 @@ mod tests {
     #[test]
     fn callback_full_output_path_reuses_scratch_capacity_after_warmup() {
         assert_capacity_stable_after_warmup(true, true);
+    }
+
+    #[test]
+    fn callback_streaming_full_output_path_reuses_scratch_capacity_after_warmup() {
+        assert_streaming_capacity_stable_after_warmup(true, true);
+    }
+
+    #[test]
+    fn callback_downsample_resampler_buffers_startup_output_without_panic() {
+        let channels = 2;
+        let frames = 4096;
+        let shared = SharedState::new();
+        let samples = (0..frames * channels)
+            .map(|sample| (sample as f64 % 97.0) / 97.0 - 0.5)
+            .collect::<Vec<_>>();
+        shared.audio_buffer.store(Arc::new(samples));
+        shared.total_frames.store(frames as u64, Ordering::Relaxed);
+        shared.sample_rate.store(96_000, Ordering::Relaxed);
+        shared.channels.store(channels as u64, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(96_000.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut resampler = Some(StreamingResampler::new(channels, 96_000, 48_000).unwrap());
+        let mut scratch = CallbackScratch::new(channels);
+        let mut out = vec![0.0f32; 2112 * channels];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            channels,
+            &mut resampler,
+            &mut scratch,
+        );
+
+        assert!(shared.position_frames.load(Ordering::Relaxed) > 0);
+        assert!(scratch.resample_leftover_pos <= scratch.resample_leftover.len());
+
+        let leftover_len = scratch.resample_leftover.len();
+        let mut next_out = vec![0.0f32; 256 * channels];
+        audio_callback_lockfree(
+            &mut next_out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            channels,
+            &mut resampler,
+            &mut scratch,
+        );
+
+        if leftover_len > 0 {
+            assert!(scratch.resample_leftover_pos <= scratch.resample_leftover.len());
+        }
+    }
+
+    #[test]
+    fn callback_upsample_resampler_reads_demand_sized_source_chunk() {
+        let channels = 2;
+        let frames = 8192;
+        let shared = SharedState::new();
+        let samples = (0..frames * channels)
+            .map(|sample| (sample as f64 % 113.0) / 113.0 - 0.5)
+            .collect::<Vec<_>>();
+        shared.audio_buffer.store(Arc::new(samples));
+        shared.total_frames.store(frames as u64, Ordering::Relaxed);
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(channels as u64, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut resampler = Some(StreamingResampler::new(channels, 44_100, 384_000).unwrap());
+        let mut scratch = CallbackScratch::new(channels);
+        let mut out = vec![0.0f32; 512 * channels];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            channels,
+            &mut resampler,
+            &mut scratch,
+        );
+
+        let position = shared.position_frames.load(Ordering::Relaxed) as usize;
+        assert!(position >= MIN_RESAMPLE_SOURCE_FRAMES);
+        assert!(
+            position < 4096,
+            "demand-sized resampling should avoid the old fixed 4096-frame chunk"
+        );
+        assert!(scratch.resample_leftover.len() < scratch.resample_leftover.capacity());
+    }
+
+    #[test]
+    fn callback_streaming_chunk_advances_position_without_full_audio_buffer() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(2, Ordering::Relaxed);
+        shared.streaming_generation.store(7, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared
+            .streaming_chunks
+            .push(StreamingAudioChunk {
+                generation: 7,
+                samples: Arc::new(vec![0.25, -0.25, 0.5, -0.5]),
+            })
+            .expect("streaming queue should have capacity");
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut out = vec![0.0f32; 4];
+        let mut scratch = CallbackScratch::new(2);
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.25, -0.25, 0.5, -0.5]);
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 2);
+        assert!(shared.audio_buffer.load().is_empty());
+    }
+
+    #[test]
+    fn callback_streaming_empty_queue_records_underrun_before_decode_finishes() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(100, Ordering::Relaxed);
+        shared.streaming_generation.store(9, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(false, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut out = vec![1.0f32; 8];
+        let mut scratch = CallbackScratch::new(2);
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.0; 8]);
+        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            shared.audio_underrun_silence_frames.load(Ordering::Relaxed),
+            4
+        );
+        assert!(shared.streaming_active.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn callback_streaming_finished_empty_queue_switches_back_to_full_buffer() {
+        let shared = SharedState::new();
+        shared
+            .audio_buffer
+            .store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(2, Ordering::Relaxed);
+        shared.streaming_generation.store(11, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut scratch = CallbackScratch::new(2);
+        let mut first = vec![1.0f32; 4];
+
+        audio_callback_lockfree(
+            &mut first,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(first, vec![0.1, 0.2, 0.3, 0.4]);
+        assert!(!shared.streaming_active.load(Ordering::Relaxed));
+        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn callback_streaming_finished_discards_stale_chunks_before_full_buffer_fallback() {
+        let shared = SharedState::new();
+        shared
+            .audio_buffer
+            .store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(2, Ordering::Relaxed);
+        shared.streaming_generation.store(12, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared
+            .streaming_chunks
+            .push(StreamingAudioChunk {
+                generation: 11,
+                samples: Arc::new(vec![0.9, 0.9, 0.9, 0.9]),
+            })
+            .expect("streaming queue should have capacity");
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut scratch = CallbackScratch::new(2);
+        let mut out = vec![1.0f32; 4];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.1, 0.2, 0.3, 0.4]);
+        assert!(!shared.streaming_active.load(Ordering::Relaxed));
+        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
+        assert!(shared.streaming_chunks.is_empty());
     }
 
     #[test]

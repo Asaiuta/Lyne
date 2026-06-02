@@ -65,7 +65,7 @@ use crate::processor::{
 
 // Import internal modules
 use audio_thread::{audio_thread_main, AudioThreadStartup};
-use loading::decode_file_internal;
+use loading::{decode_file_internal, decode_file_streaming_first_buffer};
 use spectrum::spectrum_thread_main;
 
 /// The main audio player - thread-safe wrapper
@@ -235,6 +235,9 @@ impl AudioPlayer {
         shared_state
             .exclusive_mode
             .store(config.exclusive_mode, Ordering::Relaxed);
+        shared_state
+            .prefer_default_output_config
+            .store(!config.preemptive_resample, Ordering::Relaxed);
         shared_state.device_id.store(
             config.device_id.map(|i| i as i64).unwrap_or(-1),
             Ordering::Relaxed,
@@ -379,26 +382,46 @@ impl AudioPlayer {
         let loudness_enabled = self.loudness_enabled;
         let loudness_db = self.loudness_db.clone();
 
+        let use_streaming_first_buffer =
+            self.should_use_streaming_first_buffer(path, credentials, autoplay);
+
         // Spawn background thread for decoding
         thread::spawn(move || {
-            let result = decode_file_internal(
-                &path_owned,
-                credentials_owned.as_ref(),
-                &config,
-                device_id,
-                &shared_state,
-                loudness_enabled,
-                &load_cancel,
-                loudness_db,
-            );
+            let result = if use_streaming_first_buffer {
+                decode_file_streaming_first_buffer(
+                    &path_owned,
+                    credentials_owned.as_ref(),
+                    &config,
+                    device_id,
+                    &shared_state,
+                    &load_cancel,
+                    loudness_db.clone(),
+                    generation,
+                    &cmd_tx,
+                    autoplay,
+                )
+                .map(|_| None)
+            } else {
+                decode_file_internal(
+                    &path_owned,
+                    credentials_owned.as_ref(),
+                    &config,
+                    device_id,
+                    &shared_state,
+                    loudness_enabled,
+                    &load_cancel,
+                    loudness_db.clone(),
+                )
+                .map(Some)
+            };
 
             let is_current = shared_state.load_generation.load(Ordering::Acquire) == generation;
-            if is_current {
+            if is_current && !use_streaming_first_buffer {
                 shared_state.is_loading.store(false, Ordering::Release);
             }
 
             match result {
-                Ok(load_result) => {
+                Ok(Some(load_result)) => {
                     if load_cancel.load(Ordering::Acquire) || !is_current {
                         log::info!(
                             "Discarding cancelled async load result for '{}' (generation {})",
@@ -418,6 +441,7 @@ impl AudioPlayer {
                         let _ = cmd_tx.send(AudioCommand::Play);
                     }
                 }
+                Ok(None) => {}
                 Err(e) => {
                     if load_cancel.load(Ordering::Acquire) || !is_current {
                         log::info!(
@@ -447,6 +471,20 @@ impl AudioPlayer {
         Ok(())
     }
 
+    fn should_use_streaming_first_buffer(
+        &self,
+        path: &str,
+        credentials: Option<&crate::decoder::HttpCredentials>,
+        autoplay: bool,
+    ) -> bool {
+        self.config.streaming_first_buffer
+            && autoplay
+            && credentials.is_none()
+            && !self.config.use_cache
+            && !path.starts_with("http://")
+            && !path.starts_with("https://")
+    }
+
     fn create_load_cancel_token(&mut self) -> Arc<AtomicBool> {
         let cancel = Arc::new(AtomicBool::new(false));
         self.current_load_cancel = Some(Arc::clone(&cancel));
@@ -458,6 +496,7 @@ impl AudioPlayer {
         if let Some(cancel) = self.current_load_cancel.take() {
             cancel.store(true, Ordering::Release);
         }
+        self.shared_state.reset_streaming_state();
         if was_loading {
             self.shared_state
                 .load_generation
@@ -527,6 +566,7 @@ impl AudioPlayer {
 
     pub fn stop(&mut self) {
         self.cancel_current_load();
+        self.shared_state.reset_streaming_state();
         self.shared_state
             .position_frames
             .store(0, Ordering::Relaxed);
@@ -538,6 +578,7 @@ impl AudioPlayer {
     }
 
     fn stop_for_track_load(&self) {
+        self.shared_state.reset_streaming_state();
         self.shared_state
             .position_frames
             .store(0, Ordering::Relaxed);

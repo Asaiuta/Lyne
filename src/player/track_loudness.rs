@@ -144,6 +144,9 @@ pub(super) fn apply_loaded_track_loudness(
 
     loudness_state.set_target_gain(0.0);
     shared_state.mark_loudness_finished();
+    if samples.is_empty() {
+        return;
+    }
     spawn_background_ebu_r128_analysis(
         Arc::clone(shared_state),
         Arc::clone(loudness_state),

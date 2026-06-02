@@ -75,6 +75,22 @@ pub struct LoadResult {
     pub metadata: crate::decoder::TrackMetadata,
 }
 
+#[derive(Debug, Clone)]
+pub struct StreamingTrackStart {
+    pub sample_rate: u32,
+    pub channels: usize,
+    pub total_frames: u64,
+    pub file_path: String,
+    pub cached_loudness: Option<CachedLoudness>,
+    pub metadata: crate::decoder::TrackMetadata,
+}
+
+#[derive(Debug)]
+pub struct StreamingAudioChunk {
+    pub generation: u64,
+    pub samples: Arc<Vec<f64>>,
+}
+
 /// Commands sent to the audio thread
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -84,15 +100,38 @@ pub enum AudioCommand {
     StopForLoad,
     Shutdown,
     Seek(f64),
-    SetExternalIrConvolver { ir_data: Vec<f64>, channels: usize },
+    SetExternalIrConvolver {
+        ir_data: Vec<f64>,
+        channels: usize,
+    },
     ClearExternalIrConvolver,
-    SetFirConvolver { ir_data: Vec<f64>, channels: usize },
+    SetFirConvolver {
+        ir_data: Vec<f64>,
+        channels: usize,
+    },
     ClearFirConvolver,
-    SetNoiseShaperCurve { curve: NoiseShaperCurve },
+    SetNoiseShaperCurve {
+        curve: NoiseShaperCurve,
+    },
     SetTargetLufs(f64),
     RefreshLoadedLoudness,
-    LoadComplete { generation: u64, result: LoadResult },
-    LoadError { generation: u64, message: String },
+    LoadComplete {
+        generation: u64,
+        result: LoadResult,
+    },
+    StreamingLoadReady {
+        generation: u64,
+        track: StreamingTrackStart,
+    },
+    StreamingLoadFinished {
+        generation: u64,
+        samples: Vec<f64>,
+        total_frames: u64,
+    },
+    LoadError {
+        generation: u64,
+        message: String,
+    },
 }
 
 /// Repeat behavior at the end of a track or queue.
@@ -242,7 +281,15 @@ pub struct SharedState {
     /// from the audio callback. Writers (load, gapless swap) call .store()
     /// which is an atomic pointer swap; readers call .load() which never blocks.
     pub audio_buffer: ArcSwap<Vec<f64>>,
+    pub streaming_chunks: ArrayQueue<StreamingAudioChunk>,
+    pub streaming_active: AtomicBool,
+    pub streaming_decode_finished: AtomicBool,
+    pub streaming_generation: AtomicU64,
+    pub streaming_first_chunk_ms: AtomicU64,
+    pub streaming_ready_ms: AtomicU64,
+    pub streaming_finished_ms: AtomicU64,
     pub exclusive_mode: AtomicBool,
+    pub prefer_default_output_config: AtomicBool,
     pub device_id: std::sync::atomic::AtomicI64,
     pub volume: std::sync::atomic::AtomicU64,
     pub file_path: RwLock<Option<String>>,
@@ -292,6 +339,8 @@ pub struct SharedState {
     pub background_loudness_finished_ms: AtomicU64,
     pub background_loudness_applied_ms: AtomicU64,
     pub load_complete_applied_ms: AtomicU64,
+    pub output_prepare_started_ms: AtomicU64,
+    pub output_prepare_finished_ms: AtomicU64,
     pub stream_build_started_ms: AtomicU64,
     pub stream_build_finished_ms: AtomicU64,
     pub stream_play_returned_ms: AtomicU64,
@@ -344,7 +393,15 @@ impl SharedState {
             total_frames: AtomicU64::new(0),
             spectrum_data: ArcSwap::new(Arc::new(vec![0.0; 64])),
             audio_buffer: ArcSwap::new(Arc::new(Vec::new())),
+            streaming_chunks: ArrayQueue::new(128),
+            streaming_active: AtomicBool::new(false),
+            streaming_decode_finished: AtomicBool::new(false),
+            streaming_generation: AtomicU64::new(0),
+            streaming_first_chunk_ms: AtomicU64::new(0),
+            streaming_ready_ms: AtomicU64::new(0),
+            streaming_finished_ms: AtomicU64::new(0),
             exclusive_mode: AtomicBool::new(false),
+            prefer_default_output_config: AtomicBool::new(false),
             device_id: std::sync::atomic::AtomicI64::new(-1),
             volume: std::sync::atomic::AtomicU64::new(1_000_000),
             file_path: RwLock::new(None),
@@ -383,6 +440,8 @@ impl SharedState {
             background_loudness_finished_ms: AtomicU64::new(0),
             background_loudness_applied_ms: AtomicU64::new(0),
             load_complete_applied_ms: AtomicU64::new(0),
+            output_prepare_started_ms: AtomicU64::new(0),
+            output_prepare_finished_ms: AtomicU64::new(0),
             stream_build_started_ms: AtomicU64::new(0),
             stream_build_finished_ms: AtomicU64::new(0),
             stream_play_returned_ms: AtomicU64::new(0),
@@ -439,12 +498,27 @@ impl SharedState {
         self.background_loudness_applied_ms
             .store(0, Ordering::Relaxed);
         self.load_complete_applied_ms.store(0, Ordering::Relaxed);
+        self.output_prepare_started_ms.store(0, Ordering::Relaxed);
+        self.output_prepare_finished_ms.store(0, Ordering::Relaxed);
         self.stream_build_started_ms.store(0, Ordering::Relaxed);
         self.stream_build_finished_ms.store(0, Ordering::Relaxed);
         self.stream_play_returned_ms.store(0, Ordering::Relaxed);
         self.first_callback_after_play_ms
             .store(0, Ordering::Relaxed);
         self.first_position_advanced_ms.store(0, Ordering::Relaxed);
+        self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
+        self.streaming_ready_ms.store(0, Ordering::Relaxed);
+        self.streaming_finished_ms.store(0, Ordering::Relaxed);
+    }
+
+    pub fn reset_streaming_state(&self) {
+        self.streaming_active.store(false, Ordering::Release);
+        self.streaming_decode_finished
+            .store(false, Ordering::Release);
+        while self.streaming_chunks.pop().is_some() {}
+        self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
+        self.streaming_ready_ms.store(0, Ordering::Relaxed);
+        self.streaming_finished_ms.store(0, Ordering::Relaxed);
     }
 
     pub fn mark_load_request_returned(&self) {
@@ -459,6 +533,25 @@ impl SharedState {
 
     pub fn mark_decode_finished(&self) {
         self.decode_finished_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_first_chunk(&self) {
+        let _ = self.streaming_first_chunk_ms.compare_exchange(
+            0,
+            playback_phase_time_ms(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    pub fn mark_streaming_ready(&self) {
+        self.streaming_ready_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_finished(&self) {
+        self.streaming_finished_ms
             .store(playback_phase_time_ms(), Ordering::Relaxed);
     }
 
@@ -489,6 +582,16 @@ impl SharedState {
 
     pub fn mark_load_complete_applied(&self) {
         self.load_complete_applied_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_output_prepare_started(&self) {
+        self.output_prepare_started_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_output_prepare_finished(&self) {
+        self.output_prepare_finished_ms
             .store(playback_phase_time_ms(), Ordering::Relaxed);
     }
 
@@ -604,14 +707,44 @@ mod tests {
     fn load_phase_reset_clears_previous_timestamps() {
         let shared = SharedState::new();
         shared.mark_decode_started();
+        shared.mark_output_prepare_started();
+        shared.mark_streaming_first_chunk();
         shared.mark_stream_play_returned();
 
         shared.reset_load_phase_timestamps();
 
         assert!(shared.load_request_started_ms.load(Ordering::Relaxed) > 0);
         assert_eq!(shared.decode_started_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.output_prepare_started_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.streaming_first_chunk_ms.load(Ordering::Relaxed), 0);
         assert_eq!(shared.stream_play_returned_ms.load(Ordering::Relaxed), 0);
         assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn reset_streaming_state_drains_queue_and_clears_flags() {
+        let shared = SharedState::new();
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(true, Ordering::Relaxed);
+        shared.mark_streaming_first_chunk();
+        shared.mark_streaming_ready();
+        shared
+            .streaming_chunks
+            .push(StreamingAudioChunk {
+                generation: 1,
+                samples: Arc::new(vec![0.0; 4]),
+            })
+            .expect("queue should have capacity");
+
+        shared.reset_streaming_state();
+
+        assert!(!shared.streaming_active.load(Ordering::Relaxed));
+        assert!(!shared.streaming_decode_finished.load(Ordering::Relaxed));
+        assert!(shared.streaming_chunks.pop().is_none());
+        assert_eq!(shared.streaming_first_chunk_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.streaming_ready_ms.load(Ordering::Relaxed), 0);
     }
 
     #[test]

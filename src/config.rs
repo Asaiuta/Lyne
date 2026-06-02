@@ -284,6 +284,8 @@ pub struct EngineSettings {
     pub phase_response: PhaseResponse,
     pub use_cache: bool,
     pub preemptive_resample: bool,
+    #[serde(default)]
+    pub streaming_first_buffer: bool,
     #[serde(default = "default_use_next_prefetch")]
     pub use_next_prefetch: bool,
     pub eq_type: String,
@@ -343,6 +345,7 @@ impl Default for EngineSettings {
             phase_response: PhaseResponse::default(),
             use_cache: false,
             preemptive_resample: true,
+            streaming_first_buffer: false,
             use_next_prefetch: true,
             eq_type: "IIR".to_string(),
             volume: 0.7,
@@ -416,6 +419,7 @@ impl EngineSettings {
         let use_cache = env_flag("AUDIO_USE_CACHE", false);
 
         let preemptive_resample = env_flag("AUDIO_PREEMPTIVE_RESAMPLE", true);
+        let streaming_first_buffer = env_flag("AUDIO_STREAMING_FIRST_BUFFER", false);
 
         let use_next_prefetch = env_flag("AUDIO_USE_NEXT_PREFETCH", true);
 
@@ -489,8 +493,8 @@ impl EngineSettings {
         // Load output bit depth for noise shaper (M-1 fix)
         let output_bits = env_parse_clamped("AUDIO_OUTPUT_BITS", 24_u32, 8_u32, 32_u32);
 
-        log::info!("Loaded config: Quality={:?}, Phase={:?}, Cache={}, Preemptive={}, EQ={}, Loudness={} LUFS, DynamicLoudness={} (ref={}dB), Saturation={}",
-            resample_quality, phase_response, use_cache, preemptive_resample, eq_type, loudness.target_lufs,
+        log::info!("Loaded config: Quality={:?}, Phase={:?}, Cache={}, Preemptive={}, StreamingFirstBuffer={}, EQ={}, Loudness={} LUFS, DynamicLoudness={} (ref={}dB), Saturation={}",
+            resample_quality, phase_response, use_cache, preemptive_resample, streaming_first_buffer, eq_type, loudness.target_lufs,
             dynamic_loudness.enabled, dynamic_loudness.ref_volume_db, saturation.enabled);
 
         Self {
@@ -499,6 +503,7 @@ impl EngineSettings {
             phase_response,
             use_cache,
             preemptive_resample,
+            streaming_first_buffer,
             use_next_prefetch,
             eq_type,
             volume: 0.7,
@@ -612,6 +617,9 @@ impl EngineSettings {
         if let Some(preemptive_resample) = update.preemptive_resample {
             self.preemptive_resample = preemptive_resample;
         }
+        if let Some(streaming_first_buffer) = update.streaming_first_buffer {
+            self.streaming_first_buffer = streaming_first_buffer;
+        }
         if let Some(use_next_prefetch) = update.use_next_prefetch {
             self.use_next_prefetch = use_next_prefetch;
         }
@@ -652,6 +660,7 @@ pub struct EngineSettingsUpdate {
     pub resample_quality: Option<String>,
     pub use_cache: Option<bool>,
     pub preemptive_resample: Option<bool>,
+    pub streaming_first_buffer: Option<bool>,
     pub use_next_prefetch: Option<bool>,
 }
 

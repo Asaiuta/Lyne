@@ -49,6 +49,9 @@ impl AudioPlayer {
     /// Set preemptive_resample setting
     pub fn set_preemptive_resample(&mut self, enabled: bool) {
         self.config.preemptive_resample = enabled;
+        self.shared_state
+            .prefer_default_output_config
+            .store(!enabled, Ordering::Relaxed);
         log::info!(
             "Preemptive resample {}",
             if enabled { "enabled" } else { "disabled" }

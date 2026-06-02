@@ -109,6 +109,9 @@ struct PlaybackDiagnostics {
     channels: u64,
     total_frames: u64,
     position_frames: u64,
+    streaming_active: bool,
+    streaming_decode_finished: bool,
+    streaming_queue_len: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,11 +132,16 @@ struct PlaybackPhaseTimestamps {
     background_loudness_finished: Option<u64>,
     background_loudness_applied: Option<u64>,
     load_complete_applied: Option<u64>,
+    output_prepare_started: Option<u64>,
+    output_prepare_finished: Option<u64>,
     stream_build_started: Option<u64>,
     stream_build_finished: Option<u64>,
     stream_play_returned: Option<u64>,
     first_callback_after_play: Option<u64>,
     first_position_advanced: Option<u64>,
+    streaming_first_chunk: Option<u64>,
+    streaming_ready: Option<u64>,
+    streaming_finished: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -146,6 +154,9 @@ struct PlaybackPhaseDurations {
     background_loudness_ms: Option<u64>,
     background_loudness_finish_to_apply_ms: Option<u64>,
     loudness_finished_to_load_complete_applied_ms: Option<u64>,
+    load_complete_applied_to_output_prepare_start_ms: Option<u64>,
+    output_prepare_ms: Option<u64>,
+    output_prepare_finished_to_stream_build_start_ms: Option<u64>,
     load_complete_applied_to_stream_build_start_ms: Option<u64>,
     stream_build_ms: Option<u64>,
     stream_play_to_first_callback_ms: Option<u64>,
@@ -153,6 +164,9 @@ struct PlaybackPhaseDurations {
     request_started_to_first_position_advanced_ms: Option<u64>,
     request_returned_to_first_position_advanced_ms: Option<u64>,
     decode_finished_to_first_position_advanced_ms: Option<u64>,
+    request_returned_to_streaming_ready_ms: Option<u64>,
+    streaming_ready_to_first_position_advanced_ms: Option<u64>,
+    streaming_ready_to_decode_finished_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -302,6 +316,12 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
     let load_complete_applied = shared_state
         .load_complete_applied_ms
         .load(Ordering::Relaxed);
+    let output_prepare_started = shared_state
+        .output_prepare_started_ms
+        .load(Ordering::Relaxed);
+    let output_prepare_finished = shared_state
+        .output_prepare_finished_ms
+        .load(Ordering::Relaxed);
     let stream_build_started = shared_state.stream_build_started_ms.load(Ordering::Relaxed);
     let stream_build_finished = shared_state
         .stream_build_finished_ms
@@ -313,6 +333,11 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
     let first_position_advanced = shared_state
         .first_position_advanced_ms
         .load(Ordering::Relaxed);
+    let streaming_first_chunk = shared_state
+        .streaming_first_chunk_ms
+        .load(Ordering::Relaxed);
+    let streaming_ready = shared_state.streaming_ready_ms.load(Ordering::Relaxed);
+    let streaming_finished = shared_state.streaming_finished_ms.load(Ordering::Relaxed);
 
     PlaybackPhaseDiagnostics {
         timestamps_ms: PlaybackPhaseTimestamps {
@@ -326,11 +351,16 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
             background_loudness_finished: non_zero_u64(background_loudness_finished),
             background_loudness_applied: non_zero_u64(background_loudness_applied),
             load_complete_applied: non_zero_u64(load_complete_applied),
+            output_prepare_started: non_zero_u64(output_prepare_started),
+            output_prepare_finished: non_zero_u64(output_prepare_finished),
             stream_build_started: non_zero_u64(stream_build_started),
             stream_build_finished: non_zero_u64(stream_build_finished),
             stream_play_returned: non_zero_u64(stream_play_returned),
             first_callback_after_play: non_zero_u64(first_callback_after_play),
             first_position_advanced: non_zero_u64(first_position_advanced),
+            streaming_first_chunk: non_zero_u64(streaming_first_chunk),
+            streaming_ready: non_zero_u64(streaming_ready),
+            streaming_finished: non_zero_u64(streaming_finished),
         },
         durations_ms: PlaybackPhaseDurations {
             load_request_ms: phase_delta_ms(load_request_started, load_request_returned),
@@ -352,6 +382,15 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
             loudness_finished_to_load_complete_applied_ms: phase_delta_ms(
                 loudness_finished,
                 load_complete_applied,
+            ),
+            load_complete_applied_to_output_prepare_start_ms: phase_delta_ms(
+                load_complete_applied,
+                output_prepare_started,
+            ),
+            output_prepare_ms: phase_delta_ms(output_prepare_started, output_prepare_finished),
+            output_prepare_finished_to_stream_build_start_ms: phase_delta_ms(
+                output_prepare_finished,
+                stream_build_started,
             ),
             load_complete_applied_to_stream_build_start_ms: phase_delta_ms(
                 load_complete_applied,
@@ -378,6 +417,15 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
                 decode_finished,
                 first_position_advanced,
             ),
+            request_returned_to_streaming_ready_ms: phase_delta_ms(
+                load_request_returned,
+                streaming_ready,
+            ),
+            streaming_ready_to_first_position_advanced_ms: phase_delta_ms(
+                streaming_ready,
+                first_position_advanced,
+            ),
+            streaming_ready_to_decode_finished_ms: phase_delta_ms(streaming_ready, decode_finished),
         },
     }
 }
@@ -467,6 +515,11 @@ fn build_playback_diagnostics(data: &AppState) -> PlaybackDiagnostics {
         channels: shared_state.channels.load(Ordering::Relaxed),
         total_frames: shared_state.total_frames.load(Ordering::Relaxed),
         position_frames: shared_state.position_frames.load(Ordering::Relaxed),
+        streaming_active: shared_state.streaming_active.load(Ordering::Relaxed),
+        streaming_decode_finished: shared_state
+            .streaming_decode_finished
+            .load(Ordering::Relaxed),
+        streaming_queue_len: shared_state.streaming_chunks.len(),
     }
 }
 
@@ -546,6 +599,8 @@ mod tests {
         assert!(json.contains("\"sensitive_paths_redacted\":true"));
         assert!(json.contains("\"playback_phases\""));
         assert!(json.contains("\"load_request_started\""));
+        assert!(json.contains("\"output_prepare_ms\""));
+        assert!(json.contains("\"streaming_ready\""));
         assert!(json.contains("\"stream_play_to_first_position_advanced_ms\""));
         assert!(!json.contains(&temp_dir.to_string_lossy().to_string()));
 
