@@ -72,10 +72,6 @@ interface LikedCollectionModeProps extends OnlineDetailViewReporterProps {
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
-  onPause: () => Promise<void>;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
 }
@@ -703,9 +699,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
           loginProfile={props.loginProfile()}
           setFeedback={props.setFeedback}
           playback={props.playback}
-          currentTrackPath={props.currentTrackPath}
-          currentSongId={props.currentSongId}
-          isPlaying={props.isPlaying}
           onNavigateToSongWiki={props.onNavigateToSongWiki}
         />
       </Show>
@@ -721,9 +714,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
           onBack={detailNav.exitAlbum}
           onNavigateToSongWiki={props.onNavigateToSongWiki}
           playback={props.playback}
-          currentTrackPath={props.currentTrackPath}
-          currentSongId={props.currentSongId}
-          isPlaying={props.isPlaying}
         />
       </Show>
       <Show when={detailNav.selectedArtist() !== null}>
@@ -754,16 +744,12 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
           onBack={detailNav.exitArtist}
           onNavigateToSongWiki={props.onNavigateToSongWiki}
           playback={props.playback}
-          currentTrackPath={props.currentTrackPath}
-          currentSongId={props.currentSongId}
-          isPlaying={props.isPlaying}
         />
       </Show>
       <Show when={detailNav.selectedVideo() !== null}>
         <VideoDetail
           video={detailNav.selectedVideo()}
           onBack={detailNav.exitVideo}
-          onPauseAudio={props.onPause}
           onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
         />
       </Show>

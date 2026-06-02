@@ -28,9 +28,6 @@ export interface LikedSongsModeProps extends OnlineDetailViewReporterProps {
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 export function LikedSongsMode(props: LikedSongsModeProps) {
@@ -142,9 +139,6 @@ export function LikedSongsMode(props: LikedSongsModeProps) {
             loginProfile={props.loginProfile()}
             setFeedback={props.setFeedback}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
             onRefresh={(playlist) => detailNav.loadPlaylistTracks(playlist, {
               limit: likedTrackLimit(playlist),
               forceRefresh: true

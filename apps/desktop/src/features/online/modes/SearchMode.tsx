@@ -3,6 +3,7 @@ import type { Accessor } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { NcmMediaList } from "../NcmMediaList";
 import { SegmentedTabs } from "../../../components/page/SegmentedTabs";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { NaiveH1 } from "../../../shared/ui/naive";
@@ -30,9 +31,6 @@ export interface SearchModeProps {
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   discoverSectionSubtitle: string;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 export function SearchMode(props: SearchModeProps) {
@@ -116,12 +114,13 @@ export function SearchMode(props: SearchModeProps) {
 
 function SongsResultPanel(props: SearchModeProps) {
   const { t } = useTranslation();
+  const playbackContext = usePlayback();
   return (
     <NcmMediaList
       items={props.songResults}
-      currentSourcePath={props.currentTrackPath}
-      currentSongId={props.currentSongId}
-      isPlayingNow={props.isPlaying}
+      currentSourcePath={playbackContext.currentTrackPath()}
+      currentSongId={playbackContext.currentSongId()}
+      isPlayingNow={playbackContext.isPlaying()}
       onPlay={(item) => void props.playback.playOnlineTrack(item)}
       onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
       onContextAction={(action, item) => {

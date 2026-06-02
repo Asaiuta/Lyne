@@ -6,6 +6,7 @@ import { BackToTop } from "../../../components/page/BackToTop";
 import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { NaiveDropdown, NaiveH2, NaiveP, type NaiveDropdownOption } from "../../../shared/ui/naive";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
@@ -25,9 +26,6 @@ export interface DailySongsDetailProps {
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 const formatDailyUpdatedTime = (timestamp: number | null): string | null => {
@@ -44,6 +42,7 @@ const formatDailyUpdatedTime = (timestamp: number | null): string | null => {
 
 export function DailySongsDetail(props: DailySongsDetailProps) {
   const { t } = useTranslation();
+  const playbackContext = usePlayback();
   const readErrorMessage = createErrorMessageReader(t);
   const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
   const [refreshing, setRefreshing] = createSignal<boolean>(false);
@@ -161,9 +160,9 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
       <PageBody class="ncm-detail-page-body">
         <NcmMediaList
           items={props.tracks}
-          currentSourcePath={props.currentTrackPath}
-          currentSongId={props.currentSongId}
-          isPlayingNow={props.isPlaying}
+          currentSourcePath={playbackContext.currentTrackPath()}
+          currentSongId={playbackContext.currentSongId()}
+          isPlayingNow={playbackContext.isPlaying()}
           onPlay={(item) => void props.playback.playOnlineTrack(item)}
           onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
           onContextAction={handleContextAction}

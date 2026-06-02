@@ -1,9 +1,8 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
-import type { RepeatMode, ShuffleMode } from "../shared/api/types";
 import { useTranslation } from "../shared/i18n";
 import type { NcmArtistSummary } from "../shared/api/ncmDomainTypes";
-import { findActiveLyricIndex, type LyricLine } from "../shared/media/lyrics";
+import { findActiveLyricIndex } from "../shared/media/lyrics";
 import { SpectrumCanvas } from "./player/SpectrumCanvas";
 import { FullPlayerComments } from "./player/FullPlayerComments";
 import { FullPlayerBackground } from "./player/FullPlayerBackground";
@@ -40,51 +39,17 @@ import {
   IconVolumeMute
 } from "./icons";
 import { useUISettings } from "../shared/state/useUISettings";
+import { usePlayback } from "../app/PlaybackContext";
 import { SImage } from "./SImage";
 import "../shared/styles/components/full-player.css";
 
 interface FullPlayerProps {
   isOpen: boolean;
   onClose: () => void;
-  coverUrl: string | null;
-  title: string;
-  subtitle: string;
-  artist?: string | null;
-  album?: string | null;
-  artistLinks?: readonly NcmArtistSummary[];
-  albumLink?: FullPlayerAlbumLink | null;
-  detail?: string | null;
-  currentSongId: number | null;
-  currentMediaId?: string | null;
-  duration: number;
-  currentTime: number;
-  isPlaying: boolean;
-  volume: number;
-  spectrum: number[];
-  lyrics?: readonly LyricLine[];
-  lyricStatus?: "idle" | "loading" | "ready" | "error";
-  lyricError?: string | null;
-  repeatMode: RepeatMode;
-  shuffleMode: ShuffleMode;
-  canSkipPrev: boolean;
-  canSkipNext: boolean;
-  onPlay: () => void;
-  onPause: () => void;
-  onSeek: (position: number) => void;
-  onVolumePreview?: (volume: number) => void;
-  onVolumeChange: (volume: number) => void;
-  onSkipPrev: () => void;
-  onSkipNext: () => void;
-  onCycleRepeat: () => void;
-  onToggleShuffle: () => void;
-  onOpenQueue: () => void;
   onAddToPlaylist?: () => void;
   onDownload?: () => void;
   onSelectArtist?: (artist: NcmArtistSummary) => void;
   onSelectAlbum?: (album: FullPlayerAlbumLink) => void;
-  bgBlur: number;
-  isLiked?: boolean;
-  onToggleLike?: () => void;
   onOpenLyricSettings?: () => void;
 }
 
@@ -129,6 +94,7 @@ function writeLyricOffsetMap(offsets: Record<string, number>) {
 export function FullPlayer(props: FullPlayerProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playback = usePlayback();
   const [volumePopoverOpen, setVolumePopoverOpen] = createSignal(false);
   const [lastAudibleVolume, setLastAudibleVolume] = createSignal(0.7);
   const [closePresence, setClosePresence] = createSignal<boolean>(props.isOpen);
@@ -145,6 +111,38 @@ export function FullPlayer(props: FullPlayerProps) {
     closePresenceTimer = undefined;
   };
   const renderActive = () => props.isOpen || closePresence();
+  const player = () => playback.player();
+  const title = () => playback.title();
+  const subtitle = () => playback.subtitle();
+  const artist = () => playback.artist();
+  const album = () => playback.album();
+  const coverUrl = () => playback.resolvedCoverUrl();
+  const currentSongId = () => playback.currentSongId();
+  const currentMediaId = () => playback.currentMediaId();
+  const duration = () => player()?.duration ?? 0;
+  const baseCurrentTime = () => playback.livePosition() ?? player()?.current_time ?? 0;
+  const isPlaying = () => playback.isPlaying();
+  const volume = () => player()?.volume ?? 0;
+  const spectrum = () => playback.spectrum();
+  const lyrics = () => playback.lyrics();
+  const lyricStatus = () => playback.lyricStatus();
+  const lyricError = () => playback.supplement()?.error ?? null;
+  const repeatMode = () => playback.repeatMode();
+  const shuffleMode = () => playback.shuffleMode();
+  const albumLink = createMemo<FullPlayerAlbumLink | null>(() => {
+    const supplement = playback.supplement();
+    const albumId = supplement?.albumId ?? null;
+    const albumTitle = album();
+    if (albumId === null || !albumTitle) {
+      return null;
+    }
+    return {
+      id: albumId,
+      title: albumTitle,
+      subtitle: artist(),
+      coverUrl: playback.currentCoverUrl()
+    };
+  });
 
   createEffect(() => {
     if (typeof window === "undefined") return;
@@ -189,26 +187,23 @@ export function FullPlayer(props: FullPlayerProps) {
     onClose: props.onClose
   });
 
-  const lyrics = () => props.lyrics ?? [];
-  const lyricStatus = () => props.lyricStatus ?? "idle";
-  const lyricError = () => props.lyricError ?? null;
   const hasLyrics = () => lyrics().length > 0;
   const [uiVolume, setUiVolume] = createSignal(0);
   createEffect(() => {
-    setUiVolume(clamp01(props.volume));
+    setUiVolume(clamp01(volume()));
   });
   const safeVolume = () => uiVolume();
   const previewVolume = (volume: number) => {
     const next = clamp01(volume);
     setUiVolume(next);
-    props.onVolumePreview?.(next);
+    void playback.previewVolume(next);
   };
   const commitVolume = (volume: number) => {
     const next = clamp01(volume);
     setUiVolume(next);
-    props.onVolumeChange(next);
+    void playback.changeVolume(next);
   };
-  const RepeatIcon = () => (props.repeatMode === "one" ? IconRepeatOne : IconRepeat);
+  const RepeatIcon = () => (repeatMode() === "one" ? IconRepeatOne : IconRepeat);
   const VolumeIcon = () => (safeVolume() <= 0.001 ? IconVolumeMute : IconVolumeHigh);
   const handleToggleMute = ((event: MouseEvent) => {
     event.stopPropagation();
@@ -226,21 +221,21 @@ export function FullPlayer(props: FullPlayerProps) {
     const delta = event.deltaY > 0 ? -0.05 : 0.05;
     commitVolume(safeVolume() + delta);
   }) as JSX.EventHandlerUnion<HTMLButtonElement, WheelEvent>;
-  const repeatLabel = () => t(`player.repeat.${props.repeatMode}` as const);
-  const shuffleLabel = () => t(`player.shuffle.${props.shuffleMode}` as const);
+  const repeatLabel = () => t(`player.repeat.${repeatMode()}` as const);
+  const shuffleLabel = () => t(`player.shuffle.${shuffleMode()}` as const);
   const displayTitle = () =>
-    uiSettings.hideBracketedContent ? stripBracketedContent(props.title) : props.title;
+    uiSettings.hideBracketedContent ? stripBracketedContent(title()) : title();
   const displaySubtitle = () =>
-    uiSettings.hideBracketedContent ? stripBracketedContent(props.subtitle) : props.subtitle;
+    uiSettings.hideBracketedContent ? stripBracketedContent(subtitle()) : subtitle();
   const displayArtist = () => {
-    const artist = props.artist?.trim() || null;
-    return artist && uiSettings.hideBracketedContent ? stripBracketedContent(artist) : artist;
+    const value = artist()?.trim() || null;
+    return value && uiSettings.hideBracketedContent ? stripBracketedContent(value) : value;
   };
   const displayAlbum = () => {
-    const album = props.album?.trim() || null;
-    return album && uiSettings.hideBracketedContent ? stripBracketedContent(album) : album;
+    const value = album()?.trim() || null;
+    return value && uiSettings.hideBracketedContent ? stripBracketedContent(value) : value;
   };
-  const playPauseLabel = () => (props.isPlaying ? t("player.aria.pause") : t("player.aria.play"));
+  const playPauseLabel = () => (isPlaying() ? t("player.aria.pause") : t("player.aria.play"));
   const {
     pureLyricMode,
     showComment,
@@ -253,7 +248,7 @@ export function FullPlayer(props: FullPlayerProps) {
     isOpen: () => props.isOpen,
     hasLyrics,
     commentsEnabled: () => uiSettings.fullPlayerShowComments,
-    currentSongId: () => props.currentSongId,
+    currentSongId: () => currentSongId(),
     revealMeta
   });
   const layoutSettings = () => ({
@@ -281,25 +276,26 @@ export function FullPlayer(props: FullPlayerProps) {
     return getLyricTransformOrigin(lyricLineAlign());
   };
   const lowFrequencyEnergy = createMemo(() => {
-    if (!renderActive() || !uiSettings.playerBackgroundLowFreqVolume || props.spectrum.length === 0) return 0;
-    const lows = props.spectrum.slice(0, Math.min(8, props.spectrum.length));
+    if (!renderActive() || !uiSettings.playerBackgroundLowFreqVolume || spectrum().length === 0) return 0;
+    const lows = spectrum().slice(0, Math.min(8, spectrum().length));
     const average = lows.reduce((sum, value) => sum + Math.max(0, value), 0) / lows.length;
     return clamp01(average);
   });
   const rootStyle = createMemo(() => {
-    return getRootStyle(layoutSettings(), props.bgBlur);
+    return getRootStyle(layoutSettings(), uiSettings.bgBlur);
   });
   const handlePlayPauseClick = () => {
-    if (props.isPlaying) {
-      props.onPause();
+    if (isPlaying()) {
+      void playback.pause();
       return;
     }
-    props.onPlay();
+    void playback.play();
   };
   const lyricOffsetKey = createMemo(() => {
-    if (props.currentSongId !== null) return `ncm:${props.currentSongId}`;
-    if (props.currentMediaId !== null && props.currentMediaId !== undefined) {
-      return `local:${props.currentMediaId}`;
+    if (currentSongId() !== null) return `ncm:${currentSongId()}`;
+    const mediaId = currentMediaId();
+    if (mediaId !== null) {
+      return `local:${mediaId}`;
     }
     return null;
   });
@@ -308,7 +304,7 @@ export function FullPlayer(props: FullPlayerProps) {
     return key ? lyricOffsets()[key] ?? 0 : 0;
   });
   const lyricOffsetSeconds = createMemo(() => lyricOffsetMs() / 1000);
-  const currentTime = () => (renderActive() ? props.currentTime + lyricOffsetSeconds() : 0);
+  const currentTime = () => (renderActive() ? baseCurrentTime() + lyricOffsetSeconds() : 0);
   const activeLyricIndex = createMemo(() => {
     if (!renderActive()) return -1;
     return findActiveLyricIndex(lyrics(), currentTime());
@@ -371,7 +367,7 @@ export function FullPlayer(props: FullPlayerProps) {
   } = useFullPlayerComments({
     isOpen: () => props.isOpen,
     showComment,
-    currentSongId: () => props.currentSongId,
+    currentSongId: () => currentSongId(),
     requestFailedLabel: () => t("common.error.requestFailed")
   });
   const {
@@ -381,16 +377,16 @@ export function FullPlayer(props: FullPlayerProps) {
     handleProgressClick,
     handleProgressKeyDown
   } = useFullPlayerProgress({
-    duration: () => props.duration,
-    currentTime: () => (renderActive() ? props.currentTime : 0),
+    duration: () => duration(),
+    currentTime: () => (renderActive() ? baseCurrentTime() : 0),
     lyrics,
     progressAdjustLyric: () => uiSettings.progressAdjustLyric,
-    onSeek: props.onSeek
+    onSeek: playback.seek
   });
-  const displayTime = () => (renderActive() ? props.currentTime : 0);
+  const displayTime = () => (renderActive() ? baseCurrentTime() : 0);
   const { timeLeft, timeRight, timeToggleLabel, cycleTimeFormat } = usePlayerBarTimeFormat({
     timeFormat: () => uiSettings.timeFormat,
-    duration: () => props.duration,
+    duration: () => duration(),
     displayTime,
     t
   });
@@ -452,13 +448,13 @@ export function FullPlayer(props: FullPlayerProps) {
     queue: t("sidebar.nav.queue.label"),
     more: t("player.aria.more"),
     desktopLyric: t("fullPlayer.action.desktopLyric"),
-    qualityTag: props.currentSongId === null ? t("player.quality.source") : t("settings.ncm.songLevel"),
+    qualityTag: currentSongId() === null ? t("player.quality.source") : t("settings.ncm.songLevel"),
     volumeButton: t("player.aria.volumePopover"),
     volumeDialog: t("player.aria.volume")
   });
   const controlShellActions = () => ({
     showLike: uiSettings.fullPlayerShowLike,
-    isLiked: Boolean(props.isLiked),
+    isLiked: Boolean(playback.isLiked()),
     showAddToPlaylist: uiSettings.fullPlayerShowAddToPlaylist,
     canAddToPlaylist: Boolean(props.onAddToPlaylist),
     showDownload: uiSettings.fullPlayerShowDownload,
@@ -469,34 +465,34 @@ export function FullPlayer(props: FullPlayerProps) {
     commentActive: showComment(),
     commentsEnabled: canShowComments(),
     onClose: props.onClose,
-    onToggleLike: props.onToggleLike,
+    onToggleLike: playback.toggleLike,
     onAddToPlaylist: props.onAddToPlaylist,
     onDownload: props.onDownload,
     onToggleComment: toggleComment
   });
   const controlShellTransport = () => ({
-    shuffleActive: props.shuffleMode !== "off",
+    shuffleActive: shuffleMode() !== "off",
     shuffleLabel: shuffleLabel(),
-    isHeartbeat: props.shuffleMode === "heartbeat",
-    canSkipPrev: props.canSkipPrev,
-    canSkipNext: props.canSkipNext,
-    isPlaying: props.isPlaying,
+    isHeartbeat: shuffleMode() === "heartbeat",
+    canSkipPrev: playback.previousEntryId() !== null,
+    canSkipNext: playback.nextEntryId() !== null,
+    isPlaying: isPlaying(),
     playPauseLabel: playPauseLabel(),
-    repeatActive: props.repeatMode !== "off",
+    repeatActive: repeatMode() !== "off",
     repeatLabel: repeatLabel(),
     repeatIcon: RepeatIcon(),
     canSeek: renderActive() && canSeek(),
-    duration: props.duration,
-    currentTime: renderActive() ? props.currentTime : 0,
+    duration: duration(),
+    currentTime: renderActive() ? baseCurrentTime() : 0,
     progress: renderActive() ? progress() : 0,
     timeLeft: renderActive() ? timeLeft() : "0:00",
     timeRight: renderActive() ? timeRight() : "0:00",
     timeToggleLabel: timeToggleLabel(),
-    onToggleShuffle: props.onToggleShuffle,
-    onSkipPrev: props.onSkipPrev,
+    onToggleShuffle: playback.toggleShuffle,
+    onSkipPrev: playback.skipPrevious,
     onPlayPause: handlePlayPauseClick,
-    onSkipNext: props.onSkipNext,
-    onCycleRepeat: props.onCycleRepeat,
+    onSkipNext: playback.skipNext,
+    onCycleRepeat: playback.cycleRepeat,
     onCycleTimeFormat: cycleTimeFormat,
     onProgressClick: handleProgressClick,
     onProgressKeyDown: handleProgressKeyDown
@@ -513,7 +509,7 @@ export function FullPlayer(props: FullPlayerProps) {
     onVolumePreview: previewVolume,
     onVolumeChange: commitVolume,
     onVolumeWheel: handleVolumeWheel,
-    onOpenQueue: props.onOpenQueue
+    onOpenQueue: playback.openQueue
   });
   const overlayMenuState = () => ({
     visible: metaVisible(),
@@ -533,10 +529,10 @@ export function FullPlayer(props: FullPlayerProps) {
   });
   const primaryPanelCover = () => ({
     showCover: !uiSettings.hiddenCovers.player,
-    isPlaying: props.isPlaying,
+    isPlaying: isPlaying(),
     playerType: uiSettings.playerType,
-    coverUrl: props.coverUrl,
-    coverAlt: props.title || t("cover.alt")
+    coverUrl: coverUrl(),
+    coverAlt: title() || t("cover.alt")
   });
   const primaryPanelMeta = () => ({
     showMeta: uiSettings.showPlayMeta,
@@ -546,19 +542,19 @@ export function FullPlayer(props: FullPlayerProps) {
     album: displayAlbum(),
     artistFallback: t("library.group.unknownArtist"),
     albumFallback: t("library.group.unknownAlbum"),
-    artistLinks: props.artistLinks,
-    albumLink: props.albumLink ?? null,
+    artistLinks: playback.supplement()?.artists ?? [],
+    albumLink: albumLink(),
     onSelectArtist: props.onSelectArtist,
     onSelectAlbum: props.onSelectAlbum,
-    detail: props.detail
+    detail: playback.detail()
   });
   const commentsSong = () => ({
     className: commentPanelClassName(),
     songClassName: `full-player-comment-song${uiSettings.hiddenCovers.player ? " is-cover-hidden" : ""}`,
-    coverUrl: props.coverUrl,
-    title: props.title || t("player.fallback.empty"),
-    subtitle: props.subtitle || t("player.subtitle.empty"),
-    coverAlt: props.title || t("cover.alt"),
+    coverUrl: coverUrl(),
+    title: title() || t("player.fallback.empty"),
+    subtitle: subtitle() || t("player.subtitle.empty"),
+    coverAlt: title() || t("cover.alt"),
     filterLabel: t("fullPlayer.comment.exclude"),
     filterUnavailableLabel: t("fullPlayer.comment.excludeUnavailable"),
     backLabel: t("fullPlayer.comment.backToMusic"),
@@ -661,20 +657,20 @@ export function FullPlayer(props: FullPlayerProps) {
       onMouseLeave={handleSurfaceLeave}
     >
       <FullPlayerBackground
-        coverUrl={props.coverUrl}
+        coverUrl={coverUrl()}
         renderActive={renderActive()}
         backgroundType={uiSettings.playerBackgroundType}
         fps={uiSettings.playerBackgroundFps}
         flowSpeed={uiSettings.playerBackgroundFlowSpeed}
         renderScale={uiSettings.playerBackgroundRenderScale}
-        paused={uiSettings.playerBackgroundPause && !props.isPlaying}
+        paused={uiSettings.playerBackgroundPause && !isPlaying()}
         lowFrequencyEnergy={lowFrequencyEnergy()}
       />
-      <Show when={showFullscreenCover() && props.coverUrl}>
+      <Show when={showFullscreenCover() && coverUrl()}>
         {(coverUrl) => (
           <SImage
             src={coverUrl()}
-            alt={props.title || t("cover.alt")}
+            alt={title() || t("cover.alt")}
             class="full-player-fullscreen-cover"
             mediaClass="full-player-fullscreen-cover-media"
             observeVisibility={false}
@@ -751,16 +747,16 @@ export function FullPlayer(props: FullPlayerProps) {
         />
       </Show>
 
-      <Show when={renderActive() && !isMobileFullPlayer() && uiSettings.showSpectrums && props.spectrum.length > 0}>
+      <Show when={renderActive() && !isMobileFullPlayer() && uiSettings.showSpectrums && spectrum().length > 0}>
         <div class={`full-player-spectrum${metaVisible() ? "" : " is-visible"}`} aria-hidden="true">
-          <SpectrumCanvas data={props.spectrum} active={props.isPlaying} />
+          <SpectrumCanvas data={spectrum()} active={isPlaying()} />
         </div>
       </Show>
       <CopyLyricsModal
         open={copyLyricsOpen()}
         lyrics={lyrics()}
-        title={props.title}
-        artist={props.artist}
+        title={title()}
+        artist={artist()}
         onClose={() => setCopyLyricsOpen(false)}
       />
     </div>

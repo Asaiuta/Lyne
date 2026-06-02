@@ -10,6 +10,7 @@ import {
   onCleanup
 } from "solid-js";
 import { createApiClient } from "../../shared/api/client";
+import { usePlayback } from "../../app/PlaybackContext";
 import { ncmSongPageUrl } from "../../shared/api/ncm/urls";
 import { songDetail } from "../../shared/api/ncm/search";
 import {
@@ -36,7 +37,6 @@ import { SImage } from "../../components/SImage";
 import { NaiveH2, NaiveH3, NaiveSkeleton, NaiveSpin } from "../../shared/ui/naive";
 import { createErrorMessageReader, type FeedbackSetter } from "./shared/feedback";
 import { createPlaybackController, type PlaybackController } from "./shared/playback";
-import type { NcmTrackReference } from "./ncmPlayback";
 import type { FeedCardItem, Feedback, OnlineTrackItem } from "./shared/types";
 import {
   normalizeSongWikiData,
@@ -57,13 +57,8 @@ export interface SongWikiRequest {
 interface SongWikiPageProps {
   request: SongWikiRequest;
   onBack: () => void;
-  onStateRefresh: (expectedPath?: string | null) => Promise<void>;
-  onRegisterPlayback: (track: NcmTrackReference) => void;
   onNavigateToArtistDetail: (artist: FeedCardItem) => void;
   onNavigateToAlbumDetail: (album: FeedCardItem) => void;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 interface SheetPreviewState {
@@ -92,6 +87,7 @@ const initialFeedback = (message: string): Feedback => ({
 export function SongWikiPage(props: SongWikiPageProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const readErrorMessage = createErrorMessageReader(t);
   const [status, setStatus] = createSignal<"idle" | "loading" | "success" | "error">("idle");
   const [feedback, setFeedback] = createSignal<Feedback>(initialFeedback(t("ncm.songWiki.feedback.initial")));
@@ -105,8 +101,8 @@ export function SongWikiPage(props: SongWikiPageProps) {
   const playback: PlaybackController = createPlaybackController({
     api,
     t,
-    onRegisterPlayback: props.onRegisterPlayback,
-    onStateRefresh: props.onStateRefresh,
+    onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });
 
@@ -386,9 +382,9 @@ export function SongWikiPage(props: SongWikiPageProps) {
                     <NcmMediaList
                       items={similarSongs()}
                       rowHeight={72}
-                      currentSourcePath={props.currentTrackPath}
-                      currentSongId={props.currentSongId}
-                      isPlayingNow={props.isPlaying}
+                      currentSourcePath={playbackContext.currentTrackPath()}
+                      currentSongId={playbackContext.currentSongId()}
+                      isPlayingNow={playbackContext.isPlaying()}
                       onPlay={(item) => void playback.playOnlineTrack(item)}
                       onEnqueue={(item) => void playback.enqueueOnlineTrack(item)}
                       isLoading={similarSongs().length === 0}

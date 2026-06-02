@@ -7,6 +7,7 @@ import { VirtualizedGrid } from "../../../components/media/VirtualizedGrid";
 import { NcmMediaList } from "../NcmMediaList";
 import { CoverGridSkeleton } from "../../../components/page/Skeleton";
 import { SImage } from "../../../components/SImage";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
@@ -356,9 +357,6 @@ export interface DiscoverNewShowcaseProps {
   onLoadMoreAlbums: () => void;
   onLoadAlbum: (album: DiscoverCardItem) => void | Promise<void>;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 export interface DiscoverMvShowcaseProps {
@@ -458,6 +456,7 @@ export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
 export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const songs = () => props.discoverSongs() ?? [];
   const hasVisibleItems = () => (props.discoverNewKind === "albums" ? props.allAlbums.length > 0 : songs().length > 0);
 
@@ -502,9 +501,9 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
           <div class="online-discover-card-stack content-fade-in">
             <NcmMediaList
               items={songs()}
-              currentSourcePath={props.currentTrackPath}
-              currentSongId={props.currentSongId}
-              isPlayingNow={props.isPlaying}
+              currentSourcePath={playbackContext.currentTrackPath()}
+              currentSongId={playbackContext.currentSongId()}
+              isPlayingNow={playbackContext.isPlaying()}
               hideArtwork={uiSettings.hiddenCovers.new}
               onPlay={(item) => void props.playback.playOnlineTrack(item)}
               onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}

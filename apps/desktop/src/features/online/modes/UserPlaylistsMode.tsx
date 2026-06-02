@@ -43,9 +43,6 @@ export interface UserPlaylistsModeProps extends OnlineDetailViewReporterProps {
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
@@ -265,9 +262,6 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
           loginProfile={props.loginProfile()}
           setFeedback={props.setFeedback}
           playback={props.playback}
-          currentTrackPath={props.currentTrackPath}
-          currentSongId={props.currentSongId}
-          isPlaying={props.isPlaying}
           onNavigateToSongWiki={props.onNavigateToSongWiki}
         />
       </Show>

@@ -11,9 +11,6 @@ export interface OnlineLikedPlaylistDetailRouteProps {
   loginProfile: NcmProfile | null;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
   onRefresh?: (playlist: OnlinePlaylistSummary) => void | Promise<void>;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
 }
@@ -65,9 +62,6 @@ export function OnlineLikedPlaylistDetailRoute(props: OnlineLikedPlaylistDetailR
       loginProfile={props.loginProfile}
       setFeedback={props.setFeedback}
       playback={props.playback}
-      currentTrackPath={props.currentTrackPath}
-      currentSongId={props.currentSongId}
-      isPlaying={props.isPlaying}
     />
   );
 }

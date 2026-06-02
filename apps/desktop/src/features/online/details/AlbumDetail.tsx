@@ -7,6 +7,7 @@ import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { NaiveP, NaiveSpin } from "../../../shared/ui/naive";
@@ -27,14 +28,12 @@ export interface AlbumDetailProps {
   onBack: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 export function AlbumDetail(props: AlbumDetailProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const [detailTab, setDetailTab] = createSignal<"songs" | "comments">("songs");
   const album = () => props.detail ?? props.album;
   const albumId = createMemo<number | null>(() => album()?.id ?? null);
@@ -145,9 +144,9 @@ export function AlbumDetail(props: AlbumDetailProps) {
               >
                 <NcmMediaList
                   items={props.tracks}
-                  currentSourcePath={props.currentTrackPath}
-                  currentSongId={props.currentSongId}
-                  isPlayingNow={props.isPlaying}
+                  currentSourcePath={playbackContext.currentTrackPath()}
+                  currentSongId={playbackContext.currentSongId()}
+                  isPlayingNow={playbackContext.isPlaying()}
                   onPlay={(item) => void props.playback.playOnlineTrack(item)}
                   onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
                   onContextAction={(action, item) => {

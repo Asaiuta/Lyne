@@ -1,20 +1,6 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
-import type { Accessor } from "solid-js";
-import type {
-  NcmLyricLine,
-  NcmTrackReference,
-  NcmTrackSupplement
-} from "../features/online/ncmPlayback";
-import type { UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
+import type { Accessor, Setter } from "solid-js";
 import { getNcmLikedPlaylistCached } from "../features/online/ncmPlaylistSummaryCache";
-import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "../features/online/shared/types";
-import type {
-  PlayerState,
-  QueueEntry,
-  RepeatMode,
-  RequestState,
-  ShuffleMode
-} from "../shared/api/types";
 import type { NcmSongLevel } from "../shared/state/uiSettingsModel";
 import {
   persistUISettingField,
@@ -23,7 +9,7 @@ import {
 import { useUISettings } from "../shared/state/useUISettings";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import { useTranslation } from "../shared/i18n";
-import { isPlaceholderPage, type ActivePage } from "../shared/ui/navigation";
+import { isPlaceholderPage } from "../shared/ui/navigation";
 import { paletteEngine } from "../shared/theme/paletteEngine";
 import {
   applyPlayerCoverAccentColor,
@@ -36,105 +22,38 @@ import type {
   ResolveNcmTrackInput
 } from "../shared/api/client";
 import { readErrorMessage } from "./controllerHelpers";
-import { useNavigationController } from "./useNavigationController";
-import { useNcmTrackEnrichment } from "./useNcmTrackEnrichment";
-import type { WsStatus } from "./playbackSocketContracts";
+import {
+  useNavigationController,
+  type NavigationController
+} from "./useNavigationController";
+import {
+  useNcmTrackEnrichment,
+  type NcmTrackEnrichment
+} from "./useNcmTrackEnrichment";
 import {
   usePlaybackController,
   type PlaybackController
 } from "./usePlaybackController";
-import { useQueueController } from "./useQueueController";
+import { useQueueController, type QueueController } from "./useQueueController";
+import type { PlaybackContextValue } from "./PlaybackContext";
 
 export interface AppController {
-  state: Accessor<RequestState<PlayerState>>;
-  spectrum: Accessor<number[]>;
-  loadingProgress: Accessor<number | null>;
-  wsStatus: Accessor<WsStatus>;
-  preloadRequested: Accessor<boolean>;
-  commandError: Accessor<string | null>;
-  activePage: Accessor<ActivePage>;
-  queueEntries: Accessor<QueueEntry[]>;
-  queueDrawerOpen: Accessor<boolean>;
-  livePosition: Accessor<number | null>;
+  playback: PlaybackContextValue;
+  queue: QueueController;
+  navigation: NavigationController;
+  ncm: NcmTrackEnrichment;
+  ui: AppUiController;
+  refreshPlayback: (expectedPath?: string | null) => Promise<void>;
+}
+
+export interface AppUiController {
   fullPlayerOpen: Accessor<boolean>;
   settingsOpen: Accessor<boolean>;
-  selectedPlaylistId: Accessor<number | null>;
-  localPlaylistRequest: Accessor<{ playlistId: string | null; version: number }>;
-  discoverTabRequest: Accessor<{ tab: string; version: number }>;
-  artistDetailRequest: Accessor<{ artist: FeedCardItem | null; version: number }>;
-  albumDetailRequest: Accessor<{ album: FeedCardItem | null; version: number }>;
-  radioDetailRequest: Accessor<{ radio: FeedCardItem | null; version: number }>;
-  songWikiRequest: Accessor<{ track: OnlineTrackItem | null; version: number }>;
-  radioSubscribeEvent: Accessor<RadioSubscribeEvent | null>;
-  likedCollectionTabRequest: Accessor<{ tab: "playlists" | "albums" | "artists"; version: number }>;
-  player: Accessor<PlayerState | null>;
-  currentTrackPath: Accessor<string | null>;
-  currentMediaId: Accessor<string | null>;
-  hasCoverArt: Accessor<boolean>;
-  coverUrl: Accessor<string | null>;
-  prevEntryId: Accessor<number | null>;
-  nextEntryId: Accessor<number | null>;
-  repeatMode: Accessor<RepeatMode>;
-  shuffleMode: Accessor<ShuffleMode>;
-  canGoBack: Accessor<boolean>;
-  canGoForward: Accessor<boolean>;
-  currentTrackRef: Accessor<NcmTrackReference | undefined>;
-  currentNcmSongId: Accessor<number | null>;
-  currentNcmCoverUrl: Accessor<string | null>;
-  resolvedCoverUrl: Accessor<string | null>;
-  currentLyricLines: Accessor<readonly NcmLyricLine[]>;
-  currentInlineLyric: Accessor<string | null>;
-  fullPlayerTitle: Accessor<string>;
-  fullPlayerArtist: Accessor<string | null>;
-  fullPlayerAlbum: Accessor<string | null>;
-  fullPlayerSubtitle: Accessor<string>;
-  fullPlayerDetail: Accessor<string | null>;
-  lyricStatus: Accessor<"idle" | "loading" | "ready" | "error">;
-  currentNcmSupplement: Accessor<NcmTrackSupplement | null>;
-  currentIsLiked: Accessor<boolean>;
   playbackHistoryVersion: Accessor<number>;
   notifyPlaybackHistoryChanged: () => void;
   uiSettings: ReturnType<typeof useUISettings>;
-  refreshState: (expectedPath?: string | null) => Promise<void>;
-  applyPlayerState: (next: PlayerState) => void;
-  refreshQueue: () => Promise<void>;
-  handlePlay: () => Promise<void>;
-  handlePause: () => Promise<void>;
-  handleSeek: (position: number) => Promise<void>;
-  handleVolumePreview: (volume: number) => Promise<void>;
-  handleVolumeChange: (volume: number) => Promise<void>;
-  handleSkipPrev: () => Promise<void> | undefined;
-  handleSkipNext: () => Promise<void> | undefined;
-  handleCycleRepeat: () => Promise<void>;
-  handleToggleShuffle: () => Promise<void>;
-  handleToggleLike: () => Promise<void>;
-  handleActivePageChange: (page: ActivePage) => void;
-  handleOpenQueue: () => void;
-  handleToggleQueue: () => void;
-  handleOpenQueueFromFullPlayer: () => void;
-  handlePlayQueueEntry: (entryId: number) => Promise<void>;
-  handleRemoveQueueEntry: (entryId: number) => Promise<void>;
-  handleClearQueue: () => Promise<void>;
-  handleSidebarPlaylistSelect: (page: UserPlaylistMode, playlistId: number) => void;
-  handleSidebarLocalPlaylistSelect: (playlistId: string) => void;
-  handleSelectedPlaylistChange: (playlistId: number | null) => void;
-  handleNavigateToDiscover: (tab: string) => void;
-  handleDiscoverTabChange: (tab: string) => void;
-  handleNavigateToArtistDetail: (artist: FeedCardItem) => void;
-  handleNavigateToAlbumDetail: (album: FeedCardItem) => void;
-  handleNavigateToRadioDetail: (radio: FeedCardItem) => void;
-  handleNavigateToSongWiki: (track: OnlineTrackItem) => void;
-  handleRadioSubscribeChange: (radio: FeedCardItem, subscribed: boolean) => void;
-  handleNavigateToLikedCollectionTab: (tab: "playlists" | "albums" | "artists") => void;
-  handleLikedCollectionTabChange: (tab: "playlists" | "albums" | "artists") => void;
-  handleChangeCurrentNcmQuality: (level: NcmSongLevel) => Promise<void>;
-  handleGoBack: () => void;
-  handleGoForward: () => void;
-  registerNcmPlayback: (track: NcmTrackReference) => void;
-  setFullPlayerOpen: (value: boolean) => void;
-  setQueueDrawerOpen: (value: boolean) => void;
-  setSettingsOpen: (value: boolean) => void;
-  setPreloadRequested: (value: boolean) => void;
+  setFullPlayerOpen: Setter<boolean>;
+  setSettingsOpen: Setter<boolean>;
   isPlaceholderPage: typeof isPlaceholderPage;
   personalFmReloadTick: Accessor<number>;
   requestPersonalFmRefresh: () => void;
@@ -332,99 +251,77 @@ export function useAppController(api: ApiClient): AppController {
     });
   });
 
-  return {
+  const playbackContext: PlaybackContextValue = {
     state: playback.state,
     spectrum: playback.spectrum,
     loadingProgress: playback.loadingProgress,
     wsStatus: playback.wsStatus,
-    preloadRequested: playback.preloadRequested,
     commandError: playback.commandError,
-    activePage: navigation.activePage,
-    queueEntries: queue.queueEntries,
-    queueDrawerOpen: queue.queueDrawerOpen,
     livePosition: playback.livePosition,
-    fullPlayerOpen,
-    settingsOpen,
-    selectedPlaylistId: navigation.selectedPlaylistId,
-    localPlaylistRequest: navigation.localPlaylistRequest,
-    discoverTabRequest: navigation.discoverTabRequest,
-    artistDetailRequest: navigation.artistDetailRequest,
-    albumDetailRequest: navigation.albumDetailRequest,
-    radioDetailRequest: navigation.radioDetailRequest,
-    songWikiRequest: navigation.songWikiRequest,
-    radioSubscribeEvent: navigation.radioSubscribeEvent,
-    likedCollectionTabRequest: navigation.likedCollectionTabRequest,
     player: playback.player,
+    isPlaying: () => Boolean(playback.player()?.is_playing),
     currentTrackPath: playback.currentTrackPath,
     currentMediaId: playback.currentMediaId,
-    hasCoverArt: playback.hasCoverArt,
-    coverUrl: playback.coverUrl,
-    prevEntryId: queue.prevEntryId,
-    nextEntryId: queue.nextEntryId,
+    currentSongId: ncm.currentNcmSongId,
+    currentCoverUrl: ncm.currentNcmCoverUrl,
+    resolvedCoverUrl: ncm.resolvedCoverUrl,
+    lyrics: ncm.currentLyricLines,
+    inlineLyric: ncm.currentInlineLyric,
+    title: ncm.fullPlayerTitle,
+    artist: ncm.fullPlayerArtist,
+    album: ncm.fullPlayerAlbum,
+    subtitle: ncm.fullPlayerSubtitle,
+    detail: ncm.fullPlayerDetail,
+    lyricStatus: ncm.lyricStatus,
+    supplement: ncm.currentNcmSupplement,
+    isLiked: ncm.currentIsLiked,
     repeatMode: playback.repeatMode,
     shuffleMode: playback.shuffleMode,
-    canGoBack: navigation.canGoBack,
-    canGoForward: navigation.canGoForward,
-    currentTrackRef: ncm.currentTrackRef,
-    currentNcmSongId: ncm.currentNcmSongId,
-    currentNcmCoverUrl: ncm.currentNcmCoverUrl,
-    resolvedCoverUrl: ncm.resolvedCoverUrl,
-    currentLyricLines: ncm.currentLyricLines,
-    currentInlineLyric: ncm.currentInlineLyric,
-    fullPlayerTitle: ncm.fullPlayerTitle,
-    fullPlayerArtist: ncm.fullPlayerArtist,
-    fullPlayerAlbum: ncm.fullPlayerAlbum,
-    fullPlayerSubtitle: ncm.fullPlayerSubtitle,
-    fullPlayerDetail: ncm.fullPlayerDetail,
-    lyricStatus: ncm.lyricStatus,
-    currentNcmSupplement: ncm.currentNcmSupplement,
-    currentIsLiked: ncm.currentIsLiked,
-    playbackHistoryVersion,
-    notifyPlaybackHistoryChanged,
-    uiSettings,
+    queueEntries: queue.queueEntries,
+    previousEntryId: queue.prevEntryId,
+    nextEntryId: queue.nextEntryId,
     refreshState: playback.refreshState,
     applyPlayerState: playback.applyPlayerState,
-    refreshQueue: queue.refreshQueue,
-    handlePlay: playback.handlePlay,
-    handlePause: playback.handlePause,
-    handleSeek: playback.handleSeek,
-    handleVolumePreview: playback.handleVolumePreview,
-    handleVolumeChange: playback.handleVolumeChange,
-    handleSkipPrev: queue.handleSkipPrev,
-    handleSkipNext: queue.handleSkipNext,
-    handleCycleRepeat: playback.handleCycleRepeat,
-    handleToggleShuffle: playback.handleToggleShuffle,
-    handleToggleLike: ncm.handleToggleLike,
-    handleActivePageChange: navigation.handleActivePageChange,
-    handleOpenQueue: queue.handleOpenQueue,
-    handleToggleQueue: queue.handleToggleQueue,
-    handleOpenQueueFromFullPlayer: queue.handleOpenQueueFromFullPlayer,
-    handlePlayQueueEntry: queue.handlePlayQueueEntry,
-    handleRemoveQueueEntry: queue.handleRemoveQueueEntry,
-    handleClearQueue: queue.handleClearQueue,
-    handleSidebarPlaylistSelect: navigation.handleSidebarPlaylistSelect,
-    handleSidebarLocalPlaylistSelect: navigation.handleSidebarLocalPlaylistSelect,
-    handleSelectedPlaylistChange: navigation.handleSelectedPlaylistChange,
-    handleNavigateToDiscover: navigation.handleNavigateToDiscover,
-    handleDiscoverTabChange: navigation.handleDiscoverTabChange,
-    handleNavigateToArtistDetail: navigation.handleNavigateToArtistDetail,
-    handleNavigateToAlbumDetail: navigation.handleNavigateToAlbumDetail,
-    handleNavigateToRadioDetail: navigation.handleNavigateToRadioDetail,
-    handleNavigateToSongWiki: navigation.handleNavigateToSongWiki,
-    handleRadioSubscribeChange: navigation.handleRadioSubscribeChange,
-    handleNavigateToLikedCollectionTab: navigation.handleNavigateToLikedCollectionTab,
-    handleLikedCollectionTabChange: navigation.handleLikedCollectionTabChange,
-    handleChangeCurrentNcmQuality,
-    handleGoBack: navigation.handleGoBack,
-    handleGoForward: navigation.handleGoForward,
+    play: playback.handlePlay,
+    pause: playback.handlePause,
+    seek: playback.handleSeek,
+    previewVolume: playback.handleVolumePreview,
+    changeVolume: playback.handleVolumeChange,
+    skipPrevious: queue.handleSkipPrev,
+    skipNext: queue.handleSkipNext,
+    cycleRepeat: playback.handleCycleRepeat,
+    toggleShuffle: playback.handleToggleShuffle,
+    toggleLike: ncm.handleToggleLike,
+    openQueue: queue.handleOpenQueueFromFullPlayer,
     registerNcmPlayback: ncm.registerNcmPlayback,
-    setFullPlayerOpen,
-    setQueueDrawerOpen: queue.setQueueDrawerOpen,
-    setSettingsOpen,
-    setPreloadRequested: playback.setPreloadRequested,
-    isPlaceholderPage,
-    personalFmReloadTick,
-    requestPersonalFmRefresh,
-    requestHeartbeatMode
+    changeCurrentNcmQuality: handleChangeCurrentNcmQuality
+  };
+
+  const refreshPlayback = async (expectedPath?: string | null) => {
+    await Promise.all([
+      playback.refreshState(expectedPath),
+      queue.refreshQueue()
+    ]);
+  };
+
+  return {
+    playback: playbackContext,
+    queue,
+    navigation,
+    ncm,
+    refreshPlayback,
+    ui: {
+      fullPlayerOpen,
+      settingsOpen,
+      playbackHistoryVersion,
+      notifyPlaybackHistoryChanged,
+      uiSettings,
+      setFullPlayerOpen,
+      setSettingsOpen,
+      isPlaceholderPage,
+      personalFmReloadTick,
+      requestPersonalFmRefresh,
+      requestHeartbeatMode
+    }
   };
 }

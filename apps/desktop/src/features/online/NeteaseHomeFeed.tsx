@@ -6,6 +6,7 @@ import { SImage } from "../../components/SImage";
 import { IconAlbum, IconArtist, IconCopy, IconPause, IconPlay, IconPlaylist, IconSkipNext, IconThumbDown } from "../../components/icons";
 import { ContextMenu, type ContextMenuItem } from "../../components/media/ContextMenu";
 import { createApiClient, type NcmHomeFeed } from "../../shared/api/client";
+import { usePlayback } from "../../app/PlaybackContext";
 import { useTranslation } from "../../shared/i18n";
 import { cacheFetch } from "../../shared/state/cacheFetch";
 import type { CoverHiddenKey, HomeSectionKey } from "../../shared/state/uiSettingsModel";
@@ -38,11 +39,7 @@ interface NeteaseHomeFeedProps {
   onSelectDailySongs?: () => void;
   onSelectLikedSongs?: () => void;
   onPlayPersonalFm?: () => void;
-  onPlay?: () => void;
-  onPause?: () => void;
-  onSkipNext?: () => void;
   onDislikePersonalFm?: (songId: number | null) => void;
-  isPlaying?: boolean;
   onSelectAlbum?: (album: FeedCardItem) => void;
   onSelectArtist?: (artist: FeedCardItem) => void;
   onSelectVideo?: (video: FeedCardItem) => void;
@@ -110,6 +107,7 @@ function HomeFeedSkeleton() {
 
 export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
   const { t } = useTranslation();
+  const playback = usePlayback();
 
   const [homeFeed] = createResource(
     () => (props.isLoggedIn && props.userId !== null ? props.userId : "anonymous"),
@@ -451,14 +449,14 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                   <button
                     type="button"
                     class="ncm-home-feed-fm-card-control ncm-home-feed-fm-card-control--primary"
-                    aria-label={props.isPlaying ? t("player.aria.pause") : t("player.aria.play")}
+                    aria-label={playback.isPlaying() ? t("player.aria.pause") : t("player.aria.play")}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (props.isPlaying) props.onPause?.();
-                      else props.onPlay?.();
+                      if (playback.isPlaying()) void playback.pause();
+                      else void playback.play();
                     }}
                   >
-                    <Show when={props.isPlaying} fallback={<IconPlay />}>
+                    <Show when={playback.isPlaying()} fallback={<IconPlay />}>
                       <IconPause />
                     </Show>
                   </button>
@@ -468,7 +466,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
                     aria-label={t("player.aria.next")}
                     onClick={(event) => {
                       event.stopPropagation();
-                      props.onSkipNext?.();
+                      void playback.skipNext();
                     }}
                   >
                     <IconSkipNext />

@@ -10,12 +10,12 @@ import {
   IconStorage
 } from "../../components/icons";
 import { createApiClient } from "../../shared/api/client";
+import { usePlayback } from "../../app/PlaybackContext";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { NaiveDropdown, NaiveH2, type NaiveDropdownOption } from "../../shared/ui/naive";
 import { CloudMatchModal } from "./details/CloudMatchModal";
 import { DailySongsBatchModal } from "./details/DailySongsBatchModal";
-import type { NcmTrackReference } from "./ncmPlayback";
 import {
   createErrorMessageReader,
   createFeedbackSetter,
@@ -45,11 +45,6 @@ interface CloudLoadOptions {
 let cloudCache: CloudCacheSnapshot | null = null;
 
 interface CloudPageProps {
-  onStateRefresh: (expectedPath?: string | null) => Promise<void>;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
-  onRegisterPlayback: (track: NcmTrackReference) => void;
   onRequireNcmLogin: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
 }
@@ -106,6 +101,7 @@ const fuzzySearchCloudTracks = (
 export function CloudPage(props: CloudPageProps) {
   const { t } = useTranslation();
   const accountStore = useNcmAccount();
+  const playbackContext = usePlayback();
   const [tracks, setTracks] = createSignal<OnlineTrackItem[]>([]);
   const [totalCount, setTotalCount] = createSignal<number>(0);
   const [sizeBytes, setSizeBytes] = createSignal<number>(0);
@@ -125,8 +121,8 @@ export function CloudPage(props: CloudPageProps) {
   const playback = createPlaybackController({
     api,
     t,
-    onRegisterPlayback: props.onRegisterPlayback,
-    onStateRefresh: props.onStateRefresh,
+    onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });
 
@@ -460,9 +456,9 @@ export function CloudPage(props: CloudPageProps) {
 
         <NcmMediaList
           items={filteredTracks()}
-          currentSourcePath={props.currentTrackPath}
-          currentSongId={props.currentSongId}
-          isPlayingNow={props.isPlaying}
+          currentSourcePath={playbackContext.currentTrackPath()}
+          currentSongId={playbackContext.currentSongId()}
+          isPlayingNow={playbackContext.isPlaying()}
           onPlay={(item) => void playback.playOnlineTrack(item)}
           onDoubleClick={handleTrackDoubleClick}
           onEnqueue={(item) => void playback.enqueueOnlineTrack(item)}

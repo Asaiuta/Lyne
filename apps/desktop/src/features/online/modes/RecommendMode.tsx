@@ -3,6 +3,7 @@ import type { Accessor } from "solid-js";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
 import { PageHeader } from "../../../components/page/PageHeader";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { NaiveP } from "../../../shared/ui/naive";
 import { NeteaseHomeFeed } from "../NeteaseHomeFeed";
@@ -30,12 +31,6 @@ export interface RecommendModeProps extends OnlineDetailViewReporterProps {
   onMarkPendingDiscoverSearch: () => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
-  onPlay: () => Promise<void>;
-  onPause: () => Promise<void>;
-  onSkipNext: () => Promise<void> | undefined;
 }
 
 const api = createApiClient();
@@ -43,6 +38,7 @@ const api = createApiClient();
 export function RecommendMode(props: RecommendModeProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const [isPlayingPersonalFm, setIsPlayingPersonalFm] = createSignal(false);
 
   const detailNav = useDetailNavigation({
@@ -93,11 +89,7 @@ export function RecommendMode(props: RecommendModeProps) {
         onSelectDailySongs={detailNav.enterDailySongs}
         onSelectLikedSongs={detailNav.enterLikedSongs}
         onPlayPersonalFm={() => void playPersonalFmRadio()}
-        onPlay={() => void props.onPlay()}
-        onPause={() => void props.onPause()}
-        onSkipNext={() => void props.onSkipNext()}
         onDislikePersonalFm={(songId) => void dislikePersonalFmTrack(songId)}
-        isPlaying={props.isPlaying}
         onSelectAlbum={(item) => void detailNav.loadAlbumTracks(item)}
         onSelectArtist={(item) => void detailNav.loadArtistTracks(item)}
         onSelectVideo={(item) => detailNav.enterVideo(item)}
@@ -126,13 +118,13 @@ export function RecommendMode(props: RecommendModeProps) {
   };
 
   const dislikePersonalFmTrack = async (previewSongId: number | null) => {
-    const songId = props.currentSongId ?? previewSongId;
+    const songId = playbackContext.currentSongId() ?? previewSongId;
     try {
       if (songId !== null) {
         await api.trashNcmPersonalFmTrack(songId);
         props.setFeedback("success", t("ncm.fm.feedback.disliked"));
       }
-      await props.onSkipNext();
+      await playbackContext.skipNext();
     } catch (error) {
       props.setFeedback("error", readErrorMessage(error));
     }
@@ -173,9 +165,6 @@ export function RecommendMode(props: RecommendModeProps) {
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             setFeedback={props.setFeedback}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
           />
         </Match>
         <Match when={detailNav.selectedLikedSongs()}>
@@ -188,9 +177,6 @@ export function RecommendMode(props: RecommendModeProps) {
               loginProfile={props.loginProfile()}
               setFeedback={props.setFeedback}
               playback={props.playback}
-              currentTrackPath={props.currentTrackPath}
-              currentSongId={props.currentSongId}
-              isPlaying={props.isPlaying}
               onNavigateToSongWiki={props.onNavigateToSongWiki}
             />
           </Show>
@@ -207,9 +193,6 @@ export function RecommendMode(props: RecommendModeProps) {
             onBack={detailNav.exitAlbum}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
           />
         </Match>
         <Match when={detailNav.selectedArtist() !== null}>
@@ -240,9 +223,6 @@ export function RecommendMode(props: RecommendModeProps) {
             onBack={detailNav.exitArtist}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
           />
         </Match>
         <Match when={detailNav.selectedPlaylist() !== null}>
@@ -252,9 +232,6 @@ export function RecommendMode(props: RecommendModeProps) {
             loginProfile={props.loginProfile()}
             setFeedback={props.setFeedback}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
           />
         </Match>
@@ -262,7 +239,6 @@ export function RecommendMode(props: RecommendModeProps) {
           <VideoDetail
             video={detailNav.selectedVideo()}
             onBack={detailNav.exitVideo}
-            onPauseAudio={props.onPause}
             onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
           />
         </Match>

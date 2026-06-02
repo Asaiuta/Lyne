@@ -8,6 +8,7 @@ import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import type { TranslationKey } from "../../../shared/i18n";
 import type { NcmArtistTrackOrder } from "../../../shared/api/ncmDomainTypes";
@@ -48,14 +49,12 @@ export interface ArtistDetailProps {
   onBack: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 export function ArtistDetail(props: ArtistDetailProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const [detailTab, setDetailTab] = createSignal<ArtistDetailTab>("songs");
   const artist = () => props.detail ?? props.artist;
   const artistId = createMemo<number | null>(() => artist()?.id ?? null);
@@ -174,9 +173,9 @@ export function ArtistDetail(props: ArtistDetailProps) {
                   </div>
                   <NcmMediaList
                     items={props.tracks}
-                    currentSourcePath={props.currentTrackPath}
-                    currentSongId={props.currentSongId}
-                    isPlayingNow={props.isPlaying}
+                    currentSourcePath={playbackContext.currentTrackPath()}
+                    currentSongId={playbackContext.currentSongId()}
+                    isPlayingNow={playbackContext.isPlaying()}
                     onPlay={(item) => void props.playback.playOnlineTrack(item)}
                     onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
                     onContextAction={(action, item) => {

@@ -104,10 +104,6 @@ export interface DiscoverModeProps extends OnlineDetailViewReporterProps {
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
-  onPause: () => Promise<void>;
 }
 
 export function DiscoverMode(props: DiscoverModeProps) {
@@ -600,9 +596,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             setFeedback={props.setFeedback}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
           />
         </Match>
         <Match when={detailView().kind === "liked"}>
@@ -615,9 +608,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
               loginProfile={props.loginProfile()}
               setFeedback={props.setFeedback}
               playback={props.playback}
-              currentTrackPath={props.currentTrackPath}
-              currentSongId={props.currentSongId}
-              isPlaying={props.isPlaying}
               onNavigateToSongWiki={props.onNavigateToSongWiki}
             />
           </Show>
@@ -634,9 +624,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
             onBack={detailNav.exitAlbum}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
           />
         </Match>
         <Match when={detailView().kind === "artist"}>
@@ -667,16 +654,12 @@ export function DiscoverMode(props: DiscoverModeProps) {
             onBack={detailNav.exitArtist}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
           />
         </Match>
         <Match when={detailView().kind === "video"}>
           <VideoDetail
             video={detailNav.selectedVideo()}
             onBack={detailNav.exitVideo}
-            onPauseAudio={props.onPause}
             onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
           />
         </Match>
@@ -687,9 +670,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
             loginProfile={props.loginProfile()}
             setFeedback={props.setFeedback}
             playback={props.playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
           />
         </Match>
@@ -753,9 +733,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 onLoadMoreAlbums={() => { void albumCards.loadMore(); }}
                 onLoadAlbum={(album) => void detailNav.loadAlbumTracks(toFeedCardItem(album))}
                 playback={props.playback}
-                currentTrackPath={props.currentTrackPath}
-                currentSongId={props.currentSongId}
-                isPlaying={props.isPlaying}
               />
             </Show>
             <Show when={discoverTab() === "mvs"}>
@@ -799,9 +776,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 onNavigateToSongWiki={props.onNavigateToSongWiki}
                 discoverSectionSubtitle={discoverSectionSubtitle()}
                 playback={props.playback}
-                currentTrackPath={props.currentTrackPath}
-                currentSongId={props.currentSongId}
-                isPlaying={props.isPlaying}
               />
             </Show>
           </div>

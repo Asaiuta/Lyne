@@ -22,6 +22,7 @@ import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
 import { SImage } from "../../../components/SImage";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { copyToClipboard } from "../../../shared/utils/clipboard";
 import { useUISettings } from "../../../shared/state/useUISettings";
@@ -69,14 +70,12 @@ export interface PlaylistDetailProps {
   loginProfile?: NcmProfile | null;
   setFeedback?: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
 }
 
 export function PlaylistDetail(props: PlaylistDetailProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const [menuOpen, setMenuOpen] = createSignal<boolean>(false);
   const [batchOpen, setBatchOpen] = createSignal<boolean>(false);
   const [editOpen, setEditOpen] = createSignal<boolean>(false);
@@ -407,9 +406,9 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                   >
                     <NcmMediaList
                       items={props.tracks}
-                      currentSourcePath={props.currentTrackPath}
-                      currentSongId={props.currentSongId}
-                      isPlayingNow={props.isPlaying}
+                      currentSourcePath={playbackContext.currentTrackPath()}
+                      currentSongId={playbackContext.currentSongId()}
+                      isPlayingNow={playbackContext.isPlaying()}
                       onPlay={(item) => void props.playback.playOnlineTrack(item)}
                       onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
                       onContextAction={handleContextAction}

@@ -13,6 +13,7 @@ import { NcmMediaList } from "./NcmMediaList";
 import { PageHeader } from "../../components/page/PageHeader";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
 import { createApiClient } from "../../shared/api/client";
+import { usePlayback } from "../../app/PlaybackContext";
 import {
   radioDetail,
   radioCategoryHot,
@@ -74,21 +75,7 @@ export interface NeteaseRadioPageProps {
   loginProfile: NcmProfile | null;
   onRequireNcmLogin: () => void;
   onSubscribeChange?: (radio: FeedCardItem, subscribed: boolean) => void;
-  onStateRefresh: (expectedPath?: string | null) => Promise<void>;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
-  onRegisterPlayback: (track: {
-    songId: number;
-    streamUrl: string;
-    sourcePageUrl: string;
-    title: string | null;
-    artist: string | null;
-    album: string | null;
-    coverUrl: string | null;
-    durationSecs: number | null;
-  }) => void;
 }
 
 function RadioCardGrid(props: {
@@ -135,6 +122,7 @@ function RadioCategorySkeleton() {
 export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const [categoriesExpanded, setCategoriesExpanded] = createSignal<boolean>(false);
   const [selectedCategory, setSelectedCategory] = createSignal<RadioCategory | null>(null);
   const [selectedRadio, setSelectedRadio] = createSignal<FeedCardItem | null>(null);
@@ -152,8 +140,8 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
   const playback = createPlaybackController({
     api,
     t,
-    onRegisterPlayback: props.onRegisterPlayback,
-    onStateRefresh: props.onStateRefresh,
+    onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onStateRefresh: playbackContext.refreshState,
     setFeedback: (tone, message) => setFeedback({ tone, message })
   });
 
@@ -573,9 +561,9 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
               >
                 <NcmMediaList
                   items={radioTracks()}
-                  currentSourcePath={props.currentTrackPath}
-                  currentSongId={props.currentSongId}
-                  isPlayingNow={props.isPlaying}
+                  currentSourcePath={playbackContext.currentTrackPath()}
+                  currentSongId={playbackContext.currentSongId()}
+                  isPlayingNow={playbackContext.isPlaying()}
                   hideArtwork={uiSettings.hiddenCovers.radio}
                   onPlay={(item) => void playback.playOnlineTrack(item)}
                   onEnqueue={(item) => void playback.enqueueOnlineTrack(item)}

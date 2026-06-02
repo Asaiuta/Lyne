@@ -5,6 +5,7 @@ import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageSurface } from "../../../components/page/PageSurface";
 import { SImage } from "../../../components/SImage";
+import { usePlayback } from "../../../app/PlaybackContext";
 import { mvDetail, mvDetailInfo, mvUrl, videoDetail, videoDetailInfo, videoUrl } from "../../../shared/api/ncm/video";
 import { ncmMvPageUrl, ncmVideoPageUrl } from "../../../shared/api/ncm/urls";
 import { useTranslation } from "../../../shared/i18n";
@@ -17,7 +18,6 @@ import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
 export interface VideoDetailProps {
   video: FeedCardItem | null;
   onBack: () => void;
-  onPauseAudio: () => void | Promise<void>;
   onSelectArtist?: (artist: FeedCardItem) => void | Promise<void>;
 }
 
@@ -69,6 +69,7 @@ const loadVideoDetail = async (video: FeedCardItem): Promise<VideoDetailPayload>
 
 export function VideoDetail(props: VideoDetailProps) {
   const { t } = useTranslation();
+  const playback = usePlayback();
   const [playError, setPlayError] = createSignal<string | null>(null);
   const [selectedQuality, setSelectedQuality] = createSignal<number | null>(null);
   const [payload, setPayload] = createSignal<VideoDetailPayload>(EMPTY_VIDEO_PAYLOAD);
@@ -144,7 +145,7 @@ export function VideoDetail(props: VideoDetailProps) {
             class="ncm-video-player"
             controls
             poster={displayCover() ?? undefined}
-            onPlay={() => void props.onPauseAudio()}
+            onPlay={() => void playback.pause()}
             onError={() => setPlayError(t("ncm.video.playbackError"))}
           >
             <Show when={source()}>

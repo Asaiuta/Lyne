@@ -10,9 +10,6 @@ export interface OnlinePlaylistDetailRouteProps {
   loginProfile: NcmProfile | null;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
 }
 
@@ -48,9 +45,6 @@ export function OnlinePlaylistDetailRoute(props: OnlinePlaylistDetailRouteProps)
       loginProfile={props.loginProfile}
       setFeedback={props.setFeedback}
       playback={props.playback}
-      currentTrackPath={props.currentTrackPath}
-      currentSongId={props.currentSongId}
-      isPlaying={props.isPlaying}
     />
   );
 }

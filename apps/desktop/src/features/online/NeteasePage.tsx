@@ -3,7 +3,7 @@ import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { useUISearch } from "../../shared/state/UISearchContext";
-import type { NcmTrackReference } from "./ncmPlayback";
+import { usePlayback } from "../../app/PlaybackContext";
 import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "./shared/types";
 import {
   createErrorMessageReader,
@@ -23,14 +23,6 @@ const api = createApiClient();
 
 interface NeteasePageProps {
   mode: NeteasePageMode;
-  onStateRefresh: (expectedPath?: string | null) => Promise<void>;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
-  onPlay: () => Promise<void>;
-  onPause: () => Promise<void>;
-  onSkipNext: () => Promise<void> | undefined;
-  onRegisterPlayback: (track: NcmTrackReference) => void;
   selectedPlaylistId?: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   onNavigate?: (page: "recommend" | "discover" | "radio") => void;
@@ -51,6 +43,7 @@ interface NeteasePageProps {
 export function NeteasePage(props: NeteasePageProps) {
   const { t } = useTranslation();
   const accountStore = useNcmAccount();
+  const playbackContext = usePlayback();
   const { query: globalQuery, submitNonce } = useUISearch();
 
   const [isCheckingLogin, setIsCheckingLogin] = createSignal(false);
@@ -68,11 +61,11 @@ export function NeteasePage(props: NeteasePageProps) {
   const setRawFeedback = createFeedbackSetter(setFeedback);
   const readErrorMessage = createErrorMessageReader(t);
 
-  const playback = createPlaybackController({
+  const onlinePlayback = createPlaybackController({
     api,
     t,
-    onRegisterPlayback: props.onRegisterPlayback,
-    onStateRefresh: props.onStateRefresh,
+    onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });
 
@@ -137,13 +130,7 @@ export function NeteasePage(props: NeteasePageProps) {
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             onMarkPendingDiscoverSearch={() => setPendingDiscoverSearch(true)}
             setFeedback={setRawFeedback}
-            playback={playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
-            onPlay={props.onPlay}
-            onPause={props.onPause}
-            onSkipNext={props.onSkipNext}
+            playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
           />
         </Match>
@@ -162,11 +149,7 @@ export function NeteasePage(props: NeteasePageProps) {
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
-            playback={playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
-            onPause={props.onPause}
+            playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
           />
         </Match>
@@ -178,10 +161,7 @@ export function NeteasePage(props: NeteasePageProps) {
             onBeginLogin={props.onRequireNcmLogin}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             setFeedback={setRawFeedback}
-            playback={playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
+            playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
           />
         </Match>
@@ -196,11 +176,7 @@ export function NeteasePage(props: NeteasePageProps) {
             onTabChange={props.onLikedCollectionTabChange}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
-            playback={playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
-            onPause={props.onPause}
+            playback={onlinePlayback}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             radioSubscribeEvent={props.radioSubscribeEvent}
@@ -223,10 +199,7 @@ export function NeteasePage(props: NeteasePageProps) {
             }}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             setFeedback={setRawFeedback}
-            playback={playback}
-            currentTrackPath={props.currentTrackPath}
-            currentSongId={props.currentSongId}
-            isPlaying={props.isPlaying}
+            playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
           />
         </Match>

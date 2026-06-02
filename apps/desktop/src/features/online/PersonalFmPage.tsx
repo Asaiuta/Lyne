@@ -13,11 +13,11 @@ import {
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import { SImage } from "../../components/SImage";
 import { createApiClient } from "../../shared/api/client";
+import { usePlayback } from "../../app/PlaybackContext";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { useUISettings } from "../../shared/state/useUISettings";
 import { NaiveH2, NaiveH3 } from "../../shared/ui/naive";
-import type { NcmTrackReference } from "./ncmPlayback";
 import { NcmMediaList } from "./NcmMediaList";
 import {
   createErrorMessageReader,
@@ -30,14 +30,6 @@ import type { Feedback, OnlineTrackItem } from "./shared/types";
 const api = createApiClient();
 
 interface PersonalFmPageProps {
-  onStateRefresh: (expectedPath?: string | null) => Promise<void>;
-  currentTrackPath: string | null;
-  currentSongId: number | null;
-  isPlaying: boolean;
-  onPlay: () => Promise<void>;
-  onPause: () => Promise<void>;
-  onSkipNext: () => Promise<void> | undefined;
-  onRegisterPlayback: (track: NcmTrackReference) => void;
   onRequireNcmLogin: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   reloadTick?: number;
@@ -47,6 +39,7 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
   const { t } = useTranslation();
   const accountStore = useNcmAccount();
   const uiSettings = useUISettings();
+  const playbackContext = usePlayback();
   const readErrorMessage = createErrorMessageReader(t);
   const [tracks, setTracks] = createSignal<OnlineTrackItem[]>([]);
   const [isLoading, setIsLoading] = createSignal<boolean>(false);
@@ -56,15 +49,19 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
   const playback = createPlaybackController({
     api,
     t,
-    onRegisterPlayback: props.onRegisterPlayback,
-    onStateRefresh: props.onStateRefresh,
+    onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });
 
   const activeAccount = createMemo(() => accountStore.activeAccount());
   const currentFmTrack = createMemo<OnlineTrackItem | null>(() => {
-    const songId = props.currentSongId;
+    const songId = playbackContext.currentSongId();
     return songId === null ? tracks()[0] ?? null : tracks().find((item) => item.songId === songId) ?? tracks()[0] ?? null;
+  });
+  const isCurrentFmTrackPlaying = createMemo<boolean>(() => {
+    const songId = playbackContext.currentSongId();
+    return playbackContext.isPlaying() && songId !== null && tracks().some((item) => item.songId === songId);
   });
   const coverUrl = createMemo<string | null>(() => currentFmTrack()?.artworkUrl ?? tracks()[0]?.artworkUrl ?? null);
   const heroTitle = createMemo<string>(() => currentFmTrack()?.title ?? t("ncm.fm.preview.title"));
@@ -120,8 +117,8 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
   };
 
   const handlePlayPause = async () => {
-    if (props.isPlaying && props.currentSongId !== null && tracks().some((item) => item.songId === props.currentSongId)) {
-      await props.onPause();
+    if (isCurrentFmTrackPlaying()) {
+      await playbackContext.pause();
       return;
     }
     if (tracks().length === 0) {
@@ -141,8 +138,8 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
       await api.trashNcmPersonalFmTrack(item.songId);
       setTracks((current) => current.filter((track) => track.songId !== item.songId));
       setRawFeedback("success", t("ncm.fm.feedback.disliked"));
-      if (props.currentSongId === item.songId) {
-        await props.onSkipNext();
+      if (playbackContext.currentSongId() === item.songId) {
+        await playbackContext.skipNext();
       }
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
@@ -249,10 +246,10 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
                   onClick={() => void handlePlayPause()}
                   disabled={isLoading()}
                 >
-                  <Show when={props.isPlaying && props.currentSongId !== null && tracks().some((item) => item.songId === props.currentSongId)} fallback={<IconPlay />}>
+                  <Show when={isCurrentFmTrackPlaying()} fallback={<IconPlay />}>
                     <IconPause />
                   </Show>
-                  <span>{props.isPlaying ? t("player.aria.pause") : t("player.aria.play")}</span>
+                  <span>{isCurrentFmTrackPlaying() ? t("player.aria.pause") : t("player.aria.play")}</span>
                 </button>
                 <button
                   type="button"
@@ -299,9 +296,9 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
             <NcmMediaList
               items={tracks()}
               rowHeight={74}
-              currentSourcePath={props.currentTrackPath}
-              currentSongId={props.currentSongId}
-              isPlayingNow={props.isPlaying}
+              currentSourcePath={playbackContext.currentTrackPath()}
+              currentSongId={playbackContext.currentSongId()}
+              isPlayingNow={playbackContext.isPlaying()}
               onPlay={(item) => void playback.playOnlineTrack(item)}
               onDoubleClick={(item) => void playback.playOnlineTrack(item)}
               onEnqueue={(item) => void playback.enqueueOnlineTrack(item)}
