@@ -64,16 +64,25 @@ impl AudioCommandBackend for WasapiCommandBackend<'_> {
         let _ = self.player.seek(frame);
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self, shared_state: &SharedState) {
         let _ = self.player.stop();
+        shared_state.clear_active_output_stream();
     }
 
-    fn stop_for_load(&mut self) {
+    fn stop_for_load(&mut self, shared_state: &SharedState) {
         let _ = self.player.stop();
+        shared_state.clear_active_output_stream();
+    }
+
+    fn recover_playback(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
+        let _ = self.player.stop();
+        shared_state.clear_active_output_stream();
+        AudioCommandFlow::StopPlayback
     }
 
     fn shutdown(&mut self, shared_state: &SharedState) {
         let _ = self.player.stop();
+        shared_state.clear_active_output_stream();
         shared_state.state.store(PlayerState::Stopped);
     }
 

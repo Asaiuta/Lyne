@@ -31,6 +31,7 @@ pub struct CallbackScratch {
     process_buffer: Vec<f64>,
     resample_leftover: Vec<f64>,
     resample_leftover_pos: usize,
+    streaming_local_generation: u64,
     streaming_chunk: Option<StreamingAudioChunk>,
     streaming_chunk_pos: usize,
     final_output: Vec<f64>,
@@ -88,6 +89,7 @@ impl CallbackScratch {
             process_buffer,
             resample_leftover: Vec::with_capacity(resample_samples),
             resample_leftover_pos: 0,
+            streaming_local_generation: 0,
             streaming_chunk: None,
             streaming_chunk_pos: 0,
             final_output: Vec::with_capacity(resample_samples),
@@ -103,6 +105,28 @@ impl CallbackScratch {
             final_output: self.final_output.capacity(),
         }
     }
+}
+
+fn clear_streaming_scratch(scratch: &mut CallbackScratch) {
+    scratch.resample_leftover.clear();
+    scratch.resample_leftover_pos = 0;
+    scratch.streaming_chunk = None;
+    scratch.streaming_chunk_pos = 0;
+}
+
+fn refresh_streaming_scratch_generation(
+    scratch: &mut CallbackScratch,
+    resampler: &mut Option<StreamingResampler>,
+    generation: u64,
+) {
+    if scratch.streaming_local_generation == generation {
+        return;
+    }
+    clear_streaming_scratch(scratch);
+    if let Some(ref mut rs) = resampler {
+        rs.reset();
+    }
+    scratch.streaming_local_generation = generation;
 }
 
 // ============================================================================
@@ -495,10 +519,7 @@ fn reset_dsp_state_if_requested(
     if let Some(ref mut rs) = resampler {
         rs.reset();
     }
-    scratch.resample_leftover.clear();
-    scratch.resample_leftover_pos = 0;
-    scratch.streaming_chunk = None;
-    scratch.streaming_chunk_pos = 0;
+    clear_streaming_scratch(scratch);
 }
 
 fn request_gapless_preload_if_needed(shared: &SharedState, total: usize, current_pos: usize) {
@@ -529,9 +550,10 @@ fn streaming_has_buffered_samples(
         scratch.streaming_chunk_pos = 0;
     }
 
-    let current_chunk_has_samples = scratch.streaming_chunk.as_ref().is_some_and(|chunk| {
-        scratch.streaming_chunk_pos < chunk.samples.len()
-    });
+    let current_chunk_has_samples = scratch
+        .streaming_chunk
+        .as_ref()
+        .is_some_and(|chunk| scratch.streaming_chunk_pos < chunk.samples.len());
     if current_chunk_has_samples {
         return true;
     }
@@ -895,6 +917,7 @@ fn render_streaming_audio_output(
     let output_len = data.len();
     let mut samples_written = 0;
     let generation = shared.streaming_generation.load(Ordering::Acquire);
+    refresh_streaming_scratch_generation(scratch, resampler, generation);
 
     if output_path.uses_final_buffer() && scratch.final_output.len() < output_len {
         scratch.final_output.resize(output_len, 0.0);
@@ -951,7 +974,7 @@ fn render_streaming_audio_output(
         if frames_read == 0 {
             if shared.streaming_decode_finished.load(Ordering::Acquire) {
                 shared.streaming_active.store(false, Ordering::Release);
-            } else {
+            } else if !shared.is_loading.load(Ordering::Acquire) {
                 shared.audio_underrun_count.fetch_add(1, Ordering::Relaxed);
                 shared.audio_underrun_silence_frames.fetch_add(
                     ((output_len - samples_written) / channels) as u64,
@@ -1096,6 +1119,20 @@ pub fn audio_callback_lockfree(
     let output_path = OutputPath::new(resampler.is_some(), shaper_enabled);
 
     if shared.state.load() != PlayerState::Playing {
+        data.fill(0.0);
+        return;
+    }
+    if shared.is_loading.load(Ordering::Acquire) && !shared.streaming_active.load(Ordering::Acquire)
+    {
+        data.fill(0.0);
+        return;
+    }
+    if shared
+        .active_stream_source_sample_rate
+        .load(Ordering::Acquire)
+        != 0
+        && !shared.active_output_stream_matches_current()
+    {
         data.fill(0.0);
         return;
     }
@@ -1256,7 +1293,9 @@ mod tests {
         shared
             .channels
             .store(TEST_CHANNELS as u64, Ordering::Relaxed);
-        shared.streaming_generation.store(generation, Ordering::Relaxed);
+        shared
+            .streaming_generation
+            .store(generation, Ordering::Relaxed);
         shared.streaming_active.store(true, Ordering::Relaxed);
         shared
             .streaming_decode_finished
@@ -1523,6 +1562,144 @@ mod tests {
     }
 
     #[test]
+    fn callback_loading_without_streaming_outputs_silence_without_eof() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(0, Ordering::Relaxed);
+        shared.position_frames.store(0, Ordering::Relaxed);
+        shared.is_loading.store(true, Ordering::Release);
+        shared.streaming_active.store(false, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut out = vec![1.0f32; 8];
+        let mut scratch = CallbackScratch::new(2);
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.0; 8]);
+        assert_eq!(shared.state.load(), PlayerState::Playing);
+        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.first_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn callback_warm_stream_format_mismatch_outputs_silence_without_progress() {
+        let shared = SharedState::new();
+        shared
+            .audio_buffer
+            .store(Arc::new(vec![0.5, -0.5, 0.25, -0.25]));
+        shared.sample_rate.store(48_000, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(2, Ordering::Relaxed);
+        shared.position_frames.store(0, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared.mark_stream_play_returned();
+        shared.mark_active_output_stream(44_100, 44_100, 2);
+
+        let mut chain = DspChain::new(48_000.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut out = vec![1.0f32; 4];
+        let mut scratch = CallbackScratch::new(2);
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.0; 4]);
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.first_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn callback_streaming_generation_change_discards_resampler_leftover() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(200, Ordering::Relaxed);
+        shared.streaming_generation.store(2, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared
+            .streaming_chunks
+            .push(StreamingAudioChunk {
+                generation: 2,
+                samples: Arc::new(vec![0.25, -0.25, 0.5, -0.5]),
+            })
+            .expect("streaming queue should have capacity");
+
+        let mut scratch = CallbackScratch::new(2);
+        scratch.streaming_local_generation = 1;
+        scratch
+            .resample_leftover
+            .extend_from_slice(&[0.9, 0.9, 0.9, 0.9]);
+        scratch.resample_leftover_pos = 0;
+        scratch.streaming_chunk = Some(StreamingAudioChunk {
+            generation: 1,
+            samples: Arc::new(vec![0.8, 0.8, 0.8, 0.8]),
+        });
+        scratch.streaming_chunk_pos = 0;
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let mut resampler = Some(StreamingResampler::new(2, 44_100, 44_100).unwrap());
+        let mut out = vec![0.0f32; 4];
+        let mut current_pos = 100;
+
+        let written = render_streaming_audio_output(
+            &mut out,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut resampler,
+            &mut scratch,
+            OutputPath::ResamplerOnly,
+            &mut current_pos,
+        );
+
+        assert_eq!(written, 4);
+        assert_eq!(out, vec![0.25, -0.25, 0.5, -0.5]);
+        assert_eq!(current_pos, 102);
+        assert_eq!(scratch.streaming_local_generation, 2);
+        assert!(scratch.resample_leftover.is_empty());
+        assert!(scratch.streaming_chunk.is_none());
+    }
+
+    #[test]
     fn callback_streaming_empty_queue_records_underrun_before_decode_finishes() {
         let shared = SharedState::new();
         shared.sample_rate.store(44_100, Ordering::Relaxed);
@@ -1650,6 +1827,47 @@ mod tests {
         assert!(!shared.streaming_active.load(Ordering::Relaxed));
         assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
         assert!(shared.streaming_chunks.is_empty());
+    }
+
+    #[test]
+    fn callback_memory_streaming_finished_empty_queue_stops_at_eof() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(2, Ordering::Relaxed);
+        shared.position_frames.store(2, Ordering::Relaxed);
+        shared.streaming_generation.store(13, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(true, Ordering::Relaxed);
+        shared.streaming_memory_mode.store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut scratch = CallbackScratch::new(2);
+        let mut out = vec![1.0f32; 4];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.0; 4]);
+        assert_eq!(shared.state.load(), PlayerState::Stopped);
+        assert!(!shared.streaming_active.load(Ordering::Relaxed));
+        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 1);
     }
 
     #[test]

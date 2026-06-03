@@ -27,6 +27,11 @@ pub const EVENT_PLAYBACK_STOPPED: u32 = 1 << 10;
 pub const EVENT_PLAYBACK_SEEKED: u32 = 1 << 11;
 pub const EVENT_PLAYBACK_HISTORY_UPDATED: u32 = 1 << 12;
 
+pub const AUDIO_COMMAND_CODE_STOP: u64 = 1;
+pub const AUDIO_COMMAND_CODE_STOP_FOR_LOAD: u64 = 2;
+pub const AUDIO_COMMAND_CODE_STREAMING_LOAD_READY: u64 = 3;
+pub const AUDIO_COMMAND_CODE_ENSURE_PLAYBACK_PROGRESS: u64 = 4;
+
 // ============ Commands & State ============
 
 pub(crate) fn playback_phase_time_ms() -> u64 {
@@ -80,9 +85,11 @@ pub struct StreamingTrackStart {
     pub sample_rate: u32,
     pub channels: usize,
     pub total_frames: u64,
+    pub start_frame: u64,
     pub file_path: String,
     pub cached_loudness: Option<CachedLoudness>,
     pub metadata: crate::decoder::TrackMetadata,
+    pub memory_mode: bool,
 }
 
 #[derive(Debug)]
@@ -100,6 +107,9 @@ pub enum AudioCommand {
     StopForLoad,
     Shutdown,
     Seek(f64),
+    EnsurePlaybackProgress {
+        generation: u64,
+    },
     SetExternalIrConvolver {
         ir_data: Vec<f64>,
         channels: usize,
@@ -125,7 +135,7 @@ pub enum AudioCommand {
     },
     StreamingLoadFinished {
         generation: u64,
-        samples: Vec<f64>,
+        samples: Option<Vec<f64>>,
         total_frames: u64,
     },
     LoadError {
@@ -284,8 +294,11 @@ pub struct SharedState {
     pub streaming_chunks: ArrayQueue<StreamingAudioChunk>,
     pub streaming_active: AtomicBool,
     pub streaming_decode_finished: AtomicBool,
+    pub streaming_memory_mode: AtomicBool,
+    pub streaming_full_buffer_published: AtomicBool,
     pub streaming_generation: AtomicU64,
     pub streaming_first_chunk_ms: AtomicU64,
+    pub streaming_ready_sent_ms: AtomicU64,
     pub streaming_ready_ms: AtomicU64,
     pub streaming_finished_ms: AtomicU64,
     pub exclusive_mode: AtomicBool,
@@ -344,6 +357,33 @@ pub struct SharedState {
     pub stream_build_started_ms: AtomicU64,
     pub stream_build_finished_ms: AtomicU64,
     pub stream_play_returned_ms: AtomicU64,
+    pub streaming_ready_play_requested_ms: AtomicU64,
+    pub streaming_ready_play_completed_ms: AtomicU64,
+    pub streaming_ready_play_start_playback_ms: AtomicU64,
+    pub streaming_ready_play_skipped_ms: AtomicU64,
+    pub audio_command_stop_received_ms: AtomicU64,
+    pub audio_command_stop_completed_ms: AtomicU64,
+    pub audio_command_stop_for_load_received_ms: AtomicU64,
+    pub audio_command_stop_for_load_completed_ms: AtomicU64,
+    pub audio_command_streaming_ready_received_ms: AtomicU64,
+    pub audio_command_streaming_ready_completed_ms: AtomicU64,
+    pub audio_command_ensure_progress_received_ms: AtomicU64,
+    pub audio_command_ensure_progress_completed_ms: AtomicU64,
+    pub playback_recovery_requested_ms: AtomicU64,
+    pub playback_recovery_count: AtomicU64,
+    pub audio_command_received_count: AtomicU64,
+    pub audio_command_completed_count: AtomicU64,
+    pub audio_command_last_received_code: AtomicU64,
+    pub audio_command_last_completed_code: AtomicU64,
+    pub active_stream_source_sample_rate: AtomicU64,
+    pub active_stream_output_sample_rate: AtomicU64,
+    pub active_stream_channels: AtomicU64,
+    pub active_stream_device_id: std::sync::atomic::AtomicI64,
+    pub active_stream_exclusive_mode: AtomicBool,
+    pub active_stream_prefer_default_output_config: AtomicBool,
+    pub active_stream_running: AtomicBool,
+    pub parked_output_stream_count: AtomicU64,
+    pub parked_output_stream_release_count: AtomicU64,
     pub first_callback_after_play_ms: AtomicU64,
     pub first_position_advanced_ms: AtomicU64,
     pub decode_budget_rejection_count: AtomicU64,
@@ -396,8 +436,11 @@ impl SharedState {
             streaming_chunks: ArrayQueue::new(128),
             streaming_active: AtomicBool::new(false),
             streaming_decode_finished: AtomicBool::new(false),
+            streaming_memory_mode: AtomicBool::new(false),
+            streaming_full_buffer_published: AtomicBool::new(false),
             streaming_generation: AtomicU64::new(0),
             streaming_first_chunk_ms: AtomicU64::new(0),
+            streaming_ready_sent_ms: AtomicU64::new(0),
             streaming_ready_ms: AtomicU64::new(0),
             streaming_finished_ms: AtomicU64::new(0),
             exclusive_mode: AtomicBool::new(false),
@@ -445,6 +488,33 @@ impl SharedState {
             stream_build_started_ms: AtomicU64::new(0),
             stream_build_finished_ms: AtomicU64::new(0),
             stream_play_returned_ms: AtomicU64::new(0),
+            streaming_ready_play_requested_ms: AtomicU64::new(0),
+            streaming_ready_play_completed_ms: AtomicU64::new(0),
+            streaming_ready_play_start_playback_ms: AtomicU64::new(0),
+            streaming_ready_play_skipped_ms: AtomicU64::new(0),
+            audio_command_stop_received_ms: AtomicU64::new(0),
+            audio_command_stop_completed_ms: AtomicU64::new(0),
+            audio_command_stop_for_load_received_ms: AtomicU64::new(0),
+            audio_command_stop_for_load_completed_ms: AtomicU64::new(0),
+            audio_command_streaming_ready_received_ms: AtomicU64::new(0),
+            audio_command_streaming_ready_completed_ms: AtomicU64::new(0),
+            audio_command_ensure_progress_received_ms: AtomicU64::new(0),
+            audio_command_ensure_progress_completed_ms: AtomicU64::new(0),
+            playback_recovery_requested_ms: AtomicU64::new(0),
+            playback_recovery_count: AtomicU64::new(0),
+            audio_command_received_count: AtomicU64::new(0),
+            audio_command_completed_count: AtomicU64::new(0),
+            audio_command_last_received_code: AtomicU64::new(0),
+            audio_command_last_completed_code: AtomicU64::new(0),
+            active_stream_source_sample_rate: AtomicU64::new(0),
+            active_stream_output_sample_rate: AtomicU64::new(0),
+            active_stream_channels: AtomicU64::new(0),
+            active_stream_device_id: std::sync::atomic::AtomicI64::new(-1),
+            active_stream_exclusive_mode: AtomicBool::new(false),
+            active_stream_prefer_default_output_config: AtomicBool::new(false),
+            active_stream_running: AtomicBool::new(false),
+            parked_output_stream_count: AtomicU64::new(0),
+            parked_output_stream_release_count: AtomicU64::new(0),
             first_callback_after_play_ms: AtomicU64::new(0),
             first_position_advanced_ms: AtomicU64::new(0),
             decode_budget_rejection_count: AtomicU64::new(0),
@@ -503,10 +573,19 @@ impl SharedState {
         self.stream_build_started_ms.store(0, Ordering::Relaxed);
         self.stream_build_finished_ms.store(0, Ordering::Relaxed);
         self.stream_play_returned_ms.store(0, Ordering::Relaxed);
+        self.streaming_ready_play_requested_ms
+            .store(0, Ordering::Relaxed);
+        self.streaming_ready_play_completed_ms
+            .store(0, Ordering::Relaxed);
+        self.streaming_ready_play_start_playback_ms
+            .store(0, Ordering::Relaxed);
+        self.streaming_ready_play_skipped_ms
+            .store(0, Ordering::Relaxed);
         self.first_callback_after_play_ms
             .store(0, Ordering::Relaxed);
         self.first_position_advanced_ms.store(0, Ordering::Relaxed);
         self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
+        self.streaming_ready_sent_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_ms.store(0, Ordering::Relaxed);
         self.streaming_finished_ms.store(0, Ordering::Relaxed);
     }
@@ -515,8 +594,12 @@ impl SharedState {
         self.streaming_active.store(false, Ordering::Release);
         self.streaming_decode_finished
             .store(false, Ordering::Release);
+        self.streaming_memory_mode.store(false, Ordering::Release);
+        self.streaming_full_buffer_published
+            .store(false, Ordering::Release);
         while self.streaming_chunks.pop().is_some() {}
         self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
+        self.streaming_ready_sent_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_ms.store(0, Ordering::Relaxed);
         self.streaming_finished_ms.store(0, Ordering::Relaxed);
     }
@@ -543,6 +626,11 @@ impl SharedState {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+    }
+
+    pub fn mark_streaming_ready_sent(&self) {
+        self.streaming_ready_sent_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
     }
 
     pub fn mark_streaming_ready(&self) {
@@ -611,6 +699,168 @@ impl SharedState {
         self.first_position_advanced_ms.store(0, Ordering::Relaxed);
         self.stream_play_returned_ms
             .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_ready_play_requested(&self) {
+        self.streaming_ready_play_requested_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_ready_play_completed(&self) {
+        self.streaming_ready_play_completed_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_ready_play_start_playback(&self) {
+        self.streaming_ready_play_start_playback_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_ready_play_skipped(&self) {
+        self.streaming_ready_play_skipped_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    fn mark_audio_command_received(&self, code: u64) {
+        self.audio_command_received_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.audio_command_last_received_code
+            .store(code, Ordering::Relaxed);
+    }
+
+    fn mark_audio_command_completed(&self, code: u64) {
+        self.audio_command_completed_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.audio_command_last_completed_code
+            .store(code, Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_stop_received(&self) {
+        self.mark_audio_command_received(AUDIO_COMMAND_CODE_STOP);
+        self.audio_command_stop_received_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_stop_completed(&self) {
+        self.mark_audio_command_completed(AUDIO_COMMAND_CODE_STOP);
+        self.audio_command_stop_completed_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_stop_for_load_received(&self) {
+        self.mark_audio_command_received(AUDIO_COMMAND_CODE_STOP_FOR_LOAD);
+        self.audio_command_stop_for_load_received_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_stop_for_load_completed(&self) {
+        self.mark_audio_command_completed(AUDIO_COMMAND_CODE_STOP_FOR_LOAD);
+        self.audio_command_stop_for_load_completed_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_streaming_ready_received(&self) {
+        self.mark_audio_command_received(AUDIO_COMMAND_CODE_STREAMING_LOAD_READY);
+        self.audio_command_streaming_ready_received_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_streaming_ready_completed(&self) {
+        self.mark_audio_command_completed(AUDIO_COMMAND_CODE_STREAMING_LOAD_READY);
+        self.audio_command_streaming_ready_completed_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_ensure_progress_received(&self) {
+        self.mark_audio_command_received(AUDIO_COMMAND_CODE_ENSURE_PLAYBACK_PROGRESS);
+        self.audio_command_ensure_progress_received_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_audio_command_ensure_progress_completed(&self) {
+        self.mark_audio_command_completed(AUDIO_COMMAND_CODE_ENSURE_PLAYBACK_PROGRESS);
+        self.audio_command_ensure_progress_completed_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_playback_recovery_requested(&self) {
+        self.playback_recovery_count.fetch_add(1, Ordering::Relaxed);
+        self.playback_recovery_requested_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_active_output_stream(
+        &self,
+        source_sample_rate: u32,
+        output_sample_rate: u32,
+        channels: usize,
+    ) {
+        self.active_stream_source_sample_rate
+            .store(u64::from(source_sample_rate), Ordering::Release);
+        self.active_stream_output_sample_rate
+            .store(u64::from(output_sample_rate), Ordering::Release);
+        self.active_stream_channels
+            .store(channels as u64, Ordering::Release);
+        self.active_stream_device_id
+            .store(self.device_id.load(Ordering::Relaxed), Ordering::Release);
+        self.active_stream_exclusive_mode.store(
+            self.exclusive_mode.load(Ordering::Relaxed),
+            Ordering::Release,
+        );
+        self.active_stream_prefer_default_output_config.store(
+            self.prefer_default_output_config.load(Ordering::Relaxed),
+            Ordering::Release,
+        );
+        self.active_stream_running.store(true, Ordering::Release);
+    }
+
+    pub fn clear_active_output_stream(&self) {
+        self.active_stream_source_sample_rate
+            .store(0, Ordering::Release);
+        self.active_stream_output_sample_rate
+            .store(0, Ordering::Release);
+        self.active_stream_channels.store(0, Ordering::Release);
+        self.active_stream_device_id.store(-1, Ordering::Release);
+        self.active_stream_exclusive_mode
+            .store(false, Ordering::Release);
+        self.active_stream_prefer_default_output_config
+            .store(false, Ordering::Release);
+        self.active_stream_running.store(false, Ordering::Release);
+    }
+
+    pub fn set_parked_output_stream_count(&self, count: usize) {
+        self.parked_output_stream_count
+            .store(count as u64, Ordering::Release);
+    }
+
+    pub fn mark_parked_output_streams_released(&self, count: usize) {
+        self.parked_output_stream_count.store(0, Ordering::Release);
+        self.parked_output_stream_release_count
+            .fetch_add(count as u64, Ordering::Relaxed);
+    }
+
+    pub fn mark_active_output_stream_running(&self) {
+        self.active_stream_running.store(true, Ordering::Release);
+    }
+
+    pub fn mark_active_output_stream_paused(&self) {
+        self.active_stream_running.store(false, Ordering::Release);
+    }
+
+    pub fn active_output_stream_matches_current(&self) -> bool {
+        self.active_stream_source_sample_rate
+            .load(Ordering::Acquire)
+            == self.sample_rate.load(Ordering::Relaxed)
+            && self.active_stream_channels.load(Ordering::Acquire)
+                == self.channels.load(Ordering::Relaxed)
+            && self.active_stream_device_id.load(Ordering::Acquire)
+                == self.device_id.load(Ordering::Relaxed)
+            && self.active_stream_exclusive_mode.load(Ordering::Acquire)
+                == self.exclusive_mode.load(Ordering::Relaxed)
+            && self
+                .active_stream_prefer_default_output_config
+                .load(Ordering::Acquire)
+                == self.prefer_default_output_config.load(Ordering::Relaxed)
     }
 
     pub fn mark_first_callback_after_play(&self) {
@@ -759,6 +1009,44 @@ mod tests {
         shared.mark_stream_play_returned();
         shared.mark_first_callback_after_play();
         assert!(shared.first_callback_after_play_ms.load(Ordering::Relaxed) > 0);
+    }
+
+    #[test]
+    fn active_output_stream_key_tracks_runtime_format_and_mode() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.device_id.store(3, Ordering::Relaxed);
+        shared.exclusive_mode.store(false, Ordering::Relaxed);
+        shared
+            .prefer_default_output_config
+            .store(false, Ordering::Relaxed);
+
+        shared.mark_active_output_stream(44_100, 44_100, 2);
+        assert!(shared.active_output_stream_matches_current());
+
+        shared.sample_rate.store(48_000, Ordering::Relaxed);
+        assert!(!shared.active_output_stream_matches_current());
+
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared
+            .prefer_default_output_config
+            .store(true, Ordering::Relaxed);
+        assert!(!shared.active_output_stream_matches_current());
+
+        shared
+            .prefer_default_output_config
+            .store(false, Ordering::Relaxed);
+        shared.exclusive_mode.store(true, Ordering::Relaxed);
+        assert!(!shared.active_output_stream_matches_current());
+
+        shared.clear_active_output_stream();
+        assert_eq!(
+            shared
+                .active_stream_source_sample_rate
+                .load(Ordering::Acquire),
+            0
+        );
     }
 }
 

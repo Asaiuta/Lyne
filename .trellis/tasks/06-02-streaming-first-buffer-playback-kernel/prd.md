@@ -20,6 +20,8 @@ Reduce cold `load-to-progress` latency by introducing a guarded streaming-first-
 - Decode in a producer thread by chunks and push bounded chunks to a lock-free playback queue.
 - Publish playback metadata and start playback after an initial buffer threshold is available, without waiting for full-track decode.
 - Continue collecting the full decoded buffer in the background; once complete, publish it to `audio_buffer` without resetting current playback position.
+- Stage 2: add a memory-bounded streaming mode for large decoded outputs. Small tracks continue to publish a full `audio_buffer`; tracks whose estimated decoded PCM exceeds `AUDIO_STREAMING_FULL_BUFFER_LIMIT_MIB` must avoid accumulating and publishing the full buffer.
+- Stage 2: in memory-bounded streaming mode, producer chunks must use backpressure instead of being dropped, because the queue becomes the playback source of truth until EOF.
 - Preserve generation/cancel guards so stale producer chunks or finished buffers cannot replace newer user actions.
 - Keep loudness non-blocking: ReplayGain/cache may apply immediately; missing loudness uses 0 dB until full buffer/background analysis is available.
 - Record diagnostics sufficient to separate first-buffer readiness from full decode completion.
@@ -33,6 +35,8 @@ Reduce cold `load-to-progress` latency by introducing a guarded streaming-first-
 - [x] `cargo check --bin audio_server` passes.
 - [x] Targeted unit tests cover queue consumption, underrun behavior, generation reset, and default-path compatibility.
 - [x] Real-file benchmark evidence compares streaming enabled vs disabled on at least one 44.1 kHz local file. See `research/release-benchmark-results.md`.
+- [x] Stage 2 keeps small-track full-buffer behavior and avoids full-buffer publication for large decoded outputs above the configured threshold.
+- [x] Stage 2 keeps no-full-buffer playback underrun-free in a real-file benchmark and records the selected streaming memory mode in diagnostics.
 
 ## Definition of Done
 
@@ -46,7 +50,7 @@ Reduce cold `load-to-progress` latency by introducing a guarded streaming-first-
 - Full gapless pipeline unification.
 - Manual next-track streaming promote.
 - Network/WebDAV streaming.
-- Perfect seek during active streaming decode.
+- Perfect seek during active no-full-buffer streaming decode. Stage 2 may keep seek conservative until decoder-seek replay is implemented.
 - UI settings surface for the new flag.
 - Removing the existing full-buffer load path.
 

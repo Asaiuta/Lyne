@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use crossbeam::channel::Sender;
@@ -24,6 +25,56 @@ use crate::processor::{LoudnessDatabase, StreamingResampler};
 
 const STREAMING_CHUNK_FRAMES: usize = 4096;
 const STREAMING_START_BUFFER_FRAMES: u64 = 8192;
+const STREAMING_QUEUE_BACKPRESSURE_SLEEP: Duration = Duration::from_millis(2);
+const STREAMING_READY_APPLIED_POLL: Duration = Duration::from_millis(1);
+const STREAMING_PROGRESS_WATCHDOG_DELAY: Duration = Duration::from_millis(120);
+const F64_SAMPLE_BYTES: u128 = std::mem::size_of::<f64>() as u128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamingFullBufferMode {
+    PublishFullBuffer,
+    MemoryOnly,
+}
+
+impl StreamingFullBufferMode {
+    fn publishes_full_buffer(self) -> bool {
+        matches!(self, Self::PublishFullBuffer)
+    }
+}
+
+fn streaming_full_buffer_limit_bytes(config: &EngineSettings) -> u128 {
+    u128::from(config.streaming_full_buffer_limit_mib) * 1024 * 1024
+}
+
+fn estimated_decoded_pcm_bytes(output_frames: u64, channels: usize) -> Option<u128> {
+    u128::from(output_frames)
+        .checked_mul(channels as u128)?
+        .checked_mul(F64_SAMPLE_BYTES)
+}
+
+fn streaming_full_buffer_mode(
+    estimated_output_frames: Option<u64>,
+    channels: usize,
+    config: &EngineSettings,
+) -> StreamingFullBufferMode {
+    let limit_bytes = streaming_full_buffer_limit_bytes(config);
+    if limit_bytes == 0 {
+        return StreamingFullBufferMode::MemoryOnly;
+    }
+
+    let Some(estimated_output_frames) = estimated_output_frames else {
+        return StreamingFullBufferMode::MemoryOnly;
+    };
+    let Some(estimated_bytes) = estimated_decoded_pcm_bytes(estimated_output_frames, channels)
+    else {
+        return StreamingFullBufferMode::MemoryOnly;
+    };
+    if estimated_bytes > limit_bytes {
+        StreamingFullBufferMode::MemoryOnly
+    } else {
+        StreamingFullBufferMode::PublishFullBuffer
+    }
+}
 
 pub(super) fn cached_loudness_from_db(
     db: Option<&LoudnessDatabase>,
@@ -393,6 +444,7 @@ pub(super) fn decode_file_streaming_first_buffer(
     generation: u64,
     cmd_tx: &Sender<AudioCommand>,
     autoplay: bool,
+    start_time_secs: f64,
 ) -> Result<(), String> {
     let decode_started_at = std::time::Instant::now();
     shared_state.mark_decode_started();
@@ -410,35 +462,58 @@ pub(super) fn decode_file_streaming_first_buffer(
     let target_sr = target_sample_rate_for_device(original_sr, config, device_id);
     let (final_target_sr, final_need_resample) =
         effective_resample_plan(original_sr, target_sr, config);
+    let start_time_secs = start_time_secs.max(0.0);
     let cached_loudness = cached_loudness_from_db(loudness_db.as_deref(), path);
-    let estimated_input_frames = info.total_frames.unwrap_or(0);
-    let estimated_output_frames = if final_need_resample {
-        ((estimated_input_frames as f64 * final_target_sr as f64) / original_sr.max(1) as f64)
-            .ceil() as u64
-    } else {
-        estimated_input_frames
-    };
+    let estimated_input_frames = info.total_frames;
+    let estimated_output_frames = estimated_input_frames.map(|frames| {
+        if final_need_resample {
+            ((frames as f64 * final_target_sr as f64) / original_sr.max(1) as f64).ceil() as u64
+        } else {
+            frames
+        }
+    });
+    let estimated_start_frame = (start_time_secs * f64::from(final_target_sr)) as u64;
+    let start_frame = estimated_output_frames
+        .map(|total| estimated_start_frame.min(total))
+        .unwrap_or(estimated_start_frame);
+    let estimated_input_frames_for_progress = estimated_input_frames.unwrap_or(0);
+    let full_buffer_mode = streaming_full_buffer_mode(estimated_output_frames, channels, config);
+    let estimated_pcm_mib = estimated_output_frames
+        .and_then(|frames| estimated_decoded_pcm_bytes(frames, channels))
+        .map(|bytes| bytes / 1024 / 1024);
 
     let existing_decoded_samples = published_decoded_samples(shared_state);
-    let output_sample_capacity = record_budget_rejection(
-        shared_state,
-        reserve_decoded_buffer_capacity(
-            DecodedBufferKind::CurrentTrack,
-            path,
-            estimated_input_frames,
-            original_sr,
-            final_target_sr,
-            channels,
-            final_need_resample,
-            existing_decoded_samples,
-        ),
-    )?;
-    let mut full_samples = Vec::with_capacity(output_sample_capacity);
+    let mut full_samples = if full_buffer_mode.publishes_full_buffer() {
+        let output_sample_capacity = record_budget_rejection(
+            shared_state,
+            reserve_decoded_buffer_capacity(
+                DecodedBufferKind::CurrentTrack,
+                path,
+                estimated_input_frames_for_progress,
+                original_sr,
+                final_target_sr,
+                channels,
+                final_need_resample,
+                existing_decoded_samples,
+            ),
+        )?;
+        Some(Vec::with_capacity(output_sample_capacity))
+    } else {
+        None
+    };
+    log::info!(
+        "Streaming first-buffer mode for '{}': {:?}, estimated_pcm_mib={:?}, full_buffer_limit_mib={}",
+        path,
+        full_buffer_mode,
+        estimated_pcm_mib,
+        config.streaming_full_buffer_limit_mib
+    );
     let mut pending_samples = Vec::with_capacity(STREAMING_CHUNK_FRAMES * channels);
     let mut decoded_chunk = Vec::new();
     let mut ready_sent = false;
     let mut queued_frames = 0_u64;
     let mut decoded_frames = 0_u64;
+    let mut output_samples = 0_u64;
     let mut chunk_count = 0_u64;
 
     let mut resampler = if final_need_resample {
@@ -461,13 +536,24 @@ pub(super) fn decode_file_streaming_first_buffer(
         None
     };
 
+    if start_time_secs > 0.0 {
+        decoder.seek(start_time_secs).map_err(|e| {
+            format!(
+                "Failed to seek streaming decoder to {:.3}s: {}",
+                start_time_secs, e
+            )
+        })?;
+    }
+
     let track = StreamingTrackStart {
         sample_rate: final_target_sr,
         channels,
-        total_frames: estimated_output_frames,
+        total_frames: estimated_output_frames.unwrap_or(0),
+        start_frame,
         file_path: path.to_string(),
         cached_loudness,
         metadata: info.metadata,
+        memory_mode: !full_buffer_mode.publishes_full_buffer(),
     };
 
     while decoder
@@ -478,24 +564,38 @@ pub(super) fn decode_file_streaming_first_buffer(
         ensure_streaming_load_current(shared_state, load_cancel, generation)?;
 
         decoded_frames += (decoded_chunk.len() / channels) as u64;
-        let produced_start = full_samples.len();
-        if let Some(ref mut rs) = resampler {
-            rs.process_chunk_append(&decoded_chunk, &mut full_samples);
+        let produced_samples = if let Some(full_samples) = full_samples.as_mut() {
+            let produced_start = full_samples.len();
+            if let Some(ref mut rs) = resampler {
+                rs.process_chunk_append(&decoded_chunk, full_samples);
+            } else {
+                full_samples.extend_from_slice(&decoded_chunk);
+            }
+            pending_samples.extend_from_slice(&full_samples[produced_start..]);
+
+            record_budget_rejection(
+                shared_state,
+                ensure_decoded_samples_fit_budget(
+                    DecodedBufferKind::CurrentTrack,
+                    path,
+                    full_samples.len(),
+                    existing_decoded_samples,
+                ),
+            )?;
+            full_samples.len().saturating_sub(produced_start)
         } else {
-            full_samples.extend_from_slice(&decoded_chunk);
-        }
-        pending_samples.extend_from_slice(&full_samples[produced_start..]);
+            let produced_start = pending_samples.len();
+            if let Some(ref mut rs) = resampler {
+                rs.process_chunk_append(&decoded_chunk, &mut pending_samples);
+            } else {
+                pending_samples.extend_from_slice(&decoded_chunk);
+            }
+            pending_samples.len().saturating_sub(produced_start)
+        };
+        output_samples = output_samples.saturating_add(produced_samples as u64);
 
-        record_budget_rejection(
-            shared_state,
-            ensure_decoded_samples_fit_budget(
-                DecodedBufferKind::CurrentTrack,
-                path,
-                full_samples.len(),
-                existing_decoded_samples,
-            ),
-        )?;
-
+        let pre_ready_frame_limit =
+            (!ready_sent).then(|| STREAMING_START_BUFFER_FRAMES.saturating_sub(queued_frames));
         queued_frames += push_ready_streaming_chunks(
             shared_state,
             load_cancel,
@@ -503,15 +603,30 @@ pub(super) fn decode_file_streaming_first_buffer(
             channels,
             &mut pending_samples,
             false,
+            full_buffer_mode,
+            pre_ready_frame_limit,
         )?;
         if !ready_sent && queued_frames >= STREAMING_START_BUFFER_FRAMES {
             publish_streaming_ready(shared_state, cmd_tx, generation, &track, autoplay);
             ready_sent = true;
+            if !full_buffer_mode.publishes_full_buffer() {
+                wait_for_streaming_ready_applied(shared_state, load_cancel, generation)?;
+            }
+            queued_frames += push_ready_streaming_chunks(
+                shared_state,
+                load_cancel,
+                generation,
+                channels,
+                &mut pending_samples,
+                false,
+                full_buffer_mode,
+                None,
+            )?;
         }
 
         decoded_chunk.clear();
         chunk_count += 1;
-        let total_estimated = estimated_input_frames.max(1);
+        let total_estimated = estimated_input_frames_for_progress.max(1);
         let progress = ((decoded_frames as f64 / total_estimated as f64) * 100.0).min(99.0) as u64;
         shared_state
             .load_progress
@@ -519,9 +634,24 @@ pub(super) fn decode_file_streaming_first_buffer(
     }
 
     if let Some(ref mut rs) = resampler {
-        let produced_start = full_samples.len();
-        rs.flush_into(&mut full_samples);
-        pending_samples.extend_from_slice(&full_samples[produced_start..]);
+        let produced_samples = if let Some(full_samples) = full_samples.as_mut() {
+            let produced_start = full_samples.len();
+            rs.flush_into(full_samples);
+            pending_samples.extend_from_slice(&full_samples[produced_start..]);
+            full_samples.len().saturating_sub(produced_start)
+        } else {
+            let produced_start = pending_samples.len();
+            rs.flush_into(&mut pending_samples);
+            pending_samples.len().saturating_sub(produced_start)
+        };
+        output_samples = output_samples.saturating_add(produced_samples as u64);
+    }
+
+    if !ready_sent {
+        publish_streaming_ready(shared_state, cmd_tx, generation, &track, autoplay);
+        if !full_buffer_mode.publishes_full_buffer() {
+            wait_for_streaming_ready_applied(shared_state, load_cancel, generation)?;
+        }
     }
 
     queued_frames += push_ready_streaming_chunks(
@@ -531,13 +661,13 @@ pub(super) fn decode_file_streaming_first_buffer(
         channels,
         &mut pending_samples,
         true,
+        full_buffer_mode,
+        None,
     )?;
 
-    if !ready_sent {
-        publish_streaming_ready(shared_state, cmd_tx, generation, &track, autoplay);
-    }
-
-    let total_frames = (full_samples.len() / channels) as u64;
+    let decoded_remaining_frames = output_samples / channels as u64;
+    let total_frames = estimated_output_frames
+        .unwrap_or_else(|| start_frame.saturating_add(decoded_remaining_frames));
     shared_state.load_progress.store(100, Ordering::Relaxed);
     let decode_duration_ms = decode_started_at
         .elapsed()
@@ -556,7 +686,7 @@ pub(super) fn decode_file_streaming_first_buffer(
         .store(decoded_frames, Ordering::Relaxed);
     shared_state
         .last_decode_output_samples
-        .store(full_samples.len() as u64, Ordering::Relaxed);
+        .store(output_samples, Ordering::Relaxed);
     shared_state
         .last_decode_chunk_count
         .store(chunk_count, Ordering::Relaxed);
@@ -566,12 +696,13 @@ pub(super) fn decode_file_streaming_first_buffer(
     shared_state.mark_decode_finished();
 
     log::info!(
-        "Streaming first-buffer decode complete: {} chunks, {} queued frames, {} output samples ({}→{} Hz)",
+        "Streaming first-buffer decode complete: {} chunks, {} queued frames, {} output samples ({}→{} Hz, mode={:?})",
         chunk_count,
         queued_frames,
-        full_samples.len(),
+        output_samples,
         original_sr,
-        final_target_sr
+        final_target_sr,
+        full_buffer_mode
     );
 
     ensure_streaming_load_current(shared_state, load_cancel, generation)?;
@@ -607,15 +738,35 @@ fn publish_streaming_ready(
     if shared_state.load_generation.load(Ordering::Acquire) != generation {
         return;
     }
-    shared_state.is_loading.store(false, Ordering::Release);
-    shared_state.load_progress.store(100, Ordering::Relaxed);
-    let _ = cmd_tx.send(AudioCommand::StreamingLoadReady {
+    let ready_sent = cmd_tx.send(AudioCommand::StreamingLoadReady {
         generation,
         track: track.clone(),
     });
+    if ready_sent.is_ok() {
+        shared_state.mark_streaming_ready_sent();
+        if autoplay {
+            let cmd_tx = cmd_tx.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(STREAMING_PROGRESS_WATCHDOG_DELAY);
+                let _ = cmd_tx.send(AudioCommand::EnsurePlaybackProgress { generation });
+            });
+        }
+    }
     if autoplay && shared_state.state.load() != state::PlayerState::Paused {
         let _ = cmd_tx.send(AudioCommand::Play);
     }
+}
+
+fn wait_for_streaming_ready_applied(
+    shared_state: &SharedState,
+    load_cancel: &AtomicBool,
+    generation: u64,
+) -> Result<(), String> {
+    while shared_state.streaming_ready_ms.load(Ordering::Acquire) == 0 {
+        ensure_streaming_load_current(shared_state, load_cancel, generation)?;
+        std::thread::sleep(STREAMING_READY_APPLIED_POLL);
+    }
+    Ok(())
 }
 
 fn push_ready_streaming_chunks(
@@ -625,11 +776,16 @@ fn push_ready_streaming_chunks(
     channels: usize,
     pending_samples: &mut Vec<f64>,
     force_all: bool,
+    full_buffer_mode: StreamingFullBufferMode,
+    max_pushed_frames: Option<u64>,
 ) -> Result<u64, String> {
     let mut pushed_frames = 0_u64;
     let chunk_samples = STREAMING_CHUNK_FRAMES * channels;
 
     while pending_samples.len() >= chunk_samples || (force_all && !pending_samples.is_empty()) {
+        if max_pushed_frames.is_some_and(|limit| pushed_frames >= limit) {
+            break;
+        }
         let take = if pending_samples.len() >= chunk_samples {
             chunk_samples
         } else {
@@ -637,7 +793,13 @@ fn push_ready_streaming_chunks(
         };
         let samples = pending_samples.drain(..take).collect::<Vec<_>>();
         let frames = (samples.len() / channels) as u64;
-        if push_streaming_chunk(shared_state, load_cancel, generation, samples)? {
+        if push_streaming_chunk(
+            shared_state,
+            load_cancel,
+            generation,
+            samples,
+            full_buffer_mode,
+        )? {
             pushed_frames += frames;
         }
     }
@@ -650,21 +812,132 @@ fn push_streaming_chunk(
     load_cancel: &AtomicBool,
     generation: u64,
     samples: Vec<f64>,
+    full_buffer_mode: StreamingFullBufferMode,
 ) -> Result<bool, String> {
     if samples.is_empty() {
         return Ok(false);
     }
 
-    let chunk = StreamingAudioChunk {
+    let mut chunk = StreamingAudioChunk {
         generation,
         samples: Arc::new(samples),
     };
-    ensure_streaming_load_current(shared_state, load_cancel, generation)?;
-    match shared_state.streaming_chunks.push(chunk) {
-        Ok(()) => {
-            shared_state.mark_streaming_first_chunk();
-            Ok(true)
+
+    loop {
+        ensure_streaming_load_current(shared_state, load_cancel, generation)?;
+        match shared_state.streaming_chunks.push(chunk) {
+            Ok(()) => {
+                shared_state.mark_streaming_first_chunk();
+                return Ok(true);
+            }
+            Err(returned) if full_buffer_mode.publishes_full_buffer() => {
+                let _ = returned;
+                return Ok(false);
+            }
+            Err(returned) => {
+                chunk = returned;
+                std::thread::sleep(STREAMING_QUEUE_BACKPRESSURE_SLEEP);
+            }
         }
-        Err(_returned) => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streaming_full_buffer_mode_keeps_small_outputs_publishable() {
+        let mut config = EngineSettings {
+            streaming_full_buffer_limit_mib: 256,
+            ..EngineSettings::default()
+        };
+        config = config.normalized();
+
+        let frames = 44_100 * 60;
+        assert_eq!(
+            streaming_full_buffer_mode(Some(frames), 2, &config),
+            StreamingFullBufferMode::PublishFullBuffer
+        );
+    }
+
+    #[test]
+    fn streaming_full_buffer_mode_switches_large_outputs_to_memory_only() {
+        let mut config = EngineSettings {
+            streaming_full_buffer_limit_mib: 256,
+            ..EngineSettings::default()
+        };
+        config = config.normalized();
+
+        let frames = 44_100 * 60 * 10;
+        assert_eq!(
+            streaming_full_buffer_mode(Some(frames), 2, &config),
+            StreamingFullBufferMode::MemoryOnly
+        );
+    }
+
+    #[test]
+    fn streaming_full_buffer_mode_zero_limit_forces_memory_only() {
+        let mut config = EngineSettings {
+            streaming_full_buffer_limit_mib: 0,
+            ..EngineSettings::default()
+        };
+        config = config.normalized();
+
+        assert_eq!(
+            streaming_full_buffer_mode(Some(44_100), 2, &config),
+            StreamingFullBufferMode::MemoryOnly
+        );
+    }
+
+    #[test]
+    fn streaming_full_buffer_mode_unknown_size_is_memory_only() {
+        let config = EngineSettings::default().normalized();
+
+        assert_eq!(
+            streaming_full_buffer_mode(None, 2, &config),
+            StreamingFullBufferMode::MemoryOnly
+        );
+    }
+
+    #[test]
+    fn pre_ready_streaming_push_stops_at_start_threshold() {
+        let shared = SharedState::new();
+        let cancel = AtomicBool::new(false);
+        shared.load_generation.store(7, Ordering::Release);
+
+        let channels = 2;
+        let chunk_samples = STREAMING_CHUNK_FRAMES * channels;
+        let mut pending_samples = vec![0.25; chunk_samples * 4];
+
+        let pushed = push_ready_streaming_chunks(
+            &shared,
+            &cancel,
+            7,
+            channels,
+            &mut pending_samples,
+            false,
+            StreamingFullBufferMode::MemoryOnly,
+            Some(STREAMING_START_BUFFER_FRAMES),
+        )
+        .expect("pre-ready push should not block or fail");
+
+        assert_eq!(pushed, STREAMING_START_BUFFER_FRAMES);
+        assert_eq!(
+            shared.streaming_chunks.len() as u64,
+            STREAMING_START_BUFFER_FRAMES / STREAMING_CHUNK_FRAMES as u64
+        );
+        assert_eq!(pending_samples.len(), chunk_samples * 2);
+    }
+
+    #[test]
+    fn waiting_for_streaming_ready_applied_stops_when_generation_changes() {
+        let shared = SharedState::new();
+        let cancel = AtomicBool::new(false);
+        shared.load_generation.store(8, Ordering::Release);
+
+        let result = wait_for_streaming_ready_applied(&shared, &cancel, 7);
+
+        assert_eq!(result, Err("Load cancelled".to_string()));
     }
 }

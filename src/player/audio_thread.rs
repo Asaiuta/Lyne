@@ -5,9 +5,11 @@
 use std::cell::Cell;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
+use cpal::traits::StreamTrait;
 use cpal::Stream;
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{Receiver, RecvTimeoutError, Sender};
 
 use super::callback::LockfreeDspContext;
 use super::command_handlers::{
@@ -29,6 +31,8 @@ use crate::processor::{
     AtomicEqParams, AtomicLoudnessState, AtomicNoiseShaperParams, AtomicPeakLimiterParams,
     AtomicSaturationParams, AtomicVolumeParams,
 };
+
+const PARKED_STREAM_IDLE_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
 
 struct AudioThreadDspParams {
     eq_params: Arc<AtomicEqParams>,
@@ -84,6 +88,7 @@ enum ThreadControl {
 struct AudioThreadRuntime {
     cmd_rx: Receiver<AudioCommand>,
     stream: Option<Stream>,
+    parked_streams: Vec<Stream>,
     owned_dsp_chain: Option<crate::processor::DspChain>,
     shared_state: Arc<SharedState>,
     dsp_ctx: Arc<LockfreeDspContext>,
@@ -99,11 +104,22 @@ struct AudioThreadRuntime {
 
 impl AudioThreadRuntime {
     fn run(&mut self) {
-        while let Ok(command) = self.cmd_rx.recv() {
-            if matches!(self.handle_audio_command(command), ThreadControl::Shutdown) {
-                break;
+        loop {
+            match self
+                .cmd_rx
+                .recv_timeout(PARKED_STREAM_IDLE_RELEASE_INTERVAL)
+            {
+                Ok(command) => {
+                    if matches!(self.handle_audio_command(command), ThreadControl::Shutdown) {
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => self.maintain_parked_streams(),
+                Err(RecvTimeoutError::Disconnected) => break,
             }
         }
+
+        self.release_parked_streams();
     }
 
     fn handle_audio_command(&mut self, command: AudioCommand) -> ThreadControl {
@@ -113,7 +129,7 @@ impl AudioThreadRuntime {
 
         let target_lufs = Cell::new(self.target_lufs);
         let flow = {
-            let mut backend = CpalCommandBackend::new(&mut self.stream);
+            let mut backend = CpalCommandBackend::new(&mut self.stream, &mut self.parked_streams);
             let context = SharedAudioCommandContext {
                 shared_state: &self.shared_state,
                 dsp_ctx: &self.dsp_ctx,
@@ -241,6 +257,33 @@ impl AudioThreadRuntime {
 
         ThreadControl::Continue
     }
+
+    fn maintain_parked_streams(&mut self) {
+        if self.parked_streams.is_empty() {
+            return;
+        }
+
+        if self.shared_state.state.load() != PlayerState::Playing
+            && !self.shared_state.is_loading.load(Ordering::Acquire)
+        {
+            self.release_parked_streams();
+        }
+    }
+
+    fn release_parked_streams(&mut self) {
+        let count = self.parked_streams.len();
+        if count == 0 {
+            return;
+        }
+
+        let parked_streams = std::mem::take(&mut self.parked_streams);
+        for stream in &parked_streams {
+            let _ = stream.pause();
+        }
+        drop(parked_streams);
+        self.shared_state.mark_parked_output_streams_released(count);
+        log::debug!("Released {} parked output stream(s)", count);
+    }
 }
 
 /// Main audio thread entry point
@@ -310,6 +353,7 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
     let mut runtime = AudioThreadRuntime {
         cmd_rx,
         stream: None,
+        parked_streams: Vec::new(),
         owned_dsp_chain: Some(initial_dsp_chain),
         shared_state,
         dsp_ctx: Arc::new(dsp_ctx),

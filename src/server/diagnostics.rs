@@ -111,7 +111,24 @@ struct PlaybackDiagnostics {
     position_frames: u64,
     streaming_active: bool,
     streaming_decode_finished: bool,
+    streaming_memory_mode: bool,
+    streaming_full_buffer_published: bool,
     streaming_queue_len: usize,
+    active_stream_source_sample_rate: u64,
+    active_stream_output_sample_rate: u64,
+    active_stream_channels: u64,
+    active_stream_device_id: i64,
+    active_stream_exclusive_mode: bool,
+    active_stream_prefer_default_output_config: bool,
+    active_stream_running: bool,
+    active_stream_matches_current: bool,
+    parked_output_stream_count: u64,
+    parked_output_stream_release_count: u64,
+    playback_recovery_count: u64,
+    audio_command_received_count: u64,
+    audio_command_completed_count: u64,
+    audio_command_last_received_code: u64,
+    audio_command_last_completed_code: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -137,11 +154,25 @@ struct PlaybackPhaseTimestamps {
     stream_build_started: Option<u64>,
     stream_build_finished: Option<u64>,
     stream_play_returned: Option<u64>,
+    streaming_ready_play_requested: Option<u64>,
+    streaming_ready_play_completed: Option<u64>,
+    streaming_ready_play_start_playback: Option<u64>,
+    streaming_ready_play_skipped: Option<u64>,
     first_callback_after_play: Option<u64>,
     first_position_advanced: Option<u64>,
     streaming_first_chunk: Option<u64>,
+    streaming_ready_sent: Option<u64>,
     streaming_ready: Option<u64>,
     streaming_finished: Option<u64>,
+    audio_command_stop_received: Option<u64>,
+    audio_command_stop_completed: Option<u64>,
+    audio_command_stop_for_load_received: Option<u64>,
+    audio_command_stop_for_load_completed: Option<u64>,
+    audio_command_streaming_ready_received: Option<u64>,
+    audio_command_streaming_ready_completed: Option<u64>,
+    audio_command_ensure_progress_received: Option<u64>,
+    audio_command_ensure_progress_completed: Option<u64>,
+    playback_recovery_requested: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -327,6 +358,18 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
         .stream_build_finished_ms
         .load(Ordering::Relaxed);
     let stream_play_returned = shared_state.stream_play_returned_ms.load(Ordering::Relaxed);
+    let streaming_ready_play_requested = shared_state
+        .streaming_ready_play_requested_ms
+        .load(Ordering::Relaxed);
+    let streaming_ready_play_completed = shared_state
+        .streaming_ready_play_completed_ms
+        .load(Ordering::Relaxed);
+    let streaming_ready_play_start_playback = shared_state
+        .streaming_ready_play_start_playback_ms
+        .load(Ordering::Relaxed);
+    let streaming_ready_play_skipped = shared_state
+        .streaming_ready_play_skipped_ms
+        .load(Ordering::Relaxed);
     let first_callback_after_play = shared_state
         .first_callback_after_play_ms
         .load(Ordering::Relaxed);
@@ -336,8 +379,36 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
     let streaming_first_chunk = shared_state
         .streaming_first_chunk_ms
         .load(Ordering::Relaxed);
+    let streaming_ready_sent = shared_state.streaming_ready_sent_ms.load(Ordering::Relaxed);
     let streaming_ready = shared_state.streaming_ready_ms.load(Ordering::Relaxed);
     let streaming_finished = shared_state.streaming_finished_ms.load(Ordering::Relaxed);
+    let audio_command_stop_received = shared_state
+        .audio_command_stop_received_ms
+        .load(Ordering::Relaxed);
+    let audio_command_stop_completed = shared_state
+        .audio_command_stop_completed_ms
+        .load(Ordering::Relaxed);
+    let audio_command_stop_for_load_received = shared_state
+        .audio_command_stop_for_load_received_ms
+        .load(Ordering::Relaxed);
+    let audio_command_stop_for_load_completed = shared_state
+        .audio_command_stop_for_load_completed_ms
+        .load(Ordering::Relaxed);
+    let audio_command_streaming_ready_received = shared_state
+        .audio_command_streaming_ready_received_ms
+        .load(Ordering::Relaxed);
+    let audio_command_streaming_ready_completed = shared_state
+        .audio_command_streaming_ready_completed_ms
+        .load(Ordering::Relaxed);
+    let audio_command_ensure_progress_received = shared_state
+        .audio_command_ensure_progress_received_ms
+        .load(Ordering::Relaxed);
+    let audio_command_ensure_progress_completed = shared_state
+        .audio_command_ensure_progress_completed_ms
+        .load(Ordering::Relaxed);
+    let playback_recovery_requested = shared_state
+        .playback_recovery_requested_ms
+        .load(Ordering::Relaxed);
 
     PlaybackPhaseDiagnostics {
         timestamps_ms: PlaybackPhaseTimestamps {
@@ -356,11 +427,37 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
             stream_build_started: non_zero_u64(stream_build_started),
             stream_build_finished: non_zero_u64(stream_build_finished),
             stream_play_returned: non_zero_u64(stream_play_returned),
+            streaming_ready_play_requested: non_zero_u64(streaming_ready_play_requested),
+            streaming_ready_play_completed: non_zero_u64(streaming_ready_play_completed),
+            streaming_ready_play_start_playback: non_zero_u64(streaming_ready_play_start_playback),
+            streaming_ready_play_skipped: non_zero_u64(streaming_ready_play_skipped),
             first_callback_after_play: non_zero_u64(first_callback_after_play),
             first_position_advanced: non_zero_u64(first_position_advanced),
             streaming_first_chunk: non_zero_u64(streaming_first_chunk),
+            streaming_ready_sent: non_zero_u64(streaming_ready_sent),
             streaming_ready: non_zero_u64(streaming_ready),
             streaming_finished: non_zero_u64(streaming_finished),
+            audio_command_stop_received: non_zero_u64(audio_command_stop_received),
+            audio_command_stop_completed: non_zero_u64(audio_command_stop_completed),
+            audio_command_stop_for_load_received: non_zero_u64(
+                audio_command_stop_for_load_received,
+            ),
+            audio_command_stop_for_load_completed: non_zero_u64(
+                audio_command_stop_for_load_completed,
+            ),
+            audio_command_streaming_ready_received: non_zero_u64(
+                audio_command_streaming_ready_received,
+            ),
+            audio_command_streaming_ready_completed: non_zero_u64(
+                audio_command_streaming_ready_completed,
+            ),
+            audio_command_ensure_progress_received: non_zero_u64(
+                audio_command_ensure_progress_received,
+            ),
+            audio_command_ensure_progress_completed: non_zero_u64(
+                audio_command_ensure_progress_completed,
+            ),
+            playback_recovery_requested: non_zero_u64(playback_recovery_requested),
         },
         durations_ms: PlaybackPhaseDurations {
             load_request_ms: phase_delta_ms(load_request_started, load_request_returned),
@@ -519,7 +616,46 @@ fn build_playback_diagnostics(data: &AppState) -> PlaybackDiagnostics {
         streaming_decode_finished: shared_state
             .streaming_decode_finished
             .load(Ordering::Relaxed),
+        streaming_memory_mode: shared_state.streaming_memory_mode.load(Ordering::Relaxed),
+        streaming_full_buffer_published: shared_state
+            .streaming_full_buffer_published
+            .load(Ordering::Relaxed),
         streaming_queue_len: shared_state.streaming_chunks.len(),
+        active_stream_source_sample_rate: shared_state
+            .active_stream_source_sample_rate
+            .load(Ordering::Relaxed),
+        active_stream_output_sample_rate: shared_state
+            .active_stream_output_sample_rate
+            .load(Ordering::Relaxed),
+        active_stream_channels: shared_state.active_stream_channels.load(Ordering::Relaxed),
+        active_stream_device_id: shared_state.active_stream_device_id.load(Ordering::Relaxed),
+        active_stream_exclusive_mode: shared_state
+            .active_stream_exclusive_mode
+            .load(Ordering::Relaxed),
+        active_stream_prefer_default_output_config: shared_state
+            .active_stream_prefer_default_output_config
+            .load(Ordering::Relaxed),
+        active_stream_running: shared_state.active_stream_running.load(Ordering::Relaxed),
+        active_stream_matches_current: shared_state.active_output_stream_matches_current(),
+        parked_output_stream_count: shared_state
+            .parked_output_stream_count
+            .load(Ordering::Relaxed),
+        parked_output_stream_release_count: shared_state
+            .parked_output_stream_release_count
+            .load(Ordering::Relaxed),
+        playback_recovery_count: shared_state.playback_recovery_count.load(Ordering::Relaxed),
+        audio_command_received_count: shared_state
+            .audio_command_received_count
+            .load(Ordering::Relaxed),
+        audio_command_completed_count: shared_state
+            .audio_command_completed_count
+            .load(Ordering::Relaxed),
+        audio_command_last_received_code: shared_state
+            .audio_command_last_received_code
+            .load(Ordering::Relaxed),
+        audio_command_last_completed_code: shared_state
+            .audio_command_last_completed_code
+            .load(Ordering::Relaxed),
     }
 }
 
@@ -601,7 +737,16 @@ mod tests {
         assert!(json.contains("\"load_request_started\""));
         assert!(json.contains("\"output_prepare_ms\""));
         assert!(json.contains("\"streaming_ready\""));
+        assert!(json.contains("\"streaming_ready_sent\""));
+        assert!(json.contains("\"streaming_ready_play_requested\""));
+        assert!(json.contains("\"streaming_ready_play_start_playback\""));
+        assert!(json.contains("\"audio_command_streaming_ready_received\""));
+        assert!(json.contains("\"audio_command_ensure_progress_received\""));
+        assert!(json.contains("\"playback_recovery_count\""));
+        assert!(json.contains("\"audio_command_completed_count\""));
         assert!(json.contains("\"stream_play_to_first_position_advanced_ms\""));
+        assert!(json.contains("\"active_stream_matches_current\""));
+        assert!(json.contains("\"active_stream_running\""));
         assert!(!json.contains(&temp_dir.to_string_lossy().to_string()));
 
         let _ = std::fs::remove_dir_all(&temp_dir);

@@ -32,6 +32,13 @@ pub(super) struct PlaybackOutputPlan {
     pub config: StreamConfig,
 }
 
+pub(super) struct BuiltOutputStream {
+    pub stream: Stream,
+    pub source_sample_rate: u32,
+    pub output_sample_rate: u32,
+    pub channels: usize,
+}
+
 pub(super) struct OutputStreamContext<'a> {
     pub shared_state: &'a Arc<SharedState>,
     pub dsp_ctx: &'a Arc<LockfreeDspContext>,
@@ -122,7 +129,7 @@ pub(super) fn build_requested_output_stream(
     context: &OutputStreamContext<'_>,
     dsp_params: &DspParamRefs<'_>,
     resampler_config: ResamplerConfig,
-) -> Result<Stream, String> {
+) -> Result<BuiltOutputStream, String> {
     let dsp_chain = owned_dsp_chain.take().unwrap_or_else(|| {
         build_dsp_chain(
             output_plan.channels as usize,
@@ -133,7 +140,7 @@ pub(super) fn build_requested_output_stream(
     });
 
     log::info!("Building output stream...");
-    build_output_stream_with_callback(
+    let stream = build_output_stream_with_callback(
         &output_plan.device,
         &output_plan.config,
         output_plan.channels as usize,
@@ -142,7 +149,14 @@ pub(super) fn build_requested_output_stream(
         resampler_config,
         dsp_chain,
         context,
-    )
+    )?;
+
+    Ok(BuiltOutputStream {
+        stream,
+        source_sample_rate: output_plan.requested_sample_rate,
+        output_sample_rate: output_plan.actual_sample_rate,
+        channels: output_plan.channels as usize,
+    })
 }
 
 pub(super) fn build_fallback_output_stream(
@@ -150,7 +164,7 @@ pub(super) fn build_fallback_output_stream(
     context: &OutputStreamContext<'_>,
     dsp_params: &DspParamRefs<'_>,
     resampler_config: ResamplerConfig,
-) -> Result<Stream, String> {
+) -> Result<BuiltOutputStream, String> {
     let fallback_config: StreamConfig = output_plan
         .device
         .default_output_config()
@@ -165,7 +179,7 @@ pub(super) fn build_fallback_output_stream(
         dsp_params,
     );
 
-    build_output_stream_with_callback(
+    let stream = build_output_stream_with_callback(
         &output_plan.device,
         &fallback_config,
         fallback_channels,
@@ -174,7 +188,14 @@ pub(super) fn build_fallback_output_stream(
         resampler_config,
         fallback_chain,
         context,
-    )
+    )?;
+
+    Ok(BuiltOutputStream {
+        stream,
+        source_sample_rate: output_plan.requested_sample_rate,
+        output_sample_rate: fallback_sample_rate,
+        channels: fallback_channels,
+    })
 }
 
 fn build_dsp_chain(
@@ -417,11 +438,18 @@ fn negotiate_output_config(
 
 pub(super) fn activate_started_stream(
     stream_slot: &mut Option<Stream>,
-    started_stream: Stream,
+    built_stream: BuiltOutputStream,
     shared_state: &SharedState,
 ) {
+    let BuiltOutputStream {
+        stream: started_stream,
+        source_sample_rate,
+        output_sample_rate,
+        channels,
+    } = built_stream;
     let _ = started_stream.play();
     shared_state.mark_stream_play_returned();
+    shared_state.mark_active_output_stream(source_sample_rate, output_sample_rate, channels);
     *stream_slot = Some(started_stream);
 
     // Only transition to Playing if the user has not paused during stream

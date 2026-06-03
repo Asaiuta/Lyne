@@ -171,7 +171,7 @@ before the complete decoded buffer is available.
 ```rust
 pub enum AudioCommand {
     StreamingLoadReady { generation: u64, track: StreamingTrackStart },
-    StreamingLoadFinished { generation: u64, samples: Vec<f64>, total_frames: u64 },
+    StreamingLoadFinished { generation: u64, samples: Option<Vec<f64>>, total_frames: u64 },
 }
 
 pub struct SharedState {
@@ -187,18 +187,23 @@ pub struct SharedState {
 | Field / flag | Contract |
 |------|------|
 | `AUDIO_STREAMING_FIRST_BUFFER` | Must default to false unless explicitly enabled |
+| `AUDIO_STREAMING_FULL_BUFFER_LIMIT_MIB` | Caps full decoded PCM publication for streaming first-buffer loads; default is memory-bounded but small-track compatible |
 | `StreamingLoadReady` | May start playback after the first chunk threshold, before full decode finishes |
-| `streaming_chunks` | Carries only bounded first-buffer playback chunks; it must not become the source of truth for the full track |
-| `StreamingLoadFinished` | Publishes the full `audio_buffer` without resetting `position_frames`, clears the streaming queue, and switches playback back to `audio_buffer` |
+| `streaming_chunks` | In full-buffer mode it is a bounded startup aid; in memory mode it is the sequential playback source and chunks must not be dropped |
+| `StreamingLoadFinished` with `Some(samples)` | Publishes the full `audio_buffer` without resetting `position_frames`, clears the streaming queue, and switches playback back to `audio_buffer` |
+| `StreamingLoadFinished` with `None` | Marks decode finished for memory mode without clearing the queue; the callback drains queued chunks and stops at EOF |
+| Unknown decoded size | Treat unknown `total_frames` / overflowed size estimates as memory mode, not as a small publishable buffer |
 | Generation checks | Ready/finish/chunks must be ignored when `load_generation != generation` |
 
 #### 4. Validation & Error Matrix
 
 | Condition | Expected behavior |
 |------|------|
-| Queue full while producer is still decoding | Drop later streaming chunks and keep decoding into the full buffer |
+| Queue full while producer is still decoding in full-buffer mode | Drop later streaming chunks and keep decoding into the full buffer |
+| Queue full while producer is still decoding in memory mode | Producer waits with cancel/generation checks; chunks must not be dropped |
 | Queue empty before decode finishes | Callback writes silence and increments underrun diagnostics |
 | Decode finishes while streaming is active | Store full buffer, mark `streaming_decode_finished`, clear queue, and set `streaming_active=false` |
+| Memory-mode decode finishes while streaming is active | Mark `streaming_decode_finished` and keep `streaming_active=true` until queued chunks drain |
 | Stale ready/finish command | Do not change current track state, buffer, or event flags |
 | Stale queued chunk in callback | Discard it before deciding whether streaming can continue |
 
@@ -207,10 +212,15 @@ pub struct SharedState {
 - Good: A local-file autoplay path queues enough chunks to start, keeps full decode
   running independently, then publishes the full buffer within the same load
   generation.
+- Good: A large decoded-output local file enters memory mode, uses bounded
+  backpressure instead of accumulating a full `Vec<f64>`, and plays through the
+  queue without publishing a full buffer.
 - Base: If streaming is disabled, the existing `LoadComplete` full-buffer path
   remains unchanged.
 - Bad: Blocking the producer on a full playback queue paces full decode by audio
   playback speed and leaves `streaming_finished` unavailable for seconds.
+  This is only acceptable for explicit memory mode, where the queue is the
+  playback source and the goal is bounded memory rather than early full decode.
 
 #### 6. Tests Required
 
@@ -220,14 +230,16 @@ pub struct SharedState {
 - Finished decode with empty or stale queue falls back to full `audio_buffer`
   in the same callback.
 - Stale ready/finish commands do not publish stale state.
-- Fresh finish publishes the full buffer without resetting `position_frames` and
-  drains `streaming_chunks`.
+- Fresh full-buffer finish publishes the full buffer without resetting
+  `position_frames` and drains `streaming_chunks`.
+- Fresh memory-mode finish does not replace `audio_buffer`, does not clear
+  `streaming_chunks`, and lets the callback stop at EOF after the queue drains.
 - `cargo check --bin audio_server` and `cargo test --lib` must pass after
   changing `AudioCommand`.
 
 #### 7. Wrong vs Correct
 
-#### Wrong
+#### Wrong for full-buffer mode
 
 ```rust
 while shared.streaming_chunks.push(chunk).is_err() {
@@ -237,13 +249,121 @@ while shared.streaming_chunks.push(chunk).is_err() {
 
 This blocks full decode on playback progress.
 
-#### Correct
+#### Correct for full-buffer mode
 
 ```rust
 if shared.streaming_chunks.push(chunk).is_err() {
     // Keep decoding into the full buffer; queued chunks are only a startup aid.
 }
 ```
+
+#### Correct for memory mode
+
+```rust
+while let Err(returned) = shared.streaming_chunks.push(chunk) {
+    chunk = returned;
+    ensure_load_is_still_current()?;
+    std::thread::sleep(STREAMING_QUEUE_BACKPRESSURE_SLEEP);
+}
+```
+
+In memory mode the queue is the playback source of truth, so producer chunks
+must use bounded backpressure instead of being dropped.
+
+### CPAL output stream recovery contract
+
+#### 1. Scope / Trigger
+
+Use this contract when changing shared-mode CPAL stream reuse, stop-for-load,
+or playback recovery after a missing first callback/progress watchdog.
+
+#### 2. Signatures
+
+```rust
+pub enum AudioCommand {
+    EnsurePlaybackProgress { generation: u64 },
+}
+
+pub struct SharedState {
+    pub active_stream_source_sample_rate: AtomicU64,
+    pub active_stream_output_sample_rate: AtomicU64,
+    pub active_stream_channels: AtomicU64,
+    pub active_stream_running: AtomicBool,
+    pub parked_output_stream_count: AtomicU64,
+    pub parked_output_stream_release_count: AtomicU64,
+}
+```
+
+#### 3. Contracts
+
+| Field / path | Contract |
+|------|------|
+| Active stream key | Must match current source sample rate, channels, device, exclusive mode, and default-config preference before warm reuse |
+| `StopForLoad` in compatible shared mode | Keeps the stream warm and lets callback output silence while the next track becomes ready |
+| `EnsurePlaybackProgress` | Must ignore stale generations and already-progressed playback |
+| Recovery rebuild | Must remove the old stream from the active slot before building a replacement |
+| Parked streams | May be held by the audio thread during active playback; expose count through diagnostics |
+| Parked stream release | Release only after playback is not active or when the audio thread exits |
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|------|------|
+| Warm stream matches current output key and is running | Reuse it and mark playback started |
+| Warm stream matches but is paused | Call `play()`, mark it running, and reuse it |
+| Warm stream does not match current output key | Release it before building a new stream |
+| Watchdog fires before first callback/progress | Park the old active stream, clear active stream diagnostics, then rebuild |
+| Watchdog fires for stale generation or after progress | Do nothing |
+| Parked stream exists while playback is active | Keep it parked; do not drop it in the active command window |
+| Playback becomes inactive or thread exits | Release parked streams and increment release diagnostics |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: A streaming load starts on a warm compatible shared stream without
+  rebuilding CPAL output.
+- Good: If the warm stream stops producing callbacks, recovery parks the old
+  stream and starts a fresh output stream without blocking the command thread on
+  CPAL drop.
+- Base: Exclusive WASAPI remains owned by the WASAPI backend and does not use
+  the CPAL parked-stream path.
+- Bad: Dropping or pausing old CPAL streams while active playback commands are
+  still running can reintroduce seek/load progress timeouts.
+
+#### 6. Tests Required
+
+- Command handler tests must cover recovery flow and warm stream matching.
+- Runtime diagnostics must expose active stream key, recovery counters, and
+  parked stream counters.
+- Real-file stress should cover repeated load/resume/seek with
+  `AUDIO_STREAMING_FIRST_BUFFER=true` and memory-mode streaming.
+- `cargo check --bin audio_server`, `cargo test --lib`, and a release real-file
+  benchmark must pass after changing this path.
+
+#### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+fn recover_playback(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
+    release_output_stream(self.stream, shared_state);
+    AudioCommandFlow::StartPlayback
+}
+```
+
+This can block the command thread on CPAL stream drop before the replacement
+stream reaches `output_prepare_started`.
+
+#### Correct
+
+```rust
+fn recover_playback(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
+    park_output_stream_for_recovery(self.stream, self.parked_streams, shared_state);
+    AudioCommandFlow::StartPlayback
+}
+```
+
+The replacement stream is built first; parked streams are released only after
+playback is inactive or the audio thread exits.
 
 ---
 

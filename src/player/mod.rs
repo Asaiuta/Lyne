@@ -119,6 +119,13 @@ pub struct AudioPlayer {
     loudness_db: Option<Arc<LoudnessDatabase>>,
 }
 
+struct MemoryStreamingSeekRequest {
+    path: String,
+    generation: u64,
+    load_cancel: Arc<AtomicBool>,
+    target_time_secs: f64,
+}
+
 impl AudioPlayer {
     pub fn new(config: EngineSettings) -> Self {
         Self::with_loudness_database(config, None)
@@ -399,6 +406,7 @@ impl AudioPlayer {
                     generation,
                     &cmd_tx,
                     autoplay,
+                    0.0,
                 )
                 .map(|_| None)
             } else {
@@ -416,9 +424,6 @@ impl AudioPlayer {
             };
 
             let is_current = shared_state.load_generation.load(Ordering::Acquire) == generation;
-            if is_current && !use_streaming_first_buffer {
-                shared_state.is_loading.store(false, Ordering::Release);
-            }
 
             match result {
                 Ok(Some(load_result)) => {
@@ -525,6 +530,131 @@ impl AudioPlayer {
         *self.shared_state.current_cached_loudness.write() = None;
     }
 
+    fn prepare_memory_streaming_seek(
+        &mut self,
+        time_secs: f64,
+    ) -> Result<MemoryStreamingSeekRequest, String> {
+        let path = self
+            .shared_state
+            .current_track_path
+            .read()
+            .clone()
+            .or_else(|| self.shared_state.file_path.read().clone())
+            .ok_or_else(|| {
+                "Cannot seek memory-bounded stream without a current track".to_string()
+            })?;
+        if path.starts_with("http://") || path.starts_with("https://") {
+            return Err("Streaming seek is only available for local files".to_string());
+        }
+
+        let sample_rate = self.shared_state.sample_rate.load(Ordering::Relaxed).max(1);
+        let total_frames = self.shared_state.total_frames.load(Ordering::Relaxed);
+        let requested_frame = (time_secs.max(0.0) * sample_rate as f64) as u64;
+        let target_frame = if total_frames > 0 {
+            requested_frame.min(total_frames)
+        } else {
+            requested_frame
+        };
+        let target_time_secs = target_frame as f64 / sample_rate as f64;
+
+        self.cancel_current_load();
+        GaplessManager::cancel_preload(&self.shared_state);
+        let load_cancel = self.create_load_cancel_token();
+        let generation = self
+            .shared_state
+            .load_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
+
+        self.shared_state.reset_load_phase_timestamps();
+        self.shared_state
+            .streaming_generation
+            .store(generation, Ordering::Release);
+        self.shared_state
+            .streaming_decode_finished
+            .store(false, Ordering::Release);
+        self.shared_state
+            .streaming_memory_mode
+            .store(true, Ordering::Release);
+        self.shared_state
+            .streaming_full_buffer_published
+            .store(false, Ordering::Release);
+        self.shared_state
+            .streaming_active
+            .store(true, Ordering::Release);
+        self.shared_state.audio_buffer.store(Arc::new(Vec::new()));
+        self.shared_state
+            .dsp_reset_pending
+            .store(true, Ordering::Release);
+        self.shared_state
+            .position_frames
+            .store(target_frame, Ordering::Relaxed);
+        self.shared_state.state.store(PlayerState::Playing);
+        self.shared_state.is_loading.store(true, Ordering::Release);
+        self.shared_state.load_progress.store(0, Ordering::Relaxed);
+        *self.shared_state.load_error.write() = None;
+        self.shared_state
+            .event_flags
+            .fetch_or(EVENT_PLAYBACK_SEEKED, Ordering::Release);
+
+        Ok(MemoryStreamingSeekRequest {
+            path,
+            generation,
+            load_cancel,
+            target_time_secs,
+        })
+    }
+
+    fn restart_memory_streaming_at(&mut self, time_secs: f64) -> Result<(), String> {
+        let request = self.prepare_memory_streaming_seek(time_secs)?;
+        let path_owned = request.path;
+        let shared_state = Arc::clone(&self.shared_state);
+        let cmd_tx = self.cmd_tx.clone();
+        let config = self.config.clone();
+        let device_id = self.device_id;
+        let loudness_db = self.loudness_db.clone();
+        let load_cancel = Arc::clone(&request.load_cancel);
+        let generation = request.generation;
+        let target_time_secs = request.target_time_secs;
+
+        thread::spawn(move || {
+            let result = decode_file_streaming_first_buffer(
+                &path_owned,
+                None,
+                &config,
+                device_id,
+                &shared_state,
+                &load_cancel,
+                loudness_db.clone(),
+                generation,
+                &cmd_tx,
+                true,
+                target_time_secs,
+            );
+
+            let is_current = shared_state.load_generation.load(Ordering::Acquire) == generation;
+            if let Err(e) = result {
+                if load_cancel.load(Ordering::Acquire) || !is_current {
+                    log::info!(
+                        "Streaming seek cancelled for '{}' (generation {}): {}",
+                        path_owned,
+                        generation,
+                        e
+                    );
+                    return;
+                }
+                log::error!("Streaming seek failed: {}", e);
+                let _ = cmd_tx.send(AudioCommand::LoadError {
+                    generation,
+                    message: e,
+                });
+            }
+        });
+
+        self.shared_state.mark_load_request_returned();
+        Ok(())
+    }
+
     /// Check if a file is currently being loaded
     pub fn is_loading(&self) -> bool {
         self.shared_state.is_loading.load(Ordering::Relaxed)
@@ -587,6 +717,14 @@ impl AudioPlayer {
     }
 
     pub fn seek(&mut self, time_secs: f64) -> Result<(), String> {
+        if self
+            .shared_state
+            .streaming_memory_mode
+            .load(Ordering::Acquire)
+            && self.shared_state.streaming_active.load(Ordering::Acquire)
+        {
+            return self.restart_memory_streaming_at(time_secs);
+        }
         let sr = self.shared_state.sample_rate.load(Ordering::Relaxed) as f64;
         let total = self.shared_state.total_frames.load(Ordering::Relaxed);
         let new_pos = ((time_secs.max(0.0) * sr) as u64).min(total);
@@ -641,5 +779,61 @@ impl Drop for AudioPlayer {
         if let Some(handle) = self.audio_thread.take() {
             let _ = handle.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seek_active_memory_streaming_prepares_new_streaming_generation() {
+        let mut player = AudioPlayer::new(EngineSettings::default());
+        let shared = player.shared_state();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.total_frames.store(44_100 * 60, Ordering::Relaxed);
+        shared.position_frames.store(123, Ordering::Relaxed);
+        shared.load_generation.store(41, Ordering::Release);
+        shared.streaming_generation.store(41, Ordering::Release);
+        shared.streaming_memory_mode.store(true, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.mark_active_output_stream(44_100, 44_100, 2);
+        *shared.current_track_path.write() = Some(r"D:\Music\large.flac".to_string());
+        shared
+            .streaming_chunks
+            .push(state::StreamingAudioChunk {
+                generation: 41,
+                samples: Arc::new(vec![0.5, 0.5]),
+            })
+            .expect("streaming queue should have capacity");
+
+        let request = player
+            .prepare_memory_streaming_seek(10.0)
+            .expect("active memory streaming seek should prepare rebuffer");
+
+        assert_eq!(request.path, r"D:\Music\large.flac");
+        assert_eq!(request.generation, 42);
+        assert!((request.target_time_secs - 10.0).abs() < f64::EPSILON);
+        assert!(!request.load_cancel.load(Ordering::Acquire));
+        assert_eq!(shared.load_generation.load(Ordering::Acquire), 42);
+        assert_eq!(shared.streaming_generation.load(Ordering::Acquire), 42);
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 441_000);
+        assert!(shared.streaming_active.load(Ordering::Acquire));
+        assert!(shared.streaming_memory_mode.load(Ordering::Acquire));
+        assert!(!shared.streaming_decode_finished.load(Ordering::Acquire));
+        assert!(shared.is_loading.load(Ordering::Acquire));
+        assert!(shared.audio_buffer.load().is_empty());
+        assert!(shared.streaming_chunks.is_empty());
+        assert_eq!(
+            shared
+                .active_stream_source_sample_rate
+                .load(Ordering::Acquire),
+            44_100
+        );
+        assert!(shared.active_output_stream_matches_current());
+        assert_ne!(
+            shared.event_flags.load(Ordering::Relaxed) & EVENT_PLAYBACK_SEEKED,
+            0
+        );
     }
 }
