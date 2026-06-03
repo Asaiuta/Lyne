@@ -31,6 +31,7 @@ pub const AUDIO_COMMAND_CODE_STOP: u64 = 1;
 pub const AUDIO_COMMAND_CODE_STOP_FOR_LOAD: u64 = 2;
 pub const AUDIO_COMMAND_CODE_STREAMING_LOAD_READY: u64 = 3;
 pub const AUDIO_COMMAND_CODE_ENSURE_PLAYBACK_PROGRESS: u64 = 4;
+pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 500;
 
 // ============ Commands & State ============
 
@@ -132,6 +133,7 @@ pub enum AudioCommand {
     StreamingLoadReady {
         generation: u64,
         track: StreamingTrackStart,
+        autoplay: bool,
     },
     StreamingLoadFinished {
         generation: u64,

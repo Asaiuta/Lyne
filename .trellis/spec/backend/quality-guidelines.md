@@ -170,7 +170,7 @@ before the complete decoded buffer is available.
 
 ```rust
 pub enum AudioCommand {
-    StreamingLoadReady { generation: u64, track: StreamingTrackStart },
+    StreamingLoadReady { generation: u64, track: StreamingTrackStart, autoplay: bool },
     StreamingLoadFinished { generation: u64, samples: Option<Vec<f64>>, total_frames: u64 },
 }
 
@@ -188,7 +188,8 @@ pub struct SharedState {
 |------|------|
 | `AUDIO_STREAMING_FIRST_BUFFER` | Must default to false unless explicitly enabled |
 | `AUDIO_STREAMING_FULL_BUFFER_LIMIT_MIB` | Caps full decoded PCM publication for streaming first-buffer loads; default is memory-bounded but small-track compatible |
-| `StreamingLoadReady` | May start playback after the first chunk threshold, before full decode finishes |
+| `StreamingLoadReady.autoplay` | Carries the load-time autoplay intent because `StopForLoad` can temporarily set `state=Stopped` before streaming ready applies |
+| `StreamingLoadReady` | May start playback after the first chunk threshold, before full decode finishes; start exactly once from the ready handler when `autoplay=true` unless the current state is explicitly `Paused` |
 | `streaming_chunks` | In full-buffer mode it is a bounded startup aid; in memory mode it is the sequential playback source and chunks must not be dropped |
 | `StreamingLoadFinished` with `Some(samples)` | Publishes the full `audio_buffer` without resetting `position_frames`, clears the streaming queue, and switches playback back to `audio_buffer` |
 | `StreamingLoadFinished` with `None` | Marks decode finished for memory mode without clearing the queue; the callback drains queued chunks and stops at EOF |
@@ -205,6 +206,8 @@ pub struct SharedState {
 | Decode finishes while streaming is active | Store full buffer, mark `streaming_decode_finished`, clear queue, and set `streaming_active=false` |
 | Memory-mode decode finishes while streaming is active | Mark `streaming_decode_finished` and keep `streaming_active=true` until queued chunks drain |
 | Stale ready/finish command | Do not change current track state, buffer, or event flags |
+| Ready command has `autoplay=true` after `StopForLoad` set `state=Stopped` | Treat the load as autoplay and start output from the ready handler |
+| Ready command has `autoplay=true` after a user pause set `state=Paused` | Respect the pause and skip starting output |
 | Stale queued chunk in callback | Discard it before deciding whether streaming can continue |
 
 #### 5. Good/Base/Bad Cases
@@ -230,6 +233,9 @@ pub struct SharedState {
 - Finished decode with empty or stale queue falls back to full `audio_buffer`
   in the same callback.
 - Stale ready/finish commands do not publish stale state.
+- Streaming ready autoplay starts even when `StopForLoad` left the state
+  temporarily stopped.
+- Streaming ready autoplay respects an explicit paused state.
 - Fresh full-buffer finish publishes the full buffer without resetting
   `position_frames` and drains `streaming_chunks`.
 - Fresh memory-mode finish does not replace `audio_buffer`, does not clear
@@ -284,6 +290,8 @@ pub enum AudioCommand {
     EnsurePlaybackProgress { generation: u64 },
 }
 
+pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 500;
+
 pub struct SharedState {
     pub active_stream_source_sample_rate: AtomicU64,
     pub active_stream_output_sample_rate: AtomicU64,
@@ -300,7 +308,8 @@ pub struct SharedState {
 |------|------|
 | Active stream key | Must match current source sample rate, channels, device, exclusive mode, and default-config preference before warm reuse |
 | `StopForLoad` in compatible shared mode | Keeps the stream warm and lets callback output silence while the next track becomes ready |
-| `EnsurePlaybackProgress` | Must ignore stale generations and already-progressed playback |
+| Streaming progress watchdog | Should observe generation/progress state before sending `EnsurePlaybackProgress`; do not send the command while stream play has not returned or while the post-play callback grace window is still open |
+| `EnsurePlaybackProgress` | Must ignore stale generations, non-playing states, already-progressed playback, missing `stream_play_returned_ms`, and play-returned states still inside `PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS` |
 | Recovery rebuild | Must remove the old stream from the active slot before building a replacement |
 | Parked streams | May be held by the audio thread during active playback; expose count through diagnostics |
 | Parked stream release | Release only after playback is not active or when the audio thread exits |
@@ -312,8 +321,10 @@ pub struct SharedState {
 | Warm stream matches current output key and is running | Reuse it and mark playback started |
 | Warm stream matches but is paused | Call `play()`, mark it running, and reuse it |
 | Warm stream does not match current output key | Release it before building a new stream |
-| Watchdog fires before first callback/progress | Park the old active stream, clear active stream diagnostics, then rebuild |
-| Watchdog fires for stale generation or after progress | Do nothing |
+| Watchdog observes no `stream_play_returned_ms` | Keep observing until the bounded observe window expires; do not rebuild before play has returned |
+| Watchdog observes `stream_play_returned_ms` but callback grace has not elapsed | Keep observing; do not rebuild inside the grace window |
+| Watchdog fires after play returned, callback grace elapsed, and no callback/progress exists | Park the old active stream, clear active stream diagnostics, then rebuild |
+| Watchdog fires for stale generation, paused/stopped playback, or after progress | Do nothing |
 | Parked stream exists while playback is active | Keep it parked; do not drop it in the active command window |
 | Playback becomes inactive or thread exits | Release parked streams and increment release diagnostics |
 
@@ -332,6 +343,11 @@ pub struct SharedState {
 #### 6. Tests Required
 
 - Command handler tests must cover recovery flow and warm stream matching.
+- Command handler tests must cover stale, progressed, waiting-for-play,
+  waiting-for-callback-grace, and real-stuck recovery decisions.
+- Loading tests must cover the streaming watchdog observer stopping for stale,
+  paused, and progressed loads, waiting while stream play has not returned, and
+  sending only after the post-play grace window elapses.
 - Runtime diagnostics must expose active stream key, recovery counters, and
   parked stream counters.
 - Real-file stress should cover repeated load/resume/seek with

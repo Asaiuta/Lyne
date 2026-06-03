@@ -14,11 +14,20 @@ use cpal::Stream;
 use super::callback::LockfreeDspContext;
 use super::output_stream::DspParamRefs;
 use super::state::{
-    AudioCommand, LoadResult, PlayerState, SharedState, StreamingTrackStart, EVENT_LOAD_COMPLETE,
-    EVENT_LOAD_ERROR, EVENT_PLAYBACK_STARTED, EVENT_TRACK_CHANGED,
+    playback_phase_time_ms, AudioCommand, LoadResult, PlayerState, SharedState,
+    StreamingTrackStart, EVENT_LOAD_COMPLETE, EVENT_LOAD_ERROR, EVENT_PLAYBACK_STARTED,
+    EVENT_TRACK_CHANGED, PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS,
 };
 use super::track_loudness::{apply_loaded_track_loudness, refresh_loaded_loudness};
 use crate::processor::AtomicLoudnessState;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaybackProgressWatchdogDecision {
+    Ignore,
+    WaitingForStreamPlay,
+    WaitingForCallbackAfterPlay,
+    Recover,
+}
 
 pub(super) enum AudioCommandFlow {
     Continue,
@@ -177,6 +186,42 @@ fn park_output_stream_for_recovery(
     shared_state.clear_active_output_stream();
 }
 
+fn playback_progress_watchdog_decision(
+    shared_state: &SharedState,
+    generation: u64,
+) -> PlaybackProgressWatchdogDecision {
+    let current_generation = shared_state.load_generation.load(Ordering::Acquire);
+    let has_progress = shared_state
+        .first_callback_after_play_ms
+        .load(Ordering::Acquire)
+        != 0
+        || shared_state
+            .first_position_advanced_ms
+            .load(Ordering::Acquire)
+            != 0;
+
+    if current_generation != generation || shared_state.state.load() != PlayerState::Playing {
+        return PlaybackProgressWatchdogDecision::Ignore;
+    }
+
+    if has_progress {
+        return PlaybackProgressWatchdogDecision::Ignore;
+    }
+
+    let stream_play_returned_ms = shared_state.stream_play_returned_ms.load(Ordering::Acquire);
+    if stream_play_returned_ms == 0 {
+        return PlaybackProgressWatchdogDecision::WaitingForStreamPlay;
+    }
+
+    if playback_phase_time_ms().saturating_sub(stream_play_returned_ms)
+        < PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS
+    {
+        return PlaybackProgressWatchdogDecision::WaitingForCallbackAfterPlay;
+    }
+
+    PlaybackProgressWatchdogDecision::Recover
+}
+
 pub(super) fn handle_audio_command<B: AudioCommandBackend>(
     command: AudioCommand,
     backend: &mut B,
@@ -202,29 +247,38 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
             context
                 .shared_state
                 .mark_audio_command_ensure_progress_received();
-            let current_generation = context.shared_state.load_generation.load(Ordering::Acquire);
-            let has_progress = context
-                .shared_state
-                .first_callback_after_play_ms
-                .load(Ordering::Acquire)
-                != 0
-                || context
-                    .shared_state
-                    .first_position_advanced_ms
-                    .load(Ordering::Acquire)
-                    != 0;
-            if current_generation != generation
-                || context.shared_state.state.load() != PlayerState::Playing
-                || has_progress
-            {
-                context
-                    .shared_state
-                    .mark_audio_command_ensure_progress_completed();
-                return AudioCommandFlow::Continue;
+            match playback_progress_watchdog_decision(context.shared_state, generation) {
+                PlaybackProgressWatchdogDecision::Ignore => {
+                    context
+                        .shared_state
+                        .mark_audio_command_ensure_progress_completed();
+                    return AudioCommandFlow::Continue;
+                }
+                PlaybackProgressWatchdogDecision::WaitingForStreamPlay => {
+                    log::debug!(
+                        "Playback progress watchdog waiting for stream play to return for generation {}",
+                        generation
+                    );
+                    context
+                        .shared_state
+                        .mark_audio_command_ensure_progress_completed();
+                    return AudioCommandFlow::Continue;
+                }
+                PlaybackProgressWatchdogDecision::WaitingForCallbackAfterPlay => {
+                    log::debug!(
+                        "Playback progress watchdog waiting for first callback after stream play returned for generation {}",
+                        generation
+                    );
+                    context
+                        .shared_state
+                        .mark_audio_command_ensure_progress_completed();
+                    return AudioCommandFlow::Continue;
+                }
+                PlaybackProgressWatchdogDecision::Recover => {}
             }
 
             log::warn!(
-                "No playback callback observed after streaming ready for generation {}; rebuilding output stream",
+                "No playback callback observed after stream play returned for generation {}; rebuilding output stream",
                 generation
             );
             context.shared_state.mark_playback_recovery_requested();
@@ -315,7 +369,11 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
             );
             AudioCommandFlow::Continue
         }
-        AudioCommand::StreamingLoadReady { generation, track } => {
+        AudioCommand::StreamingLoadReady {
+            generation,
+            track,
+            autoplay,
+        } => {
             context
                 .shared_state
                 .mark_audio_command_streaming_ready_received();
@@ -335,7 +393,7 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
                     .mark_audio_command_streaming_ready_completed();
                 return AudioCommandFlow::Continue;
             }
-            if context.shared_state.state.load() != PlayerState::Playing {
+            if !autoplay || context.shared_state.state.load() == PlayerState::Paused {
                 context.shared_state.mark_streaming_ready_play_skipped();
                 context
                     .shared_state
@@ -963,6 +1021,7 @@ mod tests {
                     metadata: TrackMetadata::default(),
                     memory_mode: false,
                 },
+                autoplay: true,
             },
             &mut backend,
             &fixture.context(),
@@ -1149,6 +1208,7 @@ mod tests {
                     metadata: TrackMetadata::default(),
                     memory_mode: true,
                 },
+                autoplay: false,
             },
             &mut backend,
             &fixture.context(),
@@ -1217,6 +1277,7 @@ mod tests {
                     metadata: TrackMetadata::default(),
                     memory_mode: true,
                 },
+                autoplay: true,
             },
             &mut backend,
             &fixture.context(),
@@ -1246,13 +1307,239 @@ mod tests {
     }
 
     #[test]
-    fn ensure_playback_progress_recovers_when_no_callback_observed() {
+    fn streaming_ready_autoplay_starts_after_stop_for_load_state() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(10, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Stopped);
+        fixture
+            .shared_state
+            .is_loading
+            .store(true, Ordering::Release);
+
+        let mut backend = RecordingBackend {
+            play_calls: 0,
+            play_flow: AudioCommandFlow::StartPlayback,
+        };
+        let flow = handle_audio_command(
+            AudioCommand::StreamingLoadReady {
+                generation: 10,
+                track: StreamingTrackStart {
+                    sample_rate: 44_100,
+                    channels: 2,
+                    total_frames: 44_100 * 60,
+                    start_frame: 0,
+                    file_path: "autoplay.flac".to_string(),
+                    cached_loudness: None,
+                    metadata: TrackMetadata::default(),
+                    memory_mode: true,
+                },
+                autoplay: true,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert_eq!(backend.play_calls, 1);
+        assert!(matches!(flow, AudioCommandFlow::StartPlayback));
+        assert!(
+            fixture
+                .shared_state
+                .streaming_ready_play_requested_ms
+                .load(Ordering::Relaxed)
+                > 0
+        );
+        assert_eq!(
+            fixture
+                .shared_state
+                .streaming_ready_play_skipped_ms
+                .load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn streaming_ready_autoplay_respects_paused_state() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(11, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Paused);
+        fixture
+            .shared_state
+            .is_loading
+            .store(true, Ordering::Release);
+
+        let mut backend = RecordingBackend {
+            play_calls: 0,
+            play_flow: AudioCommandFlow::StartPlayback,
+        };
+        let flow = handle_audio_command(
+            AudioCommand::StreamingLoadReady {
+                generation: 11,
+                track: StreamingTrackStart {
+                    sample_rate: 44_100,
+                    channels: 2,
+                    total_frames: 44_100 * 60,
+                    start_frame: 0,
+                    file_path: "paused.flac".to_string(),
+                    cached_loudness: None,
+                    metadata: TrackMetadata::default(),
+                    memory_mode: true,
+                },
+                autoplay: true,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert_eq!(backend.play_calls, 0);
+        assert!(matches!(flow, AudioCommandFlow::Continue));
+        assert!(
+            fixture
+                .shared_state
+                .streaming_ready_play_skipped_ms
+                .load(Ordering::Relaxed)
+                > 0
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_waits_until_stream_play_returns() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12),
+            PlaybackProgressWatchdogDecision::WaitingForStreamPlay
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_waits_during_callback_grace_after_play() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.mark_stream_play_returned();
+
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12),
+            PlaybackProgressWatchdogDecision::WaitingForCallbackAfterPlay
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_recovers_after_play_grace_without_progress() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms()
+                .saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12),
+            PlaybackProgressWatchdogDecision::Recover
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_ignores_completed_or_stale_playback() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.mark_stream_play_returned();
+        shared.mark_first_callback_after_play();
+
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12),
+            PlaybackProgressWatchdogDecision::Ignore
+        );
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 11),
+            PlaybackProgressWatchdogDecision::Ignore
+        );
+
+        shared.state.store(PlayerState::Paused);
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12),
+            PlaybackProgressWatchdogDecision::Ignore
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_ignores_position_progress_after_play() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.mark_stream_play_returned();
+        shared.mark_first_position_advanced_after_play();
+
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12),
+            PlaybackProgressWatchdogDecision::Ignore
+        );
+    }
+
+    #[test]
+    fn ensure_playback_progress_waits_when_stream_play_has_not_returned() {
         let fixture = CommandFixture::new();
         fixture
             .shared_state
             .load_generation
             .store(12, Ordering::Release);
         fixture.shared_state.state.store(PlayerState::Playing);
+
+        let mut backend = TestBackend;
+        let flow = handle_audio_command(
+            AudioCommand::EnsurePlaybackProgress { generation: 12 },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert!(matches!(flow, AudioCommandFlow::Continue));
+        assert_eq!(
+            fixture
+                .shared_state
+                .playback_recovery_count
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert!(
+            fixture
+                .shared_state
+                .audio_command_ensure_progress_received_ms
+                .load(Ordering::Relaxed)
+                > 0
+        );
+        assert!(
+            fixture
+                .shared_state
+                .audio_command_ensure_progress_completed_ms
+                .load(Ordering::Relaxed)
+                > 0
+        );
+    }
+
+    #[test]
+    fn ensure_playback_progress_recovers_after_play_returns_without_callback() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(12, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Playing);
+        fixture.shared_state.stream_play_returned_ms.store(
+            playback_phase_time_ms()
+                .saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
 
         let mut backend = TestBackend;
         let flow = handle_audio_command(
