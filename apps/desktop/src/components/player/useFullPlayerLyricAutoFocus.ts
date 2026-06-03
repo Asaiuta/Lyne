@@ -3,6 +3,28 @@ import type { Accessor } from "solid-js";
 
 const clampLyricScrollOffset = (value: number) => Math.min(0.9, Math.max(0.1, value));
 
+interface FullPlayerLyricScrollTargetInput {
+  containerScrollTop: number;
+  containerHeight: number;
+  lineOffsetFromViewportTop: number;
+  lineHeight: number;
+  scrollOffset: number;
+}
+
+export function resolveFullPlayerLyricScrollTarget(
+  input: FullPlayerLyricScrollTargetInput
+): number {
+  const targetLineOffset = Math.max(
+    0,
+    input.containerHeight * clampLyricScrollOffset(input.scrollOffset) -
+      input.lineHeight / 2
+  );
+  return Math.max(
+    0,
+    input.containerScrollTop + input.lineOffsetFromViewportTop - targetLineOffset
+  );
+}
+
 interface UseFullPlayerLyricAutoFocusOptions {
   isOpen: Accessor<boolean>;
   autoFocusLyrics: Accessor<boolean>;
@@ -33,17 +55,16 @@ export function useFullPlayerLyricAutoFocus(options: UseFullPlayerLyricAutoFocus
 
     const containerRect = container.getBoundingClientRect();
     const lineRect = activeLine.getBoundingClientRect();
-    const offset =
-      activeLine.offsetTop -
-      Math.max(
-        0,
-        container.clientHeight * clampLyricScrollOffset(options.lyricsScrollOffset()) -
-          activeLine.clientHeight / 2
-      ) +
-      (lineRect.top - containerRect.top - activeLine.offsetTop);
+    const offset = resolveFullPlayerLyricScrollTarget({
+      containerScrollTop: container.scrollTop,
+      containerHeight: container.clientHeight,
+      lineOffsetFromViewportTop: lineRect.top - containerRect.top,
+      lineHeight: activeLine.clientHeight,
+      scrollOffset: options.lyricsScrollOffset()
+    });
 
     container.scrollTo({
-      top: Math.max(0, offset),
+      top: offset,
       behavior: "smooth"
     });
   });

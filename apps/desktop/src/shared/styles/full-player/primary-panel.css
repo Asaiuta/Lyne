@@ -163,6 +163,20 @@
     text-shadow: 0 12px 32px oklch(0 0 0 / 0.22);
   }
 
+  .full-player-alias {
+    display: -webkit-box;
+    overflow: hidden;
+    margin: 6px 0 6px 4px;
+    color: var(--full-player-ink);
+    font-size: 18px;
+    line-height: normal;
+    opacity: 0.6;
+    word-break: break-all;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+
   .full-player-play-meta {
     display: flex;
     flex-wrap: wrap;
@@ -182,6 +196,87 @@
     color: var(--full-player-ink);
     font-size: 12px;
     line-height: normal;
+  }
+
+  .full-player-meta-trigger {
+    appearance: none;
+    min-height: auto;
+    height: auto;
+    cursor: pointer;
+    background: transparent;
+    box-shadow: none;
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      opacity 0.2s ease;
+  }
+
+  .full-player-meta-trigger:hover,
+  .full-player-meta-trigger.is-open {
+    border-color: var(--full-player-ink);
+    background: var(--full-player-cover-color-08);
+    opacity: 1;
+  }
+
+  .full-player-meta-popselect {
+    display: inline-flex;
+  }
+
+  .full-player-meta-popover.n-popselect-menu.n-base-select-menu {
+    --full-player-meta-popover-ink: var(--full-player-ink, var(--player-cover-color, var(--color-primary)));
+    --full-player-meta-popover-bg: var(
+      --full-player-cover-color-18,
+      color-mix(in srgb, var(--full-player-meta-popover-ink) 18%, transparent)
+    );
+    --full-player-meta-popover-hover: var(
+      --full-player-cover-color-12,
+      color-mix(in srgb, var(--full-player-meta-popover-ink) 12%, transparent)
+    );
+    min-width: 116px;
+    border-radius: 8px;
+    border: 1px solid var(--full-player-meta-popover-bg);
+    padding: 4px;
+    color: var(--full-player-meta-popover-ink);
+    background: var(--full-player-meta-popover-bg);
+    box-shadow: 0 16px 38px rgb(0 0 0 / 0.22);
+    backdrop-filter: blur(18px);
+  }
+
+  .full-player-meta-popover .full-player-meta-option {
+    position: relative;
+    min-height: 30px;
+    border-radius: 6px;
+    padding: 0 28px 0 10px;
+    color: inherit;
+    font-size: 12px;
+    line-height: 30px;
+  }
+
+  .full-player-meta-popover .full-player-meta-option::before {
+    border-radius: inherit;
+  }
+
+  .full-player-meta-popover .full-player-meta-option:hover::before,
+  .full-player-meta-popover .full-player-meta-option[data-highlighted]::before,
+  .full-player-meta-popover .full-player-meta-option.is-active::before {
+    background: var(--full-player-meta-popover-hover);
+  }
+
+  .full-player-meta-option-content {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .full-player-meta-option-check {
+    right: 8px;
+    color: currentColor;
+  }
+
+  .full-player-meta-option-check svg {
+    width: 14px;
+    height: 14px;
   }
 
   .full-player-artists,

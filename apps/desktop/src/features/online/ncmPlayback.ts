@@ -18,6 +18,7 @@ export interface NcmTrackReference {
 export interface NcmTrackSupplement {
   status: "loading" | "success" | "error";
   title: string | null;
+  alias: string | null;
   artist: string | null;
   artists: NcmArtistSummary[];
   album: string | null;
@@ -25,6 +26,7 @@ export interface NcmTrackSupplement {
   coverUrl: string | null;
   dynamicCoverUrl: string | null;
   lyrics: NcmLyricLine[];
+  lyricSource: string | null;
   error: string | null;
 }
 

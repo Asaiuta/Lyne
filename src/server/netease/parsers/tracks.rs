@@ -78,6 +78,21 @@ fn read_mv_id(item: &serde_json::Map<String, Value>) -> Option<i64> {
         .filter(|id| *id > 0)
 }
 
+fn read_first_alias(item: &serde_json::Map<String, Value>) -> Option<String> {
+    ["alia", "alias", "transNames", "tns"]
+        .iter()
+        .find_map(|key| {
+            let value = item.get(*key)?;
+            read_non_empty_string(value).or_else(|| {
+                value
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find_map(read_non_empty_string)
+            })
+        })
+}
+
 pub(in crate::server::netease) fn read_song_url(payload: &Value) -> Option<String> {
     payload
         .get("data")
@@ -107,6 +122,7 @@ pub(in crate::server::netease) fn read_song_detail(
 
     Some(NcmTrackDetail {
         title: target.get("name").and_then(read_non_empty_string),
+        alias: target.as_object().and_then(read_first_alias),
         artist: read_artists(target.get("ar"))
             .or_else(|| read_artists(target.get("artists")))
             .or_else(|| {

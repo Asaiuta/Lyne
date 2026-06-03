@@ -117,8 +117,12 @@ impl AudioThreadRuntime {
                 Err(RecvTimeoutError::Timeout) => self.maintain_parked_streams(),
                 Err(RecvTimeoutError::Disconnected) => break,
             }
+            // Free resources the audio callback retired (old buffers, replaced DSP
+            // chains, consumed streaming chunks) here on the non-realtime audio thread.
+            self.shared_state.drain_retired_audio_resources();
         }
 
+        self.shared_state.drain_retired_audio_resources();
         self.release_parked_streams();
     }
 

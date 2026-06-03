@@ -10,7 +10,12 @@ use super::state::SharedState;
 use crate::processor::SpectrumAnalyzer;
 use std::sync::Arc;
 
-pub const SPECTRUM_BATCH_CAPACITY: usize = 1024;
+// Mono samples carried per callback batch. The audio callback copies an entire
+// `SpectrumBatch` by value into the channel each invocation, so this is sized to the
+// most one stereo callback produces (output is downmixed to mono) rather than to the
+// full output buffer — keeping that per-callback copy small. The spectrum thread
+// accumulates batches into its 2048-sample FFT window regardless of batch size.
+pub const SPECTRUM_BATCH_CAPACITY: usize = 512;
 
 #[derive(Clone)]
 pub struct SpectrumBatch {

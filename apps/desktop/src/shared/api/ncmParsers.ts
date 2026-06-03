@@ -32,6 +32,7 @@ export {
   parseNcmTracksPageResponse,
   parseNcmTracksResponse,
   parseResolvedNcmTrackResponse,
+  parseResolvedNcmTrackLyricsResponse,
   parseResolvedNcmTrackSupplementResponse
 } from "./ncmTrackParsers";
 export { parseNcmLikelistIdsResponse } from "./ncmUserParsers";

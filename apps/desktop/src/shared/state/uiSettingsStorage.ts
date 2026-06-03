@@ -14,6 +14,7 @@ import {
   type HomeSectionKey,
   type LyricsBlendMode,
   type LyricsPosition,
+  type LyricPriority,
   type NcmSongLevel,
   type PlayerBackgroundType,
   type PlayerExpandAnimation,
@@ -103,6 +104,8 @@ const VALID_SEARCH_INPUT_BEHAVIORS = new Set<SearchInputBehavior>([
 const VALID_LYRICS_POSITIONS = new Set<LyricsPosition>(["flex-start", "center", "flex-end"]);
 
 const VALID_LYRICS_BLEND_MODES = new Set<LyricsBlendMode>(["screen", "plus-lighter"]);
+
+const VALID_LYRIC_PRIORITIES = new Set<LyricPriority>(["auto", "official"]);
 
 interface UISettingField<T> {
   key: string;
@@ -394,6 +397,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   volumeFadeTime: createNumberField("ui.playback.volumeFadeTime", 300),
   memoryLastSeek: createBoolField("ui.playback.memoryLastSeek", true),
   localLyricDirectories: createStringArrayField("ui.local.lyricDirectories", []),
+  lyricPriority: createEnumField("ui.lyric.priority", "auto", VALID_LYRIC_PRIORITIES),
   progressTooltipShow: createBoolField("ui.playback.progressTooltipShow", true),
   progressLyricShow: createBoolField("ui.playback.progressLyricShow", true),
   progressAdjustLyric: createBoolField("ui.playback.progressAdjustLyric", false),

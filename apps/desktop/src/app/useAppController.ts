@@ -99,7 +99,8 @@ export function useAppController(api: ApiClient): AppController {
     livePosition: playback.livePosition,
     coverUrl: playback.coverUrl,
     dynamicCoverEnabled: () => fullPlayerOpen() && uiSettings.dynamicCover,
-    localLyricDirectories: () => uiSettings.localLyricDirectories
+    localLyricDirectories: () => uiSettings.localLyricDirectories,
+    lyricPriority: () => uiSettings.lyricPriority
   });
 
   const handleChangeCurrentNcmQuality = async (level: NcmSongLevel) => {

@@ -134,6 +134,7 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
       [STORAGE_KEYS.fullPlayerLayout]: "lyrics",
       [STORAGE_KEYS.dynamicCover]: "true",
       [STORAGE_KEYS.fullPlayerShowCopyLyric]: "false",
+      [STORAGE_KEYS.lyricPriority]: "official",
       [STORAGE_KEYS.localLyricDirectories]: JSON.stringify([
         "D:/Lyrics",
         " D:/Lyrics ",
@@ -158,6 +159,7 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
   assert.equal(settings.dynamicCover, true);
   assert.equal(settings.fullPlayerShowCopyLyric, false);
   assert.equal(settings.fullPlayerShowLyricOffset, true);
+  assert.equal(settings.lyricPriority, "official");
   assert.deepEqual(settings.localLyricDirectories, ["D:/Lyrics", "E:/MoreLyrics"]);
   assert.equal(settings.contextMenuOptions.search, false);
   assert.equal(settings.contextMenuOptions.play, true);
@@ -420,7 +422,8 @@ test("readUISettingsSnapshot rejects invalid SPlayer-aligned general enums", () 
       [STORAGE_KEYS.closeAppMethod]: "quit",
       [STORAGE_KEYS.updateChannel]: "dev",
       [STORAGE_KEYS.searchInputBehavior]: "unknown",
-      [STORAGE_KEYS.shareUrlFormat]: "desktop"
+      [STORAGE_KEYS.shareUrlFormat]: "desktop",
+      [STORAGE_KEYS.lyricPriority]: "qm"
     })
   );
 
@@ -428,6 +431,7 @@ test("readUISettingsSnapshot rejects invalid SPlayer-aligned general enums", () 
   assert.equal(settings.updateChannel, "stable");
   assert.equal(settings.searchInputBehavior, "normal");
   assert.equal(settings.shareUrlFormat, "web");
+  assert.equal(settings.lyricPriority, "auto");
 });
 
 test("commitUISettingField rolls back local state when schema-managed persist fails", () => {

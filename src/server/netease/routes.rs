@@ -6,6 +6,7 @@ pub(super) const DOMAIN_ROUTE_CONTRACTS: &[(&str, &str)] = &[
     ("POST", "/domain/ncm/track/play"),
     ("POST", "/domain/ncm/track/enqueue"),
     ("POST", "/domain/ncm/track/supplement"),
+    ("POST", "/domain/ncm/track/lyrics"),
     ("POST", "/domain/ncm/home_feed"),
     ("POST", "/domain/ncm/discover/playlists"),
     ("POST", "/domain/ncm/discover/albums"),
@@ -54,6 +55,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
     .route(
         "/domain/ncm/track/supplement",
         web::post().to(resolve_ncm_track_supplement),
+    )
+    .route(
+        "/domain/ncm/track/lyrics",
+        web::post().to(resolve_ncm_track_lyrics),
     )
     .route("/domain/ncm/home_feed", web::post().to(get_ncm_home_feed))
     .route(

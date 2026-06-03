@@ -25,7 +25,7 @@ type QualityState =
   | { status: "success"; songId: number; options: PlayerBarNcmQualityOption[]; error: string | null }
   | { status: "error"; songId: number; options: PlayerBarNcmQualityOption[]; error: string | null };
 
-const QUALITY_LEVELS: readonly Omit<PlayerBarNcmQualityOption, "detail">[] = [
+export const QUALITY_LEVELS: readonly Omit<PlayerBarNcmQualityOption, "detail">[] = [
   { key: "l", level: "standard", label: "Standard", shortLabel: "Standard" },
   { key: "m", level: "higher", label: "Higher", shortLabel: "Higher" },
   { key: "h", level: "exhigh", label: "Extra High", shortLabel: "EX" },
@@ -35,6 +35,9 @@ const QUALITY_LEVELS: readonly Omit<PlayerBarNcmQualityOption, "detail">[] = [
   { key: "sk", level: "sky", label: "Surround Audio", shortLabel: "Surround" },
   { key: "jm", level: "jymaster", label: "Master", shortLabel: "Master" }
 ];
+
+export const ncmSongLevelShortLabel = (level: NcmSongLevel): string =>
+  QUALITY_LEVELS.find((item) => item.level === level)?.shortLabel ?? "EX";
 
 const readQualityNumber = (value: unknown): number | null =>
   isNumber(value) ? value : null;

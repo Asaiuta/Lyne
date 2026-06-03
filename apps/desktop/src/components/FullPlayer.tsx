@@ -3,6 +3,7 @@ import type { JSX } from "solid-js";
 import { useTranslation } from "../shared/i18n";
 import type { NcmArtistSummary } from "../shared/api/ncmDomainTypes";
 import { findActiveLyricIndex } from "../shared/media/lyrics";
+import type { LyricLine } from "../shared/media/lyrics";
 import { SpectrumCanvas } from "./player/SpectrumCanvas";
 import { FullPlayerComments } from "./player/FullPlayerComments";
 import { FullPlayerBackground } from "./player/FullPlayerBackground";
@@ -31,6 +32,7 @@ import { useFullPlayerMetaVisibility } from "./player/useFullPlayerMetaVisibilit
 import { useFullPlayerModes } from "./player/useFullPlayerModes";
 import { useFullPlayerProgress } from "./player/useFullPlayerProgress";
 import { usePlayerBarTimeFormat } from "./player/usePlayerBarTimeFormat";
+import { ncmSongLevelShortLabel } from "./player/usePlayerBarNcmQuality";
 import { clamp01 } from "./player/time";
 import {
   IconRepeat,
@@ -39,6 +41,8 @@ import {
   IconVolumeMute
 } from "./icons";
 import { useUISettings } from "../shared/state/useUISettings";
+import type { LyricPriority } from "../shared/state/uiSettingsModel";
+import { persistUISettingField } from "../shared/state/uiSettingsStorage";
 import { usePlayback } from "../app/PlaybackContext";
 import { SImage } from "./SImage";
 import "../shared/styles/components/full-player.css";
@@ -57,6 +61,34 @@ const LYRIC_OFFSET_STORAGE_KEY = "ui.lyric.songOffsets";
 const LYRIC_OFFSET_STEP_MS = 500;
 const FULL_PLAYER_CLOSE_PRESENCE_MS = 560;
 const FULL_PLAYER_MOBILE_QUERY = "(max-width: 989.98px)";
+
+const LYRIC_PRIORITY_OPTIONS: ReadonlyArray<{ value: LyricPriority; labelKey: "fullPlayer.meta.lyricPriority.auto" | "fullPlayer.meta.lyricPriority.official" }> = [
+  { value: "auto", labelKey: "fullPlayer.meta.lyricPriority.auto" },
+  { value: "official", labelKey: "fullPlayer.meta.lyricPriority.official" }
+];
+
+function resolveLyricMode(
+  lyricLines: readonly LyricLine[],
+  lyricSource: string | null | undefined,
+  showWordLyrics: boolean
+): string {
+  if (lyricLines.length === 0) return "NO-LRC";
+  const source = lyricSource?.toLowerCase() ?? "";
+  if (showWordLyrics && source.includes("ttml")) return "TTML";
+  if (showWordLyrics && lyricLines.some((line) => (line.words?.length ?? 0) > 0)) return "YRC";
+  return "LRC";
+}
+
+function resolveAudioSourceKey(
+  filePath: string | null | undefined,
+  songId: number | null
+): "local" | "netease" | "streaming" | "unknown" {
+  const path = filePath?.trim() ?? "";
+  if (songId !== null) return "netease";
+  if (/^https?:\/\//i.test(path)) return "streaming";
+  if (path.length > 0) return "local";
+  return "unknown";
+}
 
 function readLyricOffsetMap(): Record<string, number> {
   if (typeof window === "undefined") return {};
@@ -127,6 +159,7 @@ export function FullPlayer(props: FullPlayerProps) {
   const lyrics = () => playback.lyrics();
   const lyricStatus = () => playback.lyricStatus();
   const lyricError = () => playback.supplement()?.error ?? null;
+  const lyricSource = () => playback.supplement()?.lyricSource ?? null;
   const repeatMode = () => playback.repeatMode();
   const shuffleMode = () => playback.shuffleMode();
   const albumLink = createMemo<FullPlayerAlbumLink | null>(() => {
@@ -227,6 +260,10 @@ export function FullPlayer(props: FullPlayerProps) {
     uiSettings.hideBracketedContent ? stripBracketedContent(title()) : title();
   const displaySubtitle = () =>
     uiSettings.hideBracketedContent ? stripBracketedContent(subtitle()) : subtitle();
+  const displayAlias = () => {
+    if (uiSettings.hideBracketedContent) return null;
+    return playback.supplement()?.alias?.trim() || null;
+  };
   const displayArtist = () => {
     const value = artist()?.trim() || null;
     return value && uiSettings.hideBracketedContent ? stripBracketedContent(value) : value;
@@ -234,6 +271,29 @@ export function FullPlayer(props: FullPlayerProps) {
   const displayAlbum = () => {
     const value = album()?.trim() || null;
     return value && uiSettings.hideBracketedContent ? stripBracketedContent(value) : value;
+  };
+  const lyricMode = () => resolveLyricMode(lyrics(), lyricSource(), uiSettings.showWordLyrics);
+  const lyricPriorityOptions = () =>
+    LYRIC_PRIORITY_OPTIONS.map((option) => ({
+      value: option.value,
+      label: t(option.labelKey)
+    }));
+  const qualityLabel = () => {
+    const current = player();
+    if (currentSongId() !== null) {
+      return ncmSongLevelShortLabel(uiSettings.ncmSongLevel);
+    }
+    if (!current) return t("fullPlayer.meta.quality.unknown");
+    if (current.target_samplerate === null) return t("player.quality.source");
+    return t("player.quality.upsampled", { value: current.target_samplerate });
+  };
+  const audioSourceText = () => {
+    const sourceKey = resolveAudioSourceKey(player()?.file_path, currentSongId());
+    return t(`fullPlayer.meta.source.${sourceKey}` as const);
+  };
+  const handleSelectLyricPriority = (priority: LyricPriority) => {
+    if (priority === uiSettings.lyricPriority) return;
+    persistUISettingField("lyricPriority", priority);
   };
   const playPauseLabel = () => (isPlaying() ? t("player.aria.pause") : t("player.aria.play"));
   const {
@@ -538,12 +598,21 @@ export function FullPlayer(props: FullPlayerProps) {
     showMeta: uiSettings.showPlayMeta,
     title: displayTitle(),
     subtitle: displaySubtitle() || t("player.subtitle.empty"),
+    alias: displayAlias(),
     artist: displayArtist(),
     album: displayAlbum(),
+    showPlayerQuality: uiSettings.showPlayerQuality,
+    qualityLabel: qualityLabel(),
+    lyricMode: lyricMode(),
+    lyricPriority: uiSettings.lyricPriority,
+    lyricPriorityLabel: t("fullPlayer.meta.lyricPriority"),
+    lyricPriorityOptions: lyricPriorityOptions(),
+    audioSourceText: audioSourceText(),
     artistFallback: t("library.group.unknownArtist"),
     albumFallback: t("library.group.unknownAlbum"),
     artistLinks: playback.supplement()?.artists ?? [],
     albumLink: albumLink(),
+    onSelectLyricPriority: handleSelectLyricPriority,
     onSelectArtist: props.onSelectArtist,
     onSelectAlbum: props.onSelectAlbum,
     detail: playback.detail()

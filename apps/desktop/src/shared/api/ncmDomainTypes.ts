@@ -36,16 +36,20 @@ export interface NcmTrackQueueResult {
 export interface ResolvedNcmTrackSupplement {
   songId: number;
   title: string | null;
+  alias: string | null;
   artist: string | null;
   artists: NcmArtistSummary[];
   album: string | null;
   albumId: number | null;
   coverUrl: string | null;
   dynamicCoverUrl: string | null;
-  lyrics: LyricLine[];
   detailError: string | null;
-  lyricsError: string | null;
   dynamicCoverError: string | null;
+}
+
+export interface ResolvedNcmTrackLyrics {
+  songId: number;
+  lyrics: LyricLine[];
 }
 
 export interface NcmArtistSummary {

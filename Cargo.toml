@@ -122,7 +122,7 @@ sha2 = "0.10"
 hex = "0.4"
 crc32fast = "1.4"
 encoding_rs = "0.8"
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 quick-xml = { version = "0.36", features = ["serialize"] }
 ncm-api-rs = "0.1"
 serde_urlencoded = "0.7"
@@ -138,12 +138,27 @@ image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
 default = []
 python = ["pyo3", "numpy"]
 
+[profile.audio-dev]
+inherits = "dev"
+debug = 1
+incremental = true
+codegen-units = 256
+
+[profile.audio-dev.package.audio_engine]
+opt-level = 1
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
 panic = "abort"
 opt-level = 3
 # Use RUSTFLAGS="-C target-cpu=native" for CPU-specific optimizations
+
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = true
 
 [profile.release.build-override]
 opt-level = 3

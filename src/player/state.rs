@@ -31,7 +31,9 @@ pub const AUDIO_COMMAND_CODE_STOP: u64 = 1;
 pub const AUDIO_COMMAND_CODE_STOP_FOR_LOAD: u64 = 2;
 pub const AUDIO_COMMAND_CODE_STREAMING_LOAD_READY: u64 = 3;
 pub const AUDIO_COMMAND_CODE_ENSURE_PLAYBACK_PROGRESS: u64 = 4;
-pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 500;
+pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 300;
+pub(crate) const PLAYBACK_PROGRESS_REPLAY_GRACE_MS: u64 = 150;
+pub(crate) const PLAYBACK_PROGRESS_REPLAY_COMMAND_GRACE_MS: u64 = 250;
 
 // ============ Commands & State ============
 
@@ -99,6 +101,22 @@ pub struct StreamingAudioChunk {
     pub samples: Arc<Vec<f64>>,
 }
 
+/// A heap-backed resource retired by the realtime audio callback.
+///
+/// Dropping a large `Vec<f64>` or a `DspChain` frees heap memory, which can block
+/// on the allocator — forbidden on the audio thread (see backend quality
+/// guidelines). The callback hands these here via
+/// [`SharedState::retire_audio_resource`] and the audio command loop drops them
+/// off the realtime thread.
+pub enum RetiredAudioResource {
+    /// A decoded playback buffer swapped out (e.g. at a gapless track change).
+    Buffer(Arc<Vec<f64>>),
+    /// A DSP chain replaced on a format change.
+    Chain(DspChain),
+    /// A streaming chunk fully consumed (or discarded as stale) by the callback.
+    Chunk(Arc<Vec<f64>>),
+}
+
 /// Commands sent to the audio thread
 #[derive(Debug, Clone)]
 pub enum AudioCommand {
@@ -110,6 +128,7 @@ pub enum AudioCommand {
     Seek(f64),
     EnsurePlaybackProgress {
         generation: u64,
+        replay_attempted: bool,
     },
     SetExternalIrConvolver {
         ir_data: Vec<f64>,
@@ -359,6 +378,7 @@ pub struct SharedState {
     pub stream_build_started_ms: AtomicU64,
     pub stream_build_finished_ms: AtomicU64,
     pub stream_play_returned_ms: AtomicU64,
+    pub stream_play_generation: AtomicU64,
     pub streaming_ready_play_requested_ms: AtomicU64,
     pub streaming_ready_play_completed_ms: AtomicU64,
     pub streaming_ready_play_start_playback_ms: AtomicU64,
@@ -386,8 +406,14 @@ pub struct SharedState {
     pub active_stream_running: AtomicBool,
     pub parked_output_stream_count: AtomicU64,
     pub parked_output_stream_release_count: AtomicU64,
+    pub output_callback_activity_count: AtomicU64,
+    pub output_callback_after_play_ms: AtomicU64,
+    pub output_callback_silenced_inactive_count: AtomicU64,
+    pub output_callback_silenced_loading_count: AtomicU64,
+    pub output_callback_silenced_stream_mismatch_count: AtomicU64,
     pub first_callback_after_play_ms: AtomicU64,
     pub first_position_advanced_ms: AtomicU64,
+    pub playback_progress_generation: AtomicU64,
     pub decode_budget_rejection_count: AtomicU64,
     pub audio_underrun_count: AtomicU64,
     pub audio_underrun_silence_frames: AtomicU64,
@@ -423,6 +449,15 @@ pub struct SharedState {
     // H-channel fix: signal callback to swap in a prebuilt DspChain when format changes
     pub dsp_needs_rebuild: AtomicBool,
     pub pending_dsp_chain: ArrayQueue<DspChain>,
+
+    // Realtime drop offload: the audio callback pushes heap-backed resources here
+    // (swapped-out buffers, replaced DSP chains, consumed streaming chunks) instead
+    // of dropping them inline; the audio command loop drains and drops them off the
+    // realtime thread. See `RetiredAudioResource`.
+    pub retired_resources: ArrayQueue<RetiredAudioResource>,
+    /// Diagnostics: times the graveyard was full and a resource had to be dropped
+    /// on the realtime thread as a last resort.
+    pub retired_resource_drop_in_rt_count: AtomicU64,
 }
 
 impl SharedState {
@@ -490,6 +525,7 @@ impl SharedState {
             stream_build_started_ms: AtomicU64::new(0),
             stream_build_finished_ms: AtomicU64::new(0),
             stream_play_returned_ms: AtomicU64::new(0),
+            stream_play_generation: AtomicU64::new(0),
             streaming_ready_play_requested_ms: AtomicU64::new(0),
             streaming_ready_play_completed_ms: AtomicU64::new(0),
             streaming_ready_play_start_playback_ms: AtomicU64::new(0),
@@ -517,8 +553,14 @@ impl SharedState {
             active_stream_running: AtomicBool::new(false),
             parked_output_stream_count: AtomicU64::new(0),
             parked_output_stream_release_count: AtomicU64::new(0),
+            output_callback_activity_count: AtomicU64::new(0),
+            output_callback_after_play_ms: AtomicU64::new(0),
+            output_callback_silenced_inactive_count: AtomicU64::new(0),
+            output_callback_silenced_loading_count: AtomicU64::new(0),
+            output_callback_silenced_stream_mismatch_count: AtomicU64::new(0),
             first_callback_after_play_ms: AtomicU64::new(0),
             first_position_advanced_ms: AtomicU64::new(0),
+            playback_progress_generation: AtomicU64::new(0),
             decode_budget_rejection_count: AtomicU64::new(0),
             audio_underrun_count: AtomicU64::new(0),
             audio_underrun_silence_frames: AtomicU64::new(0),
@@ -540,7 +582,29 @@ impl SharedState {
             output_bits: std::sync::atomic::AtomicU32::new(24), // Default 24-bit
             dsp_needs_rebuild: AtomicBool::new(false),
             pending_dsp_chain: ArrayQueue::new(1),
+            retired_resources: ArrayQueue::new(256),
+            retired_resource_drop_in_rt_count: AtomicU64::new(0),
         }
+    }
+
+    /// Hand a heap-backed resource to the non-realtime drop queue.
+    ///
+    /// Safe to call from the audio callback: pushing is wait-free and never
+    /// allocates. If the queue is momentarily full the resource is dropped in
+    /// place as a last resort and counted via `retired_resource_drop_in_rt_count`.
+    pub fn retire_audio_resource(&self, resource: RetiredAudioResource) {
+        if self.retired_resources.push(resource).is_err() {
+            // The rejected resource drops here (on the realtime thread) as the
+            // `Err` payload of `push` goes out of scope — last-resort fallback.
+            self.retired_resource_drop_in_rt_count
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Drop every resource retired by the audio callback. Call only from a
+    /// non-realtime thread (the audio command loop).
+    pub fn drain_retired_audio_resources(&self) {
+        while self.retired_resources.pop().is_some() {}
     }
 
     pub fn current_time_secs(&self) -> f64 {
@@ -575,6 +639,7 @@ impl SharedState {
         self.stream_build_started_ms.store(0, Ordering::Relaxed);
         self.stream_build_finished_ms.store(0, Ordering::Relaxed);
         self.stream_play_returned_ms.store(0, Ordering::Relaxed);
+        self.stream_play_generation.store(0, Ordering::Relaxed);
         self.streaming_ready_play_requested_ms
             .store(0, Ordering::Relaxed);
         self.streaming_ready_play_completed_ms
@@ -583,7 +648,15 @@ impl SharedState {
             .store(0, Ordering::Relaxed);
         self.streaming_ready_play_skipped_ms
             .store(0, Ordering::Relaxed);
+        self.audio_command_ensure_progress_received_ms
+            .store(0, Ordering::Relaxed);
+        self.audio_command_ensure_progress_completed_ms
+            .store(0, Ordering::Relaxed);
+        self.playback_recovery_requested_ms
+            .store(0, Ordering::Relaxed);
         self.first_callback_after_play_ms
+            .store(0, Ordering::Relaxed);
+        self.output_callback_after_play_ms
             .store(0, Ordering::Relaxed);
         self.first_position_advanced_ms.store(0, Ordering::Relaxed);
         self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
@@ -698,9 +771,15 @@ impl SharedState {
     pub fn mark_stream_play_returned(&self) {
         self.first_callback_after_play_ms
             .store(0, Ordering::Relaxed);
+        self.output_callback_after_play_ms
+            .store(0, Ordering::Relaxed);
         self.first_position_advanced_ms.store(0, Ordering::Relaxed);
         self.stream_play_returned_ms
-            .store(playback_phase_time_ms(), Ordering::Relaxed);
+            .store(playback_phase_time_ms(), Ordering::Release);
+        self.stream_play_generation.store(
+            self.load_generation.load(Ordering::Acquire),
+            Ordering::Release,
+        );
     }
 
     pub fn mark_streaming_ready_play_requested(&self) {
@@ -865,8 +944,45 @@ impl SharedState {
                 == self.prefer_default_output_config.load(Ordering::Relaxed)
     }
 
+    pub fn mark_output_callback_activity(&self) {
+        self.output_callback_activity_count
+            .fetch_add(1, Ordering::Relaxed);
+        if !self.current_generation_stream_play_returned()
+            || self.output_callback_after_play_ms.load(Ordering::Relaxed) != 0
+        {
+            return;
+        }
+
+        let _ = self.output_callback_after_play_ms.compare_exchange(
+            0,
+            playback_phase_time_ms(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    pub fn mark_output_callback_silenced_inactive(&self) {
+        self.output_callback_silenced_inactive_count
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn mark_output_callback_silenced_loading(&self) {
+        self.output_callback_silenced_loading_count
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn mark_output_callback_silenced_stream_mismatch(&self) {
+        self.output_callback_silenced_stream_mismatch_count
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn output_callback_observed_after_current_play(&self) -> bool {
+        self.current_generation_stream_play_returned()
+            && self.output_callback_after_play_ms.load(Ordering::Acquire) != 0
+    }
+
     pub fn mark_first_callback_after_play(&self) {
-        if self.stream_play_returned_ms.load(Ordering::Relaxed) == 0
+        if !self.current_generation_stream_play_returned()
             || self.first_callback_after_play_ms.load(Ordering::Relaxed) != 0
         {
             return;
@@ -878,10 +994,11 @@ impl SharedState {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+        self.mark_playback_progress_generation();
     }
 
     pub fn mark_first_position_advanced_after_play(&self) {
-        if self.stream_play_returned_ms.load(Ordering::Relaxed) == 0
+        if !self.current_generation_stream_play_returned()
             || self.first_position_advanced_ms.load(Ordering::Relaxed) != 0
         {
             return;
@@ -893,6 +1010,27 @@ impl SharedState {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+        self.mark_playback_progress_generation();
+    }
+
+    fn current_generation_stream_play_returned(&self) -> bool {
+        let generation = self.load_generation.load(Ordering::Acquire);
+        if generation == 0 {
+            return false;
+        }
+        self.stream_play_generation.load(Ordering::Acquire) == generation
+            && self.stream_play_returned_ms.load(Ordering::Acquire) != 0
+    }
+
+    fn mark_playback_progress_generation(&self) {
+        let generation = self.load_generation.load(Ordering::Acquire);
+        if generation == 0 {
+            return;
+        }
+        if self.playback_progress_generation.load(Ordering::Relaxed) != generation {
+            self.playback_progress_generation
+                .store(generation, Ordering::Release);
+        }
     }
 
     pub fn repeat_mode(&self) -> RepeatMode {
@@ -962,6 +1100,9 @@ mod tests {
         shared.mark_output_prepare_started();
         shared.mark_streaming_first_chunk();
         shared.mark_stream_play_returned();
+        shared.mark_audio_command_ensure_progress_received();
+        shared.mark_audio_command_ensure_progress_completed();
+        shared.mark_playback_recovery_requested();
 
         shared.reset_load_phase_timestamps();
 
@@ -970,7 +1111,29 @@ mod tests {
         assert_eq!(shared.output_prepare_started_ms.load(Ordering::Relaxed), 0);
         assert_eq!(shared.streaming_first_chunk_ms.load(Ordering::Relaxed), 0);
         assert_eq!(shared.stream_play_returned_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.output_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
         assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared
+                .audio_command_ensure_progress_received_ms
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            shared
+                .audio_command_ensure_progress_completed_ms
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            shared
+                .playback_recovery_requested_ms
+                .load(Ordering::Relaxed),
+            0
+        );
     }
 
     #[test]
@@ -1002,6 +1165,7 @@ mod tests {
     #[test]
     fn first_callback_phase_requires_stream_play_marker() {
         let shared = SharedState::new();
+        shared.load_generation.store(3, Ordering::Release);
         shared.mark_first_callback_after_play();
         assert_eq!(
             shared.first_callback_after_play_ms.load(Ordering::Relaxed),
@@ -1011,6 +1175,57 @@ mod tests {
         shared.mark_stream_play_returned();
         shared.mark_first_callback_after_play();
         assert!(shared.first_callback_after_play_ms.load(Ordering::Relaxed) > 0);
+    }
+
+    #[test]
+    fn output_callback_phase_records_callback_before_audio_gate() {
+        let shared = SharedState::new();
+        shared.load_generation.store(5, Ordering::Release);
+        shared.mark_output_callback_activity();
+        assert_eq!(
+            shared.output_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            shared
+                .output_callback_activity_count
+                .load(Ordering::Relaxed),
+            1
+        );
+
+        shared.mark_stream_play_returned();
+        shared.mark_output_callback_activity();
+        assert!(shared.output_callback_after_play_ms.load(Ordering::Relaxed) > 0);
+        assert!(shared.output_callback_observed_after_current_play());
+
+        shared.mark_stream_play_returned();
+        assert_eq!(
+            shared.output_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
+        assert!(!shared.output_callback_observed_after_current_play());
+    }
+
+    #[test]
+    fn playback_progress_generation_survives_later_play_marker_reset() {
+        let shared = SharedState::new();
+        shared.load_generation.store(7, Ordering::Release);
+        shared.mark_stream_play_returned();
+        shared.mark_first_position_advanced_after_play();
+
+        assert_eq!(
+            shared.playback_progress_generation.load(Ordering::Acquire),
+            7
+        );
+        assert!(shared.first_position_advanced_ms.load(Ordering::Relaxed) > 0);
+
+        shared.mark_stream_play_returned();
+
+        assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.playback_progress_generation.load(Ordering::Acquire),
+            7
+        );
     }
 
     #[test]

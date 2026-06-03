@@ -7,6 +7,7 @@ import type {
   NcmTracksPage,
   NcmTrackSummary,
   ResolvedNcmTrack,
+  ResolvedNcmTrackLyrics,
   ResolvedNcmTrackSupplement
 } from "./ncmDomainTypes";
 import {
@@ -120,25 +121,19 @@ export const parseResolvedNcmTrackSupplementResponse = (value: unknown): Resolve
     !supplement ||
     !isInteger(supplement.song_id) ||
     !isNullableString(supplement.title) ||
+    !isNullableString(supplement.alias) ||
     !isNullableString(supplement.artist) ||
     !Array.isArray(supplement.artists) ||
     !isNullableString(supplement.album) ||
     !isNullableInteger(supplement.album_id) ||
     !isNullableString(supplement.cover_url) ||
     !isNullableString(supplement.dynamic_cover_url) ||
-    !Array.isArray(supplement.lyrics) ||
     !isNullableString(supplement.detail_error) ||
-    !isNullableString(supplement.lyrics_error) ||
     !isNullableString(supplement.dynamic_cover_error)
   ) {
     throw new Error("Invalid NCM supplement payload");
   }
 
-  const lyrics = parseCurrentLyricsResponse({
-    status: "success",
-    lyrics: supplement.lyrics,
-    source: null
-  }).lyrics;
   const artists = supplement.artists
     .filter((item): item is Record<string, unknown> => isRecord(item))
     .map((item) => ({
@@ -153,16 +148,42 @@ export const parseResolvedNcmTrackSupplementResponse = (value: unknown): Resolve
   return {
     songId: supplement.song_id,
     title: supplement.title,
+    alias: supplement.alias,
     artist: supplement.artist,
     artists,
     album: supplement.album,
     albumId: supplement.album_id,
     coverUrl: supplement.cover_url,
     dynamicCoverUrl: supplement.dynamic_cover_url,
-    lyrics,
     detailError: supplement.detail_error,
-    lyricsError: supplement.lyrics_error,
     dynamicCoverError: supplement.dynamic_cover_error
+  };
+};
+
+export const parseResolvedNcmTrackLyricsResponse = (value: unknown): ResolvedNcmTrackLyrics => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid NCM lyrics response shape");
+  }
+
+  const status = parseStatus(value.status);
+  if (status === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Failed to resolve NCM lyrics");
+  }
+
+  const lyricsPayload = isRecord(value.lyrics) ? value.lyrics : null;
+  if (!lyricsPayload || !isInteger(lyricsPayload.song_id) || !Array.isArray(lyricsPayload.lyrics)) {
+    throw new Error("Invalid NCM lyrics payload");
+  }
+
+  const parsedLyrics = parseCurrentLyricsResponse({
+    status: "success",
+    lyrics: lyricsPayload.lyrics,
+    source: null
+  }).lyrics;
+
+  return {
+    songId: lyricsPayload.song_id,
+    lyrics: parsedLyrics
   };
 };
 

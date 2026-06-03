@@ -44,7 +44,8 @@ use parsers::{
     read_song_url, read_top_artist_cards, read_top_song_tracks, read_user_playlists, track_covers,
 };
 use playback_actions::{
-    enqueue_ncm_track, play_ncm_track, resolve_ncm_track, resolve_ncm_track_supplement,
+    enqueue_ncm_track, play_ncm_track, resolve_ncm_track, resolve_ncm_track_lyrics,
+    resolve_ncm_track_supplement,
 };
 use playlists::{
     get_ncm_playlist_detail, list_ncm_playlist_tracks, list_ncm_user_playlists,
@@ -65,9 +66,10 @@ use types::{
     HomeFeedRequest, LikelistRequest, NcmAccountPath, NcmAccountStateResponse, NcmHomeFeed,
     NcmHomeFeedCard, NcmHomeFeedError, NcmHomePersonalFmPreview, NcmHomeTrackCover,
     NcmTrackResolveError, PersonalFmTrashRequest, PlaylistDetailRequest,
-    PlaylistTrackUpdateRequest, PlaylistTracksRequest, ResolveNcmTrackRequest,
-    ResolveNcmTrackSupplementRequest, ResolvedNcmTrack, ResolvedNcmTrackSupplement,
-    SearchTracksRequest, SongDetailTracksRequest, UpsertNcmAccountRequest, UserPlaylistsRequest,
+    PlaylistTrackUpdateRequest, PlaylistTracksRequest, ResolveNcmTrackLyricsRequest,
+    ResolveNcmTrackRequest, ResolveNcmTrackSupplementRequest, ResolvedNcmTrack,
+    ResolvedNcmTrackLyrics, ResolvedNcmTrackSupplement, SearchTracksRequest,
+    SongDetailTracksRequest, UpsertNcmAccountRequest, UserPlaylistsRequest,
 };
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {

@@ -9,10 +9,10 @@ use crossbeam::channel::Sender;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use super::spectrum::SpectrumBatch;
+use super::spectrum::{SpectrumBatch, SPECTRUM_BATCH_CAPACITY};
 use super::state::{
-    PlayerState, SharedState, StreamingAudioChunk, EVENT_NEEDS_PRELOAD_RESET, EVENT_TRACK_CHANGED,
-    EVENT_TRACK_EOF,
+    PlayerState, RetiredAudioResource, SharedState, StreamingAudioChunk, EVENT_NEEDS_PRELOAD_RESET,
+    EVENT_TRACK_CHANGED, EVENT_TRACK_EOF,
 };
 use crate::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
@@ -97,6 +97,15 @@ impl CallbackScratch {
         }
     }
 
+    /// Release the currently held streaming chunk to the non-realtime drop queue
+    /// instead of freeing its `Arc<Vec<f64>>` on the audio thread.
+    fn release_streaming_chunk(&mut self, shared: &SharedState) {
+        if let Some(chunk) = self.streaming_chunk.take() {
+            shared.retire_audio_resource(RetiredAudioResource::Chunk(chunk.samples));
+        }
+        self.streaming_chunk_pos = 0;
+    }
+
     #[cfg(test)]
     fn capacities(&self) -> CallbackScratchCapacities {
         CallbackScratchCapacities {
@@ -107,14 +116,14 @@ impl CallbackScratch {
     }
 }
 
-fn clear_streaming_scratch(scratch: &mut CallbackScratch) {
+fn clear_streaming_scratch(shared: &SharedState, scratch: &mut CallbackScratch) {
     scratch.resample_leftover.clear();
     scratch.resample_leftover_pos = 0;
-    scratch.streaming_chunk = None;
-    scratch.streaming_chunk_pos = 0;
+    scratch.release_streaming_chunk(shared);
 }
 
 fn refresh_streaming_scratch_generation(
+    shared: &SharedState,
     scratch: &mut CallbackScratch,
     resampler: &mut Option<StreamingResampler>,
     generation: u64,
@@ -122,7 +131,7 @@ fn refresh_streaming_scratch_generation(
     if scratch.streaming_local_generation == generation {
         return;
     }
-    clear_streaming_scratch(scratch);
+    clear_streaming_scratch(shared, scratch);
     if let Some(ref mut rs) = resampler {
         rs.reset();
     }
@@ -339,13 +348,17 @@ impl LockfreeDspContext {
         // on next invocation via ArcSwap::load()
         match merged {
             Some(conv) => {
-                self.merged_convolver_enabled.store(true, Ordering::Release);
+                // Publish the pointer before flipping the flag so a reader that
+                // observes `enabled == true` is guaranteed to also see the convolver.
                 self.merged_convolver.store(Some(conv));
+                self.merged_convolver_enabled.store(true, Ordering::Release);
             }
             None => {
-                self.merged_convolver.store(None);
+                // Clear the flag before dropping the pointer so a reader never
+                // observes `enabled == true` with an absent convolver.
                 self.merged_convolver_enabled
                     .store(false, Ordering::Release);
+                self.merged_convolver.store(None);
             }
         }
         Ok(())
@@ -484,7 +497,10 @@ fn rebuild_dsp_chain_if_requested(
     }
 
     if let Some(new_chain) = shared.pending_dsp_chain.pop() {
-        *dsp_chain = new_chain;
+        // Swap the old chain out and offload its drop: freeing a DspChain (and its
+        // processors' buffers) on the audio thread would hit the allocator.
+        let retired_chain = std::mem::replace(dsp_chain, new_chain);
+        shared.retire_audio_resource(RetiredAudioResource::Chain(retired_chain));
     } else {
         let new_sr = shared.sample_rate.load(Ordering::Relaxed).max(1) as f64;
         dsp_chain.set_sample_rate(new_sr);
@@ -519,7 +535,7 @@ fn reset_dsp_state_if_requested(
     if let Some(ref mut rs) = resampler {
         rs.reset();
     }
-    clear_streaming_scratch(scratch);
+    clear_streaming_scratch(shared, scratch);
 }
 
 fn request_gapless_preload_if_needed(shared: &SharedState, total: usize, current_pos: usize) {
@@ -546,8 +562,7 @@ fn streaming_has_buffered_samples(
         .as_ref()
         .is_some_and(|chunk| chunk.generation != generation);
     if stale_current {
-        scratch.streaming_chunk = None;
-        scratch.streaming_chunk_pos = 0;
+        scratch.release_streaming_chunk(shared);
     }
 
     let current_chunk_has_samples = scratch
@@ -560,10 +575,15 @@ fn streaming_has_buffered_samples(
 
     while let Some(chunk) = shared.streaming_chunks.pop() {
         if chunk.generation == generation {
+            // Offload any exhausted/empty chunk still in the slot before replacing it,
+            // so no `Arc<Vec<f64>>` is ever freed on the audio thread.
+            scratch.release_streaming_chunk(shared);
             scratch.streaming_chunk = Some(chunk);
             scratch.streaming_chunk_pos = 0;
             return true;
         }
+        // Stale chunk from a superseded generation: offload its drop.
+        shared.retire_audio_resource(RetiredAudioResource::Chunk(chunk.samples));
     }
 
     false
@@ -607,7 +627,10 @@ fn try_activate_pending_gapless(
     let next_sr = shared.pending_sample_rate.load(Ordering::Relaxed);
     let next_ch = shared.pending_channels.load(Ordering::Relaxed);
 
-    shared.audio_buffer.store(next);
+    // Offload the outgoing buffer's drop to the command loop; freeing a large
+    // decoded `Vec<f64>` on the audio thread would hit the allocator.
+    let retired_buffer = shared.audio_buffer.swap(next);
+    shared.retire_audio_resource(RetiredAudioResource::Buffer(retired_buffer));
     shared.total_frames.store(next_frames, Ordering::Relaxed);
     shared.sample_rate.store(next_sr, Ordering::Relaxed);
     shared.channels.store(next_ch, Ordering::Relaxed);
@@ -651,11 +674,19 @@ fn handle_eof_or_gapless(
     loudness_state: &Arc<AtomicLoudnessState>,
     resampler: &mut Option<StreamingResampler>,
     scratch: &mut CallbackScratch,
+    channels: usize,
     total: usize,
     current_pos: usize,
 ) -> bool {
     let has_leftover = scratch.resample_leftover_pos < scratch.resample_leftover.len();
-    if current_pos < total || has_leftover {
+    // `total` is the advertised track length. For streaming-first-buffer loads it
+    // can be a ceil estimate that exceeds the actually-decoded buffer, and for a
+    // drained memory-mode stream the buffer is empty. Never wait past the real
+    // decoded frames: otherwise the render loop below can never satisfy the read
+    // and spins forever on the audio thread.
+    let buffered_frames = shared.audio_buffer.load().len() / channels.max(1);
+    let playable_end = total.min(buffered_frames);
+    if current_pos < playable_end || has_leftover {
         return false;
     }
 
@@ -697,6 +728,10 @@ fn render_audio_output(
 ) -> usize {
     let output_len = data.len();
     let mut samples_written = 0;
+    // Never read past the actual decoded buffer: `total` may be a ceil estimate
+    // larger than the real sample count (streaming-first-buffer loads). Clamping
+    // keeps `available_source` honest so the loop terminates instead of spinning.
+    let total = total.min(shared.audio_buffer.load().len() / channels.max(1));
 
     if output_path.uses_final_buffer() && scratch.final_output.len() < output_len {
         scratch.final_output.resize(output_len, 0.0);
@@ -771,7 +806,10 @@ fn render_audio_output(
         }
 
         if scratch.process_buffer.is_empty() {
-            continue;
+            // With `total` clamped to the real buffer this is unreachable, but if the
+            // buffer is ever shorter than expected, stop instead of spinning: a read
+            // that fails now would fail identically on every later iteration.
+            break;
         }
 
         *current_pos += frames_to_read;
@@ -864,15 +902,12 @@ fn fill_streaming_process_buffer(
             .as_ref()
             .is_some_and(|chunk| chunk.generation != generation);
         if stale_current {
-            scratch.streaming_chunk = None;
-            scratch.streaming_chunk_pos = 0;
+            scratch.release_streaming_chunk(shared);
         }
 
         if let Some(chunk) = scratch.streaming_chunk.as_ref() {
-            let available = chunk
-                .samples
-                .len()
-                .saturating_sub(scratch.streaming_chunk_pos);
+            let chunk_len = chunk.samples.len();
+            let available = chunk_len.saturating_sub(scratch.streaming_chunk_pos);
             if available > 0 {
                 let take = available.min(target_samples - scratch.process_buffer.len());
                 let start = scratch.streaming_chunk_pos;
@@ -881,9 +916,10 @@ fn fill_streaming_process_buffer(
                     .process_buffer
                     .extend_from_slice(&chunk.samples[start..end]);
                 scratch.streaming_chunk_pos += take;
-                if scratch.streaming_chunk_pos >= chunk.samples.len() {
-                    scratch.streaming_chunk = None;
-                    scratch.streaming_chunk_pos = 0;
+                // `chunk` is no longer used past this point, so the borrow ends and
+                // `release_streaming_chunk` (which takes `&mut scratch`) is allowed.
+                if scratch.streaming_chunk_pos >= chunk_len {
+                    scratch.release_streaming_chunk(shared);
                 }
                 continue;
             }
@@ -891,10 +927,17 @@ fn fill_streaming_process_buffer(
 
         match shared.streaming_chunks.pop() {
             Some(chunk) if chunk.generation == generation => {
+                // Offload any exhausted/empty chunk still in the slot before
+                // replacing it, so no `Arc<Vec<f64>>` is freed on the audio thread.
+                scratch.release_streaming_chunk(shared);
                 scratch.streaming_chunk = Some(chunk);
                 scratch.streaming_chunk_pos = 0;
             }
-            Some(_) => continue,
+            Some(stale) => {
+                // Stale chunk from a superseded generation: offload its drop.
+                shared.retire_audio_resource(RetiredAudioResource::Chunk(stale.samples));
+                continue;
+            }
             None => break,
         }
     }
@@ -917,7 +960,7 @@ fn render_streaming_audio_output(
     let output_len = data.len();
     let mut samples_written = 0;
     let generation = shared.streaming_generation.load(Ordering::Acquire);
-    refresh_streaming_scratch_generation(scratch, resampler, generation);
+    refresh_streaming_scratch_generation(shared, scratch, resampler, generation);
 
     if output_path.uses_final_buffer() && scratch.final_output.len() < output_len {
         scratch.final_output.resize(output_len, 0.0);
@@ -1063,7 +1106,12 @@ fn publish_spectrum_batch(
         return;
     }
 
-    let take = samples_written.min(1024);
+    // Cap the source span so the downmixed mono count never exceeds the batch's
+    // fixed capacity. The whole `SpectrumBatch` is copied by value into the channel
+    // each callback, so sizing capacity to one stereo callback's mono output (rather
+    // than the full buffer) keeps that copy small. The spectrum thread accumulates
+    // batches into its FFT window regardless of per-batch size.
+    let take = samples_written.min(SPECTRUM_BATCH_CAPACITY * channels.max(1));
     scratch.spectrum_batch.clear();
     for i in (0..take).step_by(channels) {
         let mut sum = 0.0;
@@ -1111,6 +1159,7 @@ pub fn audio_callback_lockfree(
         resampler,
         scratch,
     );
+    shared.mark_output_callback_activity();
 
     let shaper_enabled = match final_noise_shaper.as_deref_mut() {
         Some(noise_shaper) => noise_shaper.refresh_is_enabled(),
@@ -1119,11 +1168,13 @@ pub fn audio_callback_lockfree(
     let output_path = OutputPath::new(resampler.is_some(), shaper_enabled);
 
     if shared.state.load() != PlayerState::Playing {
+        shared.mark_output_callback_silenced_inactive();
         data.fill(0.0);
         return;
     }
     if shared.is_loading.load(Ordering::Acquire) && !shared.streaming_active.load(Ordering::Acquire)
     {
+        shared.mark_output_callback_silenced_loading();
         data.fill(0.0);
         return;
     }
@@ -1133,6 +1184,7 @@ pub fn audio_callback_lockfree(
         != 0
         && !shared.active_output_stream_matches_current()
     {
+        shared.mark_output_callback_silenced_stream_mismatch();
         data.fill(0.0);
         return;
     }
@@ -1154,6 +1206,7 @@ pub fn audio_callback_lockfree(
             loudness_state,
             resampler,
             scratch,
+            channels,
             total,
             current_pos,
         ) {
@@ -1191,10 +1244,12 @@ pub fn audio_callback_lockfree(
     let output_len = data.len();
     if output_path.uses_final_buffer() && output_len > 0 {
         if output_path.uses_shaper() {
-            let noise_shaper = final_noise_shaper
-                .as_deref_mut()
-                .expect("output path requires final noise shaper");
-            noise_shaper.process_cached(&mut scratch.final_output[..output_len], channels);
+            // `uses_shaper()` implies the shaper was present when `OutputPath` was
+            // computed, but the audio thread must never panic (error-handling.md):
+            // if it is somehow absent, skip shaping and emit the unshaped buffer.
+            if let Some(noise_shaper) = final_noise_shaper.as_deref_mut() {
+                noise_shaper.process_cached(&mut scratch.final_output[..output_len], channels);
+            }
         }
         for (dst, src) in data
             .iter_mut()
@@ -1868,6 +1923,154 @@ mod tests {
         assert!(!shared.streaming_active.load(Ordering::Relaxed));
         assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
         assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn callback_memory_streaming_drained_with_estimate_total_stops_without_spinning() {
+        // Regression for the audio-thread hang: in memory streaming mode the full
+        // buffer is never published (it stays empty) yet `total_frames` is a ceil
+        // *estimate* that can exceed any real frame count. Once the chunk queue
+        // drains, the render loop must stop at EOF instead of spinning forever trying
+        // to read frames that were never decoded. If the bug regresses this test hangs.
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        // Estimate far beyond the (empty) buffer, with playback not yet at `total`.
+        shared.total_frames.store(100, Ordering::Relaxed);
+        shared.position_frames.store(0, Ordering::Relaxed);
+        shared.streaming_generation.store(21, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(true, Ordering::Relaxed);
+        shared.streaming_memory_mode.store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut scratch = CallbackScratch::new(2);
+        let mut out = vec![1.0f32; 4];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.0; 4]);
+        assert_eq!(shared.state.load(), PlayerState::Stopped);
+        assert!(!shared.streaming_active.load(Ordering::Relaxed));
+        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn callback_full_buffer_estimate_exceeds_decoded_stops_at_eof() {
+        // Regression for the audio-thread hang in full-buffer mode: when the decoded
+        // buffer is shorter than the advertised `total_frames` estimate, reaching the
+        // end of the real samples must stop at EOF instead of spinning on reads that
+        // can never be satisfied.
+        let shared = SharedState::new();
+        // Two real frames decoded...
+        shared.audio_buffer.store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
+        // ...but the advertised length is a larger estimate, and we are already at
+        // the end of the real data.
+        shared.total_frames.store(10, Ordering::Relaxed);
+        shared.position_frames.store(2, Ordering::Relaxed);
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut scratch = CallbackScratch::new(2);
+        let mut out = vec![1.0f32; 4];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.0; 4]);
+        assert_eq!(shared.state.load(), PlayerState::Stopped);
+        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn gapless_activation_retires_previous_buffer_off_realtime_thread() {
+        // The audio callback must not free the outgoing decoded buffer inline (that
+        // would hit the allocator on the realtime thread). At a gapless swap it hands
+        // the old buffer to the retire queue for the command loop to drop.
+        let shared = SharedState::new();
+        shared.audio_buffer.store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
+        shared.total_frames.store(2, Ordering::Relaxed);
+        shared.position_frames.store(2, Ordering::Relaxed);
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        // Arm a pending gapless track so EOF activates it instead of stopping.
+        shared
+            .pending_buffer
+            .store(Some(Arc::new(vec![0.5, 0.6, 0.7, 0.8])));
+        shared.pending_total_frames.store(2, Ordering::Relaxed);
+        shared.pending_sample_rate.store(44_100, Ordering::Relaxed);
+        shared.pending_channels.store(2, Ordering::Relaxed);
+        shared.pending_ready.store(true, Ordering::Release);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut scratch = CallbackScratch::new(2);
+        let mut out = vec![1.0f32; 4];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        // The new buffer is now active and the old one was retired, not dropped in RT.
+        assert_eq!(shared.audio_buffer.load().as_slice(), &[0.5, 0.6, 0.7, 0.8]);
+        assert_eq!(
+            shared
+                .retired_resource_drop_in_rt_count
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert!(
+            matches!(
+                shared.retired_resources.pop(),
+                Some(RetiredAudioResource::Buffer(_))
+            ),
+            "expected the previous buffer to be retired for off-thread drop"
+        );
+
+        // The command loop drains the rest without panicking.
+        shared.drain_retired_audio_resources();
     }
 
     #[test]

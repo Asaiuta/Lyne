@@ -32,6 +32,7 @@ import type {
   NcmUserPlaylistMode,
   ResolveNcmTrackInput,
   ResolvedNcmTrack,
+  ResolvedNcmTrackLyrics,
   ResolvedNcmTrackSupplement,
   SearchNcmTracksInput,
   UpdateNcmPlaylistTracksInput
@@ -74,6 +75,7 @@ export type NcmApiMethodContract = [
       (songId: number, options?: { dynamicCover?: boolean }) => Promise<ResolvedNcmTrackSupplement>
     >
   >,
+  Expect<Equal<ApiClient["resolveNcmTrackLyrics"], (songId: number) => Promise<ResolvedNcmTrackLyrics>>>,
   Expect<Equal<ApiClient["getNcmAccounts"], () => Promise<NcmAccountState>>>,
   Expect<Equal<ApiClient["upsertNcmAccount"], (input: NcmAccountUpsertInput) => Promise<NcmAccountState>>>,
   Expect<Equal<ApiClient["setActiveNcmAccount"], (userId: number) => Promise<NcmAccountState>>>,

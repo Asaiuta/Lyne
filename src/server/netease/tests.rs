@@ -306,6 +306,7 @@ fn read_song_detail_prefers_matching_song_and_modern_fields() {
             {
                 "id": 42,
                 "name": "Needle",
+                "alia": ["Needle Alias"],
                 "ar": [{ "id": 10, "name": "A" }, { "id": 11, "name": "B" }],
                 "al": { "id": 420, "name": "Album", "picUrl": "cover.jpg" }
             }
@@ -316,6 +317,7 @@ fn read_song_detail_prefers_matching_song_and_modern_fields() {
         read_song_detail(&payload, 42),
         Some(NcmTrackDetail {
             title: Some("Needle".to_string()),
+            alias: Some("Needle Alias".to_string()),
             artist: Some("A, B".to_string()),
             artists: vec![
                 NcmArtistSummary {
@@ -341,6 +343,7 @@ fn read_song_detail_supports_legacy_fields() {
             {
                 "id": 42,
                 "name": "Legacy",
+                "transNames": ["Legacy Alias"],
                 "artists": [{ "id": 99, "name": "Legacy Artist" }],
                 "album": { "id": 421, "name": "Legacy Album" },
                 "picUrl": "legacy.jpg"
@@ -352,6 +355,7 @@ fn read_song_detail_supports_legacy_fields() {
         read_song_detail(&payload, 42),
         Some(NcmTrackDetail {
             title: Some("Legacy".to_string()),
+            alias: Some("Legacy Alias".to_string()),
             artist: Some("Legacy Artist".to_string()),
             artists: vec![NcmArtistSummary {
                 id: 99,

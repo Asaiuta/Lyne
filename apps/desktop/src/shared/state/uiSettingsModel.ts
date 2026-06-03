@@ -30,6 +30,8 @@ export type LyricsPosition = "flex-start" | "center" | "flex-end";
 
 export type LyricsBlendMode = "screen" | "plus-lighter";
 
+export type LyricPriority = "auto" | "official";
+
 export const NCM_SONG_LEVELS = [
   "standard",
   "higher",
@@ -183,6 +185,7 @@ export interface UISettings {
   volumeFadeTime: number;
   memoryLastSeek: boolean;
   localLyricDirectories: string[];
+  lyricPriority: LyricPriority;
   progressTooltipShow: boolean;
   progressLyricShow: boolean;
   progressAdjustLyric: boolean;

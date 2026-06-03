@@ -74,6 +74,13 @@ impl AudioCommandBackend for WasapiCommandBackend<'_> {
         shared_state.clear_active_output_stream();
     }
 
+    fn replay_playback_progress(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
+        let _ = self.player.play();
+        shared_state.mark_stream_play_returned();
+        mark_playback_started(shared_state);
+        AudioCommandFlow::Continue
+    }
+
     fn recover_playback(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
         let _ = self.player.stop();
         shared_state.clear_active_output_stream();
@@ -325,6 +332,9 @@ fn monitor_wasapi_commands(
                 break;
             }
         }
+
+        // Free resources the WASAPI render callback retired off the realtime thread.
+        shared_state.drain_retired_audio_resources();
 
         if shared_state.state.load() == PlayerState::Stopped {
             log::info!("WASAPI playback finished");

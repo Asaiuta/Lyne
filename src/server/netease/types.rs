@@ -31,6 +31,12 @@ pub(super) struct ResolveNcmTrackSupplementRequest {
 }
 
 #[derive(Deserialize)]
+pub(super) struct ResolveNcmTrackLyricsRequest {
+    pub(super) song_id: i64,
+    pub(super) cookie: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub(super) struct HomeFeedRequest {
     pub(super) user_id: Option<i64>,
 }
@@ -192,21 +198,27 @@ pub(super) struct ResolvedNcmTrack {
 pub(super) struct ResolvedNcmTrackSupplement {
     pub(super) song_id: i64,
     pub(super) title: Option<String>,
+    pub(super) alias: Option<String>,
     pub(super) artist: Option<String>,
     pub(super) artists: Vec<NcmArtistSummary>,
     pub(super) album: Option<String>,
     pub(super) album_id: Option<i64>,
     pub(super) cover_url: Option<String>,
     pub(super) dynamic_cover_url: Option<String>,
-    pub(super) lyrics: Vec<LyricLine>,
     pub(super) detail_error: Option<String>,
-    pub(super) lyrics_error: Option<String>,
     pub(super) dynamic_cover_error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(super) struct ResolvedNcmTrackLyrics {
+    pub(super) song_id: i64,
+    pub(super) lyrics: Vec<LyricLine>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct NcmTrackDetail {
     pub(super) title: Option<String>,
+    pub(super) alias: Option<String>,
     pub(super) artist: Option<String>,
     pub(super) artists: Vec<NcmArtistSummary>,
     pub(super) album: Option<String>,

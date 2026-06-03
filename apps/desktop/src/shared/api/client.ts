@@ -109,6 +109,7 @@ export type {
   NcmUserPlaylistMode,
   ResolveNcmTrackInput,
   ResolvedNcmTrack,
+  ResolvedNcmTrackLyrics,
   ResolvedNcmTrackSupplement,
   SearchNcmTracksInput,
   UpdateNcmPlaylistTracksInput

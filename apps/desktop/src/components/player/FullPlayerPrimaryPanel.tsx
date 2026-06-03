@@ -1,6 +1,11 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { CoverArt } from "../CoverArt";
-import { IconAlbum, IconArtist } from "../icons";
+import { IconAlbum, IconArtist, IconCheckmark } from "../icons";
+import {
+  NaivePopselect,
+  type NaivePopselectOption
+} from "../../shared/ui/naive";
+import type { LyricPriority } from "../../shared/state/uiSettingsModel";
 import { FullPlayerMetaText } from "./FullPlayerInteractions";
 import { splitArtists } from "./metadata";
 
@@ -28,13 +33,22 @@ interface FullPlayerPrimaryMetaProps {
   showMeta: boolean;
   title: string;
   subtitle: string;
+  alias?: string | null;
   artist?: string | null;
   album?: string | null;
   detail?: string | null;
+  showPlayerQuality: boolean;
+  qualityLabel?: string | null;
+  lyricMode: string;
+  lyricPriority: LyricPriority;
+  lyricPriorityLabel: string;
+  lyricPriorityOptions: ReadonlyArray<NaivePopselectOption<LyricPriority>>;
+  audioSourceText: string;
   artistFallback: string;
   albumFallback: string;
   artistLinks?: readonly FullPlayerArtistLink[];
   albumLink?: FullPlayerAlbumLink | null;
+  onSelectLyricPriority: (priority: LyricPriority) => void;
   onSelectArtist?: (artist: FullPlayerArtistLink) => void;
   onSelectAlbum?: (album: FullPlayerAlbumLink) => void;
 }
@@ -75,12 +89,18 @@ export function FullPlayerVinylNeedle() {
 const normalizeName = (value: string): string => value.trim().toLowerCase();
 
 export function FullPlayerPrimaryPanel(props: FullPlayerPrimaryPanelProps) {
+  const [lyricPriorityOpen, setLyricPriorityOpen] = createSignal<boolean>(false);
   const artistNames = createMemo(() => {
     const artists = splitArtists(props.meta.artist);
     return artists.length > 0 ? artists : [props.meta.artistFallback];
   });
   const albumName = () => props.meta.album?.trim() || props.meta.albumFallback;
   const canSelectAlbum = () => Boolean(props.meta.albumLink && props.meta.onSelectAlbum);
+  const showPlayMeta = () =>
+    props.meta.showPlayerQuality ||
+    props.meta.lyricMode.trim().length > 0 ||
+    props.meta.audioSourceText.trim().length > 0 ||
+    Boolean(props.meta.detail);
 
   return (
     <div class="full-player-primary full-player-content-left">
@@ -98,12 +118,56 @@ export function FullPlayerPrimaryPanel(props: FullPlayerPrimaryPanelProps) {
           <div class="full-player-name">
             <span class="full-player-title">{props.meta.title}</span>
           </div>
-          <Show when={props.meta.detail}>
-            {(detail) => (
-              <div class="full-player-play-meta">
-                <span class="full-player-meta-item full-player-detail">{detail()}</span>
-              </div>
-            )}
+          <Show when={props.meta.alias}>
+            {(alias) => <span class="full-player-alias">{alias()}</span>}
+          </Show>
+          <Show when={showPlayMeta()}>
+            <div class="full-player-play-meta">
+              <Show when={props.meta.showPlayerQuality}>
+                <span class="full-player-meta-item full-player-quality">
+                  {props.meta.qualityLabel}
+                </span>
+              </Show>
+              <Show
+                when={props.meta.lyricPriorityOptions.length > 1}
+                fallback={
+                  <span class="full-player-meta-item full-player-lyric-mode">
+                    {props.meta.lyricMode}
+                  </span>
+                }
+              >
+                <NaivePopselect<LyricPriority>
+                  label={props.meta.lyricPriorityLabel}
+                  open={lyricPriorityOpen()}
+                  value={props.meta.lyricPriority}
+                  options={props.meta.lyricPriorityOptions}
+                  triggerContent={<span>{props.meta.lyricMode}</span>}
+                  class="full-player-meta-popselect"
+                  triggerClass="full-player-meta-item full-player-meta-trigger full-player-lyric-mode"
+                  triggerOpenClass="is-open"
+                  popoverClass="full-player-meta-popover"
+                  optionClass="full-player-meta-option"
+                  optionActiveClass="is-active"
+                  optionContentClass="full-player-meta-option-content"
+                  optionCheckClass="full-player-meta-option-check"
+                  placement="bottom"
+                  gutter={8}
+                  fallbackPopoverWidth={132}
+                  stopTriggerPropagation
+                  onOpenChange={setLyricPriorityOpen}
+                  onChange={props.meta.onSelectLyricPriority}
+                  renderCheck={() => <IconCheckmark />}
+                />
+              </Show>
+              <span class="full-player-meta-item full-player-audio-source">
+                {props.meta.audioSourceText}
+              </span>
+              <Show when={props.meta.detail}>
+                {(detail) => (
+                  <span class="full-player-meta-item full-player-detail">{detail()}</span>
+                )}
+              </Show>
+            </div>
           </Show>
           <div class="full-player-artists">
             <IconArtist />

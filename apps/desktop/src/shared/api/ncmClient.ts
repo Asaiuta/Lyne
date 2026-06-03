@@ -28,6 +28,7 @@ import type {
   NcmTrackSummary,
   ResolveNcmTrackInput,
   ResolvedNcmTrack,
+  ResolvedNcmTrackLyrics,
   ResolvedNcmTrackSupplement,
   SearchNcmTracksInput,
   UpdateNcmPlaylistTracksInput
@@ -51,6 +52,7 @@ import {
   parseNcmTracksResponse,
   parseNcmUserPlaylistsResponse,
   parseResolvedNcmTrackResponse,
+  parseResolvedNcmTrackLyricsResponse,
   parseResolvedNcmTrackSupplementResponse,
   parseStatusMessage
 } from "./ncmParsers";
@@ -65,6 +67,7 @@ export interface NcmApiClient {
     songId: number,
     options?: { dynamicCover?: boolean }
   ) => Promise<ResolvedNcmTrackSupplement>;
+  resolveNcmTrackLyrics: (songId: number) => Promise<ResolvedNcmTrackLyrics>;
   getNcmAccounts: () => Promise<NcmAccountState>;
   upsertNcmAccount: (input: NcmAccountUpsertInput) => Promise<NcmAccountState>;
   setActiveNcmAccount: (userId: number) => Promise<NcmAccountState>;
@@ -128,6 +131,10 @@ export const createNcmApiClient = (transport: NcmApiTransport): NcmApiClient => 
         "/domain/ncm/track/supplement",
         postJson({ song_id: songId, dynamic_cover: options?.dynamicCover === true })
       )
+    ),
+  resolveNcmTrackLyrics: async (songId) =>
+    parseResolvedNcmTrackLyricsResponse(
+      await transport.requestJson("/domain/ncm/track/lyrics", postJson({ song_id: songId }))
     ),
   getNcmAccounts: async () => parseNcmAccountStateResponse(await transport.requestJson("/domain/ncm/accounts")),
   upsertNcmAccount: async (input) =>

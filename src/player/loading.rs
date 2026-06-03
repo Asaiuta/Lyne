@@ -19,6 +19,7 @@ use super::cache::{
 use super::state::{
     self, playback_phase_time_ms, AudioCommand, LoadResult, SharedState, StreamingAudioChunk,
     StreamingTrackStart, PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS,
+    PLAYBACK_PROGRESS_REPLAY_COMMAND_GRACE_MS, PLAYBACK_PROGRESS_REPLAY_GRACE_MS,
 };
 use crate::config::{EngineSettings, ResampleQuality};
 use crate::decoder::{DecodeCancelToken, StreamingDecoder};
@@ -669,8 +670,18 @@ pub(super) fn decode_file_streaming_first_buffer(
     )?;
 
     let decoded_remaining_frames = output_samples / channels as u64;
-    let total_frames = estimated_output_frames
-        .unwrap_or_else(|| start_frame.saturating_add(decoded_remaining_frames));
+    // Memory mode publishes no full buffer, so the callback can only stop at EOF by
+    // position. Report the *actual* produced frame count (not the ceil estimate) so
+    // `position_frames` reaches `total_frames` exactly when the queue drains;
+    // an estimate larger than the real output would otherwise strand playback just
+    // past the last decoded sample. Full-buffer mode keeps the estimate (the
+    // callback already clamps reads to the published buffer length).
+    let total_frames = if full_buffer_mode.publishes_full_buffer() {
+        estimated_output_frames
+            .unwrap_or_else(|| start_frame.saturating_add(decoded_remaining_frames))
+    } else {
+        start_frame.saturating_add(decoded_remaining_frames)
+    };
     shared_state.load_progress.store(100, Ordering::Relaxed);
     let decode_duration_ms = decode_started_at
         .elapsed()
@@ -754,15 +765,33 @@ fn publish_streaming_ready(
             std::thread::spawn(move || {
                 std::thread::sleep(STREAMING_PROGRESS_WATCHDOG_DELAY);
                 let observe_started = Instant::now();
+                let mut replay_attempted = false;
+                let mut replay_requested_ms = 0_u64;
                 loop {
                     match streaming_progress_watchdog_should_send(
                         &shared_state,
                         generation,
                         observe_started.elapsed(),
+                        replay_attempted,
+                        replay_requested_ms,
                     ) {
-                        StreamingProgressWatchdogAction::SendEnsureProgress => {
-                            let _ = cmd_tx.send(AudioCommand::EnsurePlaybackProgress { generation });
-                            return;
+                        StreamingProgressWatchdogAction::SendEnsureProgress {
+                            replay_attempted: action_replay_attempted,
+                        } => {
+                            if !action_replay_attempted {
+                                replay_requested_ms = playback_phase_time_ms();
+                                replay_attempted = true;
+                                let _ = cmd_tx.send(AudioCommand::EnsurePlaybackProgress {
+                                    generation,
+                                    replay_attempted: false,
+                                });
+                            } else {
+                                let _ = cmd_tx.send(AudioCommand::EnsurePlaybackProgress {
+                                    generation,
+                                    replay_attempted: true,
+                                });
+                                return;
+                            }
                         }
                         StreamingProgressWatchdogAction::Wait => {
                             std::thread::sleep(STREAMING_PROGRESS_WATCHDOG_RECHECK);
@@ -777,7 +806,7 @@ fn publish_streaming_ready(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamingProgressWatchdogAction {
-    SendEnsureProgress,
+    SendEnsureProgress { replay_attempted: bool },
     Wait,
     Stop,
 }
@@ -786,6 +815,8 @@ fn streaming_progress_watchdog_should_send(
     shared_state: &SharedState,
     generation: u64,
     observe_elapsed: Duration,
+    replay_attempted: bool,
+    replay_requested_ms: u64,
 ) -> StreamingProgressWatchdogAction {
     if shared_state.load_generation.load(Ordering::Acquire) != generation {
         return StreamingProgressWatchdogAction::Stop;
@@ -797,9 +828,13 @@ fn streaming_progress_watchdog_should_send(
     }
 
     let has_progress = shared_state
-        .first_callback_after_play_ms
+        .playback_progress_generation
         .load(Ordering::Acquire)
-        != 0
+        == generation
+        || shared_state
+            .first_callback_after_play_ms
+            .load(Ordering::Acquire)
+            != 0
         || shared_state
             .first_position_advanced_ms
             .load(Ordering::Acquire)
@@ -808,16 +843,22 @@ fn streaming_progress_watchdog_should_send(
         return StreamingProgressWatchdogAction::Stop;
     }
 
+    if shared_state.output_callback_observed_after_current_play() {
+        return StreamingProgressWatchdogAction::Stop;
+    }
+
+    let stream_play_generation = shared_state.stream_play_generation.load(Ordering::Acquire);
     let stream_play_returned_ms = shared_state.stream_play_returned_ms.load(Ordering::Acquire);
     if playback_state == state::PlayerState::Stopped
         && stream_play_returned_ms != 0
+        && stream_play_generation == generation
         && !shared_state.streaming_active.load(Ordering::Acquire)
         && !shared_state.is_loading.load(Ordering::Acquire)
     {
         return StreamingProgressWatchdogAction::Stop;
     }
 
-    if stream_play_returned_ms == 0 {
+    if stream_play_returned_ms == 0 || stream_play_generation != generation {
         return if observe_elapsed >= STREAMING_PROGRESS_WATCHDOG_MAX_OBSERVE {
             StreamingProgressWatchdogAction::Stop
         } else {
@@ -825,12 +866,25 @@ fn streaming_progress_watchdog_should_send(
         };
     }
 
-    if playback_phase_time_ms().saturating_sub(stream_play_returned_ms)
-        >= PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS
+    if replay_attempted
+        && replay_requested_ms != 0
+        && stream_play_returned_ms < replay_requested_ms
+        && playback_phase_time_ms().saturating_sub(replay_requested_ms)
+            < PLAYBACK_PROGRESS_REPLAY_COMMAND_GRACE_MS
     {
-        StreamingProgressWatchdogAction::SendEnsureProgress
+        return StreamingProgressWatchdogAction::Wait;
+    }
+
+    let play_elapsed_ms = playback_phase_time_ms().saturating_sub(stream_play_returned_ms);
+    let required_grace_ms = if replay_attempted {
+        PLAYBACK_PROGRESS_REPLAY_GRACE_MS
     } else {
+        PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS
+    };
+    if play_elapsed_ms < required_grace_ms {
         StreamingProgressWatchdogAction::Wait
+    } else {
+        StreamingProgressWatchdogAction::SendEnsureProgress { replay_attempted }
     }
 }
 
@@ -1025,7 +1079,13 @@ mod tests {
         shared.state.store(state::PlayerState::Stopped);
 
         assert_eq!(
-            streaming_progress_watchdog_should_send(&shared, 9, Duration::from_millis(250)),
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(250),
+                false,
+                0
+            ),
             StreamingProgressWatchdogAction::Wait
         );
     }
@@ -1037,13 +1097,25 @@ mod tests {
         shared.state.store(state::PlayerState::Playing);
 
         assert_eq!(
-            streaming_progress_watchdog_should_send(&shared, 8, Duration::from_millis(250)),
+            streaming_progress_watchdog_should_send(
+                &shared,
+                8,
+                Duration::from_millis(250),
+                false,
+                0
+            ),
             StreamingProgressWatchdogAction::Stop
         );
 
         shared.state.store(state::PlayerState::Paused);
         assert_eq!(
-            streaming_progress_watchdog_should_send(&shared, 9, Duration::from_millis(250)),
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(250),
+                false,
+                0
+            ),
             StreamingProgressWatchdogAction::Stop
         );
 
@@ -1051,7 +1123,13 @@ mod tests {
         shared.mark_stream_play_returned();
         shared.mark_first_callback_after_play();
         assert_eq!(
-            streaming_progress_watchdog_should_send(&shared, 9, Duration::from_millis(250)),
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(250),
+                false,
+                0
+            ),
             StreamingProgressWatchdogAction::Stop
         );
     }
@@ -1064,7 +1142,13 @@ mod tests {
         shared.mark_stream_play_returned();
 
         assert_eq!(
-            streaming_progress_watchdog_should_send(&shared, 9, Duration::from_millis(600)),
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(600),
+                false,
+                0
+            ),
             StreamingProgressWatchdogAction::Wait
         );
     }
@@ -1075,14 +1159,160 @@ mod tests {
         shared.load_generation.store(9, Ordering::Release);
         shared.state.store(state::PlayerState::Playing);
         shared.stream_play_returned_ms.store(
-            playback_phase_time_ms()
-                .saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        shared.stream_play_generation.store(9, Ordering::Release);
+
+        assert_eq!(
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(600),
+                false,
+                0
+            ),
+            StreamingProgressWatchdogAction::SendEnsureProgress {
+                replay_attempted: false
+            }
+        );
+    }
+
+    #[test]
+    fn streaming_progress_watchdog_waits_for_current_generation_play_marker() {
+        let shared = SharedState::new();
+        shared.load_generation.store(9, Ordering::Release);
+        shared.state.store(state::PlayerState::Playing);
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        shared.stream_play_generation.store(8, Ordering::Release);
+
+        assert_eq!(
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(600),
+                false,
+                0
+            ),
+            StreamingProgressWatchdogAction::Wait
+        );
+        assert_eq!(
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                STREAMING_PROGRESS_WATCHDOG_MAX_OBSERVE,
+                false,
+                0
+            ),
+            StreamingProgressWatchdogAction::Stop
+        );
+    }
+
+    #[test]
+    fn streaming_progress_watchdog_waits_for_replay_command_and_short_replay_grace() {
+        let shared = SharedState::new();
+        shared.load_generation.store(9, Ordering::Release);
+        shared.state.store(state::PlayerState::Playing);
+        let replay_requested_ms = playback_phase_time_ms();
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        shared.stream_play_generation.store(9, Ordering::Release);
+
+        assert_eq!(
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(600),
+                true,
+                replay_requested_ms
+            ),
+            StreamingProgressWatchdogAction::Wait
+        );
+
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_REPLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        shared.stream_play_generation.store(9, Ordering::Release);
+        assert_eq!(
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(1100),
+                true,
+                0
+            ),
+            StreamingProgressWatchdogAction::SendEnsureProgress {
+                replay_attempted: true
+            }
+        );
+    }
+
+    #[test]
+    fn streaming_progress_watchdog_stops_after_generation_progress_survives_play_reset() {
+        let shared = SharedState::new();
+        shared.load_generation.store(9, Ordering::Release);
+        shared.state.store(state::PlayerState::Playing);
+        shared.mark_stream_play_returned();
+        shared.mark_first_position_advanced_after_play();
+        shared.mark_stream_play_returned();
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+
+        assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.playback_progress_generation.load(Ordering::Acquire),
+            9
+        );
+        assert_eq!(
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(600),
+                false,
+                0
+            ),
+            StreamingProgressWatchdogAction::Stop
+        );
+    }
+
+    #[test]
+    fn streaming_progress_watchdog_stops_when_output_callback_is_alive_without_position_progress() {
+        let shared = SharedState::new();
+        shared.load_generation.store(9, Ordering::Release);
+        shared.state.store(state::PlayerState::Playing);
+        shared.mark_stream_play_returned();
+        shared.mark_output_callback_activity();
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
             Ordering::Release,
         );
 
         assert_eq!(
-            streaming_progress_watchdog_should_send(&shared, 9, Duration::from_millis(600)),
-            StreamingProgressWatchdogAction::SendEnsureProgress
+            shared.first_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.playback_progress_generation.load(Ordering::Acquire),
+            0
+        );
+        assert_eq!(
+            streaming_progress_watchdog_should_send(
+                &shared,
+                9,
+                Duration::from_millis(600),
+                false,
+                0
+            ),
+            StreamingProgressWatchdogAction::Stop
         );
     }
 }

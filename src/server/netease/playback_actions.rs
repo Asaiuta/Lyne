@@ -1,7 +1,8 @@
 use super::{
     active_ncm_cookie, ncm_upstream_error_response, read_song_detail, read_song_dynamic_cover_url,
-    read_song_url, AppState, NcmTrackResolveError, ResolveNcmTrackRequest,
-    ResolveNcmTrackSupplementRequest, ResolvedNcmTrack, ResolvedNcmTrackSupplement,
+    read_song_url, AppState, NcmTrackResolveError, ResolveNcmTrackLyricsRequest,
+    ResolveNcmTrackRequest, ResolveNcmTrackSupplementRequest, ResolvedNcmTrack,
+    ResolvedNcmTrackLyrics, ResolvedNcmTrackSupplement,
 };
 use crate::server::lyrics;
 use crate::server::{bad_gateway_response, bad_request_response, internal_server_error_response};
@@ -222,11 +223,9 @@ pub(super) async fn resolve_ncm_track_supplement(
         .map(str::to_string)
         .or_else(|| active_ncm_cookie(&data));
     let mut detail_query = Query::new().param("ids", &request.song_id.to_string());
-    let mut lyrics_query = Query::new().param("id", &request.song_id.to_string());
     let mut dynamic_cover_query = Query::new().param("id", &request.song_id.to_string());
     if let Some(cookie) = cookie.as_deref() {
         detail_query.cookie = Some(cookie.to_string());
-        lyrics_query.cookie = Some(cookie.to_string());
         dynamic_cover_query.cookie = Some(cookie.to_string());
     }
 
@@ -243,9 +242,8 @@ pub(super) async fn resolve_ncm_track_supplement(
             None
         }
     };
-    let (detail_result, lyrics_result, dynamic_cover_result) = tokio::join!(
+    let (detail_result, dynamic_cover_result) = tokio::join!(
         data.ncm_client.song_detail(&detail_query),
-        data.ncm_client.lyric_new(&lyrics_query),
         dynamic_cover_future
     );
 
@@ -260,19 +258,6 @@ pub(super) async fn resolve_ncm_track_supplement(
                 start.elapsed()
             );
             (None, Some(message))
-        }
-    };
-    let (lyrics, lyrics_error) = match lyrics_result {
-        Ok(response) => (lyrics::read_lyric_lines_from_payload(&response.body), None),
-        Err(err) => {
-            let message = err.to_string();
-            log::warn!(
-                "NCM supplement track {} lyrics -> ERROR: {} ({:.1?})",
-                request.song_id,
-                message,
-                start.elapsed()
-            );
-            (Vec::new(), Some(message))
         }
     };
     let detail = detail.unwrap_or_default();
@@ -302,16 +287,65 @@ pub(super) async fn resolve_ncm_track_supplement(
         "supplement": ResolvedNcmTrackSupplement {
             song_id: request.song_id,
             title: detail.title,
+            alias: detail.alias,
             artist: detail.artist,
             artists: detail.artists,
             album: detail.album,
             album_id: detail.album_id,
             cover_url: detail.cover_url,
             dynamic_cover_url,
-            lyrics,
             detail_error,
-            lyrics_error,
             dynamic_cover_error,
         }
     }))
+}
+
+pub(super) async fn resolve_ncm_track_lyrics(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<ResolveNcmTrackLyricsRequest>,
+) -> HttpResponse {
+    let request = body.into_inner();
+    if request.song_id <= 0 {
+        return bad_request_response("NCM song id must be positive");
+    }
+
+    let cookie = request
+        .cookie
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| active_ncm_cookie(&data));
+    let mut lyrics_query = Query::new().param("id", &request.song_id.to_string());
+    if let Some(cookie) = cookie.as_deref() {
+        lyrics_query.cookie = Some(cookie.to_string());
+    }
+
+    let start = std::time::Instant::now();
+    match data.ncm_client.lyric_new(&lyrics_query).await {
+        Ok(response) => {
+            let lyrics = lyrics::read_lyric_lines_from_payload(&response.body);
+            log::info!(
+                "NCM lyrics track {} -> OK ({:.1?})",
+                request.song_id,
+                start.elapsed()
+            );
+            HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "lyrics": ResolvedNcmTrackLyrics {
+                    song_id: request.song_id,
+                    lyrics,
+                }
+            }))
+        }
+        Err(err) => {
+            log::warn!(
+                "NCM lyrics track {} -> ERROR: {} ({:.1?})",
+                request.song_id,
+                err,
+                start.elapsed()
+            );
+            ncm_upstream_error_response(err)
+        }
+    }
 }

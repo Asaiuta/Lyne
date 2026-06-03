@@ -16,7 +16,7 @@ use super::output_stream::DspParamRefs;
 use super::state::{
     playback_phase_time_ms, AudioCommand, LoadResult, PlayerState, SharedState,
     StreamingTrackStart, EVENT_LOAD_COMPLETE, EVENT_LOAD_ERROR, EVENT_PLAYBACK_STARTED,
-    EVENT_TRACK_CHANGED, PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS,
+    EVENT_TRACK_CHANGED, PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS, PLAYBACK_PROGRESS_REPLAY_GRACE_MS,
 };
 use super::track_loudness::{apply_loaded_track_loudness, refresh_loaded_loudness};
 use crate::processor::AtomicLoudnessState;
@@ -42,6 +42,7 @@ pub(super) trait AudioCommandBackend {
     fn seek(&mut self, frame: u64);
     fn stop(&mut self, shared_state: &SharedState);
     fn stop_for_load(&mut self, shared_state: &SharedState);
+    fn replay_playback_progress(&mut self, shared_state: &SharedState) -> AudioCommandFlow;
     fn recover_playback(&mut self, shared_state: &SharedState) -> AudioCommandFlow;
     fn shutdown(&mut self, shared_state: &SharedState);
     fn output_label(&self) -> &'static str;
@@ -123,6 +124,23 @@ impl AudioCommandBackend for CpalCommandBackend<'_> {
         keep_output_stream_running(self.stream, shared_state, "track load");
     }
 
+    fn replay_playback_progress(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
+        if let Some(stream) = self.stream.as_ref() {
+            if shared_state.active_output_stream_matches_current() {
+                if let Err(e) = stream.play() {
+                    log::warn!("Warm output stream replay failed, rebuilding stream: {}", e);
+                    return self.recover_playback(shared_state);
+                }
+                shared_state.mark_active_output_stream_running();
+                shared_state.mark_stream_play_returned();
+                mark_playback_started(shared_state);
+                return AudioCommandFlow::Continue;
+            }
+        }
+
+        self.recover_playback(shared_state)
+    }
+
     fn recover_playback(&mut self, shared_state: &SharedState) -> AudioCommandFlow {
         park_output_stream_for_recovery(self.stream, self.parked_streams, shared_state);
         AudioCommandFlow::StartPlayback
@@ -189,12 +207,17 @@ fn park_output_stream_for_recovery(
 fn playback_progress_watchdog_decision(
     shared_state: &SharedState,
     generation: u64,
+    replay_attempted: bool,
 ) -> PlaybackProgressWatchdogDecision {
     let current_generation = shared_state.load_generation.load(Ordering::Acquire);
     let has_progress = shared_state
-        .first_callback_after_play_ms
+        .playback_progress_generation
         .load(Ordering::Acquire)
-        != 0
+        == generation
+        || shared_state
+            .first_callback_after_play_ms
+            .load(Ordering::Acquire)
+            != 0
         || shared_state
             .first_position_advanced_ms
             .load(Ordering::Acquire)
@@ -208,14 +231,23 @@ fn playback_progress_watchdog_decision(
         return PlaybackProgressWatchdogDecision::Ignore;
     }
 
+    if shared_state.output_callback_observed_after_current_play() {
+        return PlaybackProgressWatchdogDecision::Ignore;
+    }
+
+    let stream_play_generation = shared_state.stream_play_generation.load(Ordering::Acquire);
     let stream_play_returned_ms = shared_state.stream_play_returned_ms.load(Ordering::Acquire);
-    if stream_play_returned_ms == 0 {
+    if stream_play_returned_ms == 0 || stream_play_generation != generation {
         return PlaybackProgressWatchdogDecision::WaitingForStreamPlay;
     }
 
-    if playback_phase_time_ms().saturating_sub(stream_play_returned_ms)
-        < PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS
-    {
+    let play_elapsed_ms = playback_phase_time_ms().saturating_sub(stream_play_returned_ms);
+    let required_grace_ms = if replay_attempted {
+        PLAYBACK_PROGRESS_REPLAY_GRACE_MS
+    } else {
+        PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS
+    };
+    if play_elapsed_ms < required_grace_ms {
         return PlaybackProgressWatchdogDecision::WaitingForCallbackAfterPlay;
     }
 
@@ -243,11 +275,18 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
             backend.seek(frame);
             AudioCommandFlow::Continue
         }
-        AudioCommand::EnsurePlaybackProgress { generation } => {
+        AudioCommand::EnsurePlaybackProgress {
+            generation,
+            replay_attempted,
+        } => {
             context
                 .shared_state
                 .mark_audio_command_ensure_progress_received();
-            match playback_progress_watchdog_decision(context.shared_state, generation) {
+            match playback_progress_watchdog_decision(
+                context.shared_state,
+                generation,
+                replay_attempted,
+            ) {
                 PlaybackProgressWatchdogDecision::Ignore => {
                     context
                         .shared_state
@@ -277,8 +316,39 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
                 PlaybackProgressWatchdogDecision::Recover => {}
             }
 
+            if !replay_attempted {
+                if context
+                    .shared_state
+                    .active_stream_running
+                    .load(Ordering::Acquire)
+                {
+                    log::warn!(
+                        "No playback callback observed on already-running stream for generation {}; rebuilding output stream",
+                        generation
+                    );
+                    context.shared_state.mark_playback_recovery_requested();
+                    context
+                        .shared_state
+                        .mark_audio_command_ensure_progress_completed();
+                    return backend.recover_playback(context.shared_state);
+                }
+
+                log::debug!(
+                    "Playback progress watchdog replaying warm output stream for generation {}",
+                    generation
+                );
+                let flow = backend.replay_playback_progress(context.shared_state);
+                context
+                    .shared_state
+                    .mark_audio_command_ensure_progress_completed();
+                if matches!(flow, AudioCommandFlow::StartPlayback) {
+                    context.shared_state.mark_playback_recovery_requested();
+                }
+                return flow;
+            }
+
             log::warn!(
-                "No playback callback observed after stream play returned for generation {}; rebuilding output stream",
+                "No playback callback observed after replaying stream for generation {}; rebuilding output stream",
                 generation
             );
             context.shared_state.mark_playback_recovery_requested();
@@ -906,6 +976,10 @@ mod tests {
 
         fn stop_for_load(&mut self, _shared_state: &SharedState) {}
 
+        fn replay_playback_progress(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
+            AudioCommandFlow::Continue
+        }
+
         fn recover_playback(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
             AudioCommandFlow::StartPlayback
         }
@@ -941,6 +1015,10 @@ mod tests {
 
         fn stop_for_load(&mut self, _shared_state: &SharedState) {}
 
+        fn replay_playback_progress(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
+            self.play(_shared_state)
+        }
+
         fn recover_playback(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
             AudioCommandFlow::StartPlayback
         }
@@ -949,6 +1027,57 @@ mod tests {
 
         fn output_label(&self) -> &'static str {
             "recording"
+        }
+    }
+
+    struct RecoveryRecordingBackend {
+        replay_calls: usize,
+        recover_calls: usize,
+        replay_flow: AudioCommandFlow,
+    }
+
+    impl RecoveryRecordingBackend {
+        fn new(replay_flow: AudioCommandFlow) -> Self {
+            Self {
+                replay_calls: 0,
+                recover_calls: 0,
+                replay_flow,
+            }
+        }
+    }
+
+    impl AudioCommandBackend for RecoveryRecordingBackend {
+        fn play(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
+            AudioCommandFlow::Continue
+        }
+
+        fn pause(&mut self, _shared_state: &SharedState) {}
+
+        fn seek(&mut self, _frame: u64) {}
+
+        fn stop(&mut self, _shared_state: &SharedState) {}
+
+        fn stop_for_load(&mut self, _shared_state: &SharedState) {}
+
+        fn replay_playback_progress(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
+            self.replay_calls += 1;
+            match self.replay_flow {
+                AudioCommandFlow::Continue => AudioCommandFlow::Continue,
+                AudioCommandFlow::StartPlayback => AudioCommandFlow::StartPlayback,
+                AudioCommandFlow::StopPlayback => AudioCommandFlow::StopPlayback,
+                AudioCommandFlow::ShutdownThread => AudioCommandFlow::ShutdownThread,
+            }
+        }
+
+        fn recover_playback(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
+            self.recover_calls += 1;
+            AudioCommandFlow::StartPlayback
+        }
+
+        fn shutdown(&mut self, _shared_state: &SharedState) {}
+
+        fn output_label(&self) -> &'static str {
+            "recovery-recording"
         }
     }
 
@@ -1414,9 +1543,27 @@ mod tests {
         shared.state.store(PlayerState::Playing);
 
         assert_eq!(
-            playback_progress_watchdog_decision(&shared, 12),
+            playback_progress_watchdog_decision(&shared, 12, false),
             PlaybackProgressWatchdogDecision::WaitingForStreamPlay
         );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_waits_for_current_generation_play_marker() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        shared.stream_play_generation.store(11, Ordering::Release);
+
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12, false),
+            PlaybackProgressWatchdogDecision::WaitingForStreamPlay
+        );
+        assert_eq!(shared.playback_recovery_count.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -1427,7 +1574,7 @@ mod tests {
         shared.mark_stream_play_returned();
 
         assert_eq!(
-            playback_progress_watchdog_decision(&shared, 12),
+            playback_progress_watchdog_decision(&shared, 12, false),
             PlaybackProgressWatchdogDecision::WaitingForCallbackAfterPlay
         );
     }
@@ -1438,13 +1585,39 @@ mod tests {
         shared.load_generation.store(12, Ordering::Release);
         shared.state.store(PlayerState::Playing);
         shared.stream_play_returned_ms.store(
-            playback_phase_time_ms()
-                .saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
             Ordering::Release,
         );
+        shared.stream_play_generation.store(12, Ordering::Release);
 
         assert_eq!(
-            playback_progress_watchdog_decision(&shared, 12),
+            playback_progress_watchdog_decision(&shared, 12, false),
+            PlaybackProgressWatchdogDecision::Recover
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_uses_short_grace_after_replay() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_REPLAY_GRACE_MS - 1),
+            Ordering::Release,
+        );
+        shared.stream_play_generation.store(12, Ordering::Release);
+
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12, true),
+            PlaybackProgressWatchdogDecision::WaitingForCallbackAfterPlay
+        );
+
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_REPLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12, true),
             PlaybackProgressWatchdogDecision::Recover
         );
     }
@@ -1458,17 +1631,17 @@ mod tests {
         shared.mark_first_callback_after_play();
 
         assert_eq!(
-            playback_progress_watchdog_decision(&shared, 12),
+            playback_progress_watchdog_decision(&shared, 12, false),
             PlaybackProgressWatchdogDecision::Ignore
         );
         assert_eq!(
-            playback_progress_watchdog_decision(&shared, 11),
+            playback_progress_watchdog_decision(&shared, 11, false),
             PlaybackProgressWatchdogDecision::Ignore
         );
 
         shared.state.store(PlayerState::Paused);
         assert_eq!(
-            playback_progress_watchdog_decision(&shared, 12),
+            playback_progress_watchdog_decision(&shared, 12, false),
             PlaybackProgressWatchdogDecision::Ignore
         );
     }
@@ -1482,7 +1655,58 @@ mod tests {
         shared.mark_first_position_advanced_after_play();
 
         assert_eq!(
-            playback_progress_watchdog_decision(&shared, 12),
+            playback_progress_watchdog_decision(&shared, 12, false),
+            PlaybackProgressWatchdogDecision::Ignore
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_ignores_generation_progress_after_later_play_reset() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.mark_stream_play_returned();
+        shared.mark_first_position_advanced_after_play();
+        shared.mark_stream_play_returned();
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+
+        assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.playback_progress_generation.load(Ordering::Acquire),
+            12
+        );
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12, false),
+            PlaybackProgressWatchdogDecision::Ignore
+        );
+    }
+
+    #[test]
+    fn playback_progress_watchdog_ignores_live_callback_without_position_progress() {
+        let shared = SharedState::new();
+        shared.load_generation.store(12, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+        shared.mark_stream_play_returned();
+        shared.mark_output_callback_activity();
+        shared.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+
+        assert_eq!(
+            shared.first_callback_after_play_ms.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(shared.first_position_advanced_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.playback_progress_generation.load(Ordering::Acquire),
+            0
+        );
+        assert_eq!(
+            playback_progress_watchdog_decision(&shared, 12, false),
             PlaybackProgressWatchdogDecision::Ignore
         );
     }
@@ -1498,7 +1722,10 @@ mod tests {
 
         let mut backend = TestBackend;
         let flow = handle_audio_command(
-            AudioCommand::EnsurePlaybackProgress { generation: 12 },
+            AudioCommand::EnsurePlaybackProgress {
+                generation: 12,
+                replay_attempted: false,
+            },
             &mut backend,
             &fixture.context(),
         );
@@ -1528,7 +1755,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_playback_progress_recovers_after_play_returns_without_callback() {
+    fn ensure_playback_progress_waits_for_current_generation_play_marker() {
         let fixture = CommandFixture::new();
         fixture
             .shared_state
@@ -1536,25 +1763,103 @@ mod tests {
             .store(12, Ordering::Release);
         fixture.shared_state.state.store(PlayerState::Playing);
         fixture.shared_state.stream_play_returned_ms.store(
-            playback_phase_time_ms()
-                .saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
             Ordering::Release,
         );
+        fixture
+            .shared_state
+            .stream_play_generation
+            .store(11, Ordering::Release);
 
         let mut backend = TestBackend;
         let flow = handle_audio_command(
-            AudioCommand::EnsurePlaybackProgress { generation: 12 },
+            AudioCommand::EnsurePlaybackProgress {
+                generation: 12,
+                replay_attempted: true,
+            },
             &mut backend,
             &fixture.context(),
         );
 
-        assert!(matches!(flow, AudioCommandFlow::StartPlayback));
+        assert!(matches!(flow, AudioCommandFlow::Continue));
         assert_eq!(
             fixture
                 .shared_state
                 .playback_recovery_count
                 .load(Ordering::Relaxed),
-            1
+            0
+        );
+    }
+
+    #[test]
+    fn ensure_playback_progress_ignores_live_callback_without_position_progress() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(12, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Playing);
+        fixture.shared_state.mark_stream_play_returned();
+        fixture.shared_state.mark_output_callback_activity();
+        fixture.shared_state.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_REPLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+
+        let mut backend = TestBackend;
+        let flow = handle_audio_command(
+            AudioCommand::EnsurePlaybackProgress {
+                generation: 12,
+                replay_attempted: true,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert!(matches!(flow, AudioCommandFlow::Continue));
+        assert_eq!(
+            fixture
+                .shared_state
+                .playback_recovery_count
+                .load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn ensure_playback_progress_replays_first_after_play_returns_without_callback() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(12, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Playing);
+        fixture.shared_state.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        fixture
+            .shared_state
+            .stream_play_generation
+            .store(12, Ordering::Release);
+
+        let mut backend = TestBackend;
+        let flow = handle_audio_command(
+            AudioCommand::EnsurePlaybackProgress {
+                generation: 12,
+                replay_attempted: false,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert!(matches!(flow, AudioCommandFlow::Continue));
+        assert_eq!(
+            fixture
+                .shared_state
+                .playback_recovery_count
+                .load(Ordering::Relaxed),
+            0
         );
         assert!(
             fixture
@@ -1569,6 +1874,129 @@ mod tests {
                 .audio_command_ensure_progress_completed_ms
                 .load(Ordering::Relaxed)
                 > 0
+        );
+    }
+
+    #[test]
+    fn ensure_playback_progress_rebuilds_running_stream_without_replay() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(12, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Playing);
+        fixture.shared_state.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        fixture
+            .shared_state
+            .stream_play_generation
+            .store(12, Ordering::Release);
+        fixture
+            .shared_state
+            .active_stream_running
+            .store(true, Ordering::Release);
+
+        let mut backend = RecoveryRecordingBackend::new(AudioCommandFlow::Continue);
+        let flow = handle_audio_command(
+            AudioCommand::EnsurePlaybackProgress {
+                generation: 12,
+                replay_attempted: false,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert!(matches!(flow, AudioCommandFlow::StartPlayback));
+        assert_eq!(backend.replay_calls, 0);
+        assert_eq!(backend.recover_calls, 1);
+        assert_eq!(
+            fixture
+                .shared_state
+                .playback_recovery_count
+                .load(Ordering::Relaxed),
+            1
+        );
+    }
+
+    #[test]
+    fn ensure_playback_progress_replays_non_running_stream_before_rebuild() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(12, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Playing);
+        fixture.shared_state.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        fixture
+            .shared_state
+            .stream_play_generation
+            .store(12, Ordering::Release);
+        fixture
+            .shared_state
+            .active_stream_running
+            .store(false, Ordering::Release);
+
+        let mut backend = RecoveryRecordingBackend::new(AudioCommandFlow::Continue);
+        let flow = handle_audio_command(
+            AudioCommand::EnsurePlaybackProgress {
+                generation: 12,
+                replay_attempted: false,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert!(matches!(flow, AudioCommandFlow::Continue));
+        assert_eq!(backend.replay_calls, 1);
+        assert_eq!(backend.recover_calls, 0);
+        assert_eq!(
+            fixture
+                .shared_state
+                .playback_recovery_count
+                .load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn ensure_playback_progress_recovers_after_replay_grace_without_callback() {
+        let fixture = CommandFixture::new();
+        fixture
+            .shared_state
+            .load_generation
+            .store(12, Ordering::Release);
+        fixture.shared_state.state.store(PlayerState::Playing);
+        fixture.shared_state.stream_play_returned_ms.store(
+            playback_phase_time_ms().saturating_sub(PLAYBACK_PROGRESS_REPLAY_GRACE_MS + 1),
+            Ordering::Release,
+        );
+        fixture
+            .shared_state
+            .stream_play_generation
+            .store(12, Ordering::Release);
+
+        let mut backend = TestBackend;
+        let flow = handle_audio_command(
+            AudioCommand::EnsurePlaybackProgress {
+                generation: 12,
+                replay_attempted: true,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert!(matches!(flow, AudioCommandFlow::StartPlayback));
+        assert_eq!(
+            fixture
+                .shared_state
+                .playback_recovery_count
+                .load(Ordering::Relaxed),
+            1
         );
     }
 
