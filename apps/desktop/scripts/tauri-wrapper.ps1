@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $workspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$repoRoot = (Resolve-Path (Join-Path $workspaceRoot "..\\..")).Path
 $tauriCliPath = Join-Path $workspaceRoot "node_modules\\@tauri-apps\\cli\\tauri.js"
 
 if (-not (Test-Path $tauriCliPath)) {
@@ -16,13 +17,13 @@ $preferredCargoHome = $env:CARGO_HOME
 if ([string]::IsNullOrWhiteSpace($preferredCargoHome)) {
   $preferredCargoHome = "D:\Rust\.cargo"
 }
-$tauriTargetDir = Join-Path $workspaceRoot ".tauri-target"
+$tauriTargetDir = Join-Path $repoRoot "target"
 New-Item -ItemType Directory -Force -Path $preferredCargoHome | Out-Null
 New-Item -ItemType Directory -Force -Path $tauriTargetDir | Out-Null
 
 # Keep using the machine-wide Cargo cache so Tauri dependencies do not need to
-# be re-downloaded, but isolate build artifacts into a writable repo-local
-# target directory to avoid the original target/cache permission issues.
+# be re-downloaded, while sharing the repo-local target directory with the
+# standalone sidecar scripts so dev builds reuse the same artifacts.
 $env:CARGO_HOME = $preferredCargoHome
 $env:CARGO_TARGET_DIR = $tauriTargetDir
 
@@ -66,13 +67,17 @@ function Invoke-TauriDevFallback {
   $devServerErrLog = Join-Path $workspaceRoot ".tauri-dev-server.err.log"
   $cargoManifest = Join-Path $workspaceRoot "src-tauri\\Cargo.toml"
   $cargoArgs = @("run", "--manifest-path", $cargoManifest)
-  $sidecarManifest = Join-Path $workspaceRoot "..\\..\\Cargo.toml"
-  $sidecarBuildArgs = @("build", "--release", "--manifest-path", $sidecarManifest, "--bin", "audio_server")
-  $sidecarBinaryPath = Join-Path $env:CARGO_TARGET_DIR "release\\audio_server.exe"
+  $sidecarManifest = Join-Path $repoRoot "Cargo.toml"
+  $sidecarProfile = "audio-dev"
 
   if ($CliArgs -contains "--release") {
     $cargoArgs += "--release"
+    $sidecarProfile = "release"
+    $sidecarBuildArgs = @("build", "--release", "--manifest-path", $sidecarManifest, "--bin", "audio_server")
+  } else {
+    $sidecarBuildArgs = @("build", "--profile", $sidecarProfile, "--manifest-path", $sidecarManifest, "--bin", "audio_server")
   }
+  $sidecarBinaryPath = Join-Path $env:CARGO_TARGET_DIR "$sidecarProfile\\audio_server.exe"
 
   Get-Process -Name "audio-desktop","audio_server" -ErrorAction SilentlyContinue | ForEach-Object {
     try {

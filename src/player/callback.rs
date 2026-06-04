@@ -574,6 +574,7 @@ fn streaming_has_buffered_samples(
     }
 
     while let Some(chunk) = shared.streaming_chunks.pop() {
+        shared.mark_streaming_queue_chunk_popped(shared.streaming_chunks.len());
         if chunk.generation == generation {
             // Offload any exhausted/empty chunk still in the slot before replacing it,
             // so no `Arc<Vec<f64>>` is ever freed on the audio thread.
@@ -871,11 +872,12 @@ fn render_audio_output(
     }
 
     if samples_written < output_len {
+        let silence_frames = ((output_len - samples_written) / channels) as u64;
         shared.audio_underrun_count.fetch_add(1, Ordering::Relaxed);
-        shared.audio_underrun_silence_frames.fetch_add(
-            ((output_len - samples_written) / channels) as u64,
-            Ordering::Relaxed,
-        );
+        shared
+            .audio_underrun_silence_frames
+            .fetch_add(silence_frames, Ordering::Relaxed);
+        shared.mark_audio_buffer_output_shortfall(silence_frames);
         if output_path.uses_final_buffer() {
             scratch.final_output[samples_written..output_len].fill(0.0);
         } else {
@@ -927,6 +929,7 @@ fn fill_streaming_process_buffer(
 
         match shared.streaming_chunks.pop() {
             Some(chunk) if chunk.generation == generation => {
+                shared.mark_streaming_queue_chunk_popped(shared.streaming_chunks.len());
                 // Offload any exhausted/empty chunk still in the slot before
                 // replacing it, so no `Arc<Vec<f64>>` is freed on the audio thread.
                 scratch.release_streaming_chunk(shared);
@@ -934,6 +937,7 @@ fn fill_streaming_process_buffer(
                 scratch.streaming_chunk_pos = 0;
             }
             Some(stale) => {
+                shared.mark_streaming_queue_chunk_popped(shared.streaming_chunks.len());
                 // Stale chunk from a superseded generation: offload its drop.
                 shared.retire_audio_resource(RetiredAudioResource::Chunk(stale.samples));
                 continue;
@@ -1018,11 +1022,12 @@ fn render_streaming_audio_output(
             if shared.streaming_decode_finished.load(Ordering::Acquire) {
                 shared.streaming_active.store(false, Ordering::Release);
             } else if !shared.is_loading.load(Ordering::Acquire) {
+                let silence_frames = ((output_len - samples_written) / channels) as u64;
                 shared.audio_underrun_count.fetch_add(1, Ordering::Relaxed);
-                shared.audio_underrun_silence_frames.fetch_add(
-                    ((output_len - samples_written) / channels) as u64,
-                    Ordering::Relaxed,
-                );
+                shared
+                    .audio_underrun_silence_frames
+                    .fetch_add(silence_frames, Ordering::Relaxed);
+                shared.mark_streaming_queue_empty_during_decode(silence_frames);
             }
             break;
         }
@@ -1085,6 +1090,8 @@ fn render_streaming_audio_output(
     }
 
     if samples_written < output_len {
+        let silence_frames = ((output_len - samples_written) / channels) as u64;
+        shared.mark_streaming_output_shortfall(silence_frames);
         if output_path.uses_final_buffer() {
             scratch.final_output[samples_written..output_len].fill(0.0);
         } else {
@@ -1792,6 +1799,31 @@ mod tests {
             shared.audio_underrun_silence_frames.load(Ordering::Relaxed),
             4
         );
+        assert_eq!(
+            shared
+                .streaming_queue_empty_during_decode_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .streaming_queue_empty_during_decode_frames
+                .load(Ordering::Relaxed),
+            4
+        );
+        assert_eq!(
+            shared
+                .streaming_output_shortfall_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .streaming_output_shortfall_frames
+                .load(Ordering::Relaxed),
+            4
+        );
+        assert_eq!(shared.streaming_queue_min_len(), Some(0));
         assert!(shared.streaming_active.load(Ordering::Relaxed));
     }
 
@@ -1979,7 +2011,9 @@ mod tests {
         // can never be satisfied.
         let shared = SharedState::new();
         // Two real frames decoded...
-        shared.audio_buffer.store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
+        shared
+            .audio_buffer
+            .store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
         // ...but the advertised length is a larger estimate, and we are already at
         // the end of the real data.
         shared.total_frames.store(10, Ordering::Relaxed);
@@ -2018,7 +2052,9 @@ mod tests {
         // would hit the allocator on the realtime thread). At a gapless swap it hands
         // the old buffer to the retire queue for the command loop to drop.
         let shared = SharedState::new();
-        shared.audio_buffer.store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
+        shared
+            .audio_buffer
+            .store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
         shared.total_frames.store(2, Ordering::Relaxed);
         shared.position_frames.store(2, Ordering::Relaxed);
         shared.sample_rate.store(44_100, Ordering::Relaxed);

@@ -26,9 +26,8 @@ use crate::decoder::{DecodeCancelToken, StreamingDecoder};
 use crate::processor::{LoudnessDatabase, StreamingResampler};
 
 const STREAMING_CHUNK_FRAMES: usize = 4096;
-const STREAMING_START_BUFFER_FRAMES: u64 = 8192;
+const STREAMING_START_BUFFER_FRAMES: u64 = 12_288;
 const STREAMING_QUEUE_BACKPRESSURE_SLEEP: Duration = Duration::from_millis(2);
-const STREAMING_READY_APPLIED_POLL: Duration = Duration::from_millis(1);
 const STREAMING_PROGRESS_WATCHDOG_DELAY: Duration = Duration::from_millis(300);
 const STREAMING_PROGRESS_WATCHDOG_RECHECK: Duration = Duration::from_millis(50);
 const STREAMING_PROGRESS_WATCHDOG_MAX_OBSERVE: Duration = Duration::from_secs(2);
@@ -559,6 +558,7 @@ pub(super) fn decode_file_streaming_first_buffer(
         metadata: info.metadata,
         memory_mode: !full_buffer_mode.publishes_full_buffer(),
     };
+    shared_state.reset_streaming_queue_window_for_generation(generation);
 
     while decoder
         .decode_next_into(&mut decoded_chunk)
@@ -613,9 +613,10 @@ pub(super) fn decode_file_streaming_first_buffer(
         if !ready_sent && queued_frames >= STREAMING_START_BUFFER_FRAMES {
             publish_streaming_ready(shared_state, cmd_tx, generation, &track, autoplay);
             ready_sent = true;
-            if !full_buffer_mode.publishes_full_buffer() {
-                wait_for_streaming_ready_applied(shared_state, load_cancel, generation)?;
-            }
+            // Keep the producer filling memory-mode queues while the audio command
+            // loop applies StreamingLoadReady. Waiting here leaves the resume point
+            // with only the fixed startup cushion and can expose a one-callback
+            // underrun after seek.
             queued_frames += push_ready_streaming_chunks(
                 shared_state,
                 load_cancel,
@@ -653,9 +654,6 @@ pub(super) fn decode_file_streaming_first_buffer(
 
     if !ready_sent {
         publish_streaming_ready(shared_state, cmd_tx, generation, &track, autoplay);
-        if !full_buffer_mode.publishes_full_buffer() {
-            wait_for_streaming_ready_applied(shared_state, load_cancel, generation)?;
-        }
     }
 
     queued_frames += push_ready_streaming_chunks(
@@ -888,18 +886,6 @@ fn streaming_progress_watchdog_should_send(
     }
 }
 
-fn wait_for_streaming_ready_applied(
-    shared_state: &SharedState,
-    load_cancel: &AtomicBool,
-    generation: u64,
-) -> Result<(), String> {
-    while shared_state.streaming_ready_ms.load(Ordering::Acquire) == 0 {
-        ensure_streaming_load_current(shared_state, load_cancel, generation)?;
-        std::thread::sleep(STREAMING_READY_APPLIED_POLL);
-    }
-    Ok(())
-}
-
 fn push_ready_streaming_chunks(
     shared_state: &SharedState,
     load_cancel: &AtomicBool,
@@ -959,13 +945,20 @@ fn push_streaming_chunk(
         match shared_state.streaming_chunks.push(chunk) {
             Ok(()) => {
                 shared_state.mark_streaming_first_chunk();
+                shared_state.mark_streaming_queue_chunk_pushed(shared_state.streaming_chunks.len());
                 return Ok(true);
             }
             Err(returned) if full_buffer_mode.publishes_full_buffer() => {
+                shared_state
+                    .mark_streaming_queue_producer_full(shared_state.streaming_chunks.len());
+                shared_state.mark_streaming_queue_dropped();
                 let _ = returned;
                 return Ok(false);
             }
             Err(returned) => {
+                shared_state
+                    .mark_streaming_queue_producer_full(shared_state.streaming_chunks.len());
+                shared_state.mark_streaming_queue_producer_backpressure();
                 chunk = returned;
                 std::thread::sleep(STREAMING_QUEUE_BACKPRESSURE_SLEEP);
             }
@@ -1036,10 +1029,12 @@ mod tests {
         let shared = SharedState::new();
         let cancel = AtomicBool::new(false);
         shared.load_generation.store(7, Ordering::Release);
+        shared.reset_streaming_queue_window_for_generation(7);
 
         let channels = 2;
         let chunk_samples = STREAMING_CHUNK_FRAMES * channels;
-        let mut pending_samples = vec![0.25; chunk_samples * 4];
+        let start_chunks = (STREAMING_START_BUFFER_FRAMES / STREAMING_CHUNK_FRAMES as u64) as usize;
+        let mut pending_samples = vec![0.25; chunk_samples * (start_chunks + 2)];
 
         let pushed = push_ready_streaming_chunks(
             &shared,
@@ -1059,17 +1054,101 @@ mod tests {
             STREAMING_START_BUFFER_FRAMES / STREAMING_CHUNK_FRAMES as u64
         );
         assert_eq!(pending_samples.len(), chunk_samples * 2);
+        assert_eq!(
+            shared
+                .streaming_queue_chunks_pushed_count
+                .load(Ordering::Relaxed),
+            start_chunks as u64
+        );
+        assert_eq!(shared.streaming_queue_min_len(), Some(1));
+        assert_eq!(
+            shared.streaming_queue_max_len.load(Ordering::Relaxed),
+            start_chunks as u64
+        );
     }
 
     #[test]
-    fn waiting_for_streaming_ready_applied_stops_when_generation_changes() {
+    fn memory_mode_post_ready_push_can_buffer_before_ready_applies() {
         let shared = SharedState::new();
         let cancel = AtomicBool::new(false);
-        shared.load_generation.store(8, Ordering::Release);
+        shared.load_generation.store(7, Ordering::Release);
+        shared.reset_streaming_queue_window_for_generation(7);
 
-        let result = wait_for_streaming_ready_applied(&shared, &cancel, 7);
+        let channels = 2;
+        let chunk_samples = STREAMING_CHUNK_FRAMES * channels;
+        let mut pending_samples = vec![0.25; chunk_samples * 3];
 
-        assert_eq!(result, Err("Load cancelled".to_string()));
+        let pushed = push_ready_streaming_chunks(
+            &shared,
+            &cancel,
+            7,
+            channels,
+            &mut pending_samples,
+            false,
+            StreamingFullBufferMode::MemoryOnly,
+            None,
+        )
+        .expect("post-ready memory-mode producer should keep buffering");
+
+        assert_eq!(shared.streaming_ready_ms.load(Ordering::Acquire), 0);
+        assert_eq!(pushed, STREAMING_CHUNK_FRAMES as u64 * 3);
+        assert_eq!(shared.streaming_chunks.len(), 3);
+        assert!(pending_samples.is_empty());
+        assert_eq!(
+            shared
+                .streaming_queue_chunks_pushed_count
+                .load(Ordering::Relaxed),
+            3
+        );
+        assert_eq!(shared.streaming_queue_min_len(), Some(1));
+        assert_eq!(shared.streaming_queue_max_len.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn full_buffer_streaming_queue_full_records_drop_diagnostic() {
+        let shared = SharedState::new();
+        let cancel = AtomicBool::new(false);
+        shared.load_generation.store(11, Ordering::Release);
+        shared.reset_streaming_queue_window_for_generation(11);
+
+        for _ in 0..128 {
+            shared
+                .streaming_chunks
+                .push(StreamingAudioChunk {
+                    generation: 11,
+                    samples: Arc::new(vec![0.0; 2]),
+                })
+                .expect("queue fixture should fill exactly");
+        }
+
+        let pushed = push_streaming_chunk(
+            &shared,
+            &cancel,
+            11,
+            vec![0.5, -0.5],
+            StreamingFullBufferMode::PublishFullBuffer,
+        )
+        .expect("full-buffer queue full should drop startup chunk");
+
+        assert!(!pushed);
+        assert_eq!(
+            shared
+                .streaming_queue_producer_full_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared.streaming_queue_dropped_count.load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .streaming_queue_chunks_pushed_count
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(shared.streaming_queue_min_len(), Some(128));
+        assert_eq!(shared.streaming_queue_max_len.load(Ordering::Relaxed), 128);
     }
 
     #[test]

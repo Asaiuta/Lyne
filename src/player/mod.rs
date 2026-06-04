@@ -497,7 +497,18 @@ impl AudioPlayer {
     }
 
     fn cancel_current_load(&mut self) {
-        let was_loading = self.shared_state.is_loading.swap(false, Ordering::AcqRel);
+        self.cancel_current_load_inner(false);
+    }
+
+    fn cancel_current_load_for_pending_load(&mut self) {
+        self.cancel_current_load_inner(true);
+    }
+
+    fn cancel_current_load_inner(&mut self, loading_after_cancel: bool) {
+        let was_loading = self
+            .shared_state
+            .is_loading
+            .swap(loading_after_cancel, Ordering::AcqRel);
         if let Some(cancel) = self.current_load_cancel.take() {
             cancel.store(true, Ordering::Release);
         }
@@ -557,8 +568,9 @@ impl AudioPlayer {
         };
         let target_time_secs = target_frame as f64 / sample_rate as f64;
 
-        self.cancel_current_load();
+        self.cancel_current_load_for_pending_load();
         GaplessManager::cancel_preload(&self.shared_state);
+        self.shared_state.load_progress.store(0, Ordering::Relaxed);
         let load_cancel = self.create_load_cancel_token();
         let generation = self
             .shared_state
@@ -571,6 +583,8 @@ impl AudioPlayer {
             .streaming_generation
             .store(generation, Ordering::Release);
         self.shared_state
+            .reset_streaming_queue_window_for_generation(generation);
+        self.shared_state
             .streaming_decode_finished
             .store(false, Ordering::Release);
         self.shared_state
@@ -579,9 +593,6 @@ impl AudioPlayer {
         self.shared_state
             .streaming_full_buffer_published
             .store(false, Ordering::Release);
-        self.shared_state
-            .streaming_active
-            .store(true, Ordering::Release);
         self.shared_state.audio_buffer.store(Arc::new(Vec::new()));
         self.shared_state
             .dsp_reset_pending
@@ -590,8 +601,9 @@ impl AudioPlayer {
             .position_frames
             .store(target_frame, Ordering::Relaxed);
         self.shared_state.state.store(PlayerState::Playing);
-        self.shared_state.is_loading.store(true, Ordering::Release);
-        self.shared_state.load_progress.store(0, Ordering::Relaxed);
+        self.shared_state
+            .streaming_active
+            .store(true, Ordering::Release);
         *self.shared_state.load_error.write() = None;
         self.shared_state
             .event_flags

@@ -44,6 +44,8 @@ const ENV_AUDIO_ALLOWED_ORIGINS: &str = "AUDIO_ALLOWED_ORIGINS";
 const ENV_AUDIO_APP_ROOT_PID: &str = "AUDIO_APP_ROOT_PID";
 const SIDECAR_PERMISSION_DENIED_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const SIDECAR_PERMISSION_DENIED_RETRY_TIMEOUT: Duration = Duration::from_secs(10);
+const SIDECAR_DEV_PROFILE: &str = "audio-dev";
+const SIDECAR_RELEASE_PROFILE: &str = "release";
 
 /// Environment variable carrying the per-run bearer token to the audio sidecar.
 /// Must stay in sync with `audio_engine::server::ENV_AUDIO_API_TOKEN`.
@@ -150,22 +152,42 @@ fn reveal_canonical_path_in_folder(path: &Path) -> Result<(), String> {
   }
 }
 
-fn sidecar_dev_fallback_path() -> PathBuf {
+fn sidecar_profile_dir() -> &'static str {
+  if cfg!(debug_assertions) {
+    SIDECAR_DEV_PROFILE
+  } else {
+    SIDECAR_RELEASE_PROFILE
+  }
+}
+
+fn sidecar_repo_target_fallback_path() -> PathBuf {
   PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("..")
     .join("..")
     .join("..")
     .join("target")
-    .join("release")
+    .join(sidecar_profile_dir())
     .join("audio_server.exe")
 }
 
 fn sidecar_target_dir_fallback_path() -> Option<PathBuf> {
   let target_dir = std::env::var_os("CARGO_TARGET_DIR")?;
-  let candidate = PathBuf::from(target_dir)
-    .join("release")
+  let target_dir = PathBuf::from(target_dir);
+  let candidate = target_dir
+    .join(sidecar_profile_dir())
     .join("audio_server.exe");
-  candidate.exists().then_some(candidate)
+  if candidate.exists() {
+    return Some(candidate);
+  }
+
+  if cfg!(debug_assertions) {
+    let release_candidate = target_dir
+      .join(SIDECAR_RELEASE_PROFILE)
+      .join("audio_server.exe");
+    return release_candidate.exists().then_some(release_candidate);
+  }
+
+  None
 }
 
 fn resolve_sidecar_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
@@ -194,7 +216,7 @@ fn resolve_sidecar_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     return bundled;
   }
 
-  let dev_fallback = sidecar_dev_fallback_path();
+  let dev_fallback = sidecar_repo_target_fallback_path();
   if dev_fallback.exists() {
     return Some(dev_fallback);
   }

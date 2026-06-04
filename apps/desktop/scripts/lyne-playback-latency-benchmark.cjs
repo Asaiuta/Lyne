@@ -45,6 +45,7 @@ const parseArgs = (argv) => {
     trials: 5,
     sampleMs: 250,
     seekFractions: [0.25, 0.5, 0.75],
+    skipSeek: false,
     keepServer: false
   };
 
@@ -119,6 +120,9 @@ const parseArgs = (argv) => {
         index += 1;
         options.seekFractions = next.split(",").map((part) => positiveNumber(part.trim(), arg));
         break;
+      case "--skip-seek":
+        options.skipSeek = true;
+        break;
       case "--keep-server":
         options.keepServer = true;
         break;
@@ -158,6 +162,7 @@ Options:
   --port <port>                  Isolated server port (default: 63904)
   --trials <n>                   Trial count for load/play/seek (default: 5)
   --seek-fractions <csv>         Seek targets as duration fractions (default: 0.25,0.5,0.75)
+  --skip-seek                    Skip seek convergence measurements
   --poll-ms <ms>                 State polling interval (default: 50)
   --sample-ms <ms>               Process metric sampling interval (default: 250)
   --keep-server                  Leave the isolated server running after the benchmark
@@ -230,10 +235,71 @@ const waitForTrackSwitch = async (options, expectedPath) =>
 const playbackPhasesFromSnapshot = (snapshot) =>
   snapshot && snapshot.playback_phases ? snapshot.playback_phases : null;
 
+const playbackCountersFromSnapshot = (snapshot) => {
+  const playback = snapshot && snapshot.playback ? snapshot.playback : {};
+  const fields = [
+    "playback_recovery_count",
+    "parked_output_stream_count",
+    "parked_output_stream_release_count",
+    "audio_command_received_count",
+    "audio_command_completed_count",
+    "underrun_count",
+    "underrun_silence_frames",
+    "audio_buffer_output_shortfall_count",
+    "audio_buffer_output_shortfall_frames",
+    "streaming_output_shortfall_count",
+    "streaming_output_shortfall_frames",
+    "stream_play_generation",
+    "playback_progress_generation",
+    "streaming_queue_chunks_pushed_count",
+    "streaming_queue_chunks_popped_count",
+    "streaming_queue_empty_during_decode_count",
+    "streaming_queue_empty_during_decode_frames",
+    "streaming_queue_producer_full_count",
+    "streaming_queue_producer_backpressure_count",
+    "streaming_queue_dropped_count",
+    "output_callback_activity_count",
+    "output_callback_silenced_inactive_count",
+    "output_callback_silenced_loading_count",
+    "output_callback_silenced_stream_mismatch_count"
+  ];
+  return Object.fromEntries(
+    fields.map((field) => [field, typeof playback[field] === "number" ? playback[field] : null])
+  );
+};
+
+const playbackQueueFromSnapshot = (snapshot) => {
+  const playback = snapshot && snapshot.playback ? snapshot.playback : {};
+  const fields = [
+    "streaming_queue_len",
+    "streaming_queue_window_generation",
+    "streaming_queue_min_len",
+    "streaming_queue_max_len"
+  ];
+  return Object.fromEntries(
+    fields.map((field) => [
+      field,
+      typeof playback[field] === "number" || playback[field] === null ? playback[field] : null
+    ])
+  );
+};
+
+const playbackCounterDelta = (before, after) => {
+  const delta = {};
+  for (const [field, beforeValue] of Object.entries(before || {})) {
+    const afterValue = after ? after[field] : null;
+    delta[field] =
+      typeof beforeValue === "number" && typeof afterValue === "number" ? afterValue - beforeValue : null;
+  }
+  return delta;
+};
+
 const readPlaybackPhaseDiagnostics = async (options) => {
   const diagnostics = await readRuntimeDiagnostics(options);
   return {
     latency_ms: Number(diagnostics.latencyMs.toFixed(3)),
+    playback: playbackCountersFromSnapshot(diagnostics.snapshot),
+    playback_queue: playbackQueueFromSnapshot(diagnostics.snapshot),
     playback_phases: playbackPhasesFromSnapshot(diagnostics.snapshot)
   };
 };
@@ -241,6 +307,7 @@ const readPlaybackPhaseDiagnostics = async (options) => {
 const measureLoadToProgress = async (options, trial) => {
   await requestJson(options, "POST", "/stop");
   await sleep(options.settleMs);
+  const phaseDiagnosticsBeforeCommand = await readPlaybackPhaseDiagnostics(options);
   const command = await requestStateCommand(options, "/load", { path: options.track, autoplay: true });
   const phaseDiagnosticsAfterCommand = await readPlaybackPhaseDiagnostics(options);
   const baselineTime = command.state && typeof command.state.current_time === "number" ? command.state.current_time : 0;
@@ -259,6 +326,11 @@ const measureLoadToProgress = async (options, trial) => {
       is_playing: progress.value.state.is_playing,
       file_path: progress.value.state.file_path
     },
+    playback_diagnostics_delta: playbackCounterDelta(
+      phaseDiagnosticsBeforeCommand.playback,
+      phaseDiagnosticsAtSuccess.playback
+    ),
+    phase_diagnostics_before_command: phaseDiagnosticsBeforeCommand,
     phase_diagnostics_after_command: phaseDiagnosticsAfterCommand,
     phase_diagnostics_at_success: phaseDiagnosticsAtSuccess
   };
@@ -268,12 +340,14 @@ const measurePausePlayResume = async (options, trial) => {
   await requestJson(options, "POST", "/pause");
   await sleep(options.settleMs);
   const before = await readState(options);
+  const phaseDiagnosticsBeforeCommand = await readPlaybackPhaseDiagnostics(options);
   const command = await requestStateCommand(options, "/play");
   const progress = await waitForProgressAdvance(
     options,
     before.state.current_time,
     `trial ${trial} play-resume-to-progress`
   );
+  const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
   return {
     trial,
     operation: "play_resume_to_progress",
@@ -282,12 +356,19 @@ const measurePausePlayResume = async (options, trial) => {
     time_to_progress_ms: progress.elapsed_ms,
     polls: progress.polls,
     current_time_before_play: before.state.current_time,
-    current_time_at_success: progress.value.state.current_time
+    current_time_at_success: progress.value.state.current_time,
+    playback_diagnostics_delta: playbackCounterDelta(
+      phaseDiagnosticsBeforeCommand.playback,
+      phaseDiagnosticsAtSuccess.playback
+    ),
+    phase_diagnostics_before_command: phaseDiagnosticsBeforeCommand,
+    phase_diagnostics_at_success: phaseDiagnosticsAtSuccess
   };
 };
 
 const measureSeek = async (options, trial, fraction, duration) => {
   const targetSecs = Math.max(0.5, Math.min(duration - 1, duration * fraction));
+  const phaseDiagnosticsBeforeCommand = await readPlaybackPhaseDiagnostics(options);
   const command = await requestStateCommand(options, "/seek", { position: targetSecs });
   const convergence = await waitForSeekConvergence(options, targetSecs);
   const progress = await waitForProgressAdvance(
@@ -296,6 +377,7 @@ const measureSeek = async (options, trial, fraction, duration) => {
     `trial ${trial} seek ${fraction} progress`,
     options.seekTimeoutMs
   );
+  const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
   return {
     trial,
     operation: "seek_convergence",
@@ -307,7 +389,13 @@ const measureSeek = async (options, trial, fraction, duration) => {
     progress_after_convergence_ms: progress.elapsed_ms,
     polls: convergence.polls + progress.polls,
     current_time_at_convergence: convergence.value.state.current_time,
-    current_time_at_progress: progress.value.state.current_time
+    current_time_at_progress: progress.value.state.current_time,
+    playback_diagnostics_delta: playbackCounterDelta(
+      phaseDiagnosticsBeforeCommand.playback,
+      phaseDiagnosticsAtSuccess.playback
+    ),
+    phase_diagnostics_before_command: phaseDiagnosticsBeforeCommand,
+    phase_diagnostics_at_success: phaseDiagnosticsAtSuccess
   };
 };
 
@@ -351,10 +439,33 @@ const summarizeOperations = (measurements) => {
       request_latency_ms: summarizeNumeric(rows.map((row) => row.request_latency_ms)),
       time_to_progress_ms: summarizeNumeric(rows.map((row) => row.time_to_progress_ms)),
       convergence_ms: summarizeNumeric(rows.map((row) => row.convergence_ms)),
-      switch_to_progress_ms: summarizeNumeric(rows.map((row) => row.switch_to_progress_ms))
+      switch_to_progress_ms: summarizeNumeric(rows.map((row) => row.switch_to_progress_ms)),
+      diagnostics_delta: summarizeOperationDiagnosticDeltas(rows)
     };
   }
   return byOperation;
+};
+
+const summarizeOperationDiagnosticDeltas = (measurements) => {
+  const fields = new Set();
+  for (const measurement of measurements) {
+    for (const field of Object.keys(measurement.playback_diagnostics_delta || {})) {
+      fields.add(field);
+    }
+  }
+
+  const summary = {};
+  for (const field of fields) {
+    const values = measurements
+      .map((measurement) => measurement.playback_diagnostics_delta && measurement.playback_diagnostics_delta[field])
+      .filter((value) => typeof value === "number");
+    summary[field] = {
+      sum: values.reduce((total, value) => total + value, 0),
+      max: values.length > 0 ? Math.max(...values) : null,
+      non_zero_count: values.filter((value) => value !== 0).length
+    };
+  }
+  return summary;
 };
 
 const runBenchmark = async (options) => {
@@ -372,7 +483,8 @@ const runBenchmark = async (options) => {
       poll_ms: options.pollMs,
       settle_ms: options.settleMs,
       sample_ms: options.sampleMs,
-      seek_fractions: options.seekFractions
+      seek_fractions: options.seekFractions,
+      skip_seek: options.skipSeek
     },
     summary: { pass: false },
     server: null,
@@ -411,15 +523,17 @@ const runBenchmark = async (options) => {
     await waitForProgressAdvance(options, 0, "initial playback warmup");
     const warmState = await readState(options);
     const duration = Number(warmState.state.duration || firstLoad.state?.duration || 0);
-    if (!Number.isFinite(duration) || duration <= 2) {
+    if (!options.skipSeek && (!Number.isFinite(duration) || duration <= 2)) {
       throw new Error(`Track duration is too short or unknown for seek benchmark: ${duration}`);
     }
 
     for (let trial = 1; trial <= options.trials; trial += 1) {
       report.measurements.push(await measureLoadToProgress(options, trial));
       report.measurements.push(await measurePausePlayResume(options, trial));
-      for (const fraction of options.seekFractions) {
-        report.measurements.push(await measureSeek(options, trial, fraction, duration));
+      if (!options.skipSeek) {
+        for (const fraction of options.seekFractions) {
+          report.measurements.push(await measureSeek(options, trial, fraction, duration));
+        }
       }
     }
 
@@ -435,23 +549,27 @@ const runBenchmark = async (options) => {
       operations: summarizeOperations(report.measurements),
       diagnostics_delta: null
     };
-    const beforePlayback = report.diagnostics.before.playback || {};
-    const afterPlayback = report.diagnostics.after.playback || {};
     report.summary.playback_phase_latest = playbackPhasesFromSnapshot(report.diagnostics.after);
-    report.summary.diagnostics_delta = {
-      underrun_count:
-        typeof beforePlayback.underrun_count === "number" && typeof afterPlayback.underrun_count === "number"
-          ? afterPlayback.underrun_count - beforePlayback.underrun_count
-          : null,
-      underrun_silence_frames:
-        typeof beforePlayback.underrun_silence_frames === "number" &&
-        typeof afterPlayback.underrun_silence_frames === "number"
-          ? afterPlayback.underrun_silence_frames - beforePlayback.underrun_silence_frames
-          : null
-    };
+    report.summary.playback_queue_latest = playbackQueueFromSnapshot(report.diagnostics.after);
+    report.summary.diagnostics_delta = playbackCounterDelta(
+      playbackCountersFromSnapshot(report.diagnostics.before),
+      playbackCountersFromSnapshot(report.diagnostics.after)
+    );
   } catch (error) {
     report.summary.pass = false;
     report.error = error instanceof Error ? error.message : String(error);
+    try {
+      report.diagnostics.error_state = (await readState(options)).state;
+    } catch (stateError) {
+      report.diagnostics.error_state_error =
+        stateError instanceof Error ? stateError.message : String(stateError);
+    }
+    try {
+      report.diagnostics.error_runtime = (await readRuntimeDiagnostics(options)).snapshot;
+    } catch (diagnosticsError) {
+      report.diagnostics.error_runtime_error =
+        diagnosticsError instanceof Error ? diagnosticsError.message : String(diagnosticsError);
+    }
   } finally {
     if (monitor) {
       const samples = await monitor.stop();

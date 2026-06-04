@@ -24,6 +24,8 @@ pub const EVENT_TRACK_EOF: u32 = 1 << 7;
 pub const EVENT_PLAYBACK_STARTED: u32 = 1 << 8;
 pub const EVENT_PLAYBACK_PAUSED: u32 = 1 << 9;
 pub const EVENT_PLAYBACK_STOPPED: u32 = 1 << 10;
+
+const STREAMING_QUEUE_MIN_UNOBSERVED: u64 = u64::MAX;
 pub const EVENT_PLAYBACK_SEEKED: u32 = 1 << 11;
 pub const EVENT_PLAYBACK_HISTORY_UPDATED: u32 = 1 << 12;
 
@@ -322,6 +324,16 @@ pub struct SharedState {
     pub streaming_ready_sent_ms: AtomicU64,
     pub streaming_ready_ms: AtomicU64,
     pub streaming_finished_ms: AtomicU64,
+    pub streaming_queue_window_generation: AtomicU64,
+    pub streaming_queue_min_len: AtomicU64,
+    pub streaming_queue_max_len: AtomicU64,
+    pub streaming_queue_chunks_pushed_count: AtomicU64,
+    pub streaming_queue_chunks_popped_count: AtomicU64,
+    pub streaming_queue_empty_during_decode_count: AtomicU64,
+    pub streaming_queue_empty_during_decode_frames: AtomicU64,
+    pub streaming_queue_producer_full_count: AtomicU64,
+    pub streaming_queue_producer_backpressure_count: AtomicU64,
+    pub streaming_queue_dropped_count: AtomicU64,
     pub exclusive_mode: AtomicBool,
     pub prefer_default_output_config: AtomicBool,
     pub device_id: std::sync::atomic::AtomicI64,
@@ -417,6 +429,10 @@ pub struct SharedState {
     pub decode_budget_rejection_count: AtomicU64,
     pub audio_underrun_count: AtomicU64,
     pub audio_underrun_silence_frames: AtomicU64,
+    pub audio_buffer_output_shortfall_count: AtomicU64,
+    pub audio_buffer_output_shortfall_frames: AtomicU64,
+    pub streaming_output_shortfall_count: AtomicU64,
+    pub streaming_output_shortfall_frames: AtomicU64,
     pub ws_spectrum_event_count: AtomicU64,
     pub ws_position_event_count: AtomicU64,
 
@@ -480,6 +496,16 @@ impl SharedState {
             streaming_ready_sent_ms: AtomicU64::new(0),
             streaming_ready_ms: AtomicU64::new(0),
             streaming_finished_ms: AtomicU64::new(0),
+            streaming_queue_window_generation: AtomicU64::new(0),
+            streaming_queue_min_len: AtomicU64::new(STREAMING_QUEUE_MIN_UNOBSERVED),
+            streaming_queue_max_len: AtomicU64::new(0),
+            streaming_queue_chunks_pushed_count: AtomicU64::new(0),
+            streaming_queue_chunks_popped_count: AtomicU64::new(0),
+            streaming_queue_empty_during_decode_count: AtomicU64::new(0),
+            streaming_queue_empty_during_decode_frames: AtomicU64::new(0),
+            streaming_queue_producer_full_count: AtomicU64::new(0),
+            streaming_queue_producer_backpressure_count: AtomicU64::new(0),
+            streaming_queue_dropped_count: AtomicU64::new(0),
             exclusive_mode: AtomicBool::new(false),
             prefer_default_output_config: AtomicBool::new(false),
             device_id: std::sync::atomic::AtomicI64::new(-1),
@@ -564,6 +590,10 @@ impl SharedState {
             decode_budget_rejection_count: AtomicU64::new(0),
             audio_underrun_count: AtomicU64::new(0),
             audio_underrun_silence_frames: AtomicU64::new(0),
+            audio_buffer_output_shortfall_count: AtomicU64::new(0),
+            audio_buffer_output_shortfall_frames: AtomicU64::new(0),
+            streaming_output_shortfall_count: AtomicU64::new(0),
+            streaming_output_shortfall_frames: AtomicU64::new(0),
             ws_spectrum_event_count: AtomicU64::new(0),
             ws_position_event_count: AtomicU64::new(0),
 
@@ -673,10 +703,95 @@ impl SharedState {
         self.streaming_full_buffer_published
             .store(false, Ordering::Release);
         while self.streaming_chunks.pop().is_some() {}
+        self.clear_streaming_queue_window();
         self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_sent_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_ms.store(0, Ordering::Relaxed);
         self.streaming_finished_ms.store(0, Ordering::Relaxed);
+    }
+
+    pub fn reset_streaming_queue_window_for_generation(&self, generation: u64) {
+        let previous = self
+            .streaming_queue_window_generation
+            .swap(generation, Ordering::AcqRel);
+        if previous != generation {
+            self.streaming_queue_min_len
+                .store(STREAMING_QUEUE_MIN_UNOBSERVED, Ordering::Relaxed);
+            self.streaming_queue_max_len.store(0, Ordering::Relaxed);
+        }
+    }
+
+    fn clear_streaming_queue_window(&self) {
+        self.streaming_queue_window_generation
+            .store(0, Ordering::Release);
+        self.streaming_queue_min_len
+            .store(STREAMING_QUEUE_MIN_UNOBSERVED, Ordering::Relaxed);
+        self.streaming_queue_max_len.store(0, Ordering::Relaxed);
+    }
+
+    pub fn observe_streaming_queue_len(&self, len: usize) {
+        let len = len as u64;
+        self.streaming_queue_min_len
+            .fetch_min(len, Ordering::Relaxed);
+        self.streaming_queue_max_len
+            .fetch_max(len, Ordering::Relaxed);
+    }
+
+    pub fn streaming_queue_min_len(&self) -> Option<u64> {
+        match self.streaming_queue_min_len.load(Ordering::Relaxed) {
+            STREAMING_QUEUE_MIN_UNOBSERVED => None,
+            len => Some(len),
+        }
+    }
+
+    pub fn mark_streaming_queue_chunk_pushed(&self, len_after_push: usize) {
+        self.streaming_queue_chunks_pushed_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.observe_streaming_queue_len(len_after_push);
+    }
+
+    pub fn mark_streaming_queue_chunk_popped(&self, len_after_pop: usize) {
+        self.streaming_queue_chunks_popped_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.observe_streaming_queue_len(len_after_pop);
+    }
+
+    pub fn mark_streaming_queue_empty_during_decode(&self, silence_frames: u64) {
+        self.streaming_queue_empty_during_decode_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.streaming_queue_empty_during_decode_frames
+            .fetch_add(silence_frames, Ordering::Relaxed);
+        self.observe_streaming_queue_len(0);
+    }
+
+    pub fn mark_audio_buffer_output_shortfall(&self, silence_frames: u64) {
+        self.audio_buffer_output_shortfall_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.audio_buffer_output_shortfall_frames
+            .fetch_add(silence_frames, Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_output_shortfall(&self, silence_frames: u64) {
+        self.streaming_output_shortfall_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.streaming_output_shortfall_frames
+            .fetch_add(silence_frames, Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_queue_producer_full(&self, len_at_full: usize) {
+        self.streaming_queue_producer_full_count
+            .fetch_add(1, Ordering::Relaxed);
+        self.observe_streaming_queue_len(len_at_full);
+    }
+
+    pub fn mark_streaming_queue_producer_backpressure(&self) {
+        self.streaming_queue_producer_backpressure_count
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn mark_streaming_queue_dropped(&self) {
+        self.streaming_queue_dropped_count
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn mark_load_request_returned(&self) {
@@ -1160,6 +1275,103 @@ mod tests {
         assert!(shared.streaming_chunks.pop().is_none());
         assert_eq!(shared.streaming_first_chunk_ms.load(Ordering::Relaxed), 0);
         assert_eq!(shared.streaming_ready_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared
+                .streaming_queue_window_generation
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(shared.streaming_queue_min_len(), None);
+        assert_eq!(shared.streaming_queue_max_len.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn streaming_queue_diagnostics_track_window_and_counters() {
+        let shared = SharedState::new();
+        shared.reset_streaming_queue_window_for_generation(7);
+
+        shared.mark_streaming_queue_chunk_pushed(1);
+        shared.mark_streaming_queue_chunk_pushed(3);
+        shared.mark_streaming_queue_chunk_popped(2);
+        shared.mark_streaming_queue_producer_full(128);
+        shared.mark_streaming_queue_producer_backpressure();
+        shared.mark_streaming_queue_dropped();
+        shared.mark_streaming_queue_empty_during_decode(512);
+        shared.mark_audio_buffer_output_shortfall(64);
+        shared.mark_streaming_output_shortfall(32);
+
+        assert_eq!(
+            shared
+                .streaming_queue_window_generation
+                .load(Ordering::Relaxed),
+            7
+        );
+        assert_eq!(shared.streaming_queue_min_len(), Some(0));
+        assert_eq!(shared.streaming_queue_max_len.load(Ordering::Relaxed), 128);
+        assert_eq!(
+            shared
+                .streaming_queue_chunks_pushed_count
+                .load(Ordering::Relaxed),
+            2
+        );
+        assert_eq!(
+            shared
+                .streaming_queue_chunks_popped_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .streaming_queue_empty_during_decode_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .streaming_queue_empty_during_decode_frames
+                .load(Ordering::Relaxed),
+            512
+        );
+        assert_eq!(
+            shared
+                .streaming_queue_producer_full_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .streaming_queue_producer_backpressure_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared.streaming_queue_dropped_count.load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .audio_buffer_output_shortfall_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .audio_buffer_output_shortfall_frames
+                .load(Ordering::Relaxed),
+            64
+        );
+        assert_eq!(
+            shared
+                .streaming_output_shortfall_count
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            shared
+                .streaming_output_shortfall_frames
+                .load(Ordering::Relaxed),
+            32
+        );
     }
 
     #[test]

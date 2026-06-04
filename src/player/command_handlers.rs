@@ -799,6 +799,7 @@ fn apply_streaming_track_state(
     shared_state
         .streaming_generation
         .store(generation, Ordering::Release);
+    shared_state.reset_streaming_queue_window_for_generation(generation);
     shared_state
         .streaming_decode_finished
         .store(false, Ordering::Release);
