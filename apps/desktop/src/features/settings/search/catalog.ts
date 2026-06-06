@@ -192,6 +192,8 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "audio-engine", itemId: "dynamicLoudnessStrength", labelKey: "settings.dynamicLoudness.strength" },
   { category: "audio-engine", itemId: "useCache", labelKey: "settings.useCache", keywords: ["cache", "缓存"] },
   { category: "audio-engine", itemId: "preemptiveResample", labelKey: "settings.preemptiveResample", keywords: ["preemptive", "resample", "预先"] },
+  { category: "audio-engine", itemId: "streamingFirstBuffer", labelKey: "settings.streamingFirstBuffer", keywords: ["streaming", "first", "buffer", "startup", "流式", "首缓冲", "起播"] },
+  { category: "audio-engine", itemId: "streamingFullBufferLimitMib", labelKey: "settings.streamingFullBufferLimitMib", keywords: ["streaming", "buffer", "limit", "memory", "MiB", "流式", "缓存", "上限"] },
 
   // ── local ────────────────────────────────────────────
   { category: "local", itemId: "localMusicDirectory", labelKey: "settings.local.localMusicDirectory", descriptionKey: "settings.local.localMusicDirectory.desc", keywords: ["local", "music", "folder", "directory", "本地", "音乐", "目录"] },

@@ -147,6 +147,8 @@ const AUDIO_ENGINE_ITEM_IDS = [
   "dynamicLoudnessStrength",
   "useCache",
   "preemptiveResample",
+  "streamingFirstBuffer",
+  "streamingFullBufferLimitMib",
   "engineReload"
 ] as const;
 

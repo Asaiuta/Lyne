@@ -195,6 +195,21 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
     return parsed;
   };
 
+  const parseRangedInteger = (value: string, label: string, min: number, max: number): number => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      throw new Error(t("settings.error.notANumber", { label }));
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed)) {
+      throw new Error(t("settings.error.notANumber", { label }));
+    }
+    if (parsed < min || parsed > max) {
+      throw new Error(t("settings.error.outOfRange", { label, min, max }));
+    }
+    return parsed;
+  };
+
   const parseOutputBits = (value: string): OutputBits => {
     if (!isOption(value, OUTPUT_BIT_OPTIONS)) {
       throw new Error(t("settings.error.invalidBits"));
@@ -403,6 +418,8 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
     switch (descriptor.parser.kind) {
       case "optionalInteger":
         return parseOptionalInteger(value, label) ?? descriptor.parser.emptyFallback ?? null;
+      case "rangedInteger":
+        return parseRangedInteger(value, label, descriptor.parser.min, descriptor.parser.max);
       case "requiredNumber":
         return parseRequiredNumber(value, label);
       case "rangedNumber":
@@ -632,6 +649,11 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
         {textField(AUDIO_ENGINE_TEXT_ITEMS.dynamicLoudnessStrength)}
         {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.useCache, t("settings.useCache"))}
         {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.preemptiveResample, t("settings.preemptiveResample"))}
+      </SettingGroup>
+
+      <SettingGroup title={t("settings.streamingBuffering")}>
+        {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.streamingFirstBuffer, t("settings.streamingFirstBuffer"))}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.streamingFullBufferLimitMib)}
       </SettingGroup>
 
       <ButtonSettingItem

@@ -5,7 +5,7 @@
 use crate::config::{
     noise_shaper_curve_to_string, normalization_mode_to_string, parse_noise_shaper_curve,
     parse_normalization_mode, parse_resample_quality, resample_quality_to_string, EngineSettings,
-    EngineSettingsUpdate,
+    EngineSettingsUpdate, DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -45,6 +45,8 @@ pub struct PersistentSettings {
     pub preemptive_resample: bool,
     #[serde(default)]
     pub streaming_first_buffer: bool,
+    #[serde(default = "default_streaming_full_buffer_limit_mib")]
+    pub streaming_full_buffer_limit_mib: u64,
     pub use_next_prefetch: bool,
 }
 
@@ -76,6 +78,7 @@ impl From<EngineSettings> for PersistentSettings {
             use_cache: settings.use_cache,
             preemptive_resample: settings.preemptive_resample,
             streaming_first_buffer: settings.streaming_first_buffer,
+            streaming_full_buffer_limit_mib: settings.streaming_full_buffer_limit_mib,
             use_next_prefetch: settings.use_next_prefetch,
         }
     }
@@ -109,9 +112,14 @@ impl From<PersistentSettings> for EngineSettings {
         engine.use_cache = settings.use_cache;
         engine.preemptive_resample = settings.preemptive_resample;
         engine.streaming_first_buffer = settings.streaming_first_buffer;
+        engine.streaming_full_buffer_limit_mib = settings.streaming_full_buffer_limit_mib;
         engine.use_next_prefetch = settings.use_next_prefetch;
         engine.normalized()
     }
+}
+
+fn default_streaming_full_buffer_limit_mib() -> u64 {
+    DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB
 }
 
 impl Default for PersistentSettings {
@@ -177,4 +185,60 @@ pub fn create_settings_manager(settings_path: &Path) -> SharedSettingsManager {
     Arc::new(Mutex::new(SettingsManager::new(
         settings_path.to_path_buf(),
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::MAX_STREAMING_FULL_BUFFER_LIMIT_MIB;
+
+    #[test]
+    fn persistent_settings_round_trips_streaming_buffer_fields() {
+        let engine = EngineSettings {
+            streaming_first_buffer: true,
+            streaming_full_buffer_limit_mib: 128,
+            ..EngineSettings::default()
+        };
+
+        let persistent = PersistentSettings::from(engine);
+        assert!(persistent.streaming_first_buffer);
+        assert_eq!(persistent.streaming_full_buffer_limit_mib, 128);
+
+        let restored = EngineSettings::from(persistent);
+        assert!(restored.streaming_first_buffer);
+        assert_eq!(restored.streaming_full_buffer_limit_mib, 128);
+    }
+
+    #[test]
+    fn persistent_settings_defaults_legacy_streaming_fields() {
+        let mut value = serde_json::to_value(PersistentSettings::default())
+            .expect("default settings should serialize");
+        let object = value
+            .as_object_mut()
+            .expect("settings should serialize as object");
+        object.remove("streaming_first_buffer");
+        object.remove("streaming_full_buffer_limit_mib");
+
+        let settings: PersistentSettings =
+            serde_json::from_value(value).expect("legacy settings should deserialize");
+
+        assert!(!settings.streaming_first_buffer);
+        assert_eq!(
+            settings.streaming_full_buffer_limit_mib,
+            DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB
+        );
+    }
+
+    #[test]
+    fn persistent_settings_normalizes_streaming_full_buffer_limit() {
+        let restored = EngineSettings::from(PersistentSettings {
+            streaming_full_buffer_limit_mib: MAX_STREAMING_FULL_BUFFER_LIMIT_MIB + 1,
+            ..PersistentSettings::default()
+        });
+
+        assert_eq!(
+            restored.streaming_full_buffer_limit_mib,
+            MAX_STREAMING_FULL_BUFFER_LIMIT_MIB
+        );
+    }
 }

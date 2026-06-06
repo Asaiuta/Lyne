@@ -24,6 +24,8 @@ export const LOUDNESS_MODE_OPTIONS = [
 export const RESAMPLE_QUALITY_OPTIONS = ["low", "std", "hq", "uhq"] as const;
 export const OUTPUT_BIT_OPTIONS = ["16", "24", "32"] as const;
 export const EQ_TYPE_OPTIONS = ["IIR", "FIR"] as const;
+const STREAMING_FULL_BUFFER_LIMIT_MIB_DEFAULT = 256;
+const STREAMING_FULL_BUFFER_LIMIT_MIB_MAX = 4096;
 
 export interface SettingsFormState {
   deviceId: string;
@@ -49,6 +51,8 @@ export interface SettingsFormState {
   resampleQuality: string;
   useCache: boolean;
   preemptiveResample: boolean;
+  streamingFirstBuffer: boolean;
+  streamingFullBufferLimitMib: string;
   eqBands: Record<EqBandKey, number>;
 }
 
@@ -183,6 +187,16 @@ const FORM_FIELD_DESCRIPTORS = [
     field: "preemptiveResample",
     defaultValue: true,
     read: (settings) => settings.preemptive_resample
+  }),
+  field({
+    field: "streamingFirstBuffer",
+    defaultValue: false,
+    read: (settings) => settings.streaming_first_buffer
+  }),
+  field({
+    field: "streamingFullBufferLimitMib",
+    defaultValue: String(STREAMING_FULL_BUFFER_LIMIT_MIB_DEFAULT),
+    read: (settings) => String(settings.streaming_full_buffer_limit_mib)
   })
 ] as const;
 
@@ -263,7 +277,8 @@ export type AudioEngineBooleanFormField =
   | "crossfeedEnabled"
   | "dynamicLoudnessEnabled"
   | "useCache"
-  | "preemptiveResample";
+  | "preemptiveResample"
+  | "streamingFirstBuffer";
 
 export type AudioEngineBooleanSettingField =
   keyof Pick<
@@ -275,6 +290,7 @@ export type AudioEngineBooleanSettingField =
     | "dynamic_loudness_enabled"
     | "use_cache"
     | "preemptive_resample"
+    | "streaming_first_buffer"
   >;
 
 export interface AudioEngineBooleanItemDescriptor {
@@ -310,6 +326,11 @@ export const AUDIO_ENGINE_BOOLEAN_ITEMS = {
     id: "preemptiveResample",
     formField: "preemptiveResample",
     settingsField: "preemptive_resample"
+  },
+  streamingFirstBuffer: {
+    id: "streamingFirstBuffer",
+    formField: "streamingFirstBuffer",
+    settingsField: "streaming_first_buffer"
   }
 } as const satisfies Record<string, AudioEngineBooleanItemDescriptor>;
 
@@ -337,6 +358,7 @@ type AudioEngineTextSettingField =
     | "crossfeed_mix"
     | "dynamic_loudness_strength"
     | "target_samplerate"
+    | "streaming_full_buffer_limit_mib"
   >;
 
 type AudioEngineTextParser =
@@ -344,6 +366,12 @@ type AudioEngineTextParser =
       kind: "optionalInteger";
       fieldLabelKey: TranslationKey;
       emptyFallback?: number;
+    }
+  | {
+      kind: "rangedInteger";
+      fieldLabelKey: TranslationKey;
+      min: number;
+      max: number;
     }
   | {
       kind: "requiredNumber";
@@ -477,5 +505,17 @@ export const AUDIO_ENGINE_TEXT_ITEMS = {
       max: 1
     },
     disabledWhen: "dynamicLoudnessDisabled"
+  },
+  streamingFullBufferLimitMib: {
+    id: "streamingFullBufferLimitMib",
+    labelKey: "settings.streamingFullBufferLimitMib",
+    formField: "streamingFullBufferLimitMib",
+    settingsField: "streaming_full_buffer_limit_mib",
+    parser: {
+      kind: "rangedInteger",
+      fieldLabelKey: "settings.field.streamingFullBufferLimitMib",
+      min: 0,
+      max: STREAMING_FULL_BUFFER_LIMIT_MIB_MAX
+    }
   }
 } as const satisfies Record<string, AudioEngineTextItemDescriptor>;
