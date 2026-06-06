@@ -61,6 +61,10 @@ name = "audio_truepeak_perf"
 harness = false
 
 [[bench]]
+name = "audio_quality_measurements"
+harness = false
+
+[[bench]]
 name = "playback_load_budget_perf"
 harness = false
 

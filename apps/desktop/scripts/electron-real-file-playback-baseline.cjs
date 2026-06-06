@@ -42,7 +42,12 @@ const parseArgs = (argv) => {
     settleMs: 350,
     seekFractions: [0.25, 0.5, 0.75],
     useWebAudio: true,
-    loopDuringStability: true
+    useCompressor: true,
+    loopDuringStability: true,
+    inWindowSeek: false,
+    inWindowPrerollMs: 10000,
+    inWindowBackSecs: 6,
+    inWindowTrials: null
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -111,8 +116,23 @@ const parseArgs = (argv) => {
         index += 1;
         options.seekFractions = next.split(",").map((part) => positiveNumber(part.trim(), arg));
         break;
+      case "--in-window-seek":
+        options.inWindowSeek = true;
+        break;
+      case "--in-window-preroll-ms":
+        options.inWindowPrerollMs = readInteger(arg);
+        break;
+      case "--in-window-back-secs":
+        options.inWindowBackSecs = readNumber(arg);
+        break;
+      case "--in-window-trials":
+        options.inWindowTrials = readInteger(arg);
+        break;
       case "--no-webaudio":
         options.useWebAudio = false;
+        break;
+      case "--no-compressor":
+        options.useCompressor = false;
         break;
       case "--no-loop":
         options.loopDuringStability = false;
@@ -131,6 +151,9 @@ const parseArgs = (argv) => {
   }
   if (options.seekFractions.some((fraction) => fraction <= 0 || fraction >= 1)) {
     throw new Error("--seek-fractions values must be between 0 and 1");
+  }
+  if (options.inWindowTrials === null) {
+    options.inWindowTrials = options.trials;
   }
 
   return options;
@@ -157,7 +180,12 @@ Options:
   --poll-ms <ms>                 Renderer polling interval (default: 25)
   --sample-ms <ms>               Main-process CPU/RSS sample interval (default: 500)
   --settle-ms <ms>               Delay between operations (default: 350)
+  --in-window-seek               Add a backward seek after a playback preroll
+  --in-window-preroll-ms <ms>    Playback time before the backward seek (default: 10000)
+  --in-window-back-secs <s>      Backward hop distance from live playhead (default: 6)
+  --in-window-trials <n>         In-window scenario trial count (default: --trials value)
   --no-webaudio                  Measure plain HTMLAudioElement playback only
+  --no-compressor                Keep WebAudio EQ/gain/analyser but skip DynamicsCompressor
   --no-loop                      Do not seek back to start near track end during stability
   --user-data-dir <dir>          Isolated Electron user data dir
   --out <dir>                    Output directory relative to apps/desktop unless absolute
@@ -728,16 +756,22 @@ const rendererHarnessSource = (options) => `
       filters.push(filter);
     }
 
-    const compressor = context.createDynamicsCompressor();
-    compressor.threshold.value = -18;
-    compressor.knee.value = 18;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.006;
-    compressor.release.value = 0.08;
+    const compressor = options.useCompressor ? context.createDynamicsCompressor() : null;
+    if (compressor) {
+      compressor.threshold.value = -18;
+      compressor.knee.value = 18;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.006;
+      compressor.release.value = 0.08;
+    }
 
     const analyser = context.createAnalyser();
     analyser.fftSize = 2048;
-    previous.connect(compressor).connect(gain).connect(analyser).connect(context.destination);
+    if (compressor) {
+      previous.connect(compressor).connect(gain).connect(analyser).connect(context.destination);
+    } else {
+      previous.connect(gain).connect(analyser).connect(context.destination);
+    }
     await context.resume();
 
     return {
@@ -746,6 +780,7 @@ const rendererHarnessSource = (options) => `
       details: {
         enabled: true,
         filter_count: filters.length,
+        compressor_enabled: Boolean(compressor),
         base_latency_seconds: typeof context.baseLatency === "number" ? context.baseLatency : null,
         output_latency_seconds: typeof context.outputLatency === "number" ? context.outputLatency : null
       }
@@ -844,6 +879,96 @@ const rendererHarnessSource = (options) => `
     };
   };
 
+  const playForPreroll = async ({ audio, context, prerollMs, label }) => {
+    const startedAt = performance.now();
+    let lastTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    let advancedSamples = 0;
+
+    while (performance.now() - startedAt < prerollMs) {
+      await sleep(options.pollMs);
+      const state = mediaState(audio, context);
+      if (state.paused || state.ended || state.ready_state < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        throw new Error(label + " stalled during preroll: " + JSON.stringify(state));
+      }
+      if (typeof state.current_time === "number" && state.current_time > lastTime + 0.005) {
+        lastTime = state.current_time;
+        advancedSamples += 1;
+      }
+    }
+
+    if (advancedSamples === 0) {
+      throw new Error(label + " did not advance during preroll");
+    }
+    return lastTime;
+  };
+
+  const measureInWindowBackwardSeek = async ({ audio, context, trial, duration }) => {
+    const baseSecs = Math.max(0.5, Math.min(duration - 1, duration * 0.5));
+    audio.currentTime = baseSecs;
+    await waitFor({
+      label: "in-window base seek " + baseSecs.toFixed(3) + "s convergence trial " + trial,
+      timeoutMs: options.seekTimeoutMs,
+      audio,
+      context,
+      predicate: () =>
+        audio.paused === false &&
+        audio.ended === false &&
+        audio.seeking === false &&
+        Number.isFinite(audio.currentTime) &&
+        Math.abs(audio.currentTime - baseSecs) < 0.75
+    });
+    await waitForProgress(
+      audio,
+      context,
+      audio.currentTime,
+      "in-window preroll start trial " + trial,
+      options.seekTimeoutMs
+    );
+    const playheadSecs = await playForPreroll({
+      audio,
+      context,
+      prerollMs: options.inWindowPrerollMs,
+      label: "in-window preroll trial " + trial
+    });
+
+    const targetSecs = Math.max(0.5, Math.min(duration - 1, playheadSecs - options.inWindowBackSecs));
+    const startedAt = performance.now();
+    audio.currentTime = targetSecs;
+    const convergence = await waitFor({
+      label: "in-window backward seek " + targetSecs.toFixed(3) + "s convergence trial " + trial,
+      timeoutMs: options.seekTimeoutMs,
+      audio,
+      context,
+      predicate: () =>
+        audio.paused === false &&
+        audio.ended === false &&
+        audio.seeking === false &&
+        Number.isFinite(audio.currentTime) &&
+        Math.abs(audio.currentTime - targetSecs) < 0.75
+    });
+    const progress = await waitForProgress(
+      audio,
+      context,
+      audio.currentTime,
+      "in-window backward seek progress trial " + trial,
+      options.seekTimeoutMs
+    );
+
+    return {
+      trial,
+      operation: "in_window_backward_seek",
+      back_secs: Number(options.inWindowBackSecs.toFixed(3)),
+      playhead_before_seek_secs: Number(playheadSecs.toFixed(3)),
+      target_secs: Number(targetSecs.toFixed(3)),
+      convergence_ms: convergence.elapsed_ms,
+      operation_elapsed_ms: Number((performance.now() - startedAt).toFixed(3)),
+      progress_after_convergence_ms: progress.elapsed_ms,
+      polls: convergence.polls + progress.polls,
+      state_at_convergence: convergence.state,
+      state_at_progress: progress.state
+    };
+  };
+
   const measureNextTrack = async ({ audio, context }) => {
     if (!options.nextTrackUrl) return null;
     const startedAt = performance.now();
@@ -885,7 +1010,9 @@ const rendererHarnessSource = (options) => `
       const now = context.currentTime;
       filter.gain.setTargetAtTime(index % 2 === 0 ? 3 : -2, now, 0.005);
       graph.gain.gain.setTargetAtTime(index % 2 === 0 ? 0.68 : 0.74, now, 0.005);
-      graph.compressor.threshold.setTargetAtTime(index % 2 === 0 ? -18 : -22, now, 0.01);
+      if (graph.compressor) {
+        graph.compressor.threshold.setTargetAtTime(index % 2 === 0 ? -18 : -22, now, 0.01);
+      }
       samples.push({
         index,
         latency_ms: Number((performance.now() - startedAt).toFixed(6))
@@ -984,6 +1111,7 @@ const rendererHarnessSource = (options) => `
     const graph = graphSetup.graph;
 
     const measurements = [];
+    let trackDuration = null;
     for (let trial = 1; trial <= options.trials; trial += 1) {
       measurements.push(
         await startTrackAndWait({
@@ -998,9 +1126,26 @@ const rendererHarnessSource = (options) => `
       if (!Number.isFinite(duration) || duration <= 2) {
         throw new Error("Track duration is too short or unknown for seek benchmark: " + duration);
       }
+      trackDuration = duration;
       measurements.push(await measurePausePlayResume({ audio, context, trial }));
       for (const fraction of options.seekFractions) {
         measurements.push(await measureSeek({ audio, context, trial, fraction, duration }));
+      }
+    }
+
+    if (options.inWindowSeek) {
+      await startTrackAndWait({
+        audio,
+        context,
+        url: options.trackUrl,
+        operation: "in_window_warmup"
+      });
+      const duration = Number.isFinite(audio.duration) ? audio.duration : trackDuration || 0;
+      if (!Number.isFinite(duration) || duration <= 2) {
+        throw new Error("Track duration is too short or unknown for in-window seek benchmark: " + duration);
+      }
+      for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
+        measurements.push(await measureInWindowBackwardSeek({ audio, context, trial, duration }));
       }
     }
 
@@ -1037,7 +1182,12 @@ const rendererHarnessSource = (options) => `
         poll_ms: options.pollMs,
         settle_ms: options.settleMs,
         seek_fractions: options.seekFractions,
+        in_window_seek: options.inWindowSeek,
+        in_window_preroll_ms: options.inWindowPrerollMs,
+        in_window_back_secs: options.inWindowBackSecs,
+        in_window_trials: options.inWindowTrials,
         use_webaudio: options.useWebAudio,
+        use_compressor: options.useCompressor,
         loop_during_stability: options.loopDuringStability
       },
       media_support: {
@@ -1064,7 +1214,7 @@ const rendererHarnessSource = (options) => `
         media_element_source_node: Boolean(context && graph),
         webaudio_filter_controls: Boolean(context && graph),
         analyser_visualizer_tap: Boolean(context && graph),
-        dynamics_compressor_node: Boolean(context && graph),
+        dynamics_compressor_node: Boolean(context && graph && graph.compressor),
         output_device_selection: typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype,
         exclusive_output_mode: false,
         explicit_output_bit_depth: false,
@@ -1157,7 +1307,14 @@ const run = async () => {
     };
     const rendererTimeoutMs = Math.max(
       30000,
-      Math.round((options.stabilitySeconds + options.trials * (options.seekFractions.length + 2)) * 6000)
+      Math.round(
+        (options.stabilitySeconds +
+          options.trials * (options.seekFractions.length + 2) +
+          (options.inWindowSeek
+            ? options.inWindowTrials * (options.inWindowPrerollMs / 1000 + 2)
+            : 0)) *
+          6000
+      )
     );
     const rendererResult = await runStage(diagnostics, "real_file_harness", () =>
       withTimeout(
@@ -1231,6 +1388,8 @@ const run = async () => {
         : null,
     seek_convergence_ms:
       report.summary && report.summary.operations ? report.summary.operations.seek_convergence?.convergence_ms : null,
+    in_window_backward_seek_ms:
+      report.summary && report.summary.operations ? report.summary.operations.in_window_backward_seek?.convergence_ms : null,
     next_track_to_progress_ms:
       report.summary && report.summary.operations ? report.summary.operations.next_track_to_progress?.switch_to_progress_ms : null,
     control_update_latency_ms: report.control_updates ? report.control_updates.latency_ms : null,

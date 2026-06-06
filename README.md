@@ -208,6 +208,12 @@ cargo bench
 
 这些数字只代表该语料与该环境，不等同于所有磁盘、冷缓存、WebDAV 或异常标签文件的通用结论。完整命令、数据和限制见 [Real Library Benchmark](docs/performance/real-library-benchmark.md)。
 
+### 真实播放响应基准
+
+在同一首本地 96 kHz FLAC 的 warm-cache 播放基准中，Lyne streaming-first-buffer 的 light-DSP 配置首播 p50 约 1.2 ms、窗口内后退 seek 合计 p50 约 15.7 ms、queue next-track 到播放推进约 14.3 ms；同口径 WebAudio light-DSP 对照分别约 30.4 ms、32.4 ms、388.1 ms。WebAudio 在 resume 和普通 seek convergence 上仍更快。
+
+这些结果用于约束播放响应和资源占用，不等同于完整音质体验证明。额外的 44.1 kHz FLAC、MP3、120 MB 级 FLAC 矩阵、30 分钟 native 稳定性样本、callback/DSP/resampler 实时预算证据，以及 THD+N、频响、限幅、重采样 stopband、dither/noise-shaping 频谱和响度参考夹具的离线客观质量测量，见 [Playback Latency Benchmark](docs/performance/playback-latency-benchmark.md)。
+
 ## 致谢
 
 - [SPlayer](https://github.com/imsyy/SPlayer) - 前端体验与交互参考

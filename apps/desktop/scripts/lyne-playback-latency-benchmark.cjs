@@ -46,6 +46,14 @@ const parseArgs = (argv) => {
     sampleMs: 250,
     seekFractions: [0.25, 0.5, 0.75],
     skipSeek: false,
+    inWindowSeek: false,
+    inWindowPrerollMs: 10000,
+    inWindowBackSecs: 6,
+    inWindowTrials: null,
+    playbackProfile: "default",
+    controlToggles: 0,
+    stabilitySeconds: 0,
+    loopDuringStability: true,
     keepServer: false
   };
 
@@ -123,6 +131,36 @@ const parseArgs = (argv) => {
       case "--skip-seek":
         options.skipSeek = true;
         break;
+      case "--in-window-seek":
+        options.inWindowSeek = true;
+        break;
+      case "--in-window-preroll-ms":
+        options.inWindowPrerollMs = readInteger(arg);
+        break;
+      case "--in-window-back-secs":
+        if (!next) throw new Error("--in-window-back-secs requires a value");
+        index += 1;
+        options.inWindowBackSecs = positiveNumber(next.trim(), arg);
+        break;
+      case "--in-window-trials":
+        options.inWindowTrials = readInteger(arg);
+        break;
+      case "--playback-profile":
+        if (!next) throw new Error("--playback-profile requires a value");
+        index += 1;
+        options.playbackProfile = next.trim().toLowerCase();
+        break;
+      case "--control-toggles":
+        options.controlToggles = readInteger(arg);
+        break;
+      case "--stability-seconds":
+        if (!next) throw new Error("--stability-seconds requires a value");
+        index += 1;
+        options.stabilitySeconds = positiveNumber(next.trim(), arg);
+        break;
+      case "--no-loop":
+        options.loopDuringStability = false;
+        break;
       case "--keep-server":
         options.keepServer = true;
         break;
@@ -140,6 +178,12 @@ const parseArgs = (argv) => {
   }
   if (options.seekFractions.some((fraction) => fraction <= 0 || fraction >= 1)) {
     throw new Error("--seek-fractions values must be between 0 and 1");
+  }
+  if (options.inWindowTrials === null) {
+    options.inWindowTrials = options.trials;
+  }
+  if (!["default", "bare", "light-dsp"].includes(options.playbackProfile)) {
+    throw new Error("--playback-profile must be one of: default, bare, light-dsp");
   }
   options.baseUrl = normalizeBaseUrl(options.baseUrl || `http://127.0.0.1:${options.port}`);
   return options;
@@ -163,6 +207,21 @@ Options:
   --trials <n>                   Trial count for load/play/seek (default: 5)
   --seek-fractions <csv>         Seek targets as duration fractions (default: 0.25,0.5,0.75)
   --skip-seek                    Skip seek convergence measurements
+  --in-window-seek               Add the in-window backward-seek scenario (default off).
+                                 Plays long enough to fill the behind-playhead retention
+                                 ring, then seeks backward into the retained window and
+                                 measures that seek's progress_after_convergence_ms.
+  --in-window-preroll-ms <ms>    Playback time before the backward seek so the ring fills
+                                 (default: 10000)
+  --in-window-back-secs <s>      Backward hop distance from the live playhead. Must exceed
+                                 the engine prefix gate (~0.26s @96k / ~0.56s @44.1k) and
+                                 stay inside the retained behind-window (~40s @96k / ~95s
+                                 @44.1k stereo for the 64 MiB ring) (default: 6)
+  --in-window-trials <n>         In-window scenario trial count (default: --trials value)
+  --playback-profile <name>      Benchmark profile: default, bare, light-dsp (default: default)
+  --control-toggles <n>          Toggle native DSP controls while playing and record latency
+  --stability-seconds <seconds>  Sample playback diagnostics after latency trials
+  --no-loop                      Do not seek near track end during stability sampling
   --poll-ms <ms>                 State polling interval (default: 50)
   --sample-ms <ms>               Process metric sampling interval (default: 250)
   --keep-server                  Leave the isolated server running after the benchmark
@@ -178,6 +237,73 @@ const requestStateCommand = async (options, route, body) => {
     elapsed_ms: Number(elapsedMs.toFixed(3)),
     state: response.json && response.json.state ? response.json.state : null
   };
+};
+
+const EQ_BAND_GAINS_LIGHT_DSP = {
+  "31": 2.5,
+  "62": -1.5,
+  "125": 2.5,
+  "250": -1.5,
+  "500": 2.5,
+  "1000": -1.5,
+  "2000": 2.5,
+  "4000": -1.5,
+  "8000": 2.5,
+  "16000": -1.5
+};
+
+const EQ_BAND_GAINS_FLAT = Object.fromEntries(
+  Object.keys(EQ_BAND_GAINS_LIGHT_DSP).map((band) => [band, 0])
+);
+
+const playbackProfileCommands = (profile) => {
+  switch (profile) {
+    case "bare":
+      return [
+        { route: "/configure_normalization", body: { enabled: false, preamp_db: 0 } },
+        { route: "/set_dynamic_loudness", body: { enabled: false, strength: 0 } },
+        { route: "/set_saturation", body: { enabled: false, drive: 0, mix: 0 } },
+        { route: "/set_crossfeed", body: { enabled: false, mix: 0 } },
+        { route: "/set_eq", body: { enabled: false, bands: EQ_BAND_GAINS_FLAT } },
+        { route: "/configure_optimizations", body: { dither_enabled: false, replaygain_enabled: false } },
+        { route: "/volume", body: { volume: 1 } }
+      ];
+    case "light-dsp":
+      return [
+        { route: "/configure_normalization", body: { enabled: false, preamp_db: 0 } },
+        { route: "/set_dynamic_loudness", body: { enabled: false, strength: 0 } },
+        { route: "/set_saturation", body: { enabled: false, drive: 0, mix: 0 } },
+        { route: "/set_crossfeed", body: { enabled: false, mix: 0 } },
+        { route: "/set_eq", body: { enabled: true, bands: EQ_BAND_GAINS_LIGHT_DSP } },
+        { route: "/configure_optimizations", body: { dither_enabled: false, replaygain_enabled: false } },
+        { route: "/volume", body: { volume: 0.78 } }
+      ];
+    case "default":
+      return [];
+    default:
+      throw new Error(`Unknown playback profile: ${profile}`);
+  }
+};
+
+const applyPlaybackProfile = async (options) => {
+  const commands = playbackProfileCommands(options.playbackProfile);
+  const applied = [];
+  for (const command of commands) {
+    const startedAt = performance.now();
+    const response = await requestJson(options, "POST", command.route, command.body);
+    applied.push({
+      route: command.route,
+      body: command.body,
+      latency_ms: Number(response.latencyMs.toFixed(3)),
+      elapsed_ms: Number((performance.now() - startedAt).toFixed(3)),
+      status: response.json && response.json.status ? response.json.status : null,
+      message: response.json && response.json.message ? response.json.message : null
+    });
+  }
+  if (commands.length > 0) {
+    await sleep(Math.min(options.settleMs, 100));
+  }
+  return applied;
 };
 
 const readQueueStatus = async (options) => {
@@ -241,6 +367,7 @@ const playbackCountersFromSnapshot = (snapshot) => {
     "playback_recovery_count",
     "parked_output_stream_count",
     "parked_output_stream_release_count",
+    "load_error_count",
     "audio_command_received_count",
     "audio_command_completed_count",
     "underrun_count",
@@ -399,6 +526,71 @@ const measureSeek = async (options, trial, fraction, duration) => {
   };
 };
 
+// Plays for at least `prerollMs` while confirming `current_time` keeps advancing,
+// so the behind-playhead retention ring fills with consumed audio. Returns the
+// last observed live playhead in seconds.
+const playUntilRingFills = async (options, prerollMs, label) => {
+  const startedAt = performance.now();
+  let lastTime = (await readState(options)).state.current_time;
+  while (performance.now() - startedAt < prerollMs) {
+    await sleep(options.pollMs);
+    const snapshot = await readState(options);
+    if (typeof snapshot.state.current_time === "number") {
+      lastTime = snapshot.state.current_time;
+    }
+    if (snapshot.state.is_playing !== true) {
+      throw new Error(`${label} stalled: playback is not advancing during preroll`);
+    }
+  }
+  return lastTime;
+};
+
+const measureInWindowBackwardSeek = async (options, trial, duration) => {
+  // Seek to a base position so there is room to hop backward and decoded audio
+  // ahead of the playhead, then play long enough to fill the retention ring.
+  const baseSecs = Math.max(0.5, Math.min(duration - 1, duration * 0.5));
+  await requestStateCommand(options, "/seek", { position: baseSecs });
+  await waitForSeekConvergence(options, baseSecs);
+  const playheadSecs = await playUntilRingFills(
+    options,
+    options.inWindowPrerollMs,
+    `trial ${trial} in-window preroll`
+  );
+
+  // Hop backward into the retained behind-playhead window.
+  const targetSecs = Math.max(0.5, playheadSecs - options.inWindowBackSecs);
+  const phaseDiagnosticsBeforeCommand = await readPlaybackPhaseDiagnostics(options);
+  const command = await requestStateCommand(options, "/seek", { position: targetSecs });
+  const convergence = await waitForSeekConvergence(options, targetSecs);
+  const progress = await waitForProgressAdvance(
+    options,
+    convergence.value.state.current_time,
+    `trial ${trial} in-window backward seek progress`,
+    options.seekTimeoutMs
+  );
+  const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
+  return {
+    trial,
+    operation: "in_window_backward_seek",
+    back_secs: Number(options.inWindowBackSecs.toFixed(3)),
+    playhead_before_seek_secs: Number(playheadSecs.toFixed(3)),
+    target_secs: Number(targetSecs.toFixed(3)),
+    request_latency_ms: Number(command.response.latencyMs.toFixed(3)),
+    request_elapsed_ms: command.elapsed_ms,
+    convergence_ms: convergence.elapsed_ms,
+    progress_after_convergence_ms: progress.elapsed_ms,
+    polls: convergence.polls + progress.polls,
+    current_time_at_convergence: convergence.value.state.current_time,
+    current_time_at_progress: progress.value.state.current_time,
+    playback_diagnostics_delta: playbackCounterDelta(
+      phaseDiagnosticsBeforeCommand.playback,
+      phaseDiagnosticsAtSuccess.playback
+    ),
+    phase_diagnostics_before_command: phaseDiagnosticsBeforeCommand,
+    phase_diagnostics_at_success: phaseDiagnosticsAtSuccess
+  };
+};
+
 const measureNextTrack = async (options) => {
   if (!options.nextTrack) return null;
 
@@ -430,6 +622,188 @@ const measureNextTrack = async (options) => {
   };
 };
 
+const DSP_CONTROL_TOGGLE_STEPS = [
+  {
+    name: "eq_gain_high",
+    route: "/set_eq",
+    body: { enabled: true, bands: EQ_BAND_GAINS_LIGHT_DSP }
+  },
+  {
+    name: "eq_gain_low",
+    route: "/set_eq",
+    body: {
+      enabled: true,
+      bands: Object.fromEntries(Object.entries(EQ_BAND_GAINS_LIGHT_DSP).map(([band, gain]) => [band, -gain]))
+    }
+  },
+  {
+    name: "volume_high",
+    route: "/volume",
+    body: { volume: 0.78 }
+  },
+  {
+    name: "volume_low",
+    route: "/volume",
+    body: { volume: 0.68 }
+  }
+];
+
+const measureControlUpdates = async (options) => {
+  if (options.controlToggles <= 0) {
+    return {
+      enabled: false,
+      reason: "--control-toggles was not set",
+      samples: [],
+      latency_ms: summarizeNumeric([]),
+      diagnostics_delta: null
+    };
+  }
+
+  await requestStateCommand(options, "/load", { path: options.track, autoplay: true });
+  await waitForProgressAdvance(options, 0, "control update warmup");
+  const phaseDiagnosticsBeforeCommand = await readPlaybackPhaseDiagnostics(options);
+  const samples = [];
+  for (let index = 0; index < options.controlToggles; index += 1) {
+    const step = DSP_CONTROL_TOGGLE_STEPS[index % DSP_CONTROL_TOGGLE_STEPS.length];
+    const startedAt = performance.now();
+    const response = await requestJson(options, "POST", step.route, step.body);
+    samples.push({
+      index,
+      name: step.name,
+      route: step.route,
+      request_latency_ms: Number(response.latencyMs.toFixed(3)),
+      elapsed_ms: Number((performance.now() - startedAt).toFixed(3)),
+      status: response.json && response.json.status ? response.json.status : null,
+      message: response.json && response.json.message ? response.json.message : null
+    });
+    await sleep(16);
+  }
+  const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
+
+  return {
+    enabled: true,
+    samples,
+    latency_ms: summarizeNumeric(samples.map((sample) => sample.elapsed_ms)),
+    request_latency_ms: summarizeNumeric(samples.map((sample) => sample.request_latency_ms)),
+    diagnostics_delta: playbackCounterDelta(
+      phaseDiagnosticsBeforeCommand.playback,
+      phaseDiagnosticsAtSuccess.playback
+    )
+  };
+};
+
+const collectStabilitySamples = async (options, duration) => {
+  if (options.stabilitySeconds <= 0) {
+    return {
+      enabled: false,
+      reason: "--stability-seconds was not set",
+      samples: [],
+      summary: {
+        sample_count: 0,
+        diagnostics_latency_ms: summarizeNumeric([]),
+        playback_false_samples: 0,
+        loading_samples: 0,
+        load_error_delta: null,
+        recovery_delta: null,
+        underrun_delta: null,
+        underrun_silence_frames_delta: null,
+        streaming_output_shortfall_delta: null,
+        streaming_output_shortfall_frames_delta: null,
+        current_time_monotonic_resets: null,
+        loop_seek_count: 0,
+        current_time_delta_ms: summarizeNumeric([])
+      }
+    };
+  }
+
+  await requestStateCommand(options, "/load", { path: options.track, autoplay: true });
+  await waitForProgressAdvance(options, 0, "stability warmup");
+  const samples = [];
+  const startedAt = performance.now();
+  let previousTime = null;
+  let monotonicResets = 0;
+  let loopSeekCount = 0;
+
+  while (performance.now() - startedAt < options.stabilitySeconds * 1000) {
+    const sampleStartedAt = performance.now();
+    const diagnostics = await readRuntimeDiagnostics(options);
+    const playback = diagnostics.snapshot.playback || {};
+    const currentTime = playback.current_time_secs;
+    if (typeof currentTime === "number" && typeof previousTime === "number" && currentTime + 0.25 < previousTime) {
+      monotonicResets += 1;
+    }
+    samples.push({
+      at_ms: Number((performance.now() - startedAt).toFixed(3)),
+      latency_ms: Number(diagnostics.latencyMs.toFixed(3)),
+      playback: {
+        is_playing: playback.is_playing,
+        is_loading: playback.is_loading,
+        current_time_secs: currentTime,
+        duration_secs: playback.duration_secs,
+        playback_recovery_count: playback.playback_recovery_count,
+        load_error_count: playback.load_error_count,
+        underrun_count: playback.underrun_count,
+        underrun_silence_frames: playback.underrun_silence_frames,
+        streaming_output_shortfall_count: playback.streaming_output_shortfall_count,
+        streaming_output_shortfall_frames: playback.streaming_output_shortfall_frames,
+        streaming_queue_len: playback.streaming_queue_len,
+        streaming_queue_min_len: playback.streaming_queue_min_len,
+        streaming_queue_max_len: playback.streaming_queue_max_len,
+        active_stream_running: playback.active_stream_running,
+        current_time_delta:
+          typeof currentTime === "number" && typeof previousTime === "number" ? currentTime - previousTime : null
+      }
+    });
+    previousTime = currentTime;
+
+    if (
+      options.loopDuringStability &&
+      typeof currentTime === "number" &&
+      Number.isFinite(duration) &&
+      duration > 10 &&
+      currentTime > Math.max(5, duration - 3)
+    ) {
+      await requestJson(options, "POST", "/seek", { position: 0.5 });
+      loopSeekCount += 1;
+    }
+
+    const elapsed = performance.now() - sampleStartedAt;
+    await sleep(Math.max(0, options.sampleMs - elapsed));
+  }
+
+  const first = samples[0] && samples[0].playback;
+  const last = samples[samples.length - 1] && samples[samples.length - 1].playback;
+  const delta = (field) =>
+    first && last && typeof first[field] === "number" && typeof last[field] === "number"
+      ? last[field] - first[field]
+      : null;
+
+  return {
+    enabled: true,
+    samples,
+    summary: {
+      sample_count: samples.length,
+      diagnostics_latency_ms: summarizeNumeric(samples.map((sample) => sample.latency_ms)),
+      playback_false_samples: samples.filter((sample) => sample.playback.is_playing !== true).length,
+      loading_samples: samples.filter((sample) => sample.playback.is_loading === true).length,
+      load_error_delta: delta("load_error_count"),
+      recovery_delta: delta("playback_recovery_count"),
+      underrun_delta: delta("underrun_count"),
+      underrun_silence_frames_delta: delta("underrun_silence_frames"),
+      streaming_output_shortfall_delta: delta("streaming_output_shortfall_count"),
+      streaming_output_shortfall_frames_delta: delta("streaming_output_shortfall_frames"),
+      current_time_monotonic_resets: monotonicResets,
+      loop_seek_count: loopSeekCount,
+      current_time_delta_ms: summarizeNumeric(
+        samples
+          .map((sample) => sample.playback.current_time_delta)
+          .filter((value) => typeof value === "number")
+          .map((value) => value * 1000)
+      )
+    }
+  };
+};
+
 const summarizeOperations = (measurements) => {
   const byOperation = {};
   for (const operation of new Set(measurements.map((measurement) => measurement.operation))) {
@@ -439,6 +813,7 @@ const summarizeOperations = (measurements) => {
       request_latency_ms: summarizeNumeric(rows.map((row) => row.request_latency_ms)),
       time_to_progress_ms: summarizeNumeric(rows.map((row) => row.time_to_progress_ms)),
       convergence_ms: summarizeNumeric(rows.map((row) => row.convergence_ms)),
+      progress_after_convergence_ms: summarizeNumeric(rows.map((row) => row.progress_after_convergence_ms)),
       switch_to_progress_ms: summarizeNumeric(rows.map((row) => row.switch_to_progress_ms)),
       diagnostics_delta: summarizeOperationDiagnosticDeltas(rows)
     };
@@ -484,17 +859,29 @@ const runBenchmark = async (options) => {
       settle_ms: options.settleMs,
       sample_ms: options.sampleMs,
       seek_fractions: options.seekFractions,
-      skip_seek: options.skipSeek
+      skip_seek: options.skipSeek,
+      in_window_seek: options.inWindowSeek,
+      in_window_preroll_ms: options.inWindowPrerollMs,
+      in_window_back_secs: options.inWindowBackSecs,
+      in_window_trials: options.inWindowTrials,
+      playback_profile: options.playbackProfile,
+      control_toggles: options.controlToggles,
+      stability_seconds: options.stabilitySeconds,
+      loop_during_stability: options.loopDuringStability
     },
     summary: { pass: false },
     server: null,
     diagnostics: {},
+    profile_setup: [],
     measurements: [],
     next_track_measurement: null,
+    control_updates: null,
+    stability: null,
     process_metrics: null,
     limitations: [
       "This benchmark uses /state progress as an audible-playback proxy; it does not capture analog output.",
       "Latency includes HTTP, server handler, decode/load, and state polling resolution.",
+      "Native control timing includes HTTP/server handling; WebAudio control timing is in-renderer JavaScript parameter update latency.",
       "Process CPU/RSS sampling is coarse Windows Get-Process data, not a profiler trace."
     ]
   };
@@ -518,12 +905,14 @@ const runBenchmark = async (options) => {
       report.server = { mode: "external" };
     }
 
+    report.profile_setup = await applyPlaybackProfile(options);
     report.diagnostics.before = (await readRuntimeDiagnostics(options)).snapshot;
     const firstLoad = await requestStateCommand(options, "/load", { path: options.track, autoplay: true });
     await waitForProgressAdvance(options, 0, "initial playback warmup");
     const warmState = await readState(options);
     const duration = Number(warmState.state.duration || firstLoad.state?.duration || 0);
-    if (!options.skipSeek && (!Number.isFinite(duration) || duration <= 2)) {
+    const needsDuration = !options.skipSeek || options.inWindowSeek;
+    if (needsDuration && (!Number.isFinite(duration) || duration <= 2)) {
       throw new Error(`Track duration is too short or unknown for seek benchmark: ${duration}`);
     }
 
@@ -537,17 +926,54 @@ const runBenchmark = async (options) => {
       }
     }
 
+    if (options.inWindowSeek) {
+      // Ensure the track is loaded and playing before the in-window scenario;
+      // earlier trials may have left it stopped/paused.
+      await requestStateCommand(options, "/load", { path: options.track, autoplay: true });
+      await waitForProgressAdvance(options, 0, "in-window scenario warmup");
+      for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
+        report.measurements.push(await measureInWindowBackwardSeek(options, trial, duration));
+      }
+    }
+
     report.next_track_measurement = await measureNextTrack(options);
     if (report.next_track_measurement) {
       report.measurements.push(report.next_track_measurement);
     }
 
+    report.control_updates = await measureControlUpdates(options);
+    report.stability = await collectStabilitySamples(options, duration);
+
     report.diagnostics.after = (await readRuntimeDiagnostics(options)).snapshot;
+    const stabilitySummary = report.stability ? report.stability.summary : null;
+    const stabilityPass =
+      !report.stability ||
+      report.stability.enabled !== true ||
+      (stabilitySummary.playback_false_samples === 0 &&
+        stabilitySummary.loading_samples === 0 &&
+        stabilitySummary.load_error_delta === 0 &&
+        stabilitySummary.recovery_delta === 0 &&
+        stabilitySummary.underrun_delta === 0 &&
+        stabilitySummary.streaming_output_shortfall_delta === 0 &&
+        stabilitySummary.current_time_monotonic_resets === 0);
+    const controlUpdatePass =
+      !report.control_updates ||
+      report.control_updates.enabled !== true ||
+      (report.control_updates.samples || []).every((sample) => sample.status === "success");
     report.summary = {
       pass: true,
+      stability_pass: stabilityPass,
+      control_update_pass: controlUpdatePass,
       total_elapsed_ms: Number((performance.now() - startedAt).toFixed(3)),
       operations: summarizeOperations(report.measurements),
-      diagnostics_delta: null
+      diagnostics_delta: null,
+      control_update_latency_ms: report.control_updates
+        ? report.control_updates.latency_ms
+        : summarizeNumeric([]),
+      control_update_request_latency_ms: report.control_updates
+        ? report.control_updates.request_latency_ms
+        : summarizeNumeric([]),
+      stability: stabilitySummary
     };
     report.summary.playback_phase_latest = playbackPhasesFromSnapshot(report.diagnostics.after);
     report.summary.playback_queue_latest = playbackQueueFromSnapshot(report.diagnostics.after);
@@ -620,7 +1046,24 @@ const main = async () => {
       console.log(
         `[lyne-playback-latency] ${operation} count=${summary.count} p50=${metric.p50}ms p95=${metric.p95}ms max=${metric.max}ms`
       );
+      if (summary.progress_after_convergence_ms && summary.progress_after_convergence_ms.count > 0) {
+        const pac = summary.progress_after_convergence_ms;
+        console.log(
+          `[lyne-playback-latency] ${operation} progress_after_convergence p50=${pac.p50}ms p95=${pac.p95}ms max=${pac.max}ms`
+        );
+      }
     }
+  }
+  if (report.control_updates && report.control_updates.latency_ms) {
+    console.log(
+      `[lyne-playback-latency] control enabled=${report.control_updates.enabled} p50=${report.control_updates.latency_ms.p50}ms p95=${report.control_updates.latency_ms.p95}ms`
+    );
+  }
+  if (report.stability && report.stability.summary) {
+    const stability = report.stability.summary;
+    console.log(
+      `[lyne-playback-latency] stability enabled=${report.stability.enabled} samples=${stability.sample_count} underruns=${stability.underrun_delta} recovery=${stability.recovery_delta} shortfall=${stability.streaming_output_shortfall_delta}`
+    );
   }
   if (report.error) {
     console.error(`[lyne-playback-latency] ${report.error}`);
