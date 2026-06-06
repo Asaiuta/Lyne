@@ -152,7 +152,8 @@ export function FullPlayer(props: FullPlayerProps) {
   const currentSongId = () => playback.currentSongId();
   const currentMediaId = () => playback.currentMediaId();
   const duration = () => player()?.duration ?? 0;
-  const baseCurrentTime = () => playback.livePosition() ?? player()?.current_time ?? 0;
+  const baseCurrentTime = () =>
+    playback.displayPosition() ?? playback.livePosition() ?? player()?.current_time ?? 0;
   const isPlaying = () => playback.isPlaying();
   const volume = () => player()?.volume ?? 0;
   const spectrum = () => playback.spectrum();

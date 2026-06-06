@@ -178,7 +178,10 @@ test("track_changed schedules refresh when there is no base player state", () =>
   );
 
   assert.equal(calls.applied.length, 0);
+  assert.deepEqual(calls.preloadRequested, [false]);
+  assert.deepEqual(calls.livePosition, [0]);
   assert.deepEqual(calls.refreshes, ["C:/Music/late.flac"]);
+  assert.equal(calls.queueRefreshCount, 1);
 });
 
 test("load_complete refreshes against the completed track path", () => {
@@ -200,7 +203,27 @@ test("load_complete refreshes against the completed track path", () => {
       is_loading: false
     }
   ]);
+  assert.deepEqual(calls.livePosition, [0]);
   assert.deepEqual(calls.refreshes, ["C:/Music/later.flac"]);
+});
+
+test("playback_ended freezes playback state at the ended position", () => {
+  const { calls, deps } = createDeps({
+    status: "success",
+    data: playerState({ is_playing: true, is_paused: false, current_time: 41 })
+  });
+
+  applyPlaybackSocketEvent({ type: "playback_ended", position: 42 }, deps);
+
+  assert.deepEqual(calls.patches, [
+    {
+      is_playing: false,
+      is_paused: false,
+      current_time: 42
+    }
+  ]);
+  assert.deepEqual(calls.livePosition, [42]);
+  assert.deepEqual(calls.refreshes, [undefined]);
 });
 
 test("position events are ignored while local seek suppression is active", () => {

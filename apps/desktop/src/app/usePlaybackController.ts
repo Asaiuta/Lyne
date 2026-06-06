@@ -15,6 +15,7 @@ import {
   patchMergedPlayerState,
   type PlayerStatePatch
 } from "./playbackState";
+import { usePlaybackDisplayClock } from "./playbackDisplayClock";
 import { usePlaybackCommands } from "./usePlaybackCommands";
 import { usePlaybackSocket } from "./usePlaybackSocket";
 
@@ -61,6 +62,7 @@ export interface PlaybackController {
   preloadRequested: Accessor<boolean>;
   commandError: Accessor<string | null>;
   livePosition: Accessor<number | null>;
+  displayPosition: Accessor<number | null>;
   player: Accessor<PlayerState | null>;
   currentTrackPath: Accessor<string | null>;
   currentMediaId: Accessor<string | null>;
@@ -195,6 +197,10 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
   });
   const repeatMode = createMemo<RepeatMode>(() => player()?.repeat_mode ?? "off");
   const shuffleMode = createMemo<ShuffleMode>(() => player()?.shuffle_mode ?? "off");
+  const displayPosition = usePlaybackDisplayClock({
+    livePosition,
+    player
+  });
 
   const commands = usePlaybackCommands({
     api,
@@ -277,6 +283,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
     preloadRequested,
     commandError,
     livePosition,
+    displayPosition,
     player,
     currentTrackPath,
     currentMediaId,

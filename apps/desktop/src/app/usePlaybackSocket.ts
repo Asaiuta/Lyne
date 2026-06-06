@@ -22,6 +22,7 @@ export const applyPlaybackSocketEvent = (event: WsEvent, deps: PlaybackSocketDep
       }));
       deps.setLoadingProgress(null);
       deps.setPreloadRequested(false);
+      deps.setLivePosition(0);
       deps.scheduleRefresh(event.file_path);
       break;
     case "load_error":
@@ -36,25 +37,23 @@ export const applyPlaybackSocketEvent = (event: WsEvent, deps: PlaybackSocketDep
       {
         const currentRequest = deps.state();
         const base = currentRequest.status === "success" ? currentRequest.data : null;
-        if (!base) {
-          deps.scheduleRefresh(event.file_path);
-          break;
+        if (base) {
+          deps.applyPlayerState({
+            ...base,
+            file_path: event.file_path,
+            duration: event.duration,
+            media_id: event.media_id,
+            ncm_song_id: event.ncm_song_id,
+            ncm_source_page_url: event.ncm_source_page_url,
+            title: event.title,
+            artist: event.artist,
+            album: event.album,
+            has_cover_art: event.has_cover_art,
+            external_artwork_url: event.external_artwork_url,
+            current_time: 0,
+            is_loading: false
+          });
         }
-        deps.applyPlayerState({
-          ...base,
-          file_path: event.file_path,
-          duration: event.duration,
-          media_id: event.media_id,
-          ncm_song_id: event.ncm_song_id,
-          ncm_source_page_url: event.ncm_source_page_url,
-          title: event.title,
-          artist: event.artist,
-          album: event.album,
-          has_cover_art: event.has_cover_art,
-          external_artwork_url: event.external_artwork_url,
-          current_time: 0,
-          is_loading: false
-        });
       }
       deps.setPreloadRequested(false);
       deps.setLivePosition(0);
@@ -63,6 +62,11 @@ export const applyPlaybackSocketEvent = (event: WsEvent, deps: PlaybackSocketDep
       break;
     case "playback_ended":
       deps.setPreloadRequested(false);
+      deps.patchPlayerState({
+        is_playing: false,
+        is_paused: false,
+        current_time: event.position
+      });
       deps.setLivePosition(event.position);
       deps.scheduleRefresh();
       break;

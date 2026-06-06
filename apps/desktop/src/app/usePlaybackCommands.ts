@@ -43,11 +43,17 @@ export function usePlaybackCommands(deps: PlaybackCommandsDeps): PlaybackCommand
     | null = null;
   let suppressRemotePositionUntil = 0;
 
-  const runPlayerCommand = async (command: () => Promise<PlayerState>) => {
+  const runPlayerCommand = async (
+    command: () => Promise<PlayerState>,
+    options: { syncPosition?: boolean } = {}
+  ) => {
     deps.setCommandError(null);
     try {
       const next = await command();
       deps.applyPlayerState(next);
+      if (options.syncPosition) {
+        deps.setLivePosition(next.current_time);
+      }
       window.setTimeout(() => {
         void deps.refreshState();
       }, TRACK_STATE_POLL_INTERVAL_MS);
@@ -56,8 +62,8 @@ export function usePlaybackCommands(deps: PlaybackCommandsDeps): PlaybackCommand
     }
   };
 
-  const handlePlay = () => runPlayerCommand(() => deps.api.play());
-  const handlePause = () => runPlayerCommand(() => deps.api.pause());
+  const handlePlay = () => runPlayerCommand(() => deps.api.play(), { syncPosition: true });
+  const handlePause = () => runPlayerCommand(() => deps.api.pause(), { syncPosition: true });
 
   const handleSeek = async (position: number) => {
     const commandId = ++seekCommandId;

@@ -146,3 +146,35 @@ test("volume commit patches only the volume field without applying the returned 
   assert.deepEqual(calls.applied, []);
   assert.equal(calls.refreshes, 0);
 });
+
+test("play command syncs the returned authoritative playback position", async () => {
+  const calls = {
+    applied: [] as PlayerState[],
+    patches: [] as Array<Partial<PlayerState>>,
+    refreshes: 0,
+    errors: [] as Array<string | null>,
+    livePositions: [] as Array<number | null>
+  };
+  const api = {
+    play: async () => playerState({ is_playing: true, is_paused: false, current_time: 18.5 })
+  } as Pick<ApiClient, "play"> as ApiClient;
+
+  const commands = usePlaybackCommands({
+    api,
+    repeatMode: () => "off",
+    shuffleMode: () => "off",
+    applyPlayerState: (next) => calls.applied.push(next),
+    patchPlayerState: (patch) => calls.patches.push(patch as Partial<PlayerState>),
+    refreshState: async () => {
+      calls.refreshes += 1;
+    },
+    setCommandError: setter<string | null>(null, (value) => calls.errors.push(value)),
+    setLivePosition: setter<number | null>(null, (value) => calls.livePositions.push(value))
+  });
+
+  await commands.handlePlay();
+
+  assert.equal(calls.applied.length, 1);
+  assert.deepEqual(calls.patches, []);
+  assert.deepEqual(calls.livePositions, [18.5]);
+});

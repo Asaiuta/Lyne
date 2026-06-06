@@ -44,7 +44,7 @@ interface PlayerBarProps {
   currentLyric?: string | null;
   canSkipPrev: boolean;
   canSkipNext: boolean;
-  livePosition: number | null;
+  displayPosition: number | null;
   queueLength: number;
   queueOpen: boolean;
   repeatMode: RepeatMode;
@@ -121,7 +121,7 @@ export function PlayerBar(props: PlayerBarProps) {
     title: () => props.title,
     subtitle: () => props.subtitle,
     currentLyric: () => props.currentLyric,
-    livePosition: () => props.livePosition,
+    displayPosition: () => props.displayPosition,
     hideBracketedContent: () => uiSettings.hideBracketedContent,
     barLyricShow: () => uiSettings.barLyricShow,
     showPlayMeta: () => uiSettings.showPlayMeta,

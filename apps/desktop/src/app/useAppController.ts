@@ -96,7 +96,7 @@ export function useAppController(api: ApiClient): AppController {
   const ncm = useNcmTrackEnrichment({
     api,
     player: playback.player,
-    livePosition: playback.livePosition,
+    displayPosition: playback.displayPosition,
     coverUrl: playback.coverUrl,
     dynamicCoverEnabled: () => fullPlayerOpen() && uiSettings.dynamicCover,
     localLyricDirectories: () => uiSettings.localLyricDirectories,
@@ -114,7 +114,7 @@ export function useAppController(api: ApiClient): AppController {
     }
 
     const current = playback.player();
-    const resumePosition = current?.current_time ?? 0;
+    const resumePosition = playback.displayPosition() ?? current?.current_time ?? 0;
     const wasPlaying = Boolean(current?.is_playing);
     playback.setCommandError(null);
     persistUISettingField("ncmSongLevel", level);
@@ -259,6 +259,7 @@ export function useAppController(api: ApiClient): AppController {
     wsStatus: playback.wsStatus,
     commandError: playback.commandError,
     livePosition: playback.livePosition,
+    displayPosition: playback.displayPosition,
     player: playback.player,
     isPlaying: () => Boolean(playback.player()?.is_playing),
     currentTrackPath: playback.currentTrackPath,

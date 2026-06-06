@@ -22,6 +22,7 @@ export interface PlaybackContextValue {
   wsStatus: Accessor<WsStatus>;
   commandError: Accessor<string | null>;
   livePosition: Accessor<number | null>;
+  displayPosition: Accessor<number | null>;
   player: Accessor<PlayerState | null>;
   isPlaying: Accessor<boolean>;
   currentTrackPath: Accessor<string | null>;

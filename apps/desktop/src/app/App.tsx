@@ -230,7 +230,7 @@ function AppContent() {
               currentLyric={playback.inlineLyric()}
               canSkipPrev={playback.previousEntryId() !== null}
               canSkipNext={playback.nextEntryId() !== null}
-              livePosition={playback.livePosition()}
+              displayPosition={playback.displayPosition()}
               queueLength={queue.queueEntries().length}
               repeatMode={playback.repeatMode()}
               shuffleMode={playback.shuffleMode()}

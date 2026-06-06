@@ -38,7 +38,7 @@ export interface NcmTrackEnrichment {
 interface NcmTrackEnrichmentDeps {
   api: ApiClient;
   player: Accessor<PlayerState | null>;
-  livePosition: Accessor<number | null>;
+  displayPosition: Accessor<number | null>;
   coverUrl: Accessor<string | null>;
   dynamicCoverEnabled?: Accessor<boolean>;
   localLyricDirectories?: Accessor<readonly string[]>;
@@ -76,7 +76,7 @@ const sameSupplementRequest = (
  * not need to own NCM-specific concerns.
  */
 export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnrichment {
-  const { api, player, livePosition, coverUrl } = deps;
+  const { api, player, displayPosition, coverUrl } = deps;
   const dynamicCoverEnabled = deps.dynamicCoverEnabled ?? (() => false);
   const localLyricDirectories = deps.localLyricDirectories ?? (() => []);
   const lyricPriority = deps.lyricPriority ?? (() => "auto");
@@ -224,7 +224,7 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
   );
   const currentLyricLines = createMemo(() => currentSupplementForRequest()?.lyrics ?? []);
   const currentInlineLyric = createMemo(() =>
-    findCurrentLyricLine(currentLyricLines(), livePosition() ?? currentPlayerTime())
+    findCurrentLyricLine(currentLyricLines(), displayPosition() ?? currentPlayerTime())
   );
   const fullPlayerTitle = createMemo(
     () =>

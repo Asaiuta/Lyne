@@ -8,7 +8,7 @@ interface UsePlayerBarDisplayOptions {
   title: Accessor<string | null | undefined>;
   subtitle: Accessor<string | null | undefined>;
   currentLyric: Accessor<string | null | undefined>;
-  livePosition: Accessor<number | null>;
+  displayPosition: Accessor<number | null>;
   hideBracketedContent: Accessor<boolean>;
   barLyricShow: Accessor<boolean>;
   showPlayMeta: Accessor<boolean>;
@@ -64,7 +64,7 @@ export function usePlayerBarDisplay(options: UsePlayerBarDisplayOptions) {
     return state?.media_id ?? state?.file_path ?? "empty";
   };
   const duration = () => player()?.duration ?? 0;
-  const currentTime = () => options.livePosition() ?? player()?.current_time ?? 0;
+  const currentTime = () => options.displayPosition() ?? player()?.current_time ?? 0;
   const isPlaying = () => Boolean(player()?.is_playing);
   const sliderVolume = () => Math.max(0, Math.min(1, player()?.volume ?? 0));
   const playbackRateLabel = () => null;
