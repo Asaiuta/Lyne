@@ -5,8 +5,9 @@
 use crate::processor::{DspChain, NoiseShaperCurve};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use crossbeam::queue::ArrayQueue;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -116,7 +117,181 @@ pub enum RetiredAudioResource {
     /// A DSP chain replaced on a format change.
     Chain(DspChain),
     /// A streaming chunk fully consumed (or discarded as stale) by the callback.
-    Chunk(Arc<Vec<f64>>),
+    ///
+    /// Carries the playback metadata the off-realtime drainer needs to route the
+    /// chunk into the [`StreamingRetentionRing`] (so an in-window seek can replay
+    /// it with zero decode) instead of dropping it. The callback fills these
+    /// fields from stack-resident integers; it never inspects the ring itself.
+    Chunk {
+        samples: Arc<Vec<f64>>,
+        generation: u64,
+        /// Output-frame index of the first frame this chunk contributed to the
+        /// playhead, as observed by the consuming callback.
+        start_frame: u64,
+        /// Number of output frames this chunk covers (`samples.len() / channels`).
+        frames: u32,
+    },
+}
+
+/// A streaming chunk retained behind the playhead for potential in-window replay.
+///
+/// Lives only off the realtime thread (inside [`StreamingRetentionRing`]). The
+/// audio callback never reads or mutates this; PR2 will consult the ring from the
+/// seek thread.
+#[derive(Clone)]
+pub struct RetainedChunk {
+    pub samples: Arc<Vec<f64>>,
+    pub generation: u64,
+    pub start_frame: u64,
+    pub frames: u32,
+}
+
+impl RetainedChunk {
+    fn byte_len(&self) -> usize {
+        self.samples.len() * std::mem::size_of::<f64>()
+    }
+}
+
+/// A contiguous run of retained PCM extracted from the [`StreamingRetentionRing`]
+/// to serve an in-window memory-streaming seek with zero decode.
+///
+/// Produced off the realtime thread by
+/// [`StreamingRetentionRing::take_replay_prefix`]; consumed by the in-window seek
+/// producer, which re-pushes `samples` (re-tagged with the new generation) into
+/// the forward streaming queue and resumes decode-ahead from
+/// `continuation_start_frame`.
+#[derive(Clone)]
+pub struct ReplayPrefix {
+    /// Absolute output frame the snapped seek resumes audio at (the start of the
+    /// chunk containing the requested target; snaps back ≤ one chunk).
+    pub audible_start_frame: u64,
+    /// Absolute output frame one past the newest retained chunk; where the
+    /// continuation decode must seek to so it picks up exactly after the prefix.
+    pub continuation_start_frame: u64,
+    /// Total output frames covered by the prefix (`continuation - audible`).
+    pub prefix_frames: u64,
+    /// Zero-copy clones of the retained PCM chunks, in playback order.
+    pub samples: Vec<Arc<Vec<f64>>>,
+}
+
+/// Total decoded PCM (f64) retained behind the playhead, in bytes.
+///
+/// ~64 MiB is roughly ±45 s @ 44.1 kHz stereo / ±20 s @ 96 kHz stereo. The ring
+/// evicts the oldest retained chunks once it would exceed this cap.
+pub const STREAMING_RETENTION_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Bounded, off-realtime ring of recently-played streaming chunks.
+///
+/// # Realtime safety
+///
+/// This structure is **never** touched by the audio callback. The callback hands
+/// consumed chunks to the lock-free `retired_resources` queue (see
+/// [`SharedState::retire_audio_resource`]); the non-realtime drainer
+/// ([`SharedState::drain_retired_audio_resources`]) is the only writer, so the
+/// `parking_lot::Mutex` here is only ever locked off the realtime thread.
+///
+/// # Contract
+///
+/// - Chunks are pushed in playback order; `bytes` tracks total retained `f64`
+///   PCM bytes.
+/// - When pushing would exceed [`STREAMING_RETENTION_BUDGET_BYTES`], the oldest
+///   chunks are evicted (dropped off the realtime thread) until back under cap.
+/// - The ring is cleared on the same lifecycle events that reset streaming state
+///   (track change, stop, stop-for-load) via [`SharedState::reset_streaming_state`].
+pub struct StreamingRetentionRing {
+    chunks: Mutex<VecDeque<RetainedChunk>>,
+    bytes: AtomicU64,
+}
+
+impl Default for StreamingRetentionRing {
+    fn default() -> Self {
+        Self {
+            chunks: Mutex::new(VecDeque::new()),
+            bytes: AtomicU64::new(0),
+        }
+    }
+}
+
+impl StreamingRetentionRing {
+    /// Retain a consumed streaming chunk, evicting the oldest chunks if the
+    /// retained byte total would exceed the budget. Off-realtime only.
+    pub fn push(&self, chunk: RetainedChunk) {
+        let added = chunk.byte_len() as u64;
+        let mut chunks = self.chunks.lock();
+        chunks.push_back(chunk);
+        let mut total = self.bytes.load(Ordering::Relaxed) + added;
+        while total > STREAMING_RETENTION_BUDGET_BYTES {
+            match chunks.pop_front() {
+                Some(evicted) => {
+                    total = total.saturating_sub(evicted.byte_len() as u64);
+                    // `evicted` drops here, off the realtime thread.
+                }
+                None => break,
+            }
+        }
+        self.bytes.store(total, Ordering::Relaxed);
+    }
+
+    /// Drop every retained chunk and reset the byte total. Off-realtime only.
+    pub fn clear(&self) {
+        let mut chunks = self.chunks.lock();
+        chunks.clear();
+        self.bytes.store(0, Ordering::Relaxed);
+    }
+
+    /// Current retained byte total.
+    pub fn retained_bytes(&self) -> u64 {
+        self.bytes.load(Ordering::Relaxed)
+    }
+
+    /// Absolute output-frame start of the oldest retained chunk, or `None` if
+    /// the ring is empty. Off-realtime only.
+    pub fn oldest_start_frame(&self) -> Option<u64> {
+        self.chunks.lock().front().map(|c| c.start_frame)
+    }
+
+    /// Extract the contiguous suffix of retained PCM beginning at the chunk that
+    /// contains `target_frame`, in playback order, for an in-window seek replay.
+    ///
+    /// Returns `None` (a miss) when the ring is empty or `target_frame` lies
+    /// before the oldest retained chunk. On a hit, returns
+    /// [`ReplayPrefix`] describing the snapped audible start frame, the
+    /// one-past-the-newest continuation frame, and the zero-copy `Arc` clones of
+    /// every retained chunk from the target chunk to the newest. The ring is left
+    /// untouched (the caller clears it after extraction). Off-realtime only.
+    pub fn take_replay_prefix(&self, target_frame: u64) -> Option<ReplayPrefix> {
+        let chunks = self.chunks.lock();
+        // Find the retained chunk that contains `target_frame`.
+        let start_idx = chunks.iter().position(|c| {
+            target_frame >= c.start_frame && target_frame < c.start_frame + u64::from(c.frames)
+        })?;
+
+        let audible_start_frame = chunks[start_idx].start_frame;
+        let mut samples = Vec::with_capacity(chunks.len() - start_idx);
+        let mut total_frames = 0_u64;
+        for chunk in chunks.iter().skip(start_idx) {
+            total_frames += u64::from(chunk.frames);
+            samples.push(Arc::clone(&chunk.samples));
+        }
+        let continuation_start_frame = audible_start_frame + total_frames;
+
+        Some(ReplayPrefix {
+            audible_start_frame,
+            continuation_start_frame,
+            prefix_frames: total_frames,
+            samples,
+        })
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.chunks.lock().len()
+    }
+
+    #[cfg(test)]
+    pub fn snapshot(&self) -> Vec<RetainedChunk> {
+        self.chunks.lock().iter().cloned().collect()
+    }
 }
 
 /// Commands sent to the audio thread
@@ -474,6 +649,11 @@ pub struct SharedState {
     /// Diagnostics: times the graveyard was full and a resource had to be dropped
     /// on the realtime thread as a last resort.
     pub retired_resource_drop_in_rt_count: AtomicU64,
+
+    /// Bounded ring of recently-played streaming chunks retained behind the
+    /// playhead so an in-window memory-streaming seek (PR2) can replay them with
+    /// zero decode. Written only off the realtime thread by the resource drainer.
+    pub streaming_retention_ring: StreamingRetentionRing,
 }
 
 impl SharedState {
@@ -614,6 +794,7 @@ impl SharedState {
             pending_dsp_chain: ArrayQueue::new(1),
             retired_resources: ArrayQueue::new(256),
             retired_resource_drop_in_rt_count: AtomicU64::new(0),
+            streaming_retention_ring: StreamingRetentionRing::default(),
         }
     }
 
@@ -631,10 +812,37 @@ impl SharedState {
         }
     }
 
-    /// Drop every resource retired by the audio callback. Call only from a
+    /// Drain every resource retired by the audio callback. Call only from a
     /// non-realtime thread (the audio command loop).
+    ///
+    /// Consumed current-generation streaming chunks are routed into the
+    /// [`StreamingRetentionRing`] (so an in-window seek can replay them); every
+    /// other retired resource — buffers, DSP chains, and stale-generation chunks
+    /// — is dropped here off the realtime thread.
     pub fn drain_retired_audio_resources(&self) {
-        while self.retired_resources.pop().is_some() {}
+        let current_generation = self.streaming_generation.load(Ordering::Acquire);
+        while let Some(resource) = self.retired_resources.pop() {
+            match resource {
+                RetiredAudioResource::Chunk {
+                    samples,
+                    generation,
+                    start_frame,
+                    frames,
+                } => {
+                    if generation == current_generation {
+                        self.streaming_retention_ring.push(RetainedChunk {
+                            samples,
+                            generation,
+                            start_frame,
+                            frames,
+                        });
+                    }
+                    // Stale-generation chunk: `samples` drops here, off the RT thread.
+                }
+                // Buffers and DSP chains drop here, off the RT thread.
+                RetiredAudioResource::Buffer(_) | RetiredAudioResource::Chain(_) => {}
+            }
+        }
     }
 
     pub fn current_time_secs(&self) -> f64 {
@@ -703,6 +911,7 @@ impl SharedState {
         self.streaming_full_buffer_published
             .store(false, Ordering::Release);
         while self.streaming_chunks.pop().is_some() {}
+        self.streaming_retention_ring.clear();
         self.clear_streaming_queue_window();
         self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_sent_ms.store(0, Ordering::Relaxed);
@@ -1283,6 +1492,177 @@ mod tests {
         );
         assert_eq!(shared.streaming_queue_min_len(), None);
         assert_eq!(shared.streaming_queue_max_len.load(Ordering::Relaxed), 0);
+    }
+
+    fn retained_chunk(generation: u64, start_frame: u64, samples: usize) -> RetainedChunk {
+        RetainedChunk {
+            samples: Arc::new(vec![0.0; samples]),
+            generation,
+            start_frame,
+            frames: (samples / 2) as u32,
+        }
+    }
+
+    #[test]
+    fn retention_ring_keeps_chunks_in_playback_order_with_metadata() {
+        let ring = StreamingRetentionRing::default();
+        ring.push(retained_chunk(5, 0, 8));
+        ring.push(retained_chunk(5, 4, 8));
+        ring.push(retained_chunk(5, 8, 8));
+
+        let snapshot = ring.snapshot();
+        assert_eq!(snapshot.len(), 3);
+        assert_eq!(
+            snapshot
+                .iter()
+                .map(|c| (c.generation, c.start_frame, c.frames))
+                .collect::<Vec<_>>(),
+            vec![(5, 0, 4), (5, 4, 4), (5, 8, 4)]
+        );
+        let expected_bytes = 3 * 8 * std::mem::size_of::<f64>() as u64;
+        assert_eq!(ring.retained_bytes(), expected_bytes);
+    }
+
+    #[test]
+    fn retention_ring_evicts_oldest_first_and_stays_under_budget() {
+        let ring = StreamingRetentionRing::default();
+        // One full-budget chunk's worth of samples (f64) per push.
+        let chunk_samples =
+            (STREAMING_RETENTION_BUDGET_BYTES as usize / std::mem::size_of::<f64>()) / 2;
+
+        // Three pushes total 1.5x the budget, forcing eviction of the oldest.
+        ring.push(retained_chunk(1, 0, chunk_samples));
+        ring.push(retained_chunk(1, 1, chunk_samples));
+        ring.push(retained_chunk(1, 2, chunk_samples));
+
+        assert!(
+            ring.retained_bytes() <= STREAMING_RETENTION_BUDGET_BYTES,
+            "retained bytes {} must never exceed the budget {}",
+            ring.retained_bytes(),
+            STREAMING_RETENTION_BUDGET_BYTES
+        );
+        // Oldest (start_frame 0) evicted first; newest two retained.
+        let starts = ring
+            .snapshot()
+            .iter()
+            .map(|c| c.start_frame)
+            .collect::<Vec<_>>();
+        assert!(!starts.contains(&0), "oldest chunk should be evicted");
+        assert_eq!(starts.last().copied(), Some(2));
+    }
+
+    #[test]
+    fn drain_routes_current_generation_chunks_into_ring_and_drops_stale() {
+        let shared = SharedState::new();
+        shared.streaming_generation.store(9, Ordering::Release);
+
+        // Current-generation consumed chunk -> retained.
+        shared.retire_audio_resource(RetiredAudioResource::Chunk {
+            samples: Arc::new(vec![0.1; 8]),
+            generation: 9,
+            start_frame: 0,
+            frames: 4,
+        });
+        // Stale-generation chunk -> dropped, not retained.
+        shared.retire_audio_resource(RetiredAudioResource::Chunk {
+            samples: Arc::new(vec![0.2; 8]),
+            generation: 8,
+            start_frame: 99,
+            frames: 4,
+        });
+        // Non-chunk resources are dropped off-thread, never retained.
+        shared.retire_audio_resource(RetiredAudioResource::Buffer(Arc::new(vec![0.0; 4])));
+
+        shared.drain_retired_audio_resources();
+
+        let snapshot = shared.streaming_retention_ring.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].generation, 9);
+        assert_eq!(snapshot[0].start_frame, 0);
+        assert_eq!(snapshot[0].frames, 4);
+        assert_eq!(
+            shared
+                .retired_resource_drop_in_rt_count
+                .load(Ordering::Relaxed),
+            0
+        );
+    }
+
+    #[test]
+    fn reset_streaming_state_clears_retention_ring() {
+        let shared = SharedState::new();
+        shared
+            .streaming_retention_ring
+            .push(retained_chunk(1, 0, 8));
+        assert_eq!(shared.streaming_retention_ring.len(), 1);
+
+        shared.reset_streaming_state();
+
+        assert_eq!(shared.streaming_retention_ring.len(), 0);
+        assert_eq!(shared.streaming_retention_ring.retained_bytes(), 0);
+    }
+
+    #[test]
+    fn retention_ring_reports_oldest_start_frame() {
+        let ring = StreamingRetentionRing::default();
+        assert_eq!(ring.oldest_start_frame(), None);
+
+        ring.push(retained_chunk(1, 100, 8)); // frames = 4
+        ring.push(retained_chunk(1, 104, 8));
+        assert_eq!(ring.oldest_start_frame(), Some(100));
+    }
+
+    #[test]
+    fn take_replay_prefix_returns_suffix_from_target_chunk() {
+        let ring = StreamingRetentionRing::default();
+        // start_frame, frames(=4 each): [100..104), [104..108), [108..112)
+        ring.push(retained_chunk(3, 100, 8));
+        ring.push(retained_chunk(3, 104, 8));
+        ring.push(retained_chunk(3, 108, 8));
+
+        // Target lands inside the middle chunk -> prefix from that chunk to newest.
+        let prefix = ring
+            .take_replay_prefix(106)
+            .expect("target inside ring should hit");
+        assert_eq!(prefix.audible_start_frame, 104);
+        assert_eq!(prefix.continuation_start_frame, 112);
+        assert_eq!(prefix.prefix_frames, 8); // 2 chunks * 4 frames
+        assert_eq!(prefix.samples.len(), 2);
+
+        // Target inside the oldest chunk -> whole ring.
+        let prefix = ring
+            .take_replay_prefix(100)
+            .expect("oldest-chunk target should hit");
+        assert_eq!(prefix.audible_start_frame, 100);
+        assert_eq!(prefix.continuation_start_frame, 112);
+        assert_eq!(prefix.prefix_frames, 12);
+        assert_eq!(prefix.samples.len(), 3);
+    }
+
+    #[test]
+    fn take_replay_prefix_misses_before_oldest_and_when_empty() {
+        let ring = StreamingRetentionRing::default();
+        // Empty ring is a miss.
+        assert!(ring.take_replay_prefix(0).is_none());
+
+        ring.push(retained_chunk(2, 100, 8)); // [100..104)
+        ring.push(retained_chunk(2, 104, 8)); // [104..108)
+
+        // Before the oldest retained frame -> miss.
+        assert!(ring.take_replay_prefix(50).is_none());
+        // Past the newest retained frame (forward in-window) -> miss for MVP.
+        assert!(ring.take_replay_prefix(108).is_none());
+    }
+
+    #[test]
+    fn take_replay_prefix_leaves_ring_intact() {
+        let ring = StreamingRetentionRing::default();
+        ring.push(retained_chunk(4, 0, 8));
+        ring.push(retained_chunk(4, 4, 8));
+
+        let _ = ring.take_replay_prefix(0).expect("hit");
+        // Caller is responsible for clearing; the accessor itself does not mutate.
+        assert_eq!(ring.len(), 2);
     }
 
     #[test]

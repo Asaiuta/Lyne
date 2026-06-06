@@ -17,8 +17,8 @@ use super::cache::{
     save_cache_with_header,
 };
 use super::state::{
-    self, playback_phase_time_ms, AudioCommand, LoadResult, SharedState, StreamingAudioChunk,
-    StreamingTrackStart, PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS,
+    self, playback_phase_time_ms, AudioCommand, LoadResult, ReplayPrefix, SharedState,
+    StreamingAudioChunk, StreamingTrackStart, PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS,
     PLAYBACK_PROGRESS_REPLAY_COMMAND_GRACE_MS, PLAYBACK_PROGRESS_REPLAY_GRACE_MS,
 };
 use crate::config::{EngineSettings, ResampleQuality};
@@ -27,6 +27,12 @@ use crate::processor::{LoudnessDatabase, StreamingResampler};
 
 const STREAMING_CHUNK_FRAMES: usize = 4096;
 const STREAMING_START_BUFFER_FRAMES: u64 = 12_288;
+/// Minimum retained-prefix length (output frames) required for an in-window seek
+/// to be served from the retention ring. Set to twice the start-buffer cushion so
+/// the deferred continuation open + seek + decode is fully hidden behind prefix
+/// playback, leaving no post-seek underrun. Smaller backward seeks fall through to
+/// the normal rebuffer path.
+pub(super) const IN_WINDOW_MIN_PREFIX_FRAMES: u64 = 2 * STREAMING_START_BUFFER_FRAMES;
 const STREAMING_QUEUE_BACKPRESSURE_SLEEP: Duration = Duration::from_millis(2);
 const STREAMING_PROGRESS_WATCHDOG_DELAY: Duration = Duration::from_millis(300);
 const STREAMING_PROGRESS_WATCHDOG_RECHECK: Duration = Duration::from_millis(50);
@@ -727,6 +733,235 @@ pub(super) fn decode_file_streaming_first_buffer(
     Ok(())
 }
 
+/// Parameters captured on the seek thread for an in-window memory-streaming
+/// replay (a backward/at seek whose target landed in the retention ring).
+pub(super) struct InWindowReplayRequest {
+    pub path: String,
+    pub generation: u64,
+    pub channels: usize,
+    /// Final output sample rate the active stream is running at.
+    pub output_sample_rate: u32,
+    /// Total output frames of the track (0 = unknown).
+    pub total_frames: u64,
+    pub metadata: crate::decoder::TrackMetadata,
+    pub cached_loudness: Option<state::CachedLoudness>,
+    pub prefix: ReplayPrefix,
+}
+
+/// Phase 1 of the in-window replay (zero decode, no file open): re-push the
+/// retained prefix into the forward queue and publish `StreamingLoadReady`.
+///
+/// Returns the number of output frames queued. Split out from the file-touching
+/// continuation so a unit test can assert that nothing opens the decoder before
+/// `publish_streaming_ready` runs.
+fn publish_in_window_prefix(
+    shared_state: &Arc<SharedState>,
+    load_cancel: &AtomicBool,
+    cmd_tx: &Sender<AudioCommand>,
+    request: &InWindowReplayRequest,
+) -> Result<u64, String> {
+    shared_state.reset_streaming_queue_window_for_generation(request.generation);
+
+    let make_track = || StreamingTrackStart {
+        sample_rate: request.output_sample_rate,
+        channels: request.channels,
+        total_frames: request.total_frames,
+        start_frame: request.prefix.audible_start_frame,
+        file_path: request.path.clone(),
+        cached_loudness: request.cached_loudness.clone(),
+        metadata: request.metadata.clone(),
+        memory_mode: true,
+    };
+
+    let mut queued_frames = 0_u64;
+    let mut ready_sent = false;
+    for samples in &request.prefix.samples {
+        ensure_streaming_load_current(shared_state, load_cancel, request.generation)?;
+        let frames = (samples.len() / request.channels.max(1)) as u64;
+        // Re-tag the retained PCM with the new generation; zero-copy `Arc` clone.
+        if push_streaming_chunk(
+            shared_state,
+            load_cancel,
+            request.generation,
+            Arc::clone(samples),
+            StreamingFullBufferMode::MemoryOnly,
+        )? {
+            queued_frames += frames;
+            if !ready_sent && queued_frames >= STREAMING_START_BUFFER_FRAMES {
+                let track = make_track();
+                publish_streaming_ready(shared_state, cmd_tx, request.generation, &track, true);
+                ready_sent = true;
+            }
+        }
+    }
+
+    if !ready_sent {
+        ensure_streaming_load_current(shared_state, load_cancel, request.generation)?;
+        let track = make_track();
+        publish_streaming_ready(shared_state, cmd_tx, request.generation, &track, true);
+    }
+
+    Ok(queued_frames)
+}
+
+/// Serve an in-window memory-streaming seek with zero decode: re-push the
+/// retained prefix and publish ready (phase 1), then open the decoder and
+/// continue decoding from `continuation_start_frame` behind the prefix playback
+/// (phase 2). Runs entirely off the realtime thread on the seek producer thread.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn replay_streaming_in_window(
+    config: &EngineSettings,
+    device_id: Option<usize>,
+    shared_state: &Arc<SharedState>,
+    load_cancel: &Arc<AtomicBool>,
+    loudness_db: Option<Arc<LoudnessDatabase>>,
+    cmd_tx: &Sender<AudioCommand>,
+    request: InWindowReplayRequest,
+) -> Result<(), String> {
+    let decode_started_at = std::time::Instant::now();
+    shared_state.mark_decode_started();
+
+    // Phase 1: serve the retained prefix from RAM (no file open, no decode).
+    publish_in_window_prefix(shared_state, load_cancel, cmd_tx, &request)?;
+
+    // Phase 2: continuation decode, picking up exactly past the prefix. This is
+    // hidden behind prefix playback, so it cannot underrun an in-window seek.
+    let continuation_secs = request.prefix.continuation_start_frame as f64
+        / f64::from(request.output_sample_rate.max(1));
+
+    let cancel_token = DecodeCancelToken::new(Arc::clone(load_cancel));
+    let mut decoder =
+        StreamingDecoder::open_with_credentials_and_cancel(&request.path, None, Some(cancel_token))
+            .map_err(|e| {
+                log::error!(
+                    "Failed to open decoder for in-window seek continuation {}: {}",
+                    request.path,
+                    e
+                );
+                e.to_string()
+            })?;
+
+    let info = decoder.info.clone();
+    let original_sr = info.sample_rate;
+    let channels = info.channels;
+    let target_sr = target_sample_rate_for_device(original_sr, config, device_id);
+    let (final_target_sr, final_need_resample) =
+        effective_resample_plan(original_sr, target_sr, config);
+    let _ = loudness_db;
+
+    let mut resampler = if final_need_resample {
+        Some(
+            StreamingResampler::with_quality(
+                channels,
+                original_sr,
+                final_target_sr,
+                config.phase_response,
+                config.resample_quality,
+            )
+            .map_err(|e| {
+                format!(
+                    "Failed to create streaming resampler: {} -> {}: {}",
+                    original_sr, final_target_sr, e
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+
+    decoder.seek(continuation_secs).map_err(|e| {
+        format!(
+            "Failed to seek streaming decoder to {:.3}s for in-window continuation: {}",
+            continuation_secs, e
+        )
+    })?;
+
+    let mut pending_samples = Vec::with_capacity(STREAMING_CHUNK_FRAMES * channels);
+    let mut decoded_chunk = Vec::new();
+    let mut output_samples = 0_u64;
+
+    while decoder
+        .decode_next_into(&mut decoded_chunk)
+        .map_err(|e| e.to_string())?
+        .is_some()
+    {
+        ensure_streaming_load_current(shared_state, load_cancel, request.generation)?;
+        let produced_start = pending_samples.len();
+        if let Some(ref mut rs) = resampler {
+            rs.process_chunk_append(&decoded_chunk, &mut pending_samples);
+        } else {
+            pending_samples.extend_from_slice(&decoded_chunk);
+        }
+        output_samples =
+            output_samples.saturating_add((pending_samples.len() - produced_start) as u64);
+
+        push_ready_streaming_chunks(
+            shared_state,
+            load_cancel,
+            request.generation,
+            channels,
+            &mut pending_samples,
+            false,
+            StreamingFullBufferMode::MemoryOnly,
+            None,
+        )?;
+        decoded_chunk.clear();
+    }
+
+    if let Some(ref mut rs) = resampler {
+        let produced_start = pending_samples.len();
+        rs.flush_into(&mut pending_samples);
+        output_samples =
+            output_samples.saturating_add((pending_samples.len() - produced_start) as u64);
+    }
+
+    push_ready_streaming_chunks(
+        shared_state,
+        load_cancel,
+        request.generation,
+        channels,
+        &mut pending_samples,
+        true,
+        StreamingFullBufferMode::MemoryOnly,
+        None,
+    )?;
+
+    // The continuation began at `continuation_start_frame`, so the final output
+    // frame count is that plus what we decoded after the prefix.
+    let continuation_frames = output_samples / channels.max(1) as u64;
+    let total_frames = request
+        .prefix
+        .continuation_start_frame
+        .saturating_add(continuation_frames);
+    shared_state.load_progress.store(100, Ordering::Relaxed);
+    let decode_duration_ms = decode_started_at
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+    shared_state
+        .last_decode_duration_ms
+        .store(decode_duration_ms, Ordering::Relaxed);
+    shared_state.mark_decode_finished();
+
+    log::info!(
+        "In-window streaming seek replay complete for '{}' (generation {}): prefix {} frames from {}, continuation {} frames",
+        request.path,
+        request.generation,
+        request.prefix.prefix_frames,
+        request.prefix.audible_start_frame,
+        continuation_frames
+    );
+
+    ensure_streaming_load_current(shared_state, load_cancel, request.generation)?;
+    let _ = cmd_tx.send(AudioCommand::StreamingLoadFinished {
+        generation: request.generation,
+        samples: None,
+        total_frames,
+    });
+
+    Ok(())
+}
+
 fn ensure_streaming_load_current(
     shared_state: &SharedState,
     load_cancel: &AtomicBool,
@@ -914,7 +1149,7 @@ fn push_ready_streaming_chunks(
             shared_state,
             load_cancel,
             generation,
-            samples,
+            Arc::new(samples),
             full_buffer_mode,
         )? {
             pushed_frames += frames;
@@ -928,7 +1163,7 @@ fn push_streaming_chunk(
     shared_state: &SharedState,
     load_cancel: &AtomicBool,
     generation: u64,
-    samples: Vec<f64>,
+    samples: Arc<Vec<f64>>,
     full_buffer_mode: StreamingFullBufferMode,
 ) -> Result<bool, String> {
     if samples.is_empty() {
@@ -937,7 +1172,7 @@ fn push_streaming_chunk(
 
     let mut chunk = StreamingAudioChunk {
         generation,
-        samples: Arc::new(samples),
+        samples,
     };
 
     loop {
@@ -1125,7 +1360,7 @@ mod tests {
             &shared,
             &cancel,
             11,
-            vec![0.5, -0.5],
+            Arc::new(vec![0.5, -0.5]),
             StreamingFullBufferMode::PublishFullBuffer,
         )
         .expect("full-buffer queue full should drop startup chunk");
@@ -1393,5 +1628,172 @@ mod tests {
             ),
             StreamingProgressWatchdogAction::Stop
         );
+    }
+
+    fn make_replay_request_with_chunks(
+        generation: u64,
+        channels: usize,
+        chunk_count: usize,
+    ) -> InWindowReplayRequest {
+        // Retained 4096-frame chunks, starting at absolute frame 1000.
+        let chunk_samples = STREAMING_CHUNK_FRAMES * channels;
+        let samples = (0..chunk_count)
+            .map(|idx| Arc::new(vec![0.1_f64 + idx as f64; chunk_samples]))
+            .collect::<Vec<_>>();
+        let audible_start_frame = 1000;
+        let prefix_frames = (STREAMING_CHUNK_FRAMES * chunk_count) as u64;
+        let prefix = ReplayPrefix {
+            audible_start_frame,
+            continuation_start_frame: audible_start_frame + prefix_frames,
+            prefix_frames,
+            samples,
+        };
+        InWindowReplayRequest {
+            path: "test-track.flac".to_string(),
+            generation,
+            channels,
+            output_sample_rate: 44_100,
+            total_frames: 44_100 * 240,
+            metadata: crate::decoder::TrackMetadata::default(),
+            cached_loudness: None,
+            prefix,
+        }
+    }
+
+    fn make_replay_request(generation: u64, channels: usize) -> InWindowReplayRequest {
+        make_replay_request_with_chunks(generation, channels, 2)
+    }
+
+    #[test]
+    fn publish_in_window_prefix_pushes_prefix_and_sends_ready_without_decode() {
+        // The test seam: phase 1 of the in-window replay performs no
+        // `StreamingDecoder::open`. It re-pushes the retained prefix and sends
+        // `StreamingLoadReady` purely from the in-RAM prefix.
+        let shared = Arc::new(SharedState::new());
+        let cancel = AtomicBool::new(false);
+        let channels = 2;
+        let generation = 12;
+        shared.load_generation.store(generation, Ordering::Release);
+
+        let (tx, rx) = crossbeam::channel::unbounded();
+        let request = make_replay_request(generation, channels);
+
+        let queued = publish_in_window_prefix(&shared, &cancel, &tx, &request)
+            .expect("prefix publish should succeed");
+
+        // Both retained chunks queued, with the new generation tag.
+        assert_eq!(queued, (STREAMING_CHUNK_FRAMES * 2) as u64);
+        assert_eq!(shared.streaming_chunks.len(), 2);
+        let first = shared.streaming_chunks.pop().expect("chunk queued");
+        assert_eq!(first.generation, generation);
+
+        // Ready was published from RAM; the start frame is the snapped audible
+        // start, and memory mode is preserved.
+        let cmd = rx.try_recv().expect("ready command sent");
+        match cmd {
+            AudioCommand::StreamingLoadReady {
+                generation: g,
+                track,
+                autoplay,
+            } => {
+                assert_eq!(g, generation);
+                assert!(autoplay);
+                assert!(track.memory_mode);
+                assert_eq!(track.start_frame, 1000);
+                assert_eq!(track.sample_rate, 44_100);
+            }
+            other => panic!("expected StreamingLoadReady, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn publish_in_window_prefix_sends_ready_at_start_buffer_threshold() {
+        // Fill the queue so only the startup threshold can fit. If ready were
+        // sent after the whole prefix, this test would time out waiting for the
+        // command because the producer would be stuck in memory-mode
+        // backpressure first.
+        let shared = Arc::new(SharedState::new());
+        let cancel = Arc::new(AtomicBool::new(false));
+        let channels = 2;
+        let generation = 12;
+        shared.load_generation.store(generation, Ordering::Release);
+
+        let start_chunks = (STREAMING_START_BUFFER_FRAMES / STREAMING_CHUNK_FRAMES as u64) as usize;
+        for _ in 0..(128 - start_chunks) {
+            shared
+                .streaming_chunks
+                .push(StreamingAudioChunk {
+                    generation,
+                    samples: Arc::new(vec![0.0; STREAMING_CHUNK_FRAMES * channels]),
+                })
+                .expect("fixture should leave room for the startup threshold");
+        }
+
+        let request = make_replay_request_with_chunks(generation, channels, start_chunks + 2);
+        let (tx, rx) = crossbeam::channel::unbounded();
+        let shared_for_thread = Arc::clone(&shared);
+        let cancel_for_thread = Arc::clone(&cancel);
+        let handle = std::thread::spawn(move || {
+            publish_in_window_prefix(&shared_for_thread, &cancel_for_thread, &tx, &request)
+        });
+
+        let cmd = rx
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .expect("ready should be sent as soon as the start buffer is queued");
+        match cmd {
+            AudioCommand::StreamingLoadReady {
+                generation: g,
+                track,
+                autoplay,
+            } => {
+                assert_eq!(g, generation);
+                assert!(autoplay);
+                assert_eq!(track.start_frame, 1000);
+            }
+            other => panic!("expected StreamingLoadReady, got {:?}", other),
+        }
+
+        cancel.store(true, Ordering::Release);
+        let result = handle.join().expect("prefix publisher thread should join");
+        assert!(
+            result.is_err(),
+            "cancellation after ready should stop the blocked remainder"
+        );
+    }
+
+    #[test]
+    fn publish_in_window_prefix_bails_for_superseded_generation() {
+        // A newer seek bumped load_generation; the in-window producer must bail
+        // before queueing or publishing anything.
+        let shared = Arc::new(SharedState::new());
+        let cancel = AtomicBool::new(false);
+        let channels = 2;
+        let request = make_replay_request(12, channels);
+        // Current generation is newer than the request's generation.
+        shared.load_generation.store(13, Ordering::Release);
+
+        let (tx, rx) = crossbeam::channel::unbounded();
+        let result = publish_in_window_prefix(&shared, &cancel, &tx, &request);
+
+        assert!(result.is_err());
+        assert_eq!(shared.streaming_chunks.len(), 0);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn publish_in_window_prefix_bails_when_cancelled() {
+        let shared = Arc::new(SharedState::new());
+        let cancel = AtomicBool::new(true);
+        let channels = 2;
+        let generation = 12;
+        shared.load_generation.store(generation, Ordering::Release);
+        let request = make_replay_request(generation, channels);
+
+        let (tx, rx) = crossbeam::channel::unbounded();
+        let result = publish_in_window_prefix(&shared, &cancel, &tx, &request);
+
+        assert!(result.is_err());
+        assert_eq!(shared.streaming_chunks.len(), 0);
+        assert!(rx.try_recv().is_err());
     }
 }

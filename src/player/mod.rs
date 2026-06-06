@@ -65,7 +65,10 @@ use crate::processor::{
 
 // Import internal modules
 use audio_thread::{audio_thread_main, AudioThreadStartup};
-use loading::{decode_file_internal, decode_file_streaming_first_buffer};
+use loading::{
+    decode_file_internal, decode_file_streaming_first_buffer, replay_streaming_in_window,
+    InWindowReplayRequest, IN_WINDOW_MIN_PREFIX_FRAMES,
+};
 use spectrum::spectrum_thread_main;
 
 /// The main audio player - thread-safe wrapper
@@ -568,6 +571,33 @@ impl AudioPlayer {
         };
         let target_time_secs = target_frame as f64 / sample_rate as f64;
 
+        let (generation, load_cancel) = self.begin_streaming_seek_generation(target_frame);
+
+        Ok(MemoryStreamingSeekRequest {
+            path,
+            generation,
+            load_cancel,
+            target_time_secs,
+        })
+    }
+
+    /// Clean-stop the current streaming load, bump to a fresh load generation,
+    /// and re-apply the generation-scoped seek flags + synchronous
+    /// `position_frames`. Shared by the normal rebuffer path
+    /// ([`Self::prepare_memory_streaming_seek`]) and the in-window replay path
+    /// ([`Self::try_restart_memory_streaming_in_window`]).
+    ///
+    /// `cancel_current_load_for_pending_load` calls `reset_streaming_state`,
+    /// which sets `streaming_active=false`, drains the forward queue, clears the
+    /// queue window, and clears the retention ring. The clean stop is what makes
+    /// the realtime callback stop consuming on the old generation so the
+    /// synchronous `position_frames = target_frame` set inside
+    /// `apply_streaming_seek_generation_state` actually sticks (fast convergence)
+    /// instead of being overwritten by the old-generation callback.
+    ///
+    /// The in-window path MUST extract its replay prefix from the retention ring
+    /// **before** calling this, because the reset clears the ring.
+    fn begin_streaming_seek_generation(&mut self, target_frame: u64) -> (u64, Arc<AtomicBool>) {
         self.cancel_current_load_for_pending_load();
         GaplessManager::cancel_preload(&self.shared_state);
         self.shared_state.load_progress.store(0, Ordering::Relaxed);
@@ -577,7 +607,18 @@ impl AudioPlayer {
             .load_generation
             .fetch_add(1, Ordering::AcqRel)
             + 1;
+        self.apply_streaming_seek_generation_state(generation, target_frame);
+        (generation, load_cancel)
+    }
 
+    /// Set the generation-scoped streaming flags and playback markers a memory
+    /// seek needs once the seek target is known. Called by
+    /// [`Self::begin_streaming_seek_generation`] after the clean stop, so both
+    /// the normal rebuffer path and the in-window replay path re-apply identical
+    /// flags. It intentionally does **not** clear streaming state or the
+    /// retention ring; the preceding `cancel_current_load_for_pending_load`
+    /// (via `reset_streaming_state`) owns that.
+    fn apply_streaming_seek_generation_state(&mut self, generation: u64, target_frame: u64) {
         self.shared_state.reset_load_phase_timestamps();
         self.shared_state
             .streaming_generation
@@ -608,13 +649,129 @@ impl AudioPlayer {
         self.shared_state
             .event_flags
             .fetch_or(EVENT_PLAYBACK_SEEKED, Ordering::Release);
+    }
 
-        Ok(MemoryStreamingSeekRequest {
+    /// Attempt to serve a memory-streaming seek from the retention ring with zero
+    /// decode. Returns `Ok(true)` when the seek was served in-window, `Ok(false)`
+    /// when it misses (forward in-window, target before the oldest retained
+    /// frame, prefix below the gate, or empty ring) and the caller must fall back
+    /// to the normal rebuffer path.
+    ///
+    /// The hit test + prefix extraction run **before** any destructive reset, so
+    /// the ring is still populated. On a hit we extract the prefix, then clear the
+    /// ring (it repopulates as the new generation plays).
+    fn try_restart_memory_streaming_in_window(&mut self, time_secs: f64) -> Result<bool, String> {
+        let path = match self
+            .shared_state
+            .current_track_path
+            .read()
+            .clone()
+            .or_else(|| self.shared_state.file_path.read().clone())
+        {
+            Some(path) => path,
+            None => return Ok(false),
+        };
+        if path.starts_with("http://") || path.starts_with("https://") {
+            return Ok(false);
+        }
+
+        let output_sample_rate = self.shared_state.sample_rate.load(Ordering::Relaxed).max(1);
+        let total_frames = self.shared_state.total_frames.load(Ordering::Relaxed);
+        let channels = self.shared_state.channels.load(Ordering::Relaxed).max(1) as usize;
+        let requested_frame = (time_secs.max(0.0) * output_sample_rate as f64) as u64;
+        let target_frame = if total_frames > 0 {
+            requested_frame.min(total_frames)
+        } else {
+            requested_frame
+        };
+        let playhead = self.shared_state.position_frames.load(Ordering::Relaxed);
+
+        // MVP: only backward/at seeks (target <= playhead) can hit the ring;
+        // forward in-window data lives only in the live forward queue (deferred).
+        if target_frame > playhead {
+            return Ok(false);
+        }
+        let ring = &self.shared_state.streaming_retention_ring;
+        match ring.oldest_start_frame() {
+            Some(oldest) if target_frame >= oldest => {}
+            _ => return Ok(false),
+        }
+        let prefix = match ring.take_replay_prefix(target_frame) {
+            Some(prefix) if prefix.prefix_frames >= IN_WINDOW_MIN_PREFIX_FRAMES => prefix,
+            _ => return Ok(false),
+        };
+
+        // Hit: capture the format/metadata and extract the replay prefix BEFORE
+        // any reset. The clean stop below (`reset_streaming_state` via
+        // `begin_streaming_seek_generation`) clears the retention ring, so the
+        // prefix must already be in hand.
+        let metadata = self.shared_state.track_metadata.read().clone();
+        let cached_loudness = self.shared_state.current_cached_loudness.read().clone();
+
+        // Mirror the normal rebuffer path's clean-stop + re-apply sequence so the
+        // realtime callback stops consuming on the old generation and the
+        // synchronous `position_frames = audible_start_frame` sticks (fast
+        // convergence). `begin_streaming_seek_generation` cancels the in-flight
+        // load, calls `reset_streaming_state` (streaming_active=false, drains the
+        // forward queue, clears the queue window AND the retention ring), bumps
+        // the load generation, then re-applies the seek flags
+        // (streaming_active=true, position_frames=target, ...). The prefix was
+        // already extracted above, so clearing the ring here is fine; the new
+        // generation repopulates it as the prefix is consumed.
+        let (generation, load_cancel) =
+            self.begin_streaming_seek_generation(prefix.audible_start_frame);
+
+        let request = InWindowReplayRequest {
             path,
             generation,
-            load_cancel,
-            target_time_secs,
-        })
+            channels,
+            output_sample_rate: output_sample_rate as u32,
+            total_frames,
+            metadata,
+            cached_loudness,
+            prefix,
+        };
+
+        let shared_state = Arc::clone(&self.shared_state);
+        let cmd_tx = self.cmd_tx.clone();
+        let config = self.config.clone();
+        let device_id = self.device_id;
+        let loudness_db = self.loudness_db.clone();
+        let load_cancel_thread = Arc::clone(&load_cancel);
+        let path_for_log = request.path.clone();
+
+        thread::spawn(move || {
+            let result = replay_streaming_in_window(
+                &config,
+                device_id,
+                &shared_state,
+                &load_cancel_thread,
+                loudness_db,
+                &cmd_tx,
+                request,
+            );
+
+            let is_current = shared_state.load_generation.load(Ordering::Acquire) == generation;
+            if let Err(e) = result {
+                if load_cancel_thread.load(Ordering::Acquire) || !is_current {
+                    log::info!(
+                        "In-window streaming seek cancelled for '{}' (generation {}): {}",
+                        path_for_log,
+                        generation,
+                        e
+                    );
+                    return;
+                }
+                log::error!("In-window streaming seek failed: {}", e);
+                let _ = cmd_tx.send(AudioCommand::LoadError {
+                    generation,
+                    message: e,
+                });
+            }
+        });
+
+        self.shared_state.mark_load_request_returned();
+        Ok(true)
     }
 
     fn restart_memory_streaming_at(&mut self, time_secs: f64) -> Result<(), String> {
@@ -735,6 +892,11 @@ impl AudioPlayer {
             .load(Ordering::Acquire)
             && self.shared_state.streaming_active.load(Ordering::Acquire)
         {
+            // Try serving the seek from the retained PCM ring with zero decode
+            // (backward/at, in-window). On a miss, fall back to the rebuffer path.
+            if self.try_restart_memory_streaming_in_window(time_secs)? {
+                return Ok(());
+            }
             return self.restart_memory_streaming_at(time_secs);
         }
         let sr = self.shared_state.sample_rate.load(Ordering::Relaxed) as f64;
@@ -843,6 +1005,155 @@ mod tests {
             44_100
         );
         assert!(shared.active_output_stream_matches_current());
+        assert_ne!(
+            shared.event_flags.load(Ordering::Relaxed) & EVENT_PLAYBACK_SEEKED,
+            0
+        );
+    }
+
+    fn build_in_window_player() -> (AudioPlayer, Arc<SharedState>) {
+        let player = AudioPlayer::new(EngineSettings::default());
+        let shared = player.shared_state();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(44_100 * 240, Ordering::Relaxed);
+        shared.load_generation.store(50, Ordering::Release);
+        shared.streaming_generation.store(50, Ordering::Release);
+        shared.streaming_memory_mode.store(true, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        *shared.current_track_path.write() = Some(r"D:\Music\large.flac".to_string());
+        (player, shared)
+    }
+
+    fn push_retained_window(shared: &SharedState, start_frame: u64, chunk_frames: u64, count: u64) {
+        for i in 0..count {
+            let frames = chunk_frames;
+            shared.streaming_retention_ring.push(state::RetainedChunk {
+                samples: Arc::new(vec![0.0; (frames * 2) as usize]),
+                generation: 50,
+                start_frame: start_frame + i * frames,
+                frames: frames as u32,
+            });
+        }
+    }
+
+    #[test]
+    fn in_window_seek_misses_on_empty_ring() {
+        let (mut player, shared) = build_in_window_player();
+        shared.position_frames.store(44_100 * 8, Ordering::Relaxed);
+
+        // No retained chunks -> miss, no state mutation, generation unchanged.
+        let served = player
+            .try_restart_memory_streaming_in_window(2.0)
+            .expect("classification should not fail");
+        assert!(!served);
+        assert_eq!(shared.load_generation.load(Ordering::Acquire), 50);
+    }
+
+    #[test]
+    fn in_window_seek_misses_forward_target() {
+        let (mut player, shared) = build_in_window_player();
+        let playhead = 44_100 * 8;
+        shared.position_frames.store(playhead, Ordering::Relaxed);
+        // A wide retained window behind the playhead exists...
+        push_retained_window(&shared, 0, 4096, 200);
+
+        // ...but a FORWARD seek (target > playhead) is a miss for the MVP.
+        let served = player
+            .try_restart_memory_streaming_in_window(20.0)
+            .expect("classification should not fail");
+        assert!(!served);
+        assert_eq!(shared.load_generation.load(Ordering::Acquire), 50);
+    }
+
+    #[test]
+    fn in_window_seek_misses_before_oldest_retained_frame() {
+        let (mut player, shared) = build_in_window_player();
+        let playhead = 44_100 * 8;
+        shared.position_frames.store(playhead, Ordering::Relaxed);
+        // Retained window starts at 5 s; a seek to 1 s is before the oldest.
+        push_retained_window(&shared, 44_100 * 5, 4096, 50);
+
+        let served = player
+            .try_restart_memory_streaming_in_window(1.0)
+            .expect("classification should not fail");
+        assert!(!served);
+        assert_eq!(shared.load_generation.load(Ordering::Acquire), 50);
+    }
+
+    #[test]
+    fn in_window_seek_misses_when_prefix_below_gate() {
+        let (mut player, shared) = build_in_window_player();
+        let playhead = 44_100 * 8;
+        shared.position_frames.store(playhead, Ordering::Relaxed);
+        // Only one chunk retained ending right at the playhead: a backward seek
+        // into it yields a prefix far below IN_WINDOW_MIN_PREFIX_FRAMES.
+        let chunk_frames = 4096;
+        push_retained_window(&shared, playhead - chunk_frames, chunk_frames, 1);
+
+        let target_secs = (playhead - chunk_frames) as f64 / 44_100.0;
+        let served = player
+            .try_restart_memory_streaming_in_window(target_secs)
+            .expect("classification should not fail");
+        assert!(!served);
+        assert_eq!(shared.load_generation.load(Ordering::Acquire), 50);
+    }
+
+    #[test]
+    fn in_window_seek_hit_clean_stops_and_reapplies_state() {
+        let (mut player, shared) = build_in_window_player();
+        let chunk_frames: u64 = 4096;
+        let playhead = chunk_frames * 200; // 819_200
+        shared.position_frames.store(playhead, Ordering::Relaxed);
+
+        // A wide retained window behind the playhead, with a prefix far above the
+        // gate so the backward seek is a hit.
+        push_retained_window(&shared, 0, chunk_frames, 200);
+
+        // The forward queue is still FULL of old-generation chunks at seek time
+        // (capacity 128). The clean stop (reset_streaming_state) must drain it so
+        // the new-generation prefix pushes do not stall in the backpressure loop.
+        for _ in 0..128 {
+            let _ = shared.streaming_chunks.push(state::StreamingAudioChunk {
+                generation: 50,
+                samples: Arc::new(vec![0.0; (chunk_frames * 2) as usize]),
+            });
+        }
+        assert!(shared.streaming_chunks.is_full());
+
+        // Seek backward to the start of chunk index 1 (an exact chunk boundary).
+        let target_frame = chunk_frames; // 4096
+        let target_secs = target_frame as f64 / 44_100.0;
+        let served = player
+            .try_restart_memory_streaming_in_window(target_secs)
+            .expect("classification should not fail");
+
+        assert!(served, "a wide backward in-window seek must be served");
+        // Generation bumped past the stale 50.
+        assert_eq!(shared.load_generation.load(Ordering::Acquire), 51);
+        assert_eq!(shared.streaming_generation.load(Ordering::Acquire), 51);
+        // The clean stop drained the stale forward queue.
+        assert!(
+            shared.streaming_chunks.is_empty(),
+            "the clean stop must drain the stale forward queue on an in-window hit"
+        );
+        // Position snapped synchronously to the audible start of the target chunk
+        // (this is what makes convergence fast: the callback was cleanly stopped
+        // so the synchronous set sticks).
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), target_frame);
+        // The ring was cleared by reset_streaming_state after the prefix was
+        // extracted; the new generation repopulates it as it plays.
+        assert_eq!(shared.streaming_retention_ring.oldest_start_frame(), None);
+        // Streaming flags were re-applied after the reset: the new generation is
+        // active in memory mode, ready for the replay producer's prefix.
+        assert!(
+            shared.streaming_active.load(Ordering::Acquire),
+            "streaming_active must be re-applied after the clean stop"
+        );
+        assert!(shared.streaming_memory_mode.load(Ordering::Acquire));
+        assert!(!shared.streaming_decode_finished.load(Ordering::Acquire));
+        assert!(shared.is_loading.load(Ordering::Acquire));
+        assert!(shared.audio_buffer.load().is_empty());
         assert_ne!(
             shared.event_flags.load(Ordering::Relaxed) & EVENT_PLAYBACK_SEEKED,
             0

@@ -34,6 +34,17 @@ pub struct CallbackScratch {
     streaming_local_generation: u64,
     streaming_chunk: Option<StreamingAudioChunk>,
     streaming_chunk_pos: usize,
+    /// Channels of the interleaved streaming chunk samples; used only to derive a
+    /// chunk's output-frame count when retiring it (no allocation).
+    streaming_channels: usize,
+    /// Running output-frame playhead of consumed streaming chunks for the current
+    /// generation. Advances by each retired chunk's frame count; reset whenever
+    /// the streaming generation changes. Used to stamp `start_frame` on retained
+    /// chunks so an in-window seek (PR2) can locate them.
+    streaming_consumed_output_frames: u64,
+    /// Output-frame index at which the currently-held `streaming_chunk` began,
+    /// captured when it was installed into the slot.
+    streaming_chunk_start_frame: u64,
     final_output: Vec<f64>,
     spectrum_batch: SpectrumBatch,
 }
@@ -92,17 +103,44 @@ impl CallbackScratch {
             streaming_local_generation: 0,
             streaming_chunk: None,
             streaming_chunk_pos: 0,
+            streaming_channels: channels.max(1),
+            streaming_consumed_output_frames: 0,
+            streaming_chunk_start_frame: 0,
             final_output: Vec::with_capacity(resample_samples),
             spectrum_batch: SpectrumBatch::new(),
         }
     }
 
-    /// Release the currently held streaming chunk to the non-realtime drop queue
-    /// instead of freeing its `Arc<Vec<f64>>` on the audio thread.
+    /// Release the currently held streaming chunk to the non-realtime retire
+    /// queue instead of freeing its `Arc<Vec<f64>>` on the audio thread.
+    ///
+    /// The retired chunk carries its `(generation, start_frame, frames)` so the
+    /// off-realtime drainer can route a current-generation chunk into the
+    /// retention ring. Only stack-resident integers and a moved `Arc` are touched
+    /// here — no allocation, no lock, no drop on the audio thread.
     fn release_streaming_chunk(&mut self, shared: &SharedState) {
         if let Some(chunk) = self.streaming_chunk.take() {
-            shared.retire_audio_resource(RetiredAudioResource::Chunk(chunk.samples));
+            let frames = (chunk.samples.len() / self.streaming_channels.max(1)) as u32;
+            let start_frame = self.streaming_chunk_start_frame;
+            shared.retire_audio_resource(RetiredAudioResource::Chunk {
+                samples: chunk.samples,
+                generation: chunk.generation,
+                start_frame,
+                frames,
+            });
+            // Advance the consumed playhead so the next installed chunk's
+            // `start_frame` follows this one in output frames.
+            self.streaming_consumed_output_frames = start_frame + frames as u64;
+            self.streaming_chunk_start_frame = self.streaming_consumed_output_frames;
         }
+        self.streaming_chunk_pos = 0;
+    }
+
+    /// Install a freshly popped chunk into the active slot, stamping its
+    /// output-frame start position from the running consumed playhead.
+    fn install_streaming_chunk(&mut self, chunk: StreamingAudioChunk) {
+        self.streaming_chunk_start_frame = self.streaming_consumed_output_frames;
+        self.streaming_chunk = Some(chunk);
         self.streaming_chunk_pos = 0;
     }
 
@@ -135,6 +173,15 @@ fn refresh_streaming_scratch_generation(
     if let Some(ref mut rs) = resampler {
         rs.reset();
     }
+    // A new generation restarts the consumed-frame playhead. Seed it from the
+    // absolute output position this generation resumes at (`position_frames`)
+    // rather than 0, so each retained chunk's `start_frame` is an absolute
+    // track-output-frame — directly comparable to an in-window seek target. This
+    // is the only callback-path change for PR2: a single atomic load plus integer
+    // assignment, with no allocation, lock, or drop on the audio thread.
+    let resume_frame = shared.position_frames.load(Ordering::Acquire);
+    scratch.streaming_consumed_output_frames = resume_frame;
+    scratch.streaming_chunk_start_frame = resume_frame;
     scratch.streaming_local_generation = generation;
 }
 
@@ -579,12 +626,17 @@ fn streaming_has_buffered_samples(
             // Offload any exhausted/empty chunk still in the slot before replacing it,
             // so no `Arc<Vec<f64>>` is ever freed on the audio thread.
             scratch.release_streaming_chunk(shared);
-            scratch.streaming_chunk = Some(chunk);
-            scratch.streaming_chunk_pos = 0;
+            scratch.install_streaming_chunk(chunk);
             return true;
         }
-        // Stale chunk from a superseded generation: offload its drop.
-        shared.retire_audio_resource(RetiredAudioResource::Chunk(chunk.samples));
+        // Stale chunk from a superseded generation: offload its drop. `frames`/
+        // `start_frame` are irrelevant because the drainer discards stale chunks.
+        shared.retire_audio_resource(RetiredAudioResource::Chunk {
+            samples: chunk.samples,
+            generation: chunk.generation,
+            start_frame: 0,
+            frames: 0,
+        });
     }
 
     false
@@ -933,13 +985,19 @@ fn fill_streaming_process_buffer(
                 // Offload any exhausted/empty chunk still in the slot before
                 // replacing it, so no `Arc<Vec<f64>>` is freed on the audio thread.
                 scratch.release_streaming_chunk(shared);
-                scratch.streaming_chunk = Some(chunk);
-                scratch.streaming_chunk_pos = 0;
+                scratch.install_streaming_chunk(chunk);
             }
             Some(stale) => {
                 shared.mark_streaming_queue_chunk_popped(shared.streaming_chunks.len());
                 // Stale chunk from a superseded generation: offload its drop.
-                shared.retire_audio_resource(RetiredAudioResource::Chunk(stale.samples));
+                // `frames`/`start_frame` are irrelevant because the drainer
+                // discards stale-generation chunks.
+                shared.retire_audio_resource(RetiredAudioResource::Chunk {
+                    samples: stale.samples,
+                    generation: stale.generation,
+                    start_frame: 0,
+                    frames: 0,
+                });
                 continue;
             }
             None => break,
@@ -1459,6 +1517,36 @@ mod tests {
     }
 
     #[test]
+    fn refresh_streaming_scratch_generation_seeds_absolute_resume_frame() {
+        // Initial load resumes at position 0, so the consumed playhead and the
+        // first chunk's start_frame both stay 0 (keeps the PR1 start_frame
+        // expectation green).
+        let shared = SharedState::new();
+        shared.position_frames.store(0, Ordering::Relaxed);
+        let mut scratch = CallbackScratch::new(TEST_CHANNELS);
+        let mut resampler: Option<StreamingResampler> = None;
+
+        refresh_streaming_scratch_generation(&shared, &mut scratch, &mut resampler, 1);
+        assert_eq!(scratch.streaming_consumed_output_frames, 0);
+        assert_eq!(scratch.streaming_chunk_start_frame, 0);
+        assert_eq!(scratch.streaming_local_generation, 1);
+
+        // A seek to an absolute output frame bumps the generation and sets
+        // position_frames; the consumed playhead must seed from that absolute
+        // frame so retained chunks carry absolute start_frames.
+        shared.position_frames.store(44_100, Ordering::Relaxed);
+        refresh_streaming_scratch_generation(&shared, &mut scratch, &mut resampler, 2);
+        assert_eq!(scratch.streaming_consumed_output_frames, 44_100);
+        assert_eq!(scratch.streaming_chunk_start_frame, 44_100);
+        assert_eq!(scratch.streaming_local_generation, 2);
+
+        // Same generation is a no-op (does not re-seed mid-playback).
+        shared.position_frames.store(99_999, Ordering::Relaxed);
+        refresh_streaming_scratch_generation(&shared, &mut scratch, &mut resampler, 2);
+        assert_eq!(scratch.streaming_consumed_output_frames, 44_100);
+    }
+
+    #[test]
     fn callback_direct_path_reuses_scratch_capacity_after_warmup() {
         assert_capacity_stable_after_warmup(false, false);
     }
@@ -1759,6 +1847,84 @@ mod tests {
         assert_eq!(scratch.streaming_local_generation, 2);
         assert!(scratch.resample_leftover.is_empty());
         assert!(scratch.streaming_chunk.is_none());
+    }
+
+    #[test]
+    fn callback_consumed_streaming_chunks_retained_off_realtime_thread() {
+        // When the callback fully consumes a streaming chunk it must hand the
+        // chunk's memory to the off-realtime retire queue (never free it inline)
+        // with correct (generation, start_frame, frames) metadata, so the drainer
+        // can build the behind-playhead retention ring for an in-window seek.
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(200, Ordering::Relaxed);
+        shared.streaming_generation.store(3, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        // Two current-generation chunks, each 2 frames (stereo).
+        shared
+            .streaming_chunks
+            .push(StreamingAudioChunk {
+                generation: 3,
+                samples: Arc::new(vec![0.1, -0.1, 0.2, -0.2]),
+            })
+            .expect("streaming queue should have capacity");
+        shared
+            .streaming_chunks
+            .push(StreamingAudioChunk {
+                generation: 3,
+                samples: Arc::new(vec![0.3, -0.3, 0.4, -0.4]),
+            })
+            .expect("streaming queue should have capacity");
+
+        let mut scratch = CallbackScratch::new(2);
+        scratch.streaming_local_generation = 3;
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let mut out = vec![0.0f32; 8]; // 4 frames -> consumes both 2-frame chunks
+        let mut current_pos = 0;
+
+        let written = render_streaming_audio_output(
+            &mut out,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut None,
+            &mut scratch,
+            OutputPath::Direct,
+            &mut current_pos,
+        );
+        assert_eq!(written, 8); // 8 interleaved samples = 4 stereo frames
+
+        // No chunk memory was freed on the realtime thread.
+        assert_eq!(
+            shared
+                .retired_resource_drop_in_rt_count
+                .load(Ordering::Relaxed),
+            0
+        );
+        // The ring is empty until the off-realtime drainer runs.
+        assert_eq!(shared.streaming_retention_ring.len(), 0);
+
+        // Drain off the realtime thread (as the command loop does): consumed
+        // chunks land in the retention ring in playback order with sequential
+        // output-frame start positions.
+        shared.drain_retired_audio_resources();
+
+        let snapshot = shared.streaming_retention_ring.snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(
+            snapshot
+                .iter()
+                .map(|c| (c.generation, c.start_frame, c.frames))
+                .collect::<Vec<_>>(),
+            vec![(3, 0, 2), (3, 2, 2)]
+        );
     }
 
     #[test]
