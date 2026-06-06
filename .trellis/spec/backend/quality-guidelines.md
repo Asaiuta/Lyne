@@ -179,6 +179,10 @@ pub struct SharedState {
     pub streaming_active: AtomicBool,
     pub streaming_decode_finished: AtomicBool,
     pub streaming_generation: AtomicU64,
+    pub is_loading: AtomicBool,
+    pub streaming_queue_empty_during_decode_count: AtomicU64,
+    pub audio_buffer_output_shortfall_count: AtomicU64,
+    pub streaming_output_shortfall_count: AtomicU64,
 }
 ```
 
@@ -191,10 +195,14 @@ pub struct SharedState {
 | `StreamingLoadReady.autoplay` | Carries the load-time autoplay intent because `StopForLoad` can temporarily set `state=Stopped` before streaming ready applies |
 | `StreamingLoadReady` | May start playback after the first chunk threshold, before full decode finishes; start exactly once from the ready handler when `autoplay=true` unless the current state is explicitly `Paused` |
 | `streaming_chunks` | In full-buffer mode it is a bounded startup aid; in memory mode it is the sequential playback source and chunks must not be dropped |
+| `streaming_retention_ring` | Bounded (`STREAMING_RETENTION_BUDGET_BYTES`, ~64 MiB) behind-playhead ring of consumed current-generation chunks. Filled **only** off the realtime thread by `drain_retired_audio_resources` (the callback hands consumed chunks to the lock-free `retired_resources` queue with `(generation, start_frame, frames)` metadata). Evict oldest past the cap; clear on `reset_streaming_state`; never read/written by the audio callback |
+| Memory-mode producer after `StreamingLoadReady` | Must keep decoding and queueing chunks while the audio command loop applies ready; do not block the producer waiting for ready application because that leaves only the fixed startup cushion at seek resume |
+| Memory-mode seek restart | Must keep `is_loading=true` while cancelling/resetting the old streaming state and before reactivating the new generation, so the callback outputs loading silence instead of falling back to an empty `audio_buffer` |
 | `StreamingLoadFinished` with `Some(samples)` | Publishes the full `audio_buffer` without resetting `position_frames`, clears the streaming queue, and switches playback back to `audio_buffer` |
 | `StreamingLoadFinished` with `None` | Marks decode finished for memory mode without clearing the queue; the callback drains queued chunks and stops at EOF |
 | Unknown decoded size | Treat unknown `total_frames` / overflowed size estimates as memory mode, not as a small publishable buffer |
 | Generation checks | Ready/finish/chunks must be ignored when `load_generation != generation` |
+| Runtime diagnostics | Must distinguish global underrun, streaming queue empty, audio-buffer output shortfall, and streaming output shortfall counters so benchmark evidence can identify the rendering path |
 
 #### 4. Validation & Error Matrix
 
@@ -202,7 +210,9 @@ pub struct SharedState {
 |------|------|
 | Queue full while producer is still decoding in full-buffer mode | Drop later streaming chunks and keep decoding into the full buffer |
 | Queue full while producer is still decoding in memory mode | Producer waits with cancel/generation checks; chunks must not be dropped |
+| Streaming ready sent in memory mode while command loop has not applied ready | Producer keeps filling the bounded queue so seek resume has more than the startup cushion |
 | Queue empty before decode finishes | Callback writes silence and increments underrun diagnostics |
+| Memory-mode seek cancels the old generation | Keep the loading gate active across `reset_streaming_state()`; do not expose `state=Playing`, `is_loading=false`, `streaming_active=false`, and an empty `audio_buffer` to the callback |
 | Decode finishes while streaming is active | Store full buffer, mark `streaming_decode_finished`, clear queue, and set `streaming_active=false` |
 | Memory-mode decode finishes while streaming is active | Mark `streaming_decode_finished` and keep `streaming_active=true` until queued chunks drain |
 | Stale ready/finish command | Do not change current track state, buffer, or event flags |
@@ -240,6 +250,10 @@ pub struct SharedState {
   `position_frames` and drains `streaming_chunks`.
 - Fresh memory-mode finish does not replace `audio_buffer`, does not clear
   `streaming_chunks`, and lets the callback stop at EOF after the queue drains.
+- Memory-mode seek restart does not create `audio_buffer_output_shortfall`
+  diagnostics during seek stress.
+- Runtime diagnostics expose queue watermark, queue empty, backpressure,
+  audio-buffer shortfall, and streaming shortfall counters.
 - `cargo check --bin audio_server` and `cargo test --lib` must pass after
   changing `AudioCommand`.
 
@@ -287,10 +301,12 @@ or playback recovery after a missing first callback/progress watchdog.
 
 ```rust
 pub enum AudioCommand {
-    EnsurePlaybackProgress { generation: u64 },
+    EnsurePlaybackProgress { generation: u64, replay_attempted: bool },
 }
 
-pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 500;
+pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 300;
+pub(crate) const PLAYBACK_PROGRESS_REPLAY_GRACE_MS: u64 = 150;
+pub(crate) const PLAYBACK_PROGRESS_REPLAY_COMMAND_GRACE_MS: u64 = 250;
 
 pub struct SharedState {
     pub active_stream_source_sample_rate: AtomicU64,
@@ -299,6 +315,8 @@ pub struct SharedState {
     pub active_stream_running: AtomicBool,
     pub parked_output_stream_count: AtomicU64,
     pub parked_output_stream_release_count: AtomicU64,
+    pub output_callback_after_play_ms: AtomicU64,
+    pub playback_progress_generation: AtomicU64,
 }
 ```
 
@@ -309,7 +327,11 @@ pub struct SharedState {
 | Active stream key | Must match current source sample rate, channels, device, exclusive mode, and default-config preference before warm reuse |
 | `StopForLoad` in compatible shared mode | Keeps the stream warm and lets callback output silence while the next track becomes ready |
 | Streaming progress watchdog | Should observe generation/progress state before sending `EnsurePlaybackProgress`; do not send the command while stream play has not returned or while the post-play callback grace window is still open |
-| `EnsurePlaybackProgress` | Must ignore stale generations, non-playing states, already-progressed playback, missing `stream_play_returned_ms`, and play-returned states still inside `PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS` |
+| First missing-progress check | Sends `EnsurePlaybackProgress { replay_attempted: false }` after the normal grace. If the active stream is already marked running and still produced no heartbeat, rebuild immediately; otherwise replay the warm output stream once before rebuilding |
+| Replay confirmation check | Sends `EnsurePlaybackProgress { replay_attempted: true }` only after the replay command has had a bounded chance to reset `stream_play_returned_ms`, then waits `PLAYBACK_PROGRESS_REPLAY_GRACE_MS` for callback/progress |
+| `playback_progress_generation` | Records that the current load generation has produced callback or position progress; unlike one-shot first-play timestamps, it must survive later resume/play marker resets |
+| `output_callback_after_play_ms` | Records current-generation callback heartbeat before audio gates. It is not playback progress, but it proves the output callback is alive, so output-stream recovery must not rebuild solely because position has not advanced yet |
+| `EnsurePlaybackProgress` | Must ignore stale generations, non-playing states, already-progressed playback by timestamp or `playback_progress_generation`, missing `stream_play_returned_ms`, and play-returned states still inside `PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS` |
 | Recovery rebuild | Must remove the old stream from the active slot before building a replacement |
 | Parked streams | May be held by the audio thread during active playback; expose count through diagnostics |
 | Parked stream release | Release only after playback is not active or when the audio thread exits |
@@ -323,7 +345,11 @@ pub struct SharedState {
 | Warm stream does not match current output key | Release it before building a new stream |
 | Watchdog observes no `stream_play_returned_ms` | Keep observing until the bounded observe window expires; do not rebuild before play has returned |
 | Watchdog observes `stream_play_returned_ms` but callback grace has not elapsed | Keep observing; do not rebuild inside the grace window |
-| Watchdog fires after play returned, callback grace elapsed, and no callback/progress exists | Park the old active stream, clear active stream diagnostics, then rebuild |
+| Watchdog first fires after play returned, callback grace elapsed, no callback/progress exists, and the stream is already marked running | Park the old active stream, clear active stream diagnostics, increment recovery, then rebuild without replay |
+| Watchdog first fires after play returned, callback grace elapsed, no callback/progress exists, and the stream is not marked running | Replay the compatible warm stream once, reset play timing, and do not increment recovery if progress resumes |
+| Watchdog confirmation fires after replay and still no callback/progress exists | Park the old active stream, clear active stream diagnostics, increment recovery, then rebuild |
+| Watchdog wakes after later resume/play reset first-callback timestamps but `playback_progress_generation` matches | Do nothing; the load generation already proved progress |
+| Watchdog observes current-generation `output_callback_after_play_ms` but no position progress | Do not rebuild the output stream; the callback is alive, so the stall belongs to buffering/state/progress diagnostics instead of CPAL recovery |
 | Watchdog fires for stale generation, paused/stopped playback, or after progress | Do nothing |
 | Parked stream exists while playback is active | Keep it parked; do not drop it in the active command window |
 | Playback becomes inactive or thread exits | Release parked streams and increment release diagnostics |
@@ -332,6 +358,9 @@ pub struct SharedState {
 
 - Good: A streaming load starts on a warm compatible shared stream without
   rebuilding CPAL output.
+- Good: A delayed watchdog for an already-progressed load does not rebuild just
+  because a later resume/play command reset `first_callback_after_play` and
+  `first_position_advanced`.
 - Good: If the warm stream stops producing callbacks, recovery parks the old
   stream and starts a fresh output stream without blocking the command thread on
   CPAL drop.
@@ -345,11 +374,18 @@ pub struct SharedState {
 - Command handler tests must cover recovery flow and warm stream matching.
 - Command handler tests must cover stale, progressed, waiting-for-play,
   waiting-for-callback-grace, and real-stuck recovery decisions.
+- Command handler tests must cover already-running stalled streams rebuilding
+  without replay while non-running streams still replay first.
 - Loading tests must cover the streaming watchdog observer stopping for stale,
   paused, and progressed loads, waiting while stream play has not returned, and
   sending only after the post-play grace window elapses.
+- State, command handler, and loading tests must cover generation-level progress
+  surviving a later `mark_stream_play_returned()` reset.
+- Command handler and loading tests must cover current-generation output callback
+  heartbeat suppressing output-stream recovery without marking playback progress.
 - Runtime diagnostics must expose active stream key, recovery counters, and
-  parked stream counters.
+  parked stream counters, including `playback_progress_generation` and callback
+  heartbeat/silence counters.
 - Real-file stress should cover repeated load/resume/seek with
   `AUDIO_STREAMING_FIRST_BUFFER=true` and memory-mode streaming.
 - `cargo check --bin audio_server`, `cargo test --lib`, and a release real-file
