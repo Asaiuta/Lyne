@@ -4,6 +4,13 @@ version = "2.0.0"
 edition = "2021"
 description = "Hi-Fi Audio Engine - Full Rust Native"
 
+[workspace]
+members = [
+    "crates/audio-engine-core",
+    "crates/audio-runtime-paths",
+]
+resolver = "2"
+
 [lib]
 name = "audio_engine"
 crate-type = ["cdylib", "rlib"]
@@ -77,6 +84,7 @@ name = "backend_library_scan_perf"
 harness = false
 
 [dependencies]
+audio-engine-core = { path = "crates/audio-engine-core" }
 audio-runtime-paths = { path = "crates/audio-runtime-paths" }
 # --- Core Audio ---
 symphonia = { version = "0.5", features = ["all"] }

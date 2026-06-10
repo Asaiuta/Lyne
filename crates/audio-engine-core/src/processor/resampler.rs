@@ -441,10 +441,10 @@ impl StreamingResampler {
 
         // Pre-allocate all buffers (Defect 33 fix)
         let max_input_frames = 16384; // Typical chunk size
-        // True conversion ratio. Per-call Soxr output is now capped (via slicing)
-        // to the naive ratio bound, so this sizes the scratch/output buffers to the
-        // real worst case for this direction (downsample ratios < 1 no longer
-        // over-reserve the old conservative 2.0).
+                                      // True conversion ratio. Per-call Soxr output is now capped (via slicing)
+                                      // to the naive ratio bound, so this sizes the scratch/output buffers to the
+                                      // real worst case for this direction (downsample ratios < 1 no longer
+                                      // over-reserve the old conservative 2.0).
         let max_ratio = to_rate as f64 / from_rate as f64;
         let max_output_per_channel = (max_input_frames as f64 * max_ratio).ceil() as usize + 64;
 

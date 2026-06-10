@@ -4,6 +4,11 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
+pub use audio_engine_core::config::{
+    CrossfeedConfig, DitherConfig, DynamicLoudnessConfig, LoudnessConfig, NormalizationMode,
+    PhaseResponse, ResampleQuality, SaturationConfig, SaturationType,
+};
+
 pub const ENV_AUDIO_CACHE_MAX_BYTES: &str = "AUDIO_CACHE_MAX_BYTES";
 pub const DEFAULT_CACHE_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 pub const DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB: u64 = 256;
@@ -90,195 +95,6 @@ pub fn normalize_eq_bands(
     normalized
 }
 
-// M-4 fix: Import SaturationType from processor module (single source of truth).
-// Previously defined identically in both config.rs and saturation.rs.
-pub use crate::processor::SaturationType;
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum ResampleQuality {
-    Low,
-    Standard,
-    High,
-    UltraHigh,
-}
-
-/// Phase response for resampling filter
-/// - Minimum: Lowest latency, some pre-echo reduction (value = 0)
-/// - Linear: Default, symmetric impulse response (value = 50)  
-/// - Maximum: Maximum phase linearization (value = 100)
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-pub enum PhaseResponse {
-    #[default]
-    Linear, // 50 - default, symmetric
-    Minimum, // 0 - lowest latency
-    Maximum, // 100 - maximum phase linearization
-}
-
-impl PhaseResponse {
-    /// Convert to soxr phase_response value
-    pub fn to_soxr_value(&self) -> f64 {
-        match self {
-            PhaseResponse::Minimum => 0.0,
-            PhaseResponse::Linear => 50.0,
-            PhaseResponse::Maximum => 100.0,
-        }
-    }
-}
-
-/// Loudness normalization mode
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-pub enum NormalizationMode {
-    #[default]
-    Track, // Track-based: analyze whole track on load (EBU R128)
-    Album,           // Album mode: preserve relative loudness within album
-    Streaming,       // Streaming: real-time adaptive adjustment
-    ReplayGainTrack, // Use ReplayGain track gain from tags
-    ReplayGainAlbum, // Use ReplayGain album gain from tags (fallback to track)
-}
-
-/// Loudness normalization configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoudnessConfig {
-    /// Target loudness in LUFS
-    /// - -23 LUFS: EBU R128 broadcast standard
-    /// - -14 LUFS: Spotify/YouTube streaming standard  
-    /// - -16 LUFS: Apple Music/Amazon standard
-    pub target_lufs: f64,
-
-    /// True peak limit in dBTP (default: -1.0)
-    pub true_peak_limit_db: f64,
-
-    /// Gain smoothing time in milliseconds (default: 100-500ms)
-    pub smoothing_time_ms: f64,
-
-    /// Normalization mode
-    pub mode: NormalizationMode,
-
-    /// Enable loudness normalization
-    pub enabled: bool,
-
-    /// ReplayGain reference loudness in LUFS
-    /// - -18 LUFS: ReplayGain 2.0 reference
-    /// - -14 LUFS: common legacy ReplayGain 1.0 tagging practice
-    pub replaygain_reference_lufs: f64,
-}
-
-impl Default for LoudnessConfig {
-    fn default() -> Self {
-        Self {
-            target_lufs: -12.0,       // Closer to domestic streaming platforms
-            true_peak_limit_db: -0.5, // Safer headroom while preserving transients
-            smoothing_time_ms: 200.0,
-            mode: NormalizationMode::Track,
-            enabled: true,
-            replaygain_reference_lufs: -18.0,
-        }
-    }
-}
-
-// M-4 fix: SaturationType is now imported from processor::saturation (single definition).
-// The duplicate definition that was here has been removed.
-
-/// Saturation configuration for analog warmth
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SaturationConfig {
-    /// Saturation type (Tape, Tube, Transistor)
-    pub sat_type: SaturationType,
-    /// Drive amount (0.0 - 2.0)
-    pub drive: f64,
-    /// Threshold where saturation begins (0.0 - 1.0)
-    pub threshold: f64,
-    /// Mix between dry and wet (0.0 - 1.0)
-    pub mix: f64,
-    /// Input gain applied before saturation (dB)
-    pub input_gain_db: f64,
-    /// Output gain compensation applied after saturation (dB)
-    pub output_gain_db: f64,
-    /// Enable/disable saturation
-    pub enabled: bool,
-}
-
-impl Default for SaturationConfig {
-    fn default() -> Self {
-        Self {
-            sat_type: SaturationType::Tube,
-            drive: 0.25,     // Lower drive for subtle warmth
-            threshold: 0.88, // Higher threshold, only affect loud transients
-            mix: 0.2,        // Lower mix for transparent effect
-            input_gain_db: 0.0,
-            output_gain_db: 0.0,
-            enabled: true, // Enabled by default for analog warmth
-        }
-    }
-}
-
-/// Dynamic Loudness Compensation configuration
-/// Based on ISO 226:2003 Equal-Loudness Contours (Fletcher-Munson effect)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DynamicLoudnessConfig {
-    /// Reference volume level in dB (above this, no compensation)
-    /// Typical values: -15 dB (50% perceived loudness) to -20 dB
-    pub ref_volume_db: f64,
-
-    /// Transition range in dB (compensation range from ref to max)
-    /// At ref_volume - transition_db, compensation is at maximum
-    /// Typical: 25 dB (e.g., -15 to -40 dB)
-    pub transition_db: f64,
-
-    /// Strength multiplier (0.0 - 1.0)
-    /// 0.0 = disabled, 1.0 = full compensation
-    pub strength: f64,
-
-    /// Pre-gain in dB to prevent clipping from bass boost
-    /// Default: -3 dB headroom
-    pub pre_gain_db: f64,
-
-    /// Enable/disable dynamic loudness compensation
-    pub enabled: bool,
-}
-
-impl Default for DynamicLoudnessConfig {
-    fn default() -> Self {
-        Self {
-            ref_volume_db: -15.0, // ~50% perceived loudness
-            transition_db: 25.0,  // Full compensation at -40 dB
-            strength: 1.0,        // Full strength by default
-            pre_gain_db: -3.0,    // Headroom for bass boost
-            enabled: false,       // Persistent settings are the canonical default
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CrossfeedConfig {
-    pub enabled: bool,
-    pub mix: f64,
-}
-
-impl Default for CrossfeedConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            mix: 0.3,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DitherConfig {
-    pub enabled: bool,
-    pub noise_shaper_curve: crate::processor::NoiseShaperCurve,
-}
-
-impl Default for DitherConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            noise_shaper_curve: crate::processor::NoiseShaperCurve::Lipshitz5,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineSettings {
     pub target_samplerate: Option<u32>,
@@ -333,12 +149,6 @@ pub struct RuntimeServerConfig {
 pub struct ResolvedConfig {
     pub settings: EngineSettings,
     pub server: RuntimeServerConfig,
-}
-
-impl Default for ResampleQuality {
-    fn default() -> Self {
-        Self::High
-    }
 }
 
 impl Default for EngineSettings {

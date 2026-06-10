@@ -383,6 +383,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
 
 [[package]]
+name = "audio-engine-core"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "assert_no_alloc",
+ "atomic_float",
+ "ebur128",
+ "log",
+ "parking_lot",
+ "pkg-config",
+ "rand 0.8.5",
+ "rayon",
+ "reqwest",
+ "rusqlite",
+ "rustfft",
+ "serde",
+ "soxr",
+ "symphonia",
+ "thiserror 2.0.18",
+ "vcpkg",
+]
+
+[[package]]
 name = "audio-runtime-paths"
 version = "0.1.0"
 
@@ -397,6 +420,7 @@ dependencies = [
  "arc-swap",
  "assert_no_alloc",
  "atomic_float",
+ "audio-engine-core",
  "audio-runtime-paths",
  "cpal",
  "crc32fast",

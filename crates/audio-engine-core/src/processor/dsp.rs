@@ -269,8 +269,8 @@ impl NoiseShaper {
     /// running the base seed mixed with the channel index through the splitmix64
     /// finalizer. Independent seeds keep each channel's dither stream uncorrelated.
     fn channel_seed(ch: usize) -> u64 {
-        let mut z = NOISE_SHAPER_RNG_SEED
-            .wrapping_add((ch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let mut z =
+            NOISE_SHAPER_RNG_SEED.wrapping_add((ch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^= z >> 31;

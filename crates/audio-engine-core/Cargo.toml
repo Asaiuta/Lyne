@@ -1,0 +1,35 @@
+[package]
+name = "audio-engine-core"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable core decoder, DSP, and pipeline primitives for the Lyne audio engine"
+
+[lib]
+name = "audio_engine_core"
+path = "src/lib.rs"
+
+[dependencies]
+symphonia = { version = "0.5", features = ["all"] }
+soxr = "0.6.0"
+rayon = "1.10"
+parking_lot = "0.12"
+rustfft = "6.2"
+rand = "0.8"
+ebur128 = "0.1"
+atomic_float = "1.0"
+arc-swap = "1.7"
+rusqlite = { version = "0.32", features = ["bundled"] }
+log = "0.4"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[dev-dependencies]
+assert_no_alloc = "1.1"
+
+[package.metadata.vcpkg]
+dependencies = ["soxr"]
+
+[build-dependencies]
+pkg-config = "0.3"
+vcpkg = "0.2"

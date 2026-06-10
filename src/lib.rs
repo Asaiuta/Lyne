@@ -5,20 +5,19 @@
 
 pub mod app_database;
 pub mod config;
-pub mod decoder;
 pub mod diagnostics;
 pub mod metadata;
 pub mod migration;
-pub mod pipeline;
 pub mod player;
 pub mod playlist;
-pub mod processor;
 pub mod runtime;
 pub mod server;
 pub mod settings;
 #[cfg(windows)]
 pub mod wasapi_output;
 pub mod webdav;
+
+pub use audio_engine_core::{decoder, pipeline, processor};
 
 // Re-exports for convenience
 pub use config::{LoudnessConfig, NormalizationMode};
