@@ -70,7 +70,7 @@ const playerState = (overrides: Partial<PlayerState> = {}): PlayerState => ({
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-test("volume preview sends real-time command without refreshing global player state", async () => {
+test("volume preview sends realtime command without refreshing global player state", async () => {
   const calls = {
     setVolume: [] as number[],
     applied: [] as PlayerState[],
@@ -82,7 +82,6 @@ test("volume preview sends real-time command without refreshing global player st
   const api = {
     setVolume: async (volume: number) => {
       calls.setVolume.push(volume);
-      return playerState({ volume });
     }
   } as Pick<ApiClient, "setVolume"> as ApiClient;
 
@@ -109,7 +108,7 @@ test("volume preview sends real-time command without refreshing global player st
   assert.deepEqual(calls.livePositions, []);
 });
 
-test("volume commit patches only the volume field without applying the returned player snapshot", async () => {
+test("volume commit patches only the volume field after sending the realtime command", async () => {
   const calls = {
     setVolume: [] as number[],
     applied: [] as PlayerState[],
@@ -121,7 +120,6 @@ test("volume commit patches only the volume field without applying the returned 
   const api = {
     setVolume: async (volume: number) => {
       calls.setVolume.push(volume);
-      return playerState({ volume, title: "Server snapshot" });
     }
   } as Pick<ApiClient, "setVolume"> as ApiClient;
 

@@ -1,4 +1,4 @@
-import type { ApiEnvelope, PlayerState } from "./types";
+import type { ApiEnvelope } from "./types";
 import { isBoolean, isNumber, isRecord, isString } from "./ncmParserUtils";
 
 export const EFFECTS_API_ROUTES = {
@@ -28,15 +28,15 @@ export interface EffectsApiTransport {
 }
 
 export interface EffectsApiClient {
-  setEq: (input: SetEqInput) => Promise<PlayerState>;
+  setEq: (input: SetEqInput) => Promise<void>;
   setEqType: (input: SetEqTypeInput) => Promise<StatusMessageResponse>;
-  configureOptimizations: (input: ConfigureOptimizationsInput) => Promise<PlayerState>;
+  configureOptimizations: (input: ConfigureOptimizationsInput) => Promise<void>;
   getCrossfeed: () => Promise<CrossfeedResponse>;
-  setCrossfeed: (input: SetCrossfeedInput) => Promise<CrossfeedResponse>;
+  setCrossfeed: (input: SetCrossfeedInput) => Promise<void>;
   getSaturation: () => Promise<SaturationResponse>;
-  setSaturation: (input: SetSaturationInput) => Promise<SaturationResponse>;
+  setSaturation: (input: SetSaturationInput) => Promise<void>;
   getDynamicLoudness: () => Promise<DynamicLoudnessResponse>;
-  setDynamicLoudness: (input: SetDynamicLoudnessInput) => Promise<DynamicLoudnessResponse>;
+  setDynamicLoudness: (input: SetDynamicLoudnessInput) => Promise<void>;
   getNoiseShaperCurve: () => Promise<NoiseShaperResponse>;
   setNoiseShaperCurve: (input: SetNoiseShaperCurveInput) => Promise<NoiseShaperResponse>;
   configureOutputBits: (input: ConfigureOutputBitsInput) => Promise<StatusMessageResponse>;
@@ -251,14 +251,10 @@ const parseStatusResponse = (value: unknown, errorMessage: string): StatusMessag
   return response;
 };
 
-const requireState = (envelope: ApiEnvelope, fallback: string): PlayerState => {
+const requireSuccessEnvelope = (envelope: ApiEnvelope, fallback: string): void => {
   if (envelope.status === "error") {
     throw new Error(envelope.message ?? fallback);
   }
-  if (!envelope.state) {
-    throw new Error("State missing from effects response");
-  }
-  return envelope.state;
 };
 
 const postJson = (body: object): RequestInit => ({
@@ -266,9 +262,9 @@ const postJson = (body: object): RequestInit => ({
   body: JSON.stringify(body)
 });
 
-export const setEq = async (transport: EffectsApiTransport, input: SetEqInput): Promise<PlayerState> => {
+export const setEq = async (transport: EffectsApiTransport, input: SetEqInput): Promise<void> => {
   const envelope = await transport.requestEnvelope(EFFECTS_API_ROUTES.setEq.path, postJson(input));
-  return requireState(envelope, "Failed to update EQ");
+  requireSuccessEnvelope(envelope, "Failed to update EQ");
 };
 
 export const setEqType = async (
@@ -282,12 +278,12 @@ export const setEqType = async (
 export const configureOptimizations = async (
   transport: EffectsApiTransport,
   input: ConfigureOptimizationsInput
-): Promise<PlayerState> => {
+): Promise<void> => {
   const envelope = await transport.requestEnvelope(
     EFFECTS_API_ROUTES.configureOptimizations.path,
     postJson(input)
   );
-  return requireState(envelope, "Failed to configure optimizations");
+  requireSuccessEnvelope(envelope, "Failed to configure optimizations");
 };
 
 export const getCrossfeed = async (transport: EffectsApiTransport): Promise<CrossfeedResponse> => {
@@ -304,15 +300,9 @@ export const getCrossfeed = async (transport: EffectsApiTransport): Promise<Cros
 export const setCrossfeed = async (
   transport: EffectsApiTransport,
   input: SetCrossfeedInput
-): Promise<CrossfeedResponse> => {
+): Promise<void> => {
   const json = await transport.requestJson(EFFECTS_API_ROUTES.setCrossfeed.path, postJson(input));
-  const { response, payload } = parsePayloadResponse(
-    json,
-    "crossfeed",
-    parseCrossfeedSettings,
-    "Invalid crossfeed response"
-  );
-  return { ...response, crossfeed: payload };
+  parseStatusResponse(json, "Failed to update crossfeed");
 };
 
 export const getSaturation = async (transport: EffectsApiTransport): Promise<SaturationResponse> => {
@@ -329,15 +319,9 @@ export const getSaturation = async (transport: EffectsApiTransport): Promise<Sat
 export const setSaturation = async (
   transport: EffectsApiTransport,
   input: SetSaturationInput
-): Promise<SaturationResponse> => {
+): Promise<void> => {
   const json = await transport.requestJson(EFFECTS_API_ROUTES.setSaturation.path, postJson(input));
-  const { response, payload } = parsePayloadResponse(
-    json,
-    "saturation",
-    parseSaturationSettings,
-    "Invalid saturation response"
-  );
-  return { ...response, saturation: payload };
+  parseStatusResponse(json, "Failed to update saturation");
 };
 
 export const getDynamicLoudness = async (
@@ -356,15 +340,9 @@ export const getDynamicLoudness = async (
 export const setDynamicLoudness = async (
   transport: EffectsApiTransport,
   input: SetDynamicLoudnessInput
-): Promise<DynamicLoudnessResponse> => {
+): Promise<void> => {
   const json = await transport.requestJson(EFFECTS_API_ROUTES.setDynamicLoudness.path, postJson(input));
-  const { response, payload } = parsePayloadResponse(
-    json,
-    "dynamic_loudness",
-    parseDynamicLoudnessSettings,
-    "Invalid dynamic loudness response"
-  );
-  return { ...response, dynamic_loudness: payload };
+  parseStatusResponse(json, "Failed to update dynamic loudness");
 };
 
 export const getNoiseShaperCurve = async (

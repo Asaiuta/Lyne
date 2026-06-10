@@ -11,7 +11,7 @@ export interface PlaybackApiClient {
   stop: () => Promise<PlayerState>;
   load: (path: string, options?: LoadOptions) => Promise<PlayerState>;
   seek: (position: number) => Promise<PlayerState>;
-  setVolume: (volume: number) => Promise<PlayerState>;
+  setVolume: (volume: number) => Promise<void>;
   setRepeatMode: (mode: RepeatMode) => Promise<PlayerState>;
   setShuffleMode: (mode: ShuffleMode) => Promise<PlayerState>;
   listDevices: () => Promise<DevicesResponse>;
@@ -44,6 +44,12 @@ const requireDevices = (envelope: ApiEnvelope, fallback: string): DevicesRespons
   return envelope.devices;
 };
 
+const requireSuccess = (envelope: ApiEnvelope, fallback: string): void => {
+  if (envelope.status === "error") {
+    throw new Error(envelope.message ?? fallback);
+  }
+};
+
 const postJson = (body: object): RequestInit => ({
   method: "POST",
   body: JSON.stringify(body)
@@ -68,7 +74,10 @@ export const createPlaybackApiClient = (transport: PlaybackApiTransport): Playba
   seek: async (position) =>
     requireState(await transport.requestEnvelope("/seek", postJson({ position })), "Failed to seek"),
   setVolume: async (volume) =>
-    requireState(await transport.requestEnvelope("/volume", postJson({ volume })), "Failed to set volume"),
+    requireSuccess(
+      await transport.requestEnvelope("/volume", postJson({ volume })),
+      "Failed to set volume"
+    ),
   setRepeatMode: async (mode) =>
     requireState(await transport.requestEnvelope("/repeat", postJson({ mode })), "Failed to set repeat mode"),
   setShuffleMode: async (mode) =>

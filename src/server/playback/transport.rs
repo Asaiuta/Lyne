@@ -312,26 +312,9 @@ pub(super) async fn set_volume(
     data: web::Data<Arc<AppState>>,
     body: web::Json<VolumeRequest>,
 ) -> HttpResponse {
-    let (snapshot, state_response) = {
+    {
         let mut player = data.player.lock();
         player.set_volume(body.volume as f64);
-        (build_runtime_snapshot(&player), get_player_state(&player))
-    };
-    if let Some(session_id) = *data.playback.active_session_id.lock() {
-        if let Err(e) = data
-            .app_db
-            .update_playback_session(session_id, "active", &snapshot)
-        {
-            log::warn!(
-                "Failed to persist volume update for session {}: {}",
-                session_id,
-                e
-            );
-        }
     }
-    let state_response = enrich_player_state(&data.app_db, state_response);
-    HttpResponse::Ok().json(ApiResponse::success_with_state(
-        "Volume set",
-        state_response,
-    ))
+    success_response("Volume set")
 }

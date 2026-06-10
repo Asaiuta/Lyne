@@ -55,7 +55,6 @@ import type {
   SetSaturationInput,
   StatusMessageResponse
 } from "./effects";
-import type { PlayerState } from "./types";
 
 type Equal<Actual, Expected> =
   (<T>() => T extends Actual ? 1 : 2) extends
@@ -120,15 +119,15 @@ export type NcmApiValueContract = [
 
 export type EffectsApiMethodContract = [
   Expect<Equal<Pick<ApiClient, keyof EffectsApiClient>, EffectsApiClient>>,
-  Expect<Equal<ApiClient["setEq"], (input: SetEqInput) => Promise<PlayerState>>>,
+  Expect<Equal<ApiClient["setEq"], (input: SetEqInput) => Promise<void>>>,
   Expect<Equal<ApiClient["setEqType"], (input: SetEqTypeInput) => Promise<StatusMessageResponse>>>,
-  Expect<Equal<ApiClient["configureOptimizations"], (input: ConfigureOptimizationsInput) => Promise<PlayerState>>>,
+  Expect<Equal<ApiClient["configureOptimizations"], (input: ConfigureOptimizationsInput) => Promise<void>>>,
   Expect<Equal<ApiClient["getCrossfeed"], () => Promise<CrossfeedResponse>>>,
-  Expect<Equal<ApiClient["setCrossfeed"], (input: SetCrossfeedInput) => Promise<CrossfeedResponse>>>,
+  Expect<Equal<ApiClient["setCrossfeed"], (input: SetCrossfeedInput) => Promise<void>>>,
   Expect<Equal<ApiClient["getSaturation"], () => Promise<SaturationResponse>>>,
-  Expect<Equal<ApiClient["setSaturation"], (input: SetSaturationInput) => Promise<SaturationResponse>>>,
+  Expect<Equal<ApiClient["setSaturation"], (input: SetSaturationInput) => Promise<void>>>,
   Expect<Equal<ApiClient["getDynamicLoudness"], () => Promise<DynamicLoudnessResponse>>>,
-  Expect<Equal<ApiClient["setDynamicLoudness"], (input: SetDynamicLoudnessInput) => Promise<DynamicLoudnessResponse>>>,
+  Expect<Equal<ApiClient["setDynamicLoudness"], (input: SetDynamicLoudnessInput) => Promise<void>>>,
   Expect<Equal<ApiClient["getNoiseShaperCurve"], () => Promise<NoiseShaperResponse>>>,
   Expect<Equal<ApiClient["setNoiseShaperCurve"], (input: SetNoiseShaperCurveInput) => Promise<NoiseShaperResponse>>>,
   Expect<Equal<ApiClient["configureOutputBits"], (input: ConfigureOutputBitsInput) => Promise<StatusMessageResponse>>>

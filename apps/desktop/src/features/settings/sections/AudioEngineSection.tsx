@@ -110,6 +110,11 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
   const isPending = (id: string) => pendingIds().has(id);
   const isBusy = () => pendingIds().size > 0;
   const isOutputPending = () => isPending("device") || isPending("exclusive");
+  let eqPreviewCommandId = 0;
+  let eqPreviewRequestInFlight = false;
+  let queuedEqPreview:
+    | { bands: Record<EqBandKey, number>; commandId: number }
+    | null = null;
 
   const eqBandsClass = () =>
     [
@@ -297,8 +302,40 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
     void loadPanelData();
   });
 
+  const flushQueuedEqPreview = (): void => {
+    if (eqPreviewRequestInFlight || queuedEqPreview === null) {
+      return;
+    }
+
+    const request = queuedEqPreview;
+    queuedEqPreview = null;
+    eqPreviewRequestInFlight = true;
+
+    void api
+      .setEq({ bands: eqBandsForSettingsUpdate(request.bands) })
+      .catch((error) => {
+        if (request.commandId !== eqPreviewCommandId) {
+          return;
+        }
+        setSaveMessageKey(null);
+        setSaveError(readErrorMessage(error));
+      })
+      .finally(() => {
+        eqPreviewRequestInFlight = false;
+        flushQueuedEqPreview();
+      });
+  };
+
+  const queueEqPreview = (bands: Record<EqBandKey, number>): void => {
+    const commandId = ++eqPreviewCommandId;
+    queuedEqPreview = { bands: { ...bands }, commandId };
+    flushQueuedEqPreview();
+  };
+
   const updateEqBand = (key: EqBandKey, value: number) => {
+    const nextBands = { ...form.eqBands, [key]: value };
     setForm("eqBands", key, value);
+    queueEqPreview(nextBands);
   };
 
   const persistedEqBands = () => {
@@ -320,6 +357,7 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
   const handleResetEq = () => {
     const nextBands = buildEmptyEqBands();
     setForm("eqBands", nextBands);
+    queueEqPreview(nextBands);
     savePatch("eqBands", { eq_bands: nextBands }, () => revertEqBands(persistedEqBands()));
   };
 

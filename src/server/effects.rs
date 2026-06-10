@@ -63,28 +63,6 @@ fn noise_shaper_config_payload(player: &AudioPlayer) -> serde_json::Value {
     })
 }
 
-fn crossfeed_config_payload(player: &AudioPlayer) -> serde_json::Value {
-    let settings = player.get_crossfeed_info();
-    serde_json::json!({
-        "enabled": settings.enabled,
-        "mix": settings.mix
-    })
-}
-
-fn saturation_config_payload(player: &AudioPlayer) -> serde_json::Value {
-    let settings = player.get_saturation_info();
-    serde_json::to_value(settings).unwrap_or(serde_json::Value::Null)
-}
-
-fn dynamic_loudness_config_payload(player: &AudioPlayer) -> serde_json::Value {
-    serde_json::json!({
-        "enabled": player.is_dynamic_loudness_enabled(),
-        "strength": player.get_dynamic_loudness_strength(),
-        "factor": player.get_dynamic_loudness_factor(),
-        "band_gains": player.get_dynamic_loudness_gains()
-    })
-}
-
 async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -> HttpResponse {
     let normalized_bands = body.bands.as_ref().map(|bands| {
         normalize_eq_bands(bands.clone(), |unknown| {
@@ -92,7 +70,7 @@ async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -
         })
     });
 
-    let (message, payload, state_response) = {
+    let message = {
         let mut player = data.player.lock();
         let is_fir = player.is_fir_eq_enabled();
 
@@ -121,11 +99,7 @@ async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -
                 }
             }
 
-            (
-                "FIR EQ updated",
-                eq_config_payload(&player),
-                get_player_state(&player),
-            )
+            "FIR EQ updated"
         } else {
             if let Some(enabled) = body.enabled {
                 player.lockfree_eq_params.set_enabled(enabled);
@@ -140,17 +114,11 @@ async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -
             }
 
             *player.shared_state().eq_type.write() = "IIR".to_string();
-            (
-                "EQ updated",
-                eq_config_payload(&player),
-                get_player_state(&player),
-            )
+            "EQ updated"
         }
     };
 
-    persist_dsp_config_payload(&data, "eq", &payload);
-    let state_response = enrich_player_state(&data.app_db, state_response);
-    HttpResponse::Ok().json(ApiResponse::success_with_state(message, state_response))
+    success_response(message)
 }
 
 async fn set_eq_type(
@@ -207,7 +175,7 @@ async fn configure_optimizations(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ConfigureOptimizationsRequest>,
 ) -> HttpResponse {
-    let (payload, state_response) = {
+    {
         let mut player = data.player.lock();
 
         if let Some(dither) = body.dither_enabled {
@@ -218,26 +186,15 @@ async fn configure_optimizations(
         if let Some(rg) = body.replaygain_enabled {
             player.replaygain_enabled = rg;
         }
-
-        (
-            noise_shaper_config_payload(&player),
-            get_player_state(&player),
-        )
-    };
-
-    persist_dsp_config_payload(&data, "noise_shaper", &payload);
-    let state_response = enrich_player_state(&data.app_db, state_response);
-    HttpResponse::Ok().json(ApiResponse::success_with_state(
-        "Optimizations updated",
-        state_response,
-    ))
+    }
+    success_response("Optimizations updated")
 }
 
 async fn set_crossfeed(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetCrossfeedRequest>,
 ) -> HttpResponse {
-    let (settings, payload) = {
+    {
         let player = data.player.lock();
 
         if let Some(enabled) = body.enabled {
@@ -246,22 +203,8 @@ async fn set_crossfeed(
         if let Some(mix) = body.mix {
             player.set_crossfeed_mix(mix);
         }
-
-        (
-            player.get_crossfeed_info(),
-            crossfeed_config_payload(&player),
-        )
-    };
-
-    persist_dsp_config_payload(&data, "crossfeed", &payload);
-    HttpResponse::Ok().json(serde_json::json!({
-        "status": "success",
-        "message": "Crossfeed updated",
-        "crossfeed": {
-            "enabled": settings.enabled,
-            "mix": settings.mix
-        }
-    }))
+    }
+    success_response("Crossfeed updated")
 }
 
 async fn get_crossfeed(data: web::Data<Arc<AppState>>) -> HttpResponse {
@@ -281,7 +224,7 @@ async fn set_saturation(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetSaturationRequest>,
 ) -> HttpResponse {
-    let (settings, payload) = {
+    {
         let player = data.player.lock();
 
         if let Some(enabled) = body.enabled {
@@ -316,19 +259,8 @@ async fn set_saturation(
                 .lockfree_saturation_params
                 .set_highpass_cutoff(highpass_cutoff);
         }
-
-        (
-            player.get_saturation_info(),
-            saturation_config_payload(&player),
-        )
-    };
-
-    persist_dsp_config_payload(&data, "saturation", &payload);
-    HttpResponse::Ok().json(serde_json::json!({
-        "status": "success",
-        "message": "Saturation updated",
-        "saturation": settings
-    }))
+    }
+    success_response("Saturation updated")
 }
 
 async fn get_saturation(data: web::Data<Arc<AppState>>) -> HttpResponse {
@@ -345,7 +277,7 @@ async fn set_dynamic_loudness(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetDynamicLoudnessRequest>,
 ) -> HttpResponse {
-    let (response, payload) = {
+    {
         let player = data.player.lock();
 
         if let Some(enabled) = body.enabled {
@@ -357,24 +289,8 @@ async fn set_dynamic_loudness(
             }
             player.set_dynamic_loudness_strength(strength);
         }
-
-        (
-            serde_json::json!({
-                "enabled": player.is_dynamic_loudness_enabled(),
-                "strength": player.get_dynamic_loudness_strength(),
-                "factor": player.get_dynamic_loudness_factor(),
-                "band_gains": player.get_dynamic_loudness_gains()
-            }),
-            dynamic_loudness_config_payload(&player),
-        )
-    };
-
-    persist_dsp_config_payload(&data, "dynamic_loudness", &payload);
-    HttpResponse::Ok().json(serde_json::json!({
-        "status": "success",
-        "message": "Dynamic Loudness updated",
-        "dynamic_loudness": response
-    }))
+    }
+    success_response("Dynamic Loudness updated")
 }
 
 async fn get_dynamic_loudness(data: web::Data<Arc<AppState>>) -> HttpResponse {
