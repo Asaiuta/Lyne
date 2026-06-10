@@ -57,7 +57,10 @@ Extracted reusable decoder, DSP, pipeline and core helpers into crates/audio-eng
 
 ### Main Changes
 
-(Add details)
+- Removed root runtime dependencies that are now owned by `crates/audio-engine-core`: `symphonia`, `soxr`, `rayon`, and `atomic_float`.
+- Moved root bench-only direct dependencies `rustfft` and `ebur128` to `[dev-dependencies]`.
+- Removed root SoXR build metadata, root build dependencies, and the delegating root `build.rs`.
+- Updated backend directory-structure guidance so build-script ownership matches the package boundary.
 
 ### Git Commits
 
@@ -65,6 +68,43 @@ Extracted reusable decoder, DSP, pipeline and core helpers into crates/audio-eng
 |------|---------|
 | `91a4707` | (see git log) |
 | `aa5b846` | (see git log) |
+
+### Testing
+
+- [OK] `cargo check --bin audio_server`
+- [OK] `cargo test -p audio-engine-core --lib` (152 passed)
+- [OK] `cargo check --bench audio_convolver_perf --bench audio_quality_measurements`
+- [OK] `F:\Python\python.exe .\.trellis\scripts\task.py validate 06-10-audio-engine-core-dependency-ownership`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 3: Tighten audio engine core dependency ownership
+
+**Date**: 2026-06-10
+**Task**: Tighten audio engine core dependency ownership
+**Branch**: `master`
+
+### Summary
+
+Removed root runtime/build dependencies now owned by audio-engine-core, kept bench-only deps as dev-dependencies, and synced the Trellis boundary docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `75058c3` | (see git log) |
+| `a84936e` | (see git log) |
 
 ### Testing
 
