@@ -71,22 +71,15 @@ pub(super) async fn get_media_items(
 }
 
 pub(super) async fn get_library_track_summaries(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let stats = match data.app_db.library_summary_stats() {
-        Ok(stats) => stats,
-        Err(e) => return internal_server_error_response(e),
-    };
-    match data.app_db.list_library_track_summaries() {
-        Ok(tracks) => {
-            let folders = data.app_db.library_folder_summaries_for_tracks(&tracks);
-            HttpResponse::Ok().json(serde_json::json!({
-                "status": "success",
-                "revision": stats.revision,
-                "total_count": stats.total_count,
-                "total_size_bytes": stats.total_size_bytes,
-                "folders": folders,
-                "tracks": tracks
-            }))
-        }
+    match data.repo.library_track_summaries_bundle().await {
+        Ok((stats, tracks, folders)) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success",
+            "revision": stats.revision,
+            "total_count": stats.total_count,
+            "total_size_bytes": stats.total_size_bytes,
+            "folders": folders,
+            "tracks": tracks
+        })),
         Err(e) => internal_server_error_response(e),
     }
 }
@@ -130,7 +123,7 @@ pub(super) async fn get_library_track_view(
         include_media_ids: body.include_media_ids,
     };
 
-    match data.app_db.library_track_view(query) {
+    match data.repo.library_track_view(query).await {
         Ok(view) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "revision": view.revision,
@@ -185,7 +178,7 @@ pub(super) async fn get_library_track_groups(
         selected_group_key: body.selected_group_key.clone(),
     };
 
-    match data.app_db.library_track_groups(query) {
+    match data.repo.library_track_groups(query).await {
         Ok(view) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "revision": view.revision,
@@ -221,8 +214,8 @@ pub(super) async fn get_library_track_cover_art(
     data: web::Data<Arc<AppState>>,
     path: web::Path<LibraryTrackPath>,
 ) -> HttpResponse {
-    match data.app_db.media_id_for_track_key(path.track_key) {
-        Ok(Some(media_id)) => get_media_cover_art_by_id(&data, &media_id),
+    match data.repo.media_id_for_track_key(path.track_key).await {
+        Ok(Some(media_id)) => get_media_cover_art_by_id(&data, &media_id).await,
         Ok(None) => not_found_response("Library track not found"),
         Err(e) => internal_server_error_response(e),
     }
@@ -496,14 +489,14 @@ pub(super) async fn get_media_cover_art(
     data: web::Data<Arc<AppState>>,
     path: web::Path<MediaPath>,
 ) -> HttpResponse {
-    get_media_cover_art_by_id(&data, &path.media_id)
+    get_media_cover_art_by_id(&data, &path.media_id).await
 }
 
 pub(super) async fn get_media_cover_art_by_query(
     data: web::Data<Arc<AppState>>,
     query: web::Query<MediaCoverArtQuery>,
 ) -> HttpResponse {
-    get_media_cover_art_by_id(&data, &query.media_id)
+    get_media_cover_art_by_id(&data, &query.media_id).await
 }
 
 pub(super) async fn resolve_current_lyrics(
@@ -524,10 +517,22 @@ pub(super) async fn resolve_current_lyrics(
     };
 
     let local_override = match request.song_id {
-        Some(song_id) => match read_local_override_lyrics(&request.lyric_dirs, song_id) {
-            Ok(value) => value,
-            Err(e) => return internal_server_error_response(e),
-        },
+        Some(song_id) => {
+            let lyric_dirs = request.lyric_dirs.clone();
+            match actix_web::rt::task::spawn_blocking(move || {
+                read_local_override_lyrics(&lyric_dirs, song_id)
+            })
+            .await
+            {
+                Ok(Ok(value)) => value,
+                Ok(Err(e)) => return internal_server_error_response(e),
+                Err(e) => {
+                    return internal_server_error_response(format!(
+                        "lyric override task join failed: {e}"
+                    ))
+                }
+            }
+        }
         None => None,
     };
     if let Some((lyric_lines, source)) = local_override {
@@ -545,9 +550,22 @@ pub(super) async fn resolve_current_lyrics(
         return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(Vec::new(), None));
     }
 
-    let local_lyrics = match read_current_local_lyrics(&path, runtime_lyrics.as_deref()) {
-        Ok(value) => value,
-        Err(e) => return internal_server_error_response(e),
+    let local_lyrics = {
+        let path = path.clone();
+        let runtime_lyrics = runtime_lyrics.clone();
+        match actix_web::rt::task::spawn_blocking(move || {
+            read_current_local_lyrics(&path, runtime_lyrics.as_deref())
+        })
+        .await
+        {
+            Ok(Ok(value)) => value,
+            Ok(Err(e)) => return internal_server_error_response(e),
+            Err(e) => {
+                return internal_server_error_response(format!(
+                    "local lyric task join failed: {e}"
+                ))
+            }
+        }
     };
     if let Some((lyric_lines, source)) = local_lyrics {
         return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(
@@ -563,18 +581,48 @@ pub(super) async fn resolve_current_lyrics(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        let cache_dir = &data.runtime_paths.cache_dir;
-        let artist = artist.as_deref();
-        if let Some(lyric_lines) = read_cached_online_lyrics(cache_dir, title, artist) {
+        let cache_dir = data.runtime_paths.cache_dir.clone();
+        let title = title.to_string();
+        let artist = artist.clone();
+        let cached = {
+            let cache_dir = cache_dir.clone();
+            let title = title.clone();
+            let artist = artist.clone();
+            match actix_web::rt::task::spawn_blocking(move || {
+                read_cached_online_lyrics(&cache_dir, &title, artist.as_deref())
+            })
+            .await
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    return internal_server_error_response(format!(
+                        "online lyric cache task join failed: {e}"
+                    ))
+                }
+            }
+        };
+        if let Some(lyric_lines) = cached {
             return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(
                 lyric_lines,
                 Some("ncm-cache".to_string()),
             ));
         }
-        let lyric_lines =
-            crate::server::netease::fetch_online_lyrics_for_metadata(&data, title, artist).await;
+        let lyric_lines = crate::server::netease::fetch_online_lyrics_for_metadata(
+            &data,
+            &title,
+            artist.as_deref(),
+        )
+        .await;
         if !lyric_lines.is_empty() {
-            write_cached_online_lyrics(cache_dir, title, artist, &lyric_lines);
+            let cache_dir = cache_dir.clone();
+            let title = title.clone();
+            let artist = artist.clone();
+            let lines = lyric_lines.clone();
+            // Cache write failures are logged inside; ignore join errors too.
+            let _ = actix_web::rt::task::spawn_blocking(move || {
+                write_cached_online_lyrics(&cache_dir, &title, artist.as_deref(), &lines)
+            })
+            .await;
             return HttpResponse::Ok().json(lyrics::CurrentLyricsResponse::success(
                 lyric_lines,
                 Some("ncm".to_string()),

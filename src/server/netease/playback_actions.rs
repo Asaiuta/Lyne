@@ -32,18 +32,40 @@ pub(super) async fn play_ncm_track(
         Err(err) => return ncm_track_resolve_error_response(err),
     };
 
-    match crate::server::playback::load_validated_path_for_playback(
-        &data,
-        &track.stream_url,
-        true,
-        "ncm_autoplay",
-    ) {
-        Ok((state, _shared_state)) => HttpResponse::Ok().json(serde_json::json!({
+    // `load_validated_path_for_playback` is fully synchronous: it acquires the
+    // `parking_lot::Mutex<AudioPlayer>` (a `!Send` guard) and performs a decoder
+    // open plus several blocking SQLite writes. Offload it onto the blocking pool
+    // so it never blocks the async executor. The player lock is acquired and
+    // released entirely inside the closure (no `.await` there), so the `!Send`
+    // guard never crosses an await point. Only owned `Send` data is moved in
+    // (`Arc<AppState>` clone, `String` path) and only owned `Send` data
+    // (`StateResponse`) is returned.
+    let state_for_task = data.get_ref().clone();
+    let stream_url = track.stream_url.clone();
+    let play_result = actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        crate::server::playback::load_validated_path_for_playback(
+            &data,
+            &stream_url,
+            true,
+            "ncm_autoplay",
+        )
+        .map(|(state, _shared_state)| state)
+    })
+    .await;
+
+    match play_result {
+        Ok(Ok(state)) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "track": track,
             "state": state
         })),
-        Err(err) => internal_server_error_response(format!("Failed to play NCM track: {}", err)),
+        Ok(Err(err)) => {
+            internal_server_error_response(format!("Failed to play NCM track: {}", err))
+        }
+        Err(err) => {
+            internal_server_error_response(format!("Failed to play NCM track: join error {}", err))
+        }
     }
 }
 
@@ -56,16 +78,32 @@ pub(super) async fn enqueue_ncm_track(
         Err(err) => return ncm_track_resolve_error_response(err),
     };
 
-    match crate::server::playback::append_validated_path_to_persistent_queue(
-        &data,
-        &track.stream_url,
-    ) {
-        Ok(queue) => HttpResponse::Ok().json(serde_json::json!({
+    // `append_validated_path_to_persistent_queue` does blocking SQLite writes and
+    // a `data.player.lock()` inside `emit_queue_updated`. Offload the whole
+    // synchronous call so it never blocks the async executor; the player lock is
+    // acquired/released inside the closure (no `.await`), so the `!Send` guard
+    // never crosses an await. Only owned `Send` data crosses the boundary.
+    let state_for_task = data.get_ref().clone();
+    let stream_url = track.stream_url.clone();
+    let enqueue_result = actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        crate::server::playback::append_validated_path_to_persistent_queue(&data, &stream_url)
+    })
+    .await;
+
+    match enqueue_result {
+        Ok(Ok(queue)) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "track": track,
             "queue": queue
         })),
-        Err(err) => internal_server_error_response(format!("Failed to enqueue NCM track: {}", err)),
+        Ok(Err(err)) => {
+            internal_server_error_response(format!("Failed to enqueue NCM track: {}", err))
+        }
+        Err(err) => internal_server_error_response(format!(
+            "Failed to enqueue NCM track: join error {}",
+            err
+        )),
     }
 }
 
@@ -163,25 +201,33 @@ async fn resolve_ncm_track_inner(
         duration_secs: request.duration_secs,
     };
 
-    if let Err(err) = data.app_db.record_external_media_metadata(
-        &track.stream_url,
-        track.title.as_deref(),
-        track.artist.as_deref(),
-        track.album.as_deref(),
-        track.duration_secs,
-        track.cover_url.as_deref(),
-    ) {
+    if let Err(err) = data
+        .repo
+        .record_external_media_metadata(
+            track.stream_url.clone(),
+            track.title.clone(),
+            track.artist.clone(),
+            track.album.clone(),
+            track.duration_secs,
+            track.cover_url.clone(),
+        )
+        .await
+    {
         log::warn!(
             "Failed to persist NCM metadata for song {}: {}",
             track.song_id,
             err
         );
     }
-    if let Err(err) = data.app_db.record_ncm_track_source(
-        &track.stream_url,
-        track.song_id,
-        Some(track.source_page_url.as_str()),
-    ) {
+    if let Err(err) = data
+        .repo
+        .record_ncm_track_source(
+            track.stream_url.clone(),
+            track.song_id,
+            Some(track.source_page_url.clone()),
+        )
+        .await
+    {
         log::warn!(
             "Failed to persist NCM track source for song {}: {}",
             track.song_id,

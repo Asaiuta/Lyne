@@ -6,38 +6,43 @@ use std::sync::Arc;
 
 const LOCAL_OVERRIDE_LYRIC_EXTENSIONS: [&str; 2] = ["ttml", "lrc"];
 
-pub(super) fn get_media_cover_art_by_id(
+pub(super) async fn get_media_cover_art_by_id(
     data: &web::Data<Arc<AppState>>,
     media_id: &str,
 ) -> HttpResponse {
-    match data.app_db.get_cover_art_for_media(media_id) {
-        Ok(Some((record, bytes))) => {
-            let mime = record
-                .mime_type
-                .clone()
-                .unwrap_or_else(|| "application/octet-stream".to_string());
-            HttpResponse::Ok()
-                .insert_header(("Content-Type", mime))
-                .insert_header(("Content-Length", bytes.len().to_string()))
-                .insert_header(("X-Cover-Art-Id", record.cover_art_id))
-                .body(bytes)
-        }
-        Ok(None) => match runtime_cover_art_for_media(data, media_id) {
-            Some((mime, bytes)) => HttpResponse::Ok()
-                .insert_header(("Content-Type", mime))
-                .insert_header(("Content-Length", bytes.len().to_string()))
-                .insert_header(("X-Cover-Art-Id", format!("{}:runtime-cover", media_id)))
-                .body(bytes),
-            None => match local_cover_art_for_media(data, media_id) {
-                Ok(Some((mime, bytes))) => HttpResponse::Ok()
-                    .insert_header(("Content-Type", mime))
-                    .insert_header(("Content-Length", bytes.len().to_string()))
-                    .insert_header(("X-Cover-Art-Id", format!("{}:local-cover", media_id)))
-                    .body(bytes),
-                Ok(None) => not_found_response("Cover art not found"),
-                Err(e) => internal_server_error_response(e),
-            },
-        },
+    let cached = match data.repo.get_cover_art_for_media(media_id.to_string()).await {
+        Ok(value) => value,
+        Err(e) => return internal_server_error_response(e),
+    };
+    if let Some((record, bytes)) = cached {
+        let mime = record
+            .mime_type
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        return HttpResponse::Ok()
+            .insert_header(("Content-Type", mime))
+            .insert_header(("Content-Length", bytes.len().to_string()))
+            .insert_header(("X-Cover-Art-Id", record.cover_art_id))
+            .body(bytes);
+    }
+
+    // Runtime fallback: snapshot the player-held cover synchronously (the
+    // parking_lot guard is `!Send` and must not cross the offload boundary).
+    if let Some((mime, bytes)) = runtime_cover_art_for_media(data, media_id) {
+        return HttpResponse::Ok()
+            .insert_header(("Content-Type", mime))
+            .insert_header(("Content-Length", bytes.len().to_string()))
+            .insert_header(("X-Cover-Art-Id", format!("{}:runtime-cover", media_id)))
+            .body(bytes);
+    }
+
+    match local_cover_art_for_media(data, media_id).await {
+        Ok(Some((mime, bytes))) => HttpResponse::Ok()
+            .insert_header(("Content-Type", mime))
+            .insert_header(("Content-Length", bytes.len().to_string()))
+            .insert_header(("X-Cover-Art-Id", format!("{}:local-cover", media_id)))
+            .body(bytes),
+        Ok(None) => not_found_response("Cover art not found"),
         Err(e) => internal_server_error_response(e),
     }
 }
@@ -64,48 +69,67 @@ fn runtime_cover_art_for_media(
     Some((mime, bytes))
 }
 
-fn local_cover_art_for_media(
+async fn local_cover_art_for_media(
     data: &web::Data<Arc<AppState>>,
     media_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, String> {
-    let Some(source_path) = data.app_db.source_path_for_media_id(media_id)? else {
+    let Some(source_path) = data
+        .repo
+        .source_path_for_media_id(media_id.to_string())
+        .await?
+    else {
         return Ok(None);
     };
     if source_path.starts_with("http://") || source_path.starts_with("https://") {
         return Ok(None);
     }
 
-    let path = Path::new(&source_path);
-    let local_metadata = match crate::metadata::read_local_metadata(&source_path) {
-        Ok(value) => value,
-        Err(e) => {
-            log::warn!(
-                "Cover art metadata read failed for '{}': {}",
-                source_path,
-                e
-            );
-            return Ok(None);
-        }
+    // Offload the lofty/symphonia open, sidecar cover read, and mime sniff onto
+    // the blocking pool; only owned data crosses the boundary.
+    let cover_max_bytes = data.analysis.library_scan_cover_max_bytes;
+    let resolved = {
+        let source_path = source_path.clone();
+        actix_web::rt::task::spawn_blocking(move || resolve_local_cover_bytes(&source_path, cover_max_bytes))
+            .await
+            .map_err(|e| format!("cover art task join failed: {e}"))?
     };
-    let metadata = metadata_with_external_cover(
-        path,
-        &local_metadata.metadata,
-        data.analysis.library_scan_cover_max_bytes,
-    );
 
-    let Some(bytes) = metadata.cover_art.clone() else {
+    let Some((mime, bytes, metadata, duration_secs)) = resolved else {
         return Ok(None);
     };
+
+    // Persist the lazily-resolved metadata through the async repo facade.
+    data.repo
+        .record_media_metadata(source_path, metadata, duration_secs, None, None)
+        .await?;
+
+    Ok(Some((mime, bytes)))
+}
+
+/// Synchronous local cover resolution intended to run inside a blocking closure.
+/// Returns `(mime, cover_bytes, metadata_to_persist, duration_secs)` on success.
+fn resolve_local_cover_bytes(
+    source_path: &str,
+    cover_max_bytes: u64,
+) -> Option<(String, Vec<u8>, crate::decoder::TrackMetadata, Option<f64>)> {
+    let path = Path::new(source_path);
+    let local_metadata = match crate::metadata::read_local_metadata(source_path) {
+        Ok(value) => value,
+        Err(e) => {
+            log::warn!("Cover art metadata read failed for '{}': {}", source_path, e);
+            return None;
+        }
+    };
+    let metadata = metadata_with_external_cover(path, &local_metadata.metadata, cover_max_bytes);
+
+    let bytes = metadata.cover_art.clone()?;
     let mime = metadata
         .cover_art_mime
         .clone()
         .unwrap_or_else(|| "application/octet-stream".to_string());
     let duration_secs = local_metadata.duration_secs;
 
-    data.app_db
-        .record_media_metadata(&source_path, &metadata, duration_secs, None, None)?;
-
-    Ok(Some((mime, bytes)))
+    Some((mime, bytes, metadata, duration_secs))
 }
 
 pub(super) fn read_current_local_lyrics(

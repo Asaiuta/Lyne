@@ -220,27 +220,65 @@ fn apply_gapless_swap_side_effects(
         *shared_state.file_path.write() = Some(path.clone());
     }
     if let Some(metadata) = next_metadata {
-        let mut enhanced = metadata.clone();
+        // Publish the decoder-provided metadata synchronously so this tick's
+        // `track_changed` readers see the new track immediately. The lofty parse
+        // (blocking file I/O) is offloaded; the enriched result is re-merged in a
+        // detached task and only applied if the current track path is still this
+        // one, so a later swap can never be clobbered by a stale enrichment.
+        *shared_state.track_metadata.write() = metadata.clone();
         if let Some(ref path) = next_path {
-            if let Some(lofty_metadata) = crate::metadata::extract_lofty_metadata(path) {
-                crate::metadata::merge_lofty_into(&mut enhanced, &lofty_metadata);
-            }
+            let path_owned = path.clone();
+            let shared_for_task = Arc::clone(shared_state);
+            let base_metadata = metadata;
+            actix_rt::spawn(async move {
+                let lofty_path = path_owned.clone();
+                let lofty_metadata = actix_web::rt::task::spawn_blocking(move || {
+                    crate::metadata::extract_lofty_metadata(&lofty_path)
+                })
+                .await
+                .ok()
+                .flatten();
+                if let Some(lofty_metadata) = lofty_metadata {
+                    if shared_for_task.current_track_path.read().as_deref() == Some(&path_owned) {
+                        let mut enhanced = base_metadata;
+                        crate::metadata::merge_lofty_into(&mut enhanced, &lofty_metadata);
+                        *shared_for_task.track_metadata.write() = enhanced;
+                    }
+                }
+            });
         }
-        *shared_state.track_metadata.write() = enhanced;
     }
     *shared_state.current_cached_loudness.write() = next_cached_loudness;
     *shared_state.current_track_path.write() = next_path.clone();
-    if let Some(ref current_path) = next_path {
-        super::playback::mark_current_track_as_played(data, current_path);
-        let _ = data.app_db.mark_queue_entry_status_by_path(
-            "active",
-            current_path,
-            &["preloading", "queued"],
-            "playing",
-        );
+    if let Some(current_path) = next_path {
+        // Both writes below are blocking SQLite upserts with no read-after-write
+        // dependence within this tick. Offload them so the 50ms coordinator tick
+        // is not stalled. `mark_current_track_as_played` emits its queue-updated
+        // event via shared-state flags, which is safe from a detached task.
+        let data_for_task = data.get_ref().clone();
+        actix_web::rt::task::spawn_blocking(move || {
+            let data = web::Data::new(data_for_task);
+            super::playback::mark_current_track_as_played(&data, &current_path);
+            let _ = data.app_db.mark_queue_entry_status_by_path(
+                "active",
+                &current_path,
+                &["preloading", "queued"],
+                "playing",
+            );
+        });
     }
 }
 
+/// Snapshot current runtime metadata synchronously, then offload the blocking
+/// lofty parse + SQLite write off the 50ms WS coordinator tick.
+///
+/// The RwLock reads below (`track_metadata`, atomics) are cheap and stay on the
+/// tick. The blocking work — `extract_lofty_metadata` (file open + tag parse) and
+/// `record_media_metadata` (SQLite write) — is moved into a detached
+/// `spawn_blocking` task so it never stalls the tick. Persistence here is
+/// fire-and-forget (only logged on failure) and is ordered per dispatch, so a
+/// detached task preserves the prior inline ordering without read-after-write
+/// dependence within the same tick.
 fn persist_current_runtime_metadata(
     data: &web::Data<Arc<AppState>>,
     shared_state: &Arc<crate::player::SharedState>,
@@ -250,21 +288,42 @@ fn persist_current_runtime_metadata(
     let Some(path) = path else {
         return;
     };
-    let mut metadata = shared_state.track_metadata.read().clone();
-    if enrich_lofty {
-        if let Some(lofty_metadata) = crate::metadata::extract_lofty_metadata(path) {
-            crate::metadata::merge_lofty_into(&mut metadata, &lofty_metadata);
+    // Owned, `Send` snapshot taken on the tick thread (no lock crosses await).
+    let path = path.to_string();
+    let metadata = shared_state.track_metadata.read().clone();
+    let duration_secs = shared_state.duration_secs();
+    let sample_rate = shared_state.sample_rate.load(Ordering::Relaxed) as u32;
+    let channels = shared_state.channels.load(Ordering::Relaxed) as usize;
+    let repo = data.repo.clone();
+
+    actix_rt::spawn(async move {
+        let mut metadata = metadata;
+        if enrich_lofty {
+            let lofty_path = path.clone();
+            let lofty_metadata =
+                actix_web::rt::task::spawn_blocking(move || {
+                    crate::metadata::extract_lofty_metadata(&lofty_path)
+                })
+                .await
+                .ok()
+                .flatten();
+            if let Some(lofty_metadata) = lofty_metadata {
+                crate::metadata::merge_lofty_into(&mut metadata, &lofty_metadata);
+            }
         }
-    }
-    if let Err(e) = data.app_db.record_media_metadata(
-        path,
-        &metadata,
-        Some(shared_state.duration_secs()),
-        Some(shared_state.sample_rate.load(Ordering::Relaxed) as u32),
-        Some(shared_state.channels.load(Ordering::Relaxed) as usize),
-    ) {
-        log::warn!("Failed to persist runtime metadata for '{}': {}", path, e);
-    }
+        if let Err(e) = repo
+            .record_media_metadata(
+                path.clone(),
+                metadata,
+                Some(duration_secs),
+                Some(sample_rate),
+                Some(channels),
+            )
+            .await
+        {
+            log::warn!("Failed to persist runtime metadata for '{}': {}", path, e);
+        }
+    });
 }
 
 fn publish_ws_event(data: &AppState, payload: serde_json::Value) {
