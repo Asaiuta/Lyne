@@ -70,7 +70,7 @@ apps/desktop/
 - **Core crate**: Put app-agnostic decoder, DSP, resampler, loudness, pipeline, and audio-thread helpers in `crates/audio-engine-core/`.
 - **Root crate**: Keep playback control, HTTP/WebSocket routes, app database, WebDAV/NetEase integrations, settings persistence, runtime paths, and desktop glue in `src/`.
 - **Re-exports**: The root `src/lib.rs`, `src/config.rs`, `src/diagnostics.rs`, and `src/runtime.rs` may re-export core types to preserve the current app-facing API. Do not add new compatibility layers unless a current compile boundary requires them.
-- **Build scripts**: SoXR link discovery is owned by `crates/audio-engine-core/build.rs`; root `build.rs` delegates to it so the build logic has one source.
+- **Build scripts**: SoXR link discovery is owned by `crates/audio-engine-core/build.rs`; the root crate should not keep a `build.rs` for core-only native links.
 
 ### Naming conventions
 

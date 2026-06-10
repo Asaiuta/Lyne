@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline index for review"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Review dependency ownership against crate boundary"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review dependency cleanup against backend quality rules"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index"}
