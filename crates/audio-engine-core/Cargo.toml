@@ -2,7 +2,14 @@
 name = "audio-engine-core"
 version = "0.1.0"
 edition = "2021"
-description = "Reusable core decoder, DSP, and pipeline primitives for the Lyne audio engine"
+description = "Reusable decoder, DSP, loudness, resampling, and streaming pipeline primitives"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Asaiuta/Lyne"
+homepage = "https://github.com/Asaiuta/Lyne"
+documentation = "https://docs.rs/audio-engine-core"
+readme = "README.md"
+keywords = ["audio", "dsp", "decoder", "resampler", "loudness"]
+categories = ["multimedia::audio", "algorithms"]
 
 [lib]
 name = "audio_engine_core"

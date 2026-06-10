@@ -6,22 +6,22 @@
 //! # Modules
 //!
 //! ## Core Processors
-//! - [`resampler`] - SoX VHQ polyphase resampling
-//! - [`eq`] - 10-band parametric IIR equalizer
-//! - [`dsp`] - Volume control and noise shaping
-//! - [`spectrum`] - FFT spectrum analyzer
-//! - [`convolver`] - FFT convolution for FIR filters
-//! - [`loudness`] - EBU R128 loudness normalization
-//! - [`dynamic_loudness`] - ISO 226 dynamic loudness compensation (Fletcher-Munson)
-//! - [`saturation`] - Tube/tape saturation for analog warmth
-//! - [`crossfeed`] - Bauer binaural crossfeed for headphones
-//! - [`fir_eq`] - FIR EQ with linear/minimum phase options
+//! - [`StreamingResampler`] and [`Resampler`] - SoX VHQ polyphase resampling
+//! - [`Equalizer`] and [`BiquadSection`] - 10-band parametric IIR equalizer
+//! - [`VolumeController`] and [`NoiseShaper`] - Volume control and noise shaping
+//! - [`SpectrumAnalyzer`] - FFT spectrum analyzer
+//! - [`FFTConvolver`] - FFT convolution for FIR filters
+//! - [`LoudnessNormalizer`], [`LoudnessMeter`], and [`TruePeakDetector`] - EBU R128 loudness normalization
+//! - [`DynamicLoudness`] - ISO 226 dynamic loudness compensation (Fletcher-Munson)
+//! - [`Saturation`] - Tube/tape saturation for analog warmth
+//! - [`Crossfeed`] - Bauer binaural crossfeed for headphones
+//! - [`FirEq`] - FIR EQ with linear/minimum phase options
 //!
 //! ## Unified Abstraction (Lock-Free Design)
-//! - [`traits`] - AudioProcessor trait and ProcessResult enum
-//! - [`lockfree_params`] - Lock-free parameter structures for thread-safe parameter passing
-//! - [`adapters`] - Processor adapters implementing AudioProcessor trait
-//! - [`dsp_chain`] - Composable DSP processing chain
+//! - [`AudioProcessor`] and [`ProcessResult`] - shared processor trait/result types
+//! - [`lockfree_params`] - lock-free parameter structures for thread-safe parameter passing
+//! - [`adapters`] - processor adapters implementing [`AudioProcessor`]
+//! - [`DspChain`] - composable DSP processing chain
 
 mod automix_analysis;
 mod convolver;
