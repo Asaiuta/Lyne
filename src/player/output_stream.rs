@@ -13,7 +13,9 @@ use crossbeam::channel::Sender;
 #[cfg(debug_assertions)]
 use assert_no_alloc::assert_no_alloc;
 
-use super::callback::{audio_callback_lockfree, CallbackScratch, LockfreeDspContext};
+use super::callback::{
+    audio_callback_lockfree, CallbackScratch, LockfreeDspContext, AUDIO_PROCESS_BUFFER_FRAMES,
+};
 use super::spectrum::SpectrumBatch;
 use super::state::{PlayerState, SharedState, EVENT_PLAYBACK_STARTED};
 use crate::config::{PhaseResponse, ResampleQuality};
@@ -250,6 +252,16 @@ fn build_output_stream_with_callback(
     let cb_loudness_state = Arc::clone(context.loudness_state);
     let cb_spectrum_tx = context.spectrum_tx.clone();
     let mut scratch = CallbackScratch::new(channels);
+    if let Some(resampler) = resampler.as_ref() {
+        // The render loop feeds at most AUDIO_PROCESS_BUFFER_FRAMES of input per
+        // call (callback.rs `.min(AUDIO_PROCESS_BUFFER_FRAMES)`). Per-call Soxr
+        // output is now capped to the naive ratio bound (the resampler slices its
+        // scratch), so the leftover reserve only needs to cover one such call —
+        // ~2x tighter than the old absolute per-chunk capacity reserve.
+        scratch.reserve_resample_leftover(
+            resampler.max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels),
+        );
+    }
     let mut final_noise_shaper = NoiseShaperProcessor::new(
         channels,
         output_sample_rate,

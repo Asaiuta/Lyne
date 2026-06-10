@@ -16,7 +16,16 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 }
 
 async fn get_runtime_diagnostics(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    HttpResponse::Ok().json(build_runtime_diagnostics(data.as_ref().as_ref()))
+    // build_runtime_diagnostics does blocking DB reads + recursive cache-dir size
+    // walks + repeated player locks; offload it off the executor thread. The
+    // parking_lot player guards are acquired inside the closure (no await there).
+    let state = Arc::clone(&data);
+    match actix_web::rt::task::spawn_blocking(move || build_runtime_diagnostics(state.as_ref()))
+        .await
+    {
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(e) => internal_server_error_response(format!("diagnostics task join failed: {e}")),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -161,6 +170,17 @@ struct PlaybackPhaseDiagnostics {
 struct PlaybackPhaseTimestamps {
     load_request_started: Option<u64>,
     load_request_returned: Option<u64>,
+    seek_request_started: Option<u64>,
+    seek_request_returned: Option<u64>,
+    seek_generation_applied: Option<u64>,
+    seek_decoder_open_started: Option<u64>,
+    seek_decoder_open_finished: Option<u64>,
+    seek_decoder_seek_started: Option<u64>,
+    seek_decoder_seek_finished: Option<u64>,
+    seek_first_chunk: Option<u64>,
+    seek_ready_sent: Option<u64>,
+    seek_ready: Option<u64>,
+    seek_first_position_advanced: Option<u64>,
     decode_started: Option<u64>,
     decode_finished: Option<u64>,
     loudness_started: Option<u64>,
@@ -199,6 +219,20 @@ struct PlaybackPhaseTimestamps {
 #[derive(Debug, Serialize)]
 struct PlaybackPhaseDurations {
     load_request_ms: Option<u64>,
+    seek_request_ms: Option<u64>,
+    seek_request_returned_to_generation_applied_ms: Option<u64>,
+    seek_generation_applied_to_decoder_open_start_ms: Option<u64>,
+    seek_decoder_open_ms: Option<u64>,
+    seek_decoder_open_finished_to_decoder_seek_start_ms: Option<u64>,
+    seek_decoder_seek_ms: Option<u64>,
+    seek_decoder_seek_finished_to_first_chunk_ms: Option<u64>,
+    seek_first_chunk_to_ready_sent_ms: Option<u64>,
+    seek_ready_sent_to_ready_ms: Option<u64>,
+    seek_ready_to_first_position_advanced_ms: Option<u64>,
+    seek_request_started_to_first_position_advanced_ms: Option<u64>,
+    seek_request_returned_to_first_position_advanced_ms: Option<u64>,
+    seek_generation_applied_to_first_position_advanced_ms: Option<u64>,
+    seek_request_returned_to_streaming_ready_ms: Option<u64>,
     request_returned_to_decode_start_ms: Option<u64>,
     decode_ms: Option<u64>,
     decode_finished_to_loudness_start_ms: Option<u64>,
@@ -353,6 +387,31 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
     let load_request_returned = shared_state
         .load_request_returned_ms
         .load(Ordering::Relaxed);
+    let seek_request_started = shared_state.seek_request_started_ms.load(Ordering::Relaxed);
+    let seek_request_returned = shared_state
+        .seek_request_returned_ms
+        .load(Ordering::Relaxed);
+    let seek_generation_applied = shared_state
+        .seek_generation_applied_ms
+        .load(Ordering::Relaxed);
+    let seek_decoder_open_started = shared_state
+        .seek_decoder_open_started_ms
+        .load(Ordering::Relaxed);
+    let seek_decoder_open_finished = shared_state
+        .seek_decoder_open_finished_ms
+        .load(Ordering::Relaxed);
+    let seek_decoder_seek_started = shared_state
+        .seek_decoder_seek_started_ms
+        .load(Ordering::Relaxed);
+    let seek_decoder_seek_finished = shared_state
+        .seek_decoder_seek_finished_ms
+        .load(Ordering::Relaxed);
+    let seek_first_chunk = shared_state.seek_first_chunk_ms.load(Ordering::Relaxed);
+    let seek_ready_sent = shared_state.seek_ready_sent_ms.load(Ordering::Relaxed);
+    let seek_ready = shared_state.seek_ready_ms.load(Ordering::Relaxed);
+    let seek_first_position_advanced = shared_state
+        .seek_first_position_advanced_ms
+        .load(Ordering::Relaxed);
     let decode_started = shared_state.decode_started_ms.load(Ordering::Relaxed);
     let decode_finished = shared_state.decode_finished_ms.load(Ordering::Relaxed);
     let loudness_started = shared_state.loudness_started_ms.load(Ordering::Relaxed);
@@ -439,6 +498,17 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
         timestamps_ms: PlaybackPhaseTimestamps {
             load_request_started: non_zero_u64(load_request_started),
             load_request_returned: non_zero_u64(load_request_returned),
+            seek_request_started: non_zero_u64(seek_request_started),
+            seek_request_returned: non_zero_u64(seek_request_returned),
+            seek_generation_applied: non_zero_u64(seek_generation_applied),
+            seek_decoder_open_started: non_zero_u64(seek_decoder_open_started),
+            seek_decoder_open_finished: non_zero_u64(seek_decoder_open_finished),
+            seek_decoder_seek_started: non_zero_u64(seek_decoder_seek_started),
+            seek_decoder_seek_finished: non_zero_u64(seek_decoder_seek_finished),
+            seek_first_chunk: non_zero_u64(seek_first_chunk),
+            seek_ready_sent: non_zero_u64(seek_ready_sent),
+            seek_ready: non_zero_u64(seek_ready),
+            seek_first_position_advanced: non_zero_u64(seek_first_position_advanced),
             decode_started: non_zero_u64(decode_started),
             decode_finished: non_zero_u64(decode_finished),
             loudness_started: non_zero_u64(loudness_started),
@@ -487,6 +557,53 @@ fn build_playback_phase_diagnostics(data: &AppState) -> PlaybackPhaseDiagnostics
         },
         durations_ms: PlaybackPhaseDurations {
             load_request_ms: phase_delta_ms(load_request_started, load_request_returned),
+            seek_request_ms: phase_delta_ms(seek_request_started, seek_request_returned),
+            seek_request_returned_to_generation_applied_ms: phase_delta_ms(
+                seek_request_returned,
+                seek_generation_applied,
+            ),
+            seek_generation_applied_to_decoder_open_start_ms: phase_delta_ms(
+                seek_generation_applied,
+                seek_decoder_open_started,
+            ),
+            seek_decoder_open_ms: phase_delta_ms(
+                seek_decoder_open_started,
+                seek_decoder_open_finished,
+            ),
+            seek_decoder_open_finished_to_decoder_seek_start_ms: phase_delta_ms(
+                seek_decoder_open_finished,
+                seek_decoder_seek_started,
+            ),
+            seek_decoder_seek_ms: phase_delta_ms(
+                seek_decoder_seek_started,
+                seek_decoder_seek_finished,
+            ),
+            seek_decoder_seek_finished_to_first_chunk_ms: phase_delta_ms(
+                seek_decoder_seek_finished,
+                seek_first_chunk,
+            ),
+            seek_first_chunk_to_ready_sent_ms: phase_delta_ms(seek_first_chunk, seek_ready_sent),
+            seek_ready_sent_to_ready_ms: phase_delta_ms(seek_ready_sent, seek_ready),
+            seek_ready_to_first_position_advanced_ms: phase_delta_ms(
+                seek_ready,
+                seek_first_position_advanced,
+            ),
+            seek_request_started_to_first_position_advanced_ms: phase_delta_ms(
+                seek_request_started,
+                seek_first_position_advanced,
+            ),
+            seek_request_returned_to_first_position_advanced_ms: phase_delta_ms(
+                seek_request_returned,
+                seek_first_position_advanced,
+            ),
+            seek_generation_applied_to_first_position_advanced_ms: phase_delta_ms(
+                seek_generation_applied,
+                seek_first_position_advanced,
+            ),
+            seek_request_returned_to_streaming_ready_ms: phase_delta_ms(
+                seek_request_returned,
+                streaming_ready,
+            ),
             request_returned_to_decode_start_ms: phase_delta_ms(
                 load_request_returned,
                 decode_started,
@@ -763,11 +880,13 @@ mod tests {
         };
         runtime_paths.ensure().unwrap();
 
+        let app_db = Arc::new(AppDatabase::in_memory().unwrap());
         Arc::new(AppState {
             player: Mutex::new(AudioPlayer::new(EngineSettings::default())),
             webdav_config: Mutex::new(WebDavConfig::default()),
             ncm_client: Arc::new(ncm_api_rs::create_client(None)),
-            app_db: Arc::new(AppDatabase::in_memory().unwrap()),
+            repo: crate::server::repository::AsyncRepo::new(Arc::clone(&app_db)),
+            app_db,
             settings_manager: create_settings_manager(&runtime_paths.settings_path),
             analysis: AnalysisState {
                 loudness_db: None,
@@ -844,6 +963,17 @@ mod tests {
         assert!(json.contains("\"output_callback_after_play\""));
         assert!(json.contains("\"stream_play_to_output_callback_ms\""));
         assert!(json.contains("\"stream_play_to_first_position_advanced_ms\""));
+        assert!(json.contains("\"seek_request_started\""));
+        assert!(json.contains("\"seek_request_returned\""));
+        assert!(json.contains("\"seek_generation_applied\""));
+        assert!(json.contains("\"seek_decoder_open_started\""));
+        assert!(json.contains("\"seek_decoder_open_ms\""));
+        assert!(json.contains("\"seek_decoder_seek_ms\""));
+        assert!(json.contains("\"seek_first_chunk\""));
+        assert!(json.contains("\"seek_ready_sent\""));
+        assert!(json.contains("\"seek_ready\""));
+        assert!(json.contains("\"seek_ready_to_first_position_advanced_ms\""));
+        assert!(json.contains("\"seek_request_returned_to_streaming_ready_ms\""));
         assert!(json.contains("\"active_stream_matches_current\""));
         assert!(json.contains("\"active_stream_running\""));
         assert!(!json.contains(&temp_dir.to_string_lossy().to_string()));

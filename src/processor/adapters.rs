@@ -128,10 +128,13 @@ pub struct SaturationProcessor {
 }
 
 impl SaturationProcessor {
-    pub fn new(params: Arc<AtomicSaturationParams>) -> Self {
+    pub fn new(channels: usize, params: Arc<AtomicSaturationParams>) -> Self {
         let (cached_params, cached_generation) = params.load_with_generation();
         let cached = *cached_params;
         let mut saturation = Saturation::new();
+        // Pre-size per-channel HPF state off the audio thread so highpass-mode
+        // processing never resizes on the realtime thread.
+        saturation.set_channel_count(channels);
         saturation.set_drive(cached.drive);
         saturation.set_threshold(cached.threshold);
         saturation.set_mix(cached.mix);
@@ -938,7 +941,7 @@ mod tests {
     #[test]
     fn test_saturation_processor() {
         let params = Arc::new(AtomicSaturationParams::new());
-        let mut proc = SaturationProcessor::new(Arc::clone(&params));
+        let mut proc = SaturationProcessor::new(2, Arc::clone(&params));
 
         params.set_drive(1.0);
         params.set_mix(1.0);

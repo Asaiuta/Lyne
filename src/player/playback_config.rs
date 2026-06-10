@@ -292,6 +292,7 @@ fn promote_pending_buffer_if_matching(
     shared.gapless_swap_pending.store(false, Ordering::Release);
 
     shared.position_frames.store(0, Ordering::Relaxed);
+    shared.reset_render_clock(0);
     shared
         .total_frames
         .store(pending_total_frames, Ordering::Relaxed);

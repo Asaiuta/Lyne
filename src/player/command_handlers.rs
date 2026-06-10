@@ -272,6 +272,7 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
                 .shared_state
                 .position_frames
                 .store(frame, Ordering::Relaxed);
+            context.shared_state.reset_render_clock(frame);
             backend.seek(frame);
             AudioCommandFlow::Continue
         }
@@ -363,6 +364,7 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
                 .shared_state
                 .position_frames
                 .store(0, Ordering::Relaxed);
+            context.shared_state.reset_render_clock(0);
             context.shared_state.state.store(PlayerState::Stopped);
             backend.stop(context.shared_state);
             context.shared_state.mark_audio_command_stop_completed();
@@ -376,6 +378,7 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
                 .shared_state
                 .position_frames
                 .store(0, Ordering::Relaxed);
+            context.shared_state.reset_render_clock(0);
             context.shared_state.state.store(PlayerState::Stopped);
             backend.stop_for_load(context.shared_state);
             context
@@ -568,6 +571,7 @@ fn handle_streaming_load_ready_command(
 
     shared_state.mark_load_complete_applied();
     shared_state.mark_streaming_ready();
+    shared_state.mark_seek_ready(generation);
     shared_state.load_progress.store(100, Ordering::Relaxed);
     shared_state.is_loading.store(false, Ordering::Release);
     shared_state
@@ -759,6 +763,7 @@ fn apply_loaded_track_state(
         .total_frames
         .store(total_frames, Ordering::Relaxed);
     shared_state.position_frames.store(0, Ordering::Relaxed);
+    shared_state.reset_render_clock(0);
 
     match shared_state.state.load() {
         PlayerState::Playing | PlayerState::Paused => {}
@@ -796,6 +801,7 @@ fn apply_streaming_track_state(
     shared_state
         .position_frames
         .store(start_frame, Ordering::Relaxed);
+    shared_state.reset_render_clock(start_frame);
     shared_state
         .streaming_generation
         .store(generation, Ordering::Release);
@@ -887,6 +893,15 @@ mod tests {
         AtomicVolumeParams,
     };
 
+    /// Advance the process-start monotonic playback clock past `floor_ms` so
+    /// tests can synthesize "play returned `grace` ago" timestamps and rely on
+    /// non-zero `mark_*_ms()` markers even in a fresh test process.
+    fn advance_playback_clock_past(floor_ms: u64) {
+        while playback_phase_time_ms() <= floor_ms {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     struct CommandFixture {
         shared_state: Arc<SharedState>,
         dsp_ctx: Arc<LockfreeDspContext>,
@@ -904,6 +919,13 @@ mod tests {
 
     impl CommandFixture {
         fn new() -> Self {
+            // The playback phase clock is now a process-start monotonic source,
+            // so a fresh test process can read values smaller than the grace
+            // windows these tests synthesize. Advance it past the largest grace
+            // so `mark_*_ms()` timestamps are non-zero and
+            // `playback_phase_time_ms().saturating_sub(grace)` stays ordered.
+            advance_playback_clock_past(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1);
+
             let eq_params = Arc::new(AtomicEqParams::new());
             let saturation_params = Arc::new(AtomicSaturationParams::new());
             let crossfeed_params = Arc::new(AtomicCrossfeedParams::new());
@@ -1583,6 +1605,7 @@ mod tests {
     #[test]
     fn playback_progress_watchdog_recovers_after_play_grace_without_progress() {
         let shared = SharedState::new();
+        advance_playback_clock_past(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1);
         shared.load_generation.store(12, Ordering::Release);
         shared.state.store(PlayerState::Playing);
         shared.stream_play_returned_ms.store(
@@ -1600,6 +1623,7 @@ mod tests {
     #[test]
     fn playback_progress_watchdog_uses_short_grace_after_replay() {
         let shared = SharedState::new();
+        advance_playback_clock_past(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1);
         shared.load_generation.store(12, Ordering::Release);
         shared.state.store(PlayerState::Playing);
         shared.stream_play_returned_ms.store(
@@ -1688,6 +1712,7 @@ mod tests {
     #[test]
     fn playback_progress_watchdog_ignores_live_callback_without_position_progress() {
         let shared = SharedState::new();
+        advance_playback_clock_past(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1);
         shared.load_generation.store(12, Ordering::Release);
         shared.state.store(PlayerState::Playing);
         shared.mark_stream_play_returned();

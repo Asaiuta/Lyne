@@ -67,7 +67,7 @@ fn open_http_media_source(
 ) -> Result<(MediaSourceStream, Hint), DecoderError> {
     let owned_creds = credentials.cloned();
     match RangeStream::new(url.to_string(), owned_creds, cancel_token.clone()) {
-        Ok(stream) if stream.content_length.is_some() => {
+        Ok(stream) if stream.is_usable_range_stream() => {
             log::info!("HTTP URL supports Range requests, streaming: {}", url);
             let mss = MediaSourceStream::new(Box::new(stream), Default::default());
             Ok((mss, hint_from_url(url)))
@@ -327,7 +327,7 @@ impl RangeStream {
                         .and_then(|v| v.to_str().ok())
                         .and_then(|s| s.parse().ok())
                 });
-                let supports_range = head_response
+                let mut supports_range = head_response
                     .as_ref()
                     .map(|r| {
                         r.headers()
@@ -338,7 +338,7 @@ impl RangeStream {
                     })
                     .unwrap_or(false);
 
-                if content_length.is_none() {
+                if !supports_range || content_length.is_none() {
                     if cancel_token
                         .as_ref()
                         .is_some_and(DecodeCancelToken::is_cancelled)
@@ -353,18 +353,24 @@ impl RangeStream {
                     if let Some(e) = response_network_error(&range_response) {
                         return Err(e);
                     }
-                    content_length = range_response
+                    let range_status = range_response.status();
+                    let range_content_total = range_response
                         .headers()
                         .get("content-range")
                         .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.split('/').last().and_then(|s| s.parse().ok()))
-                        .or_else(|| {
-                            range_response
-                                .headers()
-                                .get("content-length")
-                                .and_then(|v| v.to_str().ok())
-                                .and_then(|s| s.parse().ok())
-                        });
+                        .and_then(|s| s.split('/').last().and_then(|s| s.parse().ok()));
+                    let range_content_length = range_response
+                        .headers()
+                        .get("content-length")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse().ok());
+
+                    if range_status.as_u16() == 206 || range_content_total.is_some() {
+                        supports_range = true;
+                        content_length = range_content_total.or(content_length);
+                    } else if content_length.is_none() {
+                        content_length = range_content_length;
+                    }
                 }
 
                 Ok((content_length, supports_range))
@@ -374,7 +380,7 @@ impl RangeStream {
         let initial_fetch_len = content_length
             .map(|len| RANGE_PREFETCH.min(len as usize))
             .unwrap_or(RANGE_PREFETCH);
-        let initial_buf = if initial_fetch_len > 0 {
+        let initial_buf = if supports_range && initial_fetch_len > 0 {
             with_network_retry("HTTP stream initial range GET", || {
                 fetch_range_once(
                     &client,
@@ -401,6 +407,10 @@ impl RangeStream {
             supports_range,
             cancel_token,
         })
+    }
+
+    fn is_usable_range_stream(&self) -> bool {
+        self.supports_range && self.content_length.is_some()
     }
 
     fn fetch_range(&mut self, start: u64, len: usize) -> Result<Vec<u8>, DecoderError> {
@@ -496,10 +506,46 @@ impl Seek for RangeStream {
 
 impl symphonia::core::io::MediaSource for RangeStream {
     fn is_seekable(&self) -> bool {
-        self.supports_range && self.content_length.is_some()
+        self.is_usable_range_stream()
     }
 
     fn byte_len(&self) -> Option<u64> {
         self.content_length
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_stream_requires_range_support_and_content_length() {
+        let stream = RangeStream {
+            url: "https://example.test/song.flac".to_string(),
+            credentials: None,
+            client: reqwest::blocking::Client::builder()
+                .build()
+                .expect("client fixture"),
+            buf: Vec::new(),
+            buf_start: 0,
+            pos: 0,
+            content_length: Some(1024),
+            supports_range: true,
+            cancel_token: None,
+        };
+        assert!(stream.is_usable_range_stream());
+
+        let no_range = RangeStream {
+            supports_range: false,
+            ..stream
+        };
+        assert!(!no_range.is_usable_range_stream());
+
+        let no_len = RangeStream {
+            supports_range: true,
+            content_length: None,
+            ..no_range
+        };
+        assert!(!no_len.is_usable_range_stream());
     }
 }

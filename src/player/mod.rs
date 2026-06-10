@@ -129,6 +129,14 @@ struct MemoryStreamingSeekRequest {
     target_time_secs: f64,
 }
 
+fn is_remote_http_path(path: &str) -> bool {
+    path.starts_with("http://") || path.starts_with("https://")
+}
+
+fn is_streaming_first_buffer_source_candidate(path: &str) -> bool {
+    !path.is_empty() && (is_remote_http_path(path) || !path.contains("://"))
+}
+
 impl AudioPlayer {
     pub fn new(config: EngineSettings) -> Self {
         Self::with_loudness_database(config, None)
@@ -485,12 +493,15 @@ impl AudioPlayer {
         credentials: Option<&crate::decoder::HttpCredentials>,
         autoplay: bool,
     ) -> bool {
-        self.config.streaming_first_buffer
-            && autoplay
-            && credentials.is_none()
-            && !self.config.use_cache
-            && !path.starts_with("http://")
-            && !path.starts_with("https://")
+        if !self.config.streaming_first_buffer || !autoplay || self.config.use_cache {
+            return false;
+        }
+
+        if credentials.is_some() {
+            return false;
+        }
+
+        is_streaming_first_buffer_source_candidate(path)
     }
 
     fn create_load_cancel_token(&mut self) -> Arc<AtomicBool> {
@@ -529,6 +540,7 @@ impl AudioPlayer {
         self.shared_state
             .position_frames
             .store(0, Ordering::Relaxed);
+        self.shared_state.reset_render_clock(0);
         self.shared_state.total_frames.store(0, Ordering::Relaxed);
         self.shared_state.state.store(if autoplay {
             PlayerState::Playing
@@ -599,7 +611,13 @@ impl AudioPlayer {
     /// **before** calling this, because the reset clears the ring.
     fn begin_streaming_seek_generation(&mut self, target_frame: u64) -> (u64, Arc<AtomicBool>) {
         self.cancel_current_load_for_pending_load();
-        GaplessManager::cancel_preload(&self.shared_state);
+        // A seek within the current memory-streaming track does not invalidate a
+        // decoded/decoding next-track preload. Clear only the edge-triggered
+        // request flag so a stale near-EOF signal is not replayed after seeking
+        // away from the end.
+        self.shared_state
+            .needs_preload
+            .store(false, Ordering::Release);
         self.shared_state.load_progress.store(0, Ordering::Relaxed);
         let load_cancel = self.create_load_cancel_token();
         let generation = self
@@ -619,10 +637,11 @@ impl AudioPlayer {
     /// retention ring; the preceding `cancel_current_load_for_pending_load`
     /// (via `reset_streaming_state`) owns that.
     fn apply_streaming_seek_generation_state(&mut self, generation: u64, target_frame: u64) {
-        self.shared_state.reset_load_phase_timestamps();
+        self.shared_state.reset_load_phase_timestamps_for_seek();
         self.shared_state
             .streaming_generation
             .store(generation, Ordering::Release);
+        self.shared_state.mark_seek_generation_applied(generation);
         self.shared_state
             .reset_streaming_queue_window_for_generation(generation);
         self.shared_state
@@ -641,6 +660,7 @@ impl AudioPlayer {
         self.shared_state
             .position_frames
             .store(target_frame, Ordering::Relaxed);
+        self.shared_state.reset_render_clock(target_frame);
         self.shared_state.state.store(PlayerState::Playing);
         self.shared_state
             .streaming_active
@@ -771,6 +791,7 @@ impl AudioPlayer {
         });
 
         self.shared_state.mark_load_request_returned();
+        self.shared_state.mark_seek_request_returned();
         Ok(true)
     }
 
@@ -821,6 +842,7 @@ impl AudioPlayer {
         });
 
         self.shared_state.mark_load_request_returned();
+        self.shared_state.mark_seek_request_returned();
         Ok(())
     }
 
@@ -839,16 +861,25 @@ impl AudioPlayer {
         self.shared_state.load_error.read().clone()
     }
 
+    fn can_resume_inline_on_warm_shared_stream(&self) -> bool {
+        !self.shared_state.exclusive_mode.load(Ordering::Relaxed)
+            && self
+                .shared_state
+                .active_stream_running
+                .load(Ordering::Acquire)
+            && self.shared_state.active_output_stream_matches_current()
+    }
+
     pub fn play(&mut self) -> Result<(), String> {
         let previous = self.shared_state.state.load();
         if previous == PlayerState::Paused {
             if !self.shared_state.exclusive_mode.load(Ordering::Relaxed) {
                 self.shared_state.mark_stream_play_returned();
+                command_handlers::mark_playback_started(&self.shared_state);
+                if self.can_resume_inline_on_warm_shared_stream() {
+                    return Ok(());
+                }
             }
-            self.shared_state.state.store(PlayerState::Playing);
-            self.shared_state
-                .event_flags
-                .fetch_or(EVENT_PLAYBACK_STARTED, Ordering::Release);
         }
         let _ = self.cmd_tx.send(AudioCommand::Play);
         Ok(())
@@ -859,7 +890,9 @@ impl AudioPlayer {
         self.shared_state
             .event_flags
             .fetch_or(EVENT_PLAYBACK_PAUSED, Ordering::Release);
-        let _ = self.cmd_tx.send(AudioCommand::Pause);
+        if self.shared_state.exclusive_mode.load(Ordering::Relaxed) {
+            let _ = self.cmd_tx.send(AudioCommand::Pause);
+        }
         Ok(())
     }
 
@@ -869,6 +902,7 @@ impl AudioPlayer {
         self.shared_state
             .position_frames
             .store(0, Ordering::Relaxed);
+        self.shared_state.reset_render_clock(0);
         self.shared_state.state.store(PlayerState::Stopped);
         self.shared_state
             .event_flags
@@ -881,11 +915,13 @@ impl AudioPlayer {
         self.shared_state
             .position_frames
             .store(0, Ordering::Relaxed);
+        self.shared_state.reset_render_clock(0);
         self.shared_state.state.store(PlayerState::Stopped);
         let _ = self.cmd_tx.send(AudioCommand::StopForLoad);
     }
 
     pub fn seek(&mut self, time_secs: f64) -> Result<(), String> {
+        self.shared_state.reset_seek_phase_timestamps();
         if self
             .shared_state
             .streaming_memory_mode
@@ -905,12 +941,15 @@ impl AudioPlayer {
         self.shared_state
             .position_frames
             .store(new_pos, Ordering::Relaxed);
+        self.shared_state.reset_render_clock(new_pos);
         self.shared_state
             .event_flags
             .fetch_or(EVENT_PLAYBACK_SEEKED, Ordering::Release);
         self.cmd_tx
             .send(AudioCommand::Seek(time_secs))
-            .map_err(|e| format!("Failed to send seek command: {}", e))
+            .map_err(|e| format!("Failed to send seek command: {}", e))?;
+        self.shared_state.mark_seek_request_returned();
+        Ok(())
     }
 
     pub fn set_volume(&mut self, vol: f64) {
@@ -960,19 +999,187 @@ impl Drop for AudioPlayer {
 mod tests {
     use super::*;
 
+    fn build_streaming_policy_player(use_cache: bool) -> AudioPlayer {
+        AudioPlayer::new(EngineSettings {
+            streaming_first_buffer: true,
+            use_cache,
+            ..EngineSettings::default()
+        })
+    }
+
+    #[test]
+    fn streaming_first_buffer_allows_local_and_http_autoplay_without_cache_or_credentials() {
+        let player = build_streaming_policy_player(false);
+
+        assert!(player.should_use_streaming_first_buffer(r"D:\Music\song.flac", None, true));
+        assert!(player.should_use_streaming_first_buffer(
+            "http://media.example.test/song.flac",
+            None,
+            true
+        ));
+        assert!(player.should_use_streaming_first_buffer(
+            "https://m701.music.126.net/song.flac",
+            None,
+            true
+        ));
+    }
+
+    #[test]
+    fn streaming_first_buffer_rejects_cache_credentials_non_autoplay_and_unknown_schemes() {
+        let player = build_streaming_policy_player(false);
+        let cached_player = build_streaming_policy_player(true);
+        let credentials = crate::decoder::HttpCredentials {
+            username: "user".to_string(),
+            password: "pass".to_string(),
+        };
+
+        assert!(!player.should_use_streaming_first_buffer(
+            "https://dav.example.test/song.flac",
+            Some(&credentials),
+            true
+        ));
+        assert!(!cached_player.should_use_streaming_first_buffer(
+            "https://m701.music.126.net/song.flac",
+            None,
+            true
+        ));
+        assert!(!player.should_use_streaming_first_buffer(
+            "https://m701.music.126.net/song.flac",
+            None,
+            false
+        ));
+        assert!(!player.should_use_streaming_first_buffer(
+            "ftp://media.example.test/song.flac",
+            None,
+            true
+        ));
+    }
+
+    #[test]
+    fn cancelling_current_load_clears_streaming_state_and_signals_decode_thread() {
+        let mut player = build_streaming_policy_player(false);
+        let shared = player.shared_state();
+        let cancel = player.create_load_cancel_token();
+
+        shared.is_loading.store(true, Ordering::Release);
+        shared.load_generation.store(7, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.streaming_memory_mode.store(true, Ordering::Release);
+        shared
+            .streaming_chunks
+            .push(state::StreamingAudioChunk {
+                generation: 7,
+                samples: Arc::new(vec![0.0; 8]),
+            })
+            .expect("streaming queue should have capacity");
+
+        player.cancel_current_load();
+
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(!shared.streaming_active.load(Ordering::Acquire));
+        assert!(!shared.streaming_memory_mode.load(Ordering::Acquire));
+        assert!(shared.streaming_chunks.is_empty());
+        assert_eq!(shared.load_generation.load(Ordering::Acquire), 8);
+        assert_eq!(shared.load_progress.load(Ordering::Relaxed), 0);
+    }
+
+    fn build_resume_player() -> (AudioPlayer, Arc<SharedState>) {
+        let player = AudioPlayer::new(EngineSettings::default());
+        let shared = player.shared_state();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.device_id.store(-1, Ordering::Relaxed);
+        shared.exclusive_mode.store(false, Ordering::Relaxed);
+        shared
+            .prefer_default_output_config
+            .store(false, Ordering::Relaxed);
+        shared.load_generation.store(7, Ordering::Release);
+        shared.mark_active_output_stream(44_100, 44_100, 2);
+        (player, shared)
+    }
+
+    #[test]
+    fn warm_shared_resume_can_inline_only_when_running_and_key_matches() {
+        let (player, shared) = build_resume_player();
+
+        assert!(player.can_resume_inline_on_warm_shared_stream());
+
+        shared.mark_active_output_stream_paused();
+        assert!(!player.can_resume_inline_on_warm_shared_stream());
+
+        shared.mark_active_output_stream_running();
+        shared.channels.store(1, Ordering::Relaxed);
+        assert!(!player.can_resume_inline_on_warm_shared_stream());
+
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.exclusive_mode.store(true, Ordering::Relaxed);
+        assert!(!player.can_resume_inline_on_warm_shared_stream());
+    }
+
+    #[test]
+    fn play_from_paused_warm_shared_stream_resumes_inline() {
+        let (mut player, shared) = build_resume_player();
+        shared.state.store(PlayerState::Paused);
+        shared.event_flags.store(0, Ordering::Release);
+
+        player.play().expect("warm shared resume should succeed");
+
+        assert_eq!(shared.state.load(), PlayerState::Playing);
+        assert_ne!(
+            shared.event_flags.load(Ordering::Acquire) & EVENT_PLAYBACK_STARTED,
+            0
+        );
+        assert!(shared.stream_play_returned_ms.load(Ordering::Acquire) > 0);
+        assert_eq!(
+            shared.stream_play_generation.load(Ordering::Acquire),
+            shared.load_generation.load(Ordering::Acquire)
+        );
+    }
+
+    #[test]
+    fn shared_pause_keeps_warm_output_stream_running() {
+        let (mut player, shared) = build_resume_player();
+        shared.state.store(PlayerState::Playing);
+        shared.event_flags.store(0, Ordering::Release);
+        assert!(shared.active_stream_running.load(Ordering::Acquire));
+
+        player.pause().expect("pause should succeed");
+
+        assert_eq!(shared.state.load(), PlayerState::Paused);
+        assert_ne!(
+            shared.event_flags.load(Ordering::Acquire) & EVENT_PLAYBACK_PAUSED,
+            0
+        );
+        assert!(
+            shared.active_stream_running.load(Ordering::Acquire),
+            "shared-mode pause keeps the CPAL stream warm and lets the callback output silence"
+        );
+    }
+
     #[test]
     fn seek_active_memory_streaming_prepares_new_streaming_generation() {
         let mut player = AudioPlayer::new(EngineSettings::default());
         let shared = player.shared_state();
+        let pending = Arc::new(vec![0.25, 0.5, 0.75, 1.0]);
+        let pending_ptr = Arc::as_ptr(&pending);
         shared.sample_rate.store(44_100, Ordering::Relaxed);
         shared.total_frames.store(44_100 * 60, Ordering::Relaxed);
         shared.position_frames.store(123, Ordering::Relaxed);
         shared.load_generation.store(41, Ordering::Release);
+        shared.preload_generation.store(9, Ordering::Release);
         shared.streaming_generation.store(41, Ordering::Release);
         shared.streaming_memory_mode.store(true, Ordering::Release);
         shared.streaming_active.store(true, Ordering::Release);
         shared.mark_active_output_stream(44_100, 44_100, 2);
         *shared.current_track_path.write() = Some(r"D:\Music\large.flac".to_string());
+        shared.pending_buffer.store(Some(pending));
+        shared.pending_ready.store(true, Ordering::Release);
+        shared.pending_total_frames.store(2, Ordering::Relaxed);
+        shared.pending_sample_rate.store(44_100, Ordering::Relaxed);
+        shared.pending_channels.store(2, Ordering::Relaxed);
+        *shared.pending_file_path.write() = Some(r"D:\Music\next.flac".to_string());
+        shared.needs_preload.store(true, Ordering::Release);
+        shared.cancel_preload_signal.store(false, Ordering::Release);
         shared
             .streaming_chunks
             .push(state::StreamingAudioChunk {
@@ -998,6 +1205,25 @@ mod tests {
         assert!(shared.is_loading.load(Ordering::Acquire));
         assert!(shared.audio_buffer.load().is_empty());
         assert!(shared.streaming_chunks.is_empty());
+        assert_eq!(shared.preload_generation.load(Ordering::Acquire), 9);
+        assert!(shared.pending_ready.load(Ordering::Acquire));
+        let pending_after_seek = shared
+            .pending_buffer
+            .load_full()
+            .expect("memory-streaming seek should preserve the next-track preload");
+        assert_eq!(Arc::as_ptr(&pending_after_seek), pending_ptr);
+        assert_eq!(
+            shared.pending_file_path.read().as_deref(),
+            Some(r"D:\Music\next.flac")
+        );
+        assert!(
+            !shared.needs_preload.load(Ordering::Acquire),
+            "seek clears only the stale near-EOF preload request flag"
+        );
+        assert!(
+            !shared.cancel_preload_signal.load(Ordering::Acquire),
+            "seek must not cancel an in-flight or ready next-track preload"
+        );
         assert_eq!(
             shared
                 .active_stream_source_sample_rate
@@ -1137,9 +1363,9 @@ mod tests {
             shared.streaming_chunks.is_empty(),
             "the clean stop must drain the stale forward queue on an in-window hit"
         );
-        // Position snapped synchronously to the audible start of the target chunk
-        // (this is what makes convergence fast: the callback was cleanly stopped
-        // so the synchronous set sticks).
+        // Position is set synchronously to the exact replay start (this is what
+        // makes convergence fast: the callback was cleanly stopped so the
+        // synchronous set sticks).
         assert_eq!(shared.position_frames.load(Ordering::Relaxed), target_frame);
         // The ring was cleared by reset_streaming_state after the prefix was
         // extracted; the new generation repopulates it as it plays.

@@ -1,8 +1,13 @@
 //! Atomic loudness state for lock-free audio-thread access.
 //!
 //! The main thread mutates target gains / mode / preamp via the helpers below;
-//! the audio thread reads them in `process_gain` with relaxed/SeqCst ordering
-//! to bound the "mid-mode-switch" inconsistency window without taking a lock.
+//! the audio thread reads them in `process_gain` with relaxed ordering. The reads
+//! are intentionally independent rather than a single consistent snapshot: a mode
+//! switch and its matching gains are not published atomically, so the callback can
+//! briefly observe a mode from one update with a gain from another. That transient
+//! is inaudible because the applied gain is exponentially smoothed toward its
+//! target (~200 ms), so one block of a slightly-off target only nudges the smoother
+//! and is corrected on the next read.
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
@@ -50,20 +55,17 @@ impl AtomicLoudnessState {
         }
     }
 
-    /// Set target gain (call from main thread)
+    /// Set target gain.
     ///
-    /// H-2 fix: Guards against NaN/Infinity values that could propagate through
-    /// the audio path and produce corrupted output. Falls back to 0 dB (no gain).
+    /// H-2 fix: Guards against NaN/Infinity values that could propagate through the
+    /// audio path and produce corrupted output by coercing them to 0 dB (no gain).
+    /// This is reachable from the audio thread in streaming mode
+    /// (`LoudnessNormalizer::process`), so the non-finite branch must stay
+    /// allocation- and log-free; non-realtime callers that want to report invalid
+    /// loudness (e.g. `analyze_track`) log it on their own path.
     pub fn set_target_gain(&self, gain_db: f64) {
-        if gain_db.is_finite() {
-            self.target_gain_db.store(gain_db, Ordering::Relaxed);
-        } else {
-            log::warn!(
-                "set_target_gain: ignoring non-finite value ({:.2}), using 0.0 dB",
-                gain_db
-            );
-            self.target_gain_db.store(0.0, Ordering::Relaxed);
-        }
+        let value = if gain_db.is_finite() { gain_db } else { 0.0 };
+        self.target_gain_db.store(value, Ordering::Relaxed);
     }
 
     /// Set album gain (call from main thread)
@@ -108,18 +110,19 @@ impl AtomicLoudnessState {
     /// Process gain for a chunk (call from audio thread - lock-free)
     /// Returns the linear gain to apply (includes preamp)
     ///
-    /// Uses SeqCst for mode read to reduce mid-update inconsistency window (RISK-01 fix).
-    /// Other fields use Relaxed ordering since gains don't need strict synchronization.
+    /// All fields are read with Relaxed ordering. They are independent atomics, so
+    /// this is deliberately not a consistent snapshot: a concurrent main-thread
+    /// update can leave the mode and the gains momentarily mismatched for one block.
+    /// That is acceptable because the resulting gain is exponentially smoothed (see
+    /// `remaining_factor` below), so a single slightly-wrong target is inaudible and
+    /// self-corrects on the next call.
     #[inline]
     pub fn process_gain(&self, frames: usize) -> f64 {
         if !self.enabled.load(Ordering::Relaxed) {
             return 1.0;
         }
 
-        // Read mode with SeqCst first to establish a consistent snapshot point
-        let mode = self.mode.load(Ordering::SeqCst);
-
-        // Now read other fields with Relaxed - they will be from approximately the same point
+        let mode = self.mode.load(Ordering::Relaxed);
         let target = self.target_gain_db.load(Ordering::Relaxed);
         let current = self.current_gain_db.load(Ordering::Relaxed);
         let coeff = self.smoothing_coeff.load(Ordering::Relaxed);

@@ -9,8 +9,8 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 // ============ Event Flag Constants (Task E) ============
 
@@ -40,11 +40,24 @@ pub(crate) const PLAYBACK_PROGRESS_REPLAY_COMMAND_GRACE_MS: u64 = 250;
 
 // ============ Commands & State ============
 
+/// Process-start monotonic epoch for the playback phase clock.
+///
+/// `Instant::now()` is a vDSO user-space monotonic read on Windows
+/// (`QueryPerformanceCounter`), Linux (`clock_gettime(CLOCK_MONOTONIC)`), and
+/// macOS (`mach_absolute_time`) — no syscall, allocation, or lock — so it is
+/// safe to read from the realtime audio callback. Using a process-start epoch
+/// instead of the wall clock makes every phase/staleness timestamp monotonic
+/// and immune to NTP / system-time adjustments.
+fn playback_clock_epoch() -> Instant {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
 pub(crate) fn playback_phase_time_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or(0)
+    playback_clock_epoch()
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
 }
 
 /// Load result for async loading
@@ -162,8 +175,10 @@ impl RetainedChunk {
 /// `continuation_start_frame`.
 #[derive(Clone)]
 pub struct ReplayPrefix {
-    /// Absolute output frame the snapped seek resumes audio at (the start of the
-    /// chunk containing the requested target; snaps back ≤ one chunk).
+    /// Absolute output frame where replay resumes. This is the requested target
+    /// frame; when the target lands inside a retained chunk, the first prefix
+    /// chunk is trimmed off the realtime thread so playback does not snap back
+    /// to the retained chunk boundary.
     pub audible_start_frame: u64,
     /// Absolute output frame one past the newest retained chunk; where the
     /// continuation decode must seek to so it picks up exactly after the prefix.
@@ -254,11 +269,12 @@ impl StreamingRetentionRing {
     /// contains `target_frame`, in playback order, for an in-window seek replay.
     ///
     /// Returns `None` (a miss) when the ring is empty or `target_frame` lies
-    /// before the oldest retained chunk. On a hit, returns
-    /// [`ReplayPrefix`] describing the snapped audible start frame, the
-    /// one-past-the-newest continuation frame, and the zero-copy `Arc` clones of
-    /// every retained chunk from the target chunk to the newest. The ring is left
-    /// untouched (the caller clears it after extraction). Off-realtime only.
+    /// before the oldest retained chunk. On a hit, returns [`ReplayPrefix`]
+    /// describing the exact audible start frame, the one-past-the-newest
+    /// continuation frame, and the retained PCM from the target frame to the
+    /// newest chunk. Chunks after the first are zero-copy `Arc` clones; the first
+    /// chunk is cloned only when the target lands inside that chunk. The ring is
+    /// left untouched (the caller clears it after extraction). Off-realtime only.
     pub fn take_replay_prefix(&self, target_frame: u64) -> Option<ReplayPrefix> {
         let chunks = self.chunks.lock();
         // Find the retained chunk that contains `target_frame`.
@@ -266,12 +282,33 @@ impl StreamingRetentionRing {
             target_frame >= c.start_frame && target_frame < c.start_frame + u64::from(c.frames)
         })?;
 
-        let audible_start_frame = chunks[start_idx].start_frame;
+        let audible_start_frame = target_frame;
         let mut samples = Vec::with_capacity(chunks.len() - start_idx);
         let mut total_frames = 0_u64;
-        for chunk in chunks.iter().skip(start_idx) {
-            total_frames += u64::from(chunk.frames);
-            samples.push(Arc::clone(&chunk.samples));
+        for (idx, chunk) in chunks.iter().enumerate().skip(start_idx) {
+            if idx == start_idx {
+                let frame_offset = target_frame.saturating_sub(chunk.start_frame);
+                if frame_offset == 0 {
+                    total_frames += u64::from(chunk.frames);
+                    samples.push(Arc::clone(&chunk.samples));
+                    continue;
+                }
+
+                let channels = (chunk.samples.len() / chunk.frames.max(1) as usize).max(1);
+                let start_sample = frame_offset as usize * channels;
+                if start_sample >= chunk.samples.len() {
+                    continue;
+                }
+                let trimmed = Arc::new(chunk.samples[start_sample..].to_vec());
+                total_frames += (trimmed.len() / channels) as u64;
+                samples.push(trimmed);
+            } else {
+                total_frames += u64::from(chunk.frames);
+                samples.push(Arc::clone(&chunk.samples));
+            }
+        }
+        if total_frames == 0 {
+            return None;
         }
         let continuation_start_frame = audible_start_frame + total_frames;
 
@@ -481,6 +518,9 @@ impl AtomicPlayerState {
 pub struct SharedState {
     pub state: AtomicPlayerState,
     pub position_frames: AtomicU64,
+    pub render_clock_start_frame: AtomicU64,
+    pub render_clock_end_frame: AtomicU64,
+    pub render_clock_anchor_ms: AtomicU64,
     pub sample_rate: AtomicU64,
     pub channels: AtomicU64,
     pub total_frames: AtomicU64,
@@ -566,6 +606,18 @@ pub struct SharedState {
     pub stream_build_finished_ms: AtomicU64,
     pub stream_play_returned_ms: AtomicU64,
     pub stream_play_generation: AtomicU64,
+    pub seek_phase_generation: AtomicU64,
+    pub seek_request_started_ms: AtomicU64,
+    pub seek_request_returned_ms: AtomicU64,
+    pub seek_generation_applied_ms: AtomicU64,
+    pub seek_decoder_open_started_ms: AtomicU64,
+    pub seek_decoder_open_finished_ms: AtomicU64,
+    pub seek_decoder_seek_started_ms: AtomicU64,
+    pub seek_decoder_seek_finished_ms: AtomicU64,
+    pub seek_first_chunk_ms: AtomicU64,
+    pub seek_ready_sent_ms: AtomicU64,
+    pub seek_ready_ms: AtomicU64,
+    pub seek_first_position_advanced_ms: AtomicU64,
     pub streaming_ready_play_requested_ms: AtomicU64,
     pub streaming_ready_play_completed_ms: AtomicU64,
     pub streaming_ready_play_start_playback_ms: AtomicU64,
@@ -658,9 +710,17 @@ pub struct SharedState {
 
 impl SharedState {
     pub fn new() -> Self {
+        // Force the monotonic playback clock epoch to initialize here, off the
+        // realtime thread, so the first audio-callback read of
+        // `playback_phase_time_ms()` does not pay the one-shot `OnceLock` init cost.
+        playback_clock_epoch();
+
         Self {
             state: AtomicPlayerState::new(PlayerState::Stopped),
             position_frames: AtomicU64::new(0),
+            render_clock_start_frame: AtomicU64::new(0),
+            render_clock_end_frame: AtomicU64::new(0),
+            render_clock_anchor_ms: AtomicU64::new(0),
             sample_rate: AtomicU64::new(44100),
             channels: AtomicU64::new(2),
             total_frames: AtomicU64::new(0),
@@ -732,6 +792,18 @@ impl SharedState {
             stream_build_finished_ms: AtomicU64::new(0),
             stream_play_returned_ms: AtomicU64::new(0),
             stream_play_generation: AtomicU64::new(0),
+            seek_phase_generation: AtomicU64::new(0),
+            seek_request_started_ms: AtomicU64::new(0),
+            seek_request_returned_ms: AtomicU64::new(0),
+            seek_generation_applied_ms: AtomicU64::new(0),
+            seek_decoder_open_started_ms: AtomicU64::new(0),
+            seek_decoder_open_finished_ms: AtomicU64::new(0),
+            seek_decoder_seek_started_ms: AtomicU64::new(0),
+            seek_decoder_seek_finished_ms: AtomicU64::new(0),
+            seek_first_chunk_ms: AtomicU64::new(0),
+            seek_ready_sent_ms: AtomicU64::new(0),
+            seek_ready_ms: AtomicU64::new(0),
+            seek_first_position_advanced_ms: AtomicU64::new(0),
             streaming_ready_play_requested_ms: AtomicU64::new(0),
             streaming_ready_play_completed_ms: AtomicU64::new(0),
             streaming_ready_play_start_playback_ms: AtomicU64::new(0),
@@ -848,7 +920,29 @@ impl SharedState {
     pub fn current_time_secs(&self) -> f64 {
         let pos = self.position_frames.load(Ordering::Relaxed);
         let sr = self.sample_rate.load(Ordering::Relaxed).max(1);
-        pos as f64 / sr as f64
+        if self.state.load() != PlayerState::Playing
+            || (self.is_loading.load(Ordering::Acquire)
+                && !self.streaming_active.load(Ordering::Acquire))
+        {
+            return pos as f64 / sr as f64;
+        }
+
+        let anchor_ms = self.render_clock_anchor_ms.load(Ordering::Acquire);
+        let start_frame = self.render_clock_start_frame.load(Ordering::Acquire);
+        let end_frame = self.render_clock_end_frame.load(Ordering::Acquire);
+        let generation = self.load_generation.load(Ordering::Acquire);
+        if !self.is_seek_phase_generation(generation)
+            || anchor_ms == 0
+            || end_frame <= start_frame
+            || pos < start_frame
+        {
+            return pos as f64 / sr as f64;
+        }
+
+        let elapsed_ms = playback_phase_time_ms().saturating_sub(anchor_ms);
+        let elapsed_frames = elapsed_ms.saturating_mul(sr) / 1000;
+        let display_frame = start_frame.saturating_add(elapsed_frames).min(end_frame);
+        display_frame as f64 / sr as f64
     }
 
     pub fn duration_secs(&self) -> f64 {
@@ -857,7 +951,37 @@ impl SharedState {
         total as f64 / sr as f64
     }
 
+    pub fn reset_render_clock(&self, frame: u64) {
+        self.render_clock_start_frame
+            .store(frame, Ordering::Release);
+        self.render_clock_end_frame.store(frame, Ordering::Release);
+        self.render_clock_anchor_ms.store(0, Ordering::Release);
+    }
+
+    pub fn mark_render_clock_span(&self, start_frame: u64, end_frame: u64) {
+        if end_frame <= start_frame {
+            return;
+        }
+        self.render_clock_start_frame
+            .store(start_frame, Ordering::Release);
+        self.render_clock_end_frame
+            .store(end_frame, Ordering::Release);
+        self.render_clock_anchor_ms
+            .store(playback_phase_time_ms(), Ordering::Release);
+    }
+
     pub fn reset_load_phase_timestamps(&self) {
+        self.reset_load_phase_timestamps_inner(true);
+    }
+
+    pub fn reset_load_phase_timestamps_for_seek(&self) {
+        self.reset_load_phase_timestamps_inner(false);
+    }
+
+    fn reset_load_phase_timestamps_inner(&self, clear_seek_phase: bool) {
+        if clear_seek_phase {
+            self.clear_seek_phase_timestamps();
+        }
         self.load_request_started_ms
             .store(playback_phase_time_ms(), Ordering::Relaxed);
         self.load_request_returned_ms.store(0, Ordering::Relaxed);
@@ -903,7 +1027,28 @@ impl SharedState {
         self.streaming_finished_ms.store(0, Ordering::Relaxed);
     }
 
+    fn clear_seek_phase_timestamps(&self) {
+        self.seek_phase_generation.store(0, Ordering::Release);
+        self.seek_request_started_ms.store(0, Ordering::Relaxed);
+        self.seek_request_returned_ms.store(0, Ordering::Relaxed);
+        self.seek_generation_applied_ms.store(0, Ordering::Relaxed);
+        self.seek_decoder_open_started_ms
+            .store(0, Ordering::Relaxed);
+        self.seek_decoder_open_finished_ms
+            .store(0, Ordering::Relaxed);
+        self.seek_decoder_seek_started_ms
+            .store(0, Ordering::Relaxed);
+        self.seek_decoder_seek_finished_ms
+            .store(0, Ordering::Relaxed);
+        self.seek_first_chunk_ms.store(0, Ordering::Relaxed);
+        self.seek_ready_sent_ms.store(0, Ordering::Relaxed);
+        self.seek_ready_ms.store(0, Ordering::Relaxed);
+        self.seek_first_position_advanced_ms
+            .store(0, Ordering::Relaxed);
+    }
+
     pub fn reset_streaming_state(&self) {
+        self.reset_render_clock(self.position_frames.load(Ordering::Relaxed));
         self.streaming_active.store(false, Ordering::Release);
         self.streaming_decode_finished
             .store(false, Ordering::Release);
@@ -1006,6 +1151,81 @@ impl SharedState {
     pub fn mark_load_request_returned(&self) {
         self.load_request_returned_ms
             .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn reset_seek_phase_timestamps(&self) {
+        self.clear_seek_phase_timestamps();
+        self.seek_request_started_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_seek_request_returned(&self) {
+        self.seek_request_returned_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn mark_seek_generation_applied(&self, generation: u64) {
+        self.seek_phase_generation
+            .store(generation, Ordering::Release);
+        self.seek_generation_applied_ms
+            .store(playback_phase_time_ms(), Ordering::Relaxed);
+    }
+
+    pub fn is_seek_phase_generation(&self, generation: u64) -> bool {
+        generation != 0 && self.seek_phase_generation.load(Ordering::Acquire) == generation
+    }
+
+    pub fn mark_seek_decoder_open_started(&self, generation: u64) {
+        if self.is_seek_phase_generation(generation) {
+            self.seek_decoder_open_started_ms
+                .store(playback_phase_time_ms(), Ordering::Relaxed);
+        }
+    }
+
+    pub fn mark_seek_decoder_open_finished(&self, generation: u64) {
+        if self.is_seek_phase_generation(generation) {
+            self.seek_decoder_open_finished_ms
+                .store(playback_phase_time_ms(), Ordering::Relaxed);
+        }
+    }
+
+    pub fn mark_seek_decoder_seek_started(&self, generation: u64) {
+        if self.is_seek_phase_generation(generation) {
+            self.seek_decoder_seek_started_ms
+                .store(playback_phase_time_ms(), Ordering::Relaxed);
+        }
+    }
+
+    pub fn mark_seek_decoder_seek_finished(&self, generation: u64) {
+        if self.is_seek_phase_generation(generation) {
+            self.seek_decoder_seek_finished_ms
+                .store(playback_phase_time_ms(), Ordering::Relaxed);
+        }
+    }
+
+    pub fn mark_seek_first_chunk(&self, generation: u64) {
+        if self.is_seek_phase_generation(generation) {
+            let _ = self.seek_first_chunk_ms.compare_exchange(
+                0,
+                playback_phase_time_ms(),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
+    }
+
+    pub fn mark_seek_ready_sent(&self, generation: u64) {
+        if self.is_seek_phase_generation(generation) {
+            self.seek_ready_sent_ms
+                .store(playback_phase_time_ms(), Ordering::Relaxed);
+        }
+    }
+
+    pub fn mark_seek_ready(&self, generation: u64) {
+        if self.is_seek_phase_generation(generation) {
+            self.seek_ready_ms
+                .store(playback_phase_time_ms(), Ordering::Relaxed);
+        }
     }
 
     pub fn mark_decode_started(&self) {
@@ -1322,12 +1542,14 @@ impl SharedState {
     }
 
     pub fn mark_first_position_advanced_after_play(&self) {
-        if !self.current_generation_stream_play_returned()
-            || self.first_position_advanced_ms.load(Ordering::Relaxed) != 0
-        {
+        if !self.current_generation_stream_play_returned() {
             return;
         }
 
+        self.mark_seek_first_position_advanced();
+        if self.first_position_advanced_ms.load(Ordering::Relaxed) != 0 {
+            return;
+        }
         let _ = self.first_position_advanced_ms.compare_exchange(
             0,
             playback_phase_time_ms(),
@@ -1335,6 +1557,19 @@ impl SharedState {
             Ordering::Acquire,
         );
         self.mark_playback_progress_generation();
+    }
+
+    fn mark_seek_first_position_advanced(&self) {
+        let generation = self.load_generation.load(Ordering::Acquire);
+        if !self.is_seek_phase_generation(generation) {
+            return;
+        }
+        let _ = self.seek_first_position_advanced_ms.compare_exchange(
+            0,
+            playback_phase_time_ms(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 
     fn current_generation_stream_play_returned(&self) -> bool {
@@ -1384,6 +1619,18 @@ impl Default for SharedState {
 mod tests {
     use super::*;
 
+    /// Advance the process-start monotonic playback clock past `floor_ms` so
+    /// the render-clock anchor (`mark_render_clock_span`) is stored non-zero
+    /// even in a fresh test process. Without this, `playback_phase_time_ms()`
+    /// can return 0 within the first ~1ms after epoch init, which sets
+    /// `anchor_ms == 0` and makes `current_time_secs()` fall back to
+    /// `position_frames / sr` instead of exercising the interpolation branch.
+    fn advance_playback_clock_past(floor_ms: u64) {
+        while playback_phase_time_ms() <= floor_ms {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     #[test]
     fn repeat_mode_parses_and_round_trips_atomic_value() {
         assert_eq!(RepeatMode::parse("off"), Some(RepeatMode::Off));
@@ -1427,6 +1674,10 @@ mod tests {
         shared.mark_audio_command_ensure_progress_received();
         shared.mark_audio_command_ensure_progress_completed();
         shared.mark_playback_recovery_requested();
+        shared.reset_seek_phase_timestamps();
+        shared.mark_seek_generation_applied(7);
+        shared.mark_seek_decoder_open_started(7);
+        shared.mark_seek_first_chunk(7);
 
         shared.reset_load_phase_timestamps();
 
@@ -1457,6 +1708,46 @@ mod tests {
                 .playback_recovery_requested_ms
                 .load(Ordering::Relaxed),
             0
+        );
+        assert_eq!(shared.seek_phase_generation.load(Ordering::Acquire), 0);
+        assert_eq!(shared.seek_request_started_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared.seek_decoder_open_started_ms.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(shared.seek_first_chunk_ms.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn seek_load_phase_reset_preserves_seek_timestamps() {
+        let shared = SharedState::new();
+        shared.reset_seek_phase_timestamps();
+        shared.mark_seek_generation_applied(11);
+        shared.mark_seek_decoder_open_started(11);
+
+        let seek_request_started = shared.seek_request_started_ms.load(Ordering::Relaxed);
+        let seek_generation_applied = shared.seek_generation_applied_ms.load(Ordering::Relaxed);
+        let seek_decoder_open_started = shared.seek_decoder_open_started_ms.load(Ordering::Relaxed);
+
+        shared.mark_decode_started();
+        shared.mark_streaming_first_chunk();
+        shared.reset_load_phase_timestamps_for_seek();
+
+        assert!(shared.load_request_started_ms.load(Ordering::Relaxed) > 0);
+        assert_eq!(shared.decode_started_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.streaming_first_chunk_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(shared.seek_phase_generation.load(Ordering::Acquire), 11);
+        assert_eq!(
+            shared.seek_request_started_ms.load(Ordering::Relaxed),
+            seek_request_started
+        );
+        assert_eq!(
+            shared.seek_generation_applied_ms.load(Ordering::Relaxed),
+            seek_generation_applied
+        );
+        assert_eq!(
+            shared.seek_decoder_open_started_ms.load(Ordering::Relaxed),
+            seek_decoder_open_started
         );
     }
 
@@ -1620,14 +1911,16 @@ mod tests {
         ring.push(retained_chunk(3, 104, 8));
         ring.push(retained_chunk(3, 108, 8));
 
-        // Target lands inside the middle chunk -> prefix from that chunk to newest.
+        // Target lands inside the middle chunk -> first chunk is trimmed to the
+        // exact target frame, then the newer chunks remain zero-copy clones.
         let prefix = ring
             .take_replay_prefix(106)
             .expect("target inside ring should hit");
-        assert_eq!(prefix.audible_start_frame, 104);
+        assert_eq!(prefix.audible_start_frame, 106);
         assert_eq!(prefix.continuation_start_frame, 112);
-        assert_eq!(prefix.prefix_frames, 8); // 2 chunks * 4 frames
+        assert_eq!(prefix.prefix_frames, 6); // 2 frames from middle + 4 newest
         assert_eq!(prefix.samples.len(), 2);
+        assert_eq!(prefix.samples[0].len(), 4); // 2 stereo frames
 
         // Target inside the oldest chunk -> whole ring.
         let prefix = ring
@@ -1818,6 +2111,129 @@ mod tests {
             shared.playback_progress_generation.load(Ordering::Acquire),
             7
         );
+    }
+
+    #[test]
+    fn seek_phase_records_first_position_after_initial_play_marker_exists() {
+        let shared = SharedState::new();
+        shared.load_generation.store(7, Ordering::Release);
+        shared.mark_stream_play_returned();
+        shared.mark_first_position_advanced_after_play();
+        assert!(shared.first_position_advanced_ms.load(Ordering::Relaxed) > 0);
+
+        shared.reset_seek_phase_timestamps();
+        shared.mark_seek_generation_applied(7);
+        shared.mark_first_position_advanced_after_play();
+
+        assert!(
+            shared
+                .seek_first_position_advanced_ms
+                .load(Ordering::Relaxed)
+                > 0
+        );
+    }
+
+    #[test]
+    fn seek_phase_current_time_interpolates_within_render_span() {
+        let shared = SharedState::new();
+        // Ensure the monotonic anchor is non-zero so the interpolation branch is
+        // actually taken instead of falling back to position_frames / sr.
+        advance_playback_clock_past(10);
+        shared.sample_rate.store(1_000, Ordering::Relaxed);
+        // Park position_frames at the span start so an interpolated read is
+        // distinguishable from the authoritative fallback (0.100).
+        shared.position_frames.store(100, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared.load_generation.store(9, Ordering::Release);
+        shared.mark_seek_generation_applied(9);
+        shared.mark_render_clock_span(100, 110);
+        assert_ne!(
+            shared.render_clock_anchor_ms.load(Ordering::Acquire),
+            0,
+            "anchor must be non-zero for the interpolation branch to engage"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(3));
+
+        let current = shared.current_time_secs();
+        assert!(
+            current > 0.100,
+            "interpolation must advance past the authoritative position (0.100), got {current}"
+        );
+        assert!(
+            (0.100..=0.110).contains(&current),
+            "seek display clock should advance within the rendered span, got {current}"
+        );
+    }
+
+    #[test]
+    fn render_clock_display_time_is_monotonic_non_decreasing() {
+        let shared = SharedState::new();
+        // Ensure the monotonic anchor is non-zero so interpolation engages.
+        advance_playback_clock_past(10);
+        let sample_rate = 1_000u64;
+        let start_frame = 100u64;
+        let end_frame = 200u64;
+        shared.sample_rate.store(sample_rate, Ordering::Relaxed);
+        // Park position_frames at the span start so the display value is driven
+        // by interpolation, not by the authoritative position fallback.
+        shared.position_frames.store(start_frame, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared.load_generation.store(9, Ordering::Release);
+        shared.mark_seek_generation_applied(9);
+        shared.mark_render_clock_span(start_frame, end_frame);
+        assert_ne!(
+            shared.render_clock_anchor_ms.load(Ordering::Acquire),
+            0,
+            "anchor must be non-zero for the interpolation branch to engage"
+        );
+
+        let lower = start_frame as f64 / sample_rate as f64;
+        let upper = end_frame as f64 / sample_rate as f64;
+
+        let mut previous = shared.current_time_secs();
+        assert!(
+            (lower..=upper).contains(&previous),
+            "first display time {previous} should fall within [{lower}, {upper}]"
+        );
+
+        let mut advanced_strictly_between = false;
+        for _ in 0..50 {
+            // Spin/sleep so the monotonic clock advances between reads.
+            std::thread::sleep(std::time::Duration::from_micros(200));
+            let current = shared.current_time_secs();
+            assert!(
+                current >= previous,
+                "display time must be non-decreasing: {current} < {previous}"
+            );
+            assert!(
+                (lower..=upper).contains(&current),
+                "display time {current} should stay within [{lower}, {upper}]"
+            );
+            if current > lower && current < upper {
+                advanced_strictly_between = true;
+            }
+            previous = current;
+        }
+        assert!(
+            advanced_strictly_between,
+            "interpolation branch must produce a value strictly inside ({lower}, {upper}); \
+             otherwise the test does not exercise the render clock"
+        );
+    }
+
+    #[test]
+    fn non_seek_current_time_uses_authoritative_position_frames() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(1_000, Ordering::Relaxed);
+        shared.position_frames.store(110, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared.load_generation.store(9, Ordering::Release);
+        shared.mark_render_clock_span(100, 110);
+
+        std::thread::sleep(std::time::Duration::from_millis(3));
+
+        assert_eq!(shared.current_time_secs(), 0.110);
     }
 
     #[test]

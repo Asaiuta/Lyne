@@ -111,6 +111,22 @@ impl CallbackScratch {
         }
     }
 
+    /// Grow the `resample_leftover` reserve off the audio thread so a single
+    /// resampler output chunk can never reallocate inside the callback.
+    ///
+    /// Per-call Soxr output is now capped to the naive ratio bound (the resampler
+    /// slices its scratch), so the reserve is driven by
+    /// `StreamingResampler::max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels)`
+    /// — the output ceiling for the largest input chunk the render loop feeds in
+    /// one call. Call this whenever a resampler is attached to this scratch (off
+    /// the realtime path); it is a no-op once the capacity is already large enough.
+    pub fn reserve_resample_leftover(&mut self, max_chunk_samples: usize) {
+        if max_chunk_samples > self.resample_leftover.capacity() {
+            let additional = max_chunk_samples - self.resample_leftover.len();
+            self.resample_leftover.reserve_exact(additional);
+        }
+    }
+
     /// Release the currently held streaming chunk to the non-realtime retire
     /// queue instead of freeing its `Arc<Vec<f64>>` on the audio thread.
     ///
@@ -299,7 +315,7 @@ impl LockfreeDspContext {
     ) -> DspChain {
         let mut chain = DspChain::new(sample_rate);
         chain.add(EqProcessor::new(channels, sample_rate, eq_params));
-        chain.add(SaturationProcessor::new(saturation_params));
+        chain.add(SaturationProcessor::new(channels, saturation_params));
         chain.add(CrossfeedProcessor::new(sample_rate, crossfeed_params));
         chain.add(ConvolverProcessor::new(convolver_swap, convolver_enabled));
         chain.add(VolumeProcessor::new(volume_params));
@@ -688,6 +704,7 @@ fn try_activate_pending_gapless(
     shared.sample_rate.store(next_sr, Ordering::Relaxed);
     shared.channels.store(next_ch, Ordering::Relaxed);
     shared.position_frames.store(0, Ordering::Relaxed);
+    shared.reset_render_clock(0);
 
     shared.pending_ready.store(false, Ordering::Release);
     shared.needs_preload.store(false, Ordering::Relaxed);
@@ -865,6 +882,7 @@ fn render_audio_output(
             break;
         }
 
+        let rendered_start_frame = *current_pos as u64;
         *current_pos += frames_to_read;
         shared
             .position_frames
@@ -893,7 +911,36 @@ fn render_audio_output(
                 chunk_idx += 1;
             }
 
+            let rendered_output_frames = chunk_idx / channels;
+            if rendered_output_frames > 0 && samples_written > 0 {
+                let source_frames_rendered =
+                    frames_to_read.saturating_mul(rendered_output_frames) / frames_needed_out;
+                shared.mark_render_clock_span(
+                    rendered_start_frame,
+                    rendered_start_frame.saturating_add(source_frames_rendered.max(1) as u64),
+                );
+            }
+
             if chunk_idx < resampled_samples.len() {
+                // Safety net: leftover is drained (and cleared) before this render
+                // loop runs, so this extend is the only writer per callback. The
+                // reserve is sized off the realtime thread (at resampler-attach
+                // time) to the resampler's naive per-call output bound
+                // (`max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels)`),
+                // which is now a valid single-call ceiling because per-call Soxr
+                // output is capped via slicing. A failure here means the attach-time
+                // reserve was skipped or undersized, which would otherwise reallocate
+                // on the real-time audio thread.
+                let added = resampled_samples.len() - chunk_idx;
+                debug_assert!(
+                    scratch.resample_leftover.len() + added
+                        <= scratch.resample_leftover.capacity(),
+                    "resample_leftover would realloc in the audio callback: len {} + {} > cap {} \
+                     (attach-time reserve_resample_leftover was skipped or undersized)",
+                    scratch.resample_leftover.len(),
+                    added,
+                    scratch.resample_leftover.capacity()
+                );
                 scratch
                     .resample_leftover
                     .extend_from_slice(&resampled_samples[chunk_idx..]);
@@ -918,6 +965,13 @@ fn render_audio_output(
                 {
                     *dst = *src;
                 }
+            }
+            let rendered_output_frames = take / channels;
+            if rendered_output_frames > 0 {
+                shared.mark_render_clock_span(
+                    rendered_start_frame,
+                    rendered_start_frame.saturating_add(rendered_output_frames as u64),
+                );
             }
             samples_written += take;
         }
@@ -1090,6 +1144,7 @@ fn render_streaming_audio_output(
             break;
         }
 
+        let rendered_start_frame = *current_pos as u64;
         *current_pos += frames_read;
         shared
             .position_frames
@@ -1117,7 +1172,36 @@ fn render_streaming_audio_output(
                 chunk_idx += 1;
             }
 
+            let rendered_output_frames = chunk_idx / channels;
+            if rendered_output_frames > 0 && samples_written > 0 {
+                let source_frames_rendered =
+                    frames_read.saturating_mul(rendered_output_frames) / frames_needed_out;
+                shared.mark_render_clock_span(
+                    rendered_start_frame,
+                    rendered_start_frame.saturating_add(source_frames_rendered.max(1) as u64),
+                );
+            }
+
             if chunk_idx < resampled_samples.len() {
+                // Safety net: leftover is drained (and cleared) before this render
+                // loop runs, so this extend is the only writer per callback. The
+                // reserve is sized off the realtime thread (at resampler-attach
+                // time) to the resampler's naive per-call output bound
+                // (`max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels)`),
+                // which is now a valid single-call ceiling because per-call Soxr
+                // output is capped via slicing. A failure here means the attach-time
+                // reserve was skipped or undersized, which would otherwise reallocate
+                // on the real-time audio thread.
+                let added = resampled_samples.len() - chunk_idx;
+                debug_assert!(
+                    scratch.resample_leftover.len() + added
+                        <= scratch.resample_leftover.capacity(),
+                    "resample_leftover would realloc in the audio callback: len {} + {} > cap {} \
+                     (attach-time reserve_resample_leftover was skipped or undersized)",
+                    scratch.resample_leftover.len(),
+                    added,
+                    scratch.resample_leftover.capacity()
+                );
                 scratch
                     .resample_leftover
                     .extend_from_slice(&resampled_samples[chunk_idx..]);
@@ -1143,13 +1227,22 @@ fn render_streaming_audio_output(
                     *dst = *src;
                 }
             }
+            let rendered_output_frames = take / channels;
+            if rendered_output_frames > 0 {
+                shared.mark_render_clock_span(
+                    rendered_start_frame,
+                    rendered_start_frame.saturating_add(rendered_output_frames as u64),
+                );
+            }
             samples_written += take;
         }
     }
 
     if samples_written < output_len {
         let silence_frames = ((output_len - samples_written) / channels) as u64;
-        shared.mark_streaming_output_shortfall(silence_frames);
+        if !shared.is_loading.load(Ordering::Acquire) {
+            shared.mark_streaming_output_shortfall(silence_frames);
+        }
         if output_path.uses_final_buffer() {
             scratch.final_output[samples_written..output_len].fill(0.0);
         } else {
@@ -1671,6 +1764,83 @@ mod tests {
     }
 
     #[test]
+    fn callback_dynamic_leftover_reserve_absorbs_soxr_burst_without_realloc() {
+        // Worst *supported* upsample ratio: 8 kHz source -> 384 kHz target (48x).
+        // A tiny output buffer pins each source read at MIN_RESAMPLE_SOURCE_FRAMES.
+        // Per-call Soxr output is now capped to the naive ratio bound (the resampler
+        // slices its scratch), so the per-call burst can no longer exceed
+        // max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels). The
+        // leftover reserve, sized from that same bound at attach time, must absorb
+        // every call without reallocating, and the per-call cap must hold.
+        let channels = 2;
+        let frames = 8192;
+        let shared = SharedState::new();
+        let samples = (0..frames * channels)
+            .map(|sample| (sample as f64 % 113.0) / 113.0 - 0.5)
+            .collect::<Vec<_>>();
+        shared.audio_buffer.store(Arc::new(samples));
+        shared.total_frames.store(frames as u64, Ordering::Relaxed);
+        shared.sample_rate.store(8_000, Ordering::Relaxed);
+        shared.channels.store(channels as u64, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(8_000.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut resampler = Some(StreamingResampler::new(channels, 8_000, 384_000).unwrap());
+        let per_call_cap = resampler
+            .as_ref()
+            .unwrap()
+            .max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels);
+        let mut scratch = CallbackScratch::new(channels);
+        // Mirror the production attach path (output_stream.rs): size the leftover
+        // reserve to the resampler's per-call (naive ratio) output bound.
+        scratch.reserve_resample_leftover(per_call_cap);
+        let initial_capacity = scratch.resample_leftover.capacity();
+
+        // Tiny output buffer => maximum burst per producing callback. Run enough
+        // callbacks to cover more than one full produce + drain cycle.
+        let mut out = vec![0.0f32; 32 * channels];
+        let mut peak_leftover = 0;
+        for _ in 0..512 {
+            audio_callback_lockfree(
+                &mut out,
+                &shared,
+                &mut chain,
+                None,
+                &loudness,
+                &tx,
+                channels,
+                &mut resampler,
+                &mut scratch,
+            );
+            peak_leftover = peak_leftover.max(scratch.resample_leftover.len());
+            assert!(
+                scratch.resample_leftover.len() <= scratch.resample_leftover.capacity(),
+                "leftover exceeded capacity: {} > {}",
+                scratch.resample_leftover.len(),
+                scratch.resample_leftover.capacity()
+            );
+            assert_eq!(
+                scratch.resample_leftover.capacity(),
+                initial_capacity,
+                "resample_leftover reallocated in the audio callback"
+            );
+        }
+
+        // The per-call output cap must hold: slicing the resampler scratch bounds
+        // each callback's leftover to the naive ratio bound, so it never exceeds
+        // the attach-time reserve.
+        assert!(
+            peak_leftover <= per_call_cap,
+            "per-call Soxr output cap violated: peak {} > naive bound {}",
+            peak_leftover,
+            per_call_cap
+        );
+    }
+
+    #[test]
     fn callback_streaming_chunk_advances_position_without_full_audio_buffer() {
         let shared = SharedState::new();
         shared.sample_rate.store(44_100, Ordering::Relaxed);
@@ -1990,6 +2160,62 @@ mod tests {
             4
         );
         assert_eq!(shared.streaming_queue_min_len(), Some(0));
+        assert!(shared.streaming_active.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn callback_streaming_loading_empty_queue_silence_is_not_output_shortfall() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.total_frames.store(100, Ordering::Relaxed);
+        shared.streaming_generation.store(9, Ordering::Relaxed);
+        shared.streaming_active.store(true, Ordering::Relaxed);
+        shared
+            .streaming_decode_finished
+            .store(false, Ordering::Relaxed);
+        shared.is_loading.store(true, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+
+        let mut chain = DspChain::new(44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut out = vec![1.0f32; 8];
+        let mut scratch = CallbackScratch::new(2);
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+
+        assert_eq!(out, vec![0.0; 8]);
+        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared
+                .streaming_queue_empty_during_decode_count
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            shared
+                .streaming_output_shortfall_count
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            shared
+                .streaming_output_shortfall_frames
+                .load(Ordering::Relaxed),
+            0
+        );
         assert!(shared.streaming_active.load(Ordering::Relaxed));
     }
 

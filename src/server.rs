@@ -37,6 +37,10 @@ pub struct AppState {
     pub webdav_config: Mutex<WebDavConfig>,
     pub ncm_client: Arc<ncm_api_rs::ApiClient>,
     pub app_db: Arc<AppDatabase>,
+    /// Async facade over `app_db` that offloads blocking DB calls onto the
+    /// blocking thread pool. Shares the same `Arc<AppDatabase>` (no extra
+    /// connection). Handlers should prefer this over `app_db` in request paths.
+    pub repo: repository::AsyncRepo,
     /// Persistent settings manager
     pub settings_manager: SharedSettingsManager,
     /// Analysis and scan job state.
@@ -211,6 +215,7 @@ mod lyrics;
 mod netease;
 mod path_security;
 mod playback;
+mod repository;
 mod request_types;
 mod settings_handlers;
 mod state_helpers;
@@ -307,11 +312,13 @@ pub(crate) fn test_app_state_for_analysis(
     };
     runtime_paths.ensure().unwrap();
 
+    let app_db = Arc::new(AppDatabase::in_memory().unwrap());
     Arc::new(AppState {
         player: Mutex::new(AudioPlayer::new(crate::config::EngineSettings::default())),
         webdav_config: Mutex::new(WebDavConfig::default()),
         ncm_client: Arc::new(ncm_api_rs::create_client(None)),
-        app_db: Arc::new(AppDatabase::in_memory().unwrap()),
+        repo: repository::AsyncRepo::new(Arc::clone(&app_db)),
+        app_db,
         settings_manager: crate::settings::create_settings_manager(&runtime_paths.settings_path),
         analysis: AnalysisState {
             loudness_db: None,
@@ -484,6 +491,7 @@ pub async fn run_server(
         player: Mutex::new(player),
         webdav_config: Mutex::new(webdav_config),
         ncm_client: Arc::clone(&ncm_client),
+        repo: repository::AsyncRepo::new(Arc::clone(&app_db)),
         app_db,
         settings_manager,
         analysis: AnalysisState {

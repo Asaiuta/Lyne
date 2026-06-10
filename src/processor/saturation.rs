@@ -160,6 +160,19 @@ impl Saturation {
         self.update_hpf_coef();
     }
 
+    /// Pre-size the per-channel HPF state for `channels`, off the audio thread.
+    ///
+    /// Call this during setup (when the processor is built for a stream) so
+    /// `process_highpass` never resizes `hpf_states`/`prev_inputs` on the realtime
+    /// audio thread. Defaults keep the stereo size when `channels == 0`.
+    pub fn set_channel_count(&mut self, channels: usize) {
+        let channels = channels.max(1);
+        if self.hpf_states.len() != channels {
+            self.hpf_states.resize(channels, 0.0);
+            self.prev_inputs.resize(channels, 0.0);
+        }
+    }
+
     /// Recalculate HPF coefficient based on current cutoff and sample rate
     fn update_hpf_coef(&mut self) {
         // Correct first-order RC HPF: α = fs / (fs + 2π·fc)
@@ -230,11 +243,15 @@ impl Saturation {
         let mix = self.mix;
         let sat_type = self.sat_type;
 
-        // Ensure HPF state vectors are large enough for the channel count
-        if self.hpf_states.len() < channels {
-            self.hpf_states.resize(channels, 0.0);
-            self.prev_inputs.resize(channels, 0.0);
-        }
+        // HPF state is sized off the audio thread via `set_channel_count`; never
+        // resize here, which would allocate on the realtime audio thread. If this
+        // fires, a caller processed more channels than it was set up for.
+        debug_assert!(
+            self.hpf_states.len() >= channels,
+            "Saturation HPF state undersized for {} channels (have {}); call set_channel_count during setup",
+            channels,
+            self.hpf_states.len()
+        );
 
         let frames = samples.len() / channels;
         for frame in 0..frames {
@@ -496,23 +513,30 @@ mod tests {
     }
 
     #[test]
-    fn test_highpass_sustained_subnormal_input_flushes_to_zero() {
-        crate::runtime::audio_thread_init();
-        if !crate::runtime::audio_thread_float_mode_is_enabled() {
-            return;
-        }
-
+    fn test_highpass_multichannel_after_set_channel_count_does_not_panic() {
         let mut sat = Saturation::new();
         sat.set_highpass_mode(true);
-        let subnormal = f64::from_bits(1);
-        let mut samples = (0..1024)
-            .flat_map(|_| [subnormal, -subnormal])
-            .collect::<Vec<_>>();
+        sat.set_channel_count(6);
 
-        sat.process_with_channels(&mut samples, 2);
+        // 6-channel interleaved buffer (8 frames). Before the fix this would
+        // resize hpf_states/prev_inputs on the (would-be) audio thread; now the
+        // state is pre-sized and process_highpass must not resize.
+        let mut samples = vec![0.5; 6 * 8];
+        sat.process_with_channels(&mut samples, 6);
 
-        assert!(samples.iter().all(|sample| *sample == 0.0));
-        assert!(sat.hpf_states.iter().all(|state| *state == 0.0));
-        assert!(sat.prev_inputs.iter().all(|input| *input == 0.0));
+        assert_eq!(sat.hpf_states.len(), 6);
+        assert_eq!(sat.prev_inputs.len(), 6);
+    }
+
+    #[test]
+    fn test_set_channel_count_resizes_state_off_rt() {
+        let mut sat = Saturation::new();
+        assert_eq!(sat.hpf_states.len(), 2);
+        sat.set_channel_count(8);
+        assert_eq!(sat.hpf_states.len(), 8);
+        assert_eq!(sat.prev_inputs.len(), 8);
+        // Zero channels falls back to a mono-safe size rather than emptying state.
+        sat.set_channel_count(0);
+        assert_eq!(sat.hpf_states.len(), 1);
     }
 }

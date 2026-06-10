@@ -341,6 +341,14 @@ impl StreamingResampler {
         self.to_rate
     }
 
+    /// Naive ratio upper bound, in interleaved samples, on the output a single
+    /// `process_chunk_*` call can return.
+    ///
+    /// Per-call Soxr output is now capped (via slicing the pre-allocated scratch
+    /// to this bound) inside `process_chunk_*`, so this is a *valid* single-call
+    /// ceiling: any excess input is buffered by Soxr and recovered on later
+    /// calls. Callers reserving an output/leftover buffer for one render-loop
+    /// input chunk should size it with this method.
     pub fn max_output_len_for_input(&self, input_samples: usize) -> usize {
         if self.channels == 0 {
             return 0;
@@ -348,6 +356,17 @@ impl StreamingResampler {
         let input_frames = input_samples / self.channels;
         let ratio = self.to_rate as f64 / self.from_rate as f64;
         (input_frames as f64 * ratio).ceil() as usize * self.channels + self.channels * 64
+    }
+
+    /// Absolute hard upper bound, in interleaved samples, on the output a single
+    /// `process_chunk_*` call can return for this resampler.
+    ///
+    /// This equals the pre-allocated `interleaved_output` capacity. With per-call
+    /// output now capped to the naive ratio bound (see `max_output_len_for_input`),
+    /// `max_output_len_for_input` is the right size for per-call reserves; this
+    /// method remains the absolute ceiling tied to the internal buffer capacity.
+    pub fn max_output_samples_per_chunk(&self) -> usize {
+        self.interleaved_output.capacity()
     }
 
     pub fn input_frames_for_output_frames(&self, output_frames: usize) -> usize {
@@ -422,11 +441,11 @@ impl StreamingResampler {
 
         // Pre-allocate all buffers (Defect 33 fix)
         let max_input_frames = 16384; // Typical chunk size
-        let max_ratio = if from_rate > 0 && to_rate > from_rate {
-            to_rate as f64 / from_rate as f64
-        } else {
-            2.0 // Conservative default
-        };
+        // True conversion ratio. Per-call Soxr output is now capped (via slicing)
+        // to the naive ratio bound, so this sizes the scratch/output buffers to the
+        // real worst case for this direction (downsample ratios < 1 no longer
+        // over-reserve the old conservative 2.0).
+        let max_ratio = to_rate as f64 / from_rate as f64;
         let max_output_per_channel = (max_input_frames as f64 * max_ratio).ceil() as usize + 64;
 
         // Pre-allocate channel buffers
@@ -469,29 +488,33 @@ impl StreamingResampler {
 
         // Process each channel
         for (ch, channel_data) in self.channel_inputs.iter().enumerate() {
-            // Ensure scratch buffer is large enough (only resize if needed)
+            // Naive ratio bound for this call. We never resize on the audio thread;
+            // instead we cap Soxr's output by slicing the pre-allocated scratch.
+            // Capping to the naive bound keeps `max_output_len_for_input` a valid
+            // single-call ceiling. The `.min(len)` keeps it panic-safe for offline
+            // callers feeding chunks larger than `max_input_frames` — Soxr buffers
+            // the excess and recovers it on later process/flush calls.
             let expected_output = (channel_data.len() as f64 * self.to_rate as f64
                 / self.from_rate as f64)
                 .ceil() as usize
                 + 64;
-            if self.output_scratch.len() < expected_output {
-                self.output_scratch.resize(expected_output, 0.0);
-            }
+            let cap = expected_output.min(self.output_scratch.len());
 
-            let processed =
-                match self.soxr_instances[ch].process(channel_data, &mut self.output_scratch) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        log::error!(
-                            "Resampler process_chunk failed (ch={}, in_frames={}): {:?}",
-                            ch,
-                            channel_data.len(),
-                            e
-                        );
-                        self.interleaved_output.clear();
-                        return 0;
-                    }
-                };
+            let processed = match self.soxr_instances[ch]
+                .process(channel_data, &mut self.output_scratch[..cap])
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!(
+                        "Resampler process_chunk failed (ch={}, in_frames={}): {:?}",
+                        ch,
+                        channel_data.len(),
+                        e
+                    );
+                    self.interleaved_output.clear();
+                    return 0;
+                }
+            };
 
             self.channel_outputs[ch]
                 .extend_from_slice(&self.output_scratch[..processed.output_frames]);
@@ -573,27 +596,28 @@ impl StreamingResampler {
 
         // Process each channel
         for (ch, channel_data) in self.channel_inputs.iter().enumerate() {
+            // See process_chunk_to_internal_output: cap Soxr output via slicing
+            // instead of resizing on the audio thread.
             let expected_output = (channel_data.len() as f64 * self.to_rate as f64
                 / self.from_rate as f64)
                 .ceil() as usize
                 + 64;
-            if self.output_scratch.len() < expected_output {
-                self.output_scratch.resize(expected_output, 0.0);
-            }
+            let cap = expected_output.min(self.output_scratch.len());
 
-            let processed =
-                match self.soxr_instances[ch].process(channel_data, &mut self.output_scratch) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        log::error!(
-                            "Resampler process_chunk_into failed (ch={}, in_frames={}): {:?}",
-                            ch,
-                            channel_data.len(),
-                            e
-                        );
-                        return 0;
-                    }
-                };
+            let processed = match self.soxr_instances[ch]
+                .process(channel_data, &mut self.output_scratch[..cap])
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!(
+                        "Resampler process_chunk_into failed (ch={}, in_frames={}): {:?}",
+                        ch,
+                        channel_data.len(),
+                        e
+                    );
+                    return 0;
+                }
+            };
 
             self.channel_outputs[ch]
                 .extend_from_slice(&self.output_scratch[..processed.output_frames]);

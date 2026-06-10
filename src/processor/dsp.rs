@@ -231,9 +231,15 @@ pub struct NoiseShaper {
     curve: NoiseShaperCurve,
     /// Sample rate for auto-selection
     sample_rate: u32,
-    /// xorshift64 state for TPDF generation
-    rng_state: u64,
+    /// Per-channel xorshift64 state for TPDF generation. Each channel owns an
+    /// independent, decorrelated stream so L/R dither is not identical (a single
+    /// shared stream leaves the channels' dither correlated, which images as a
+    /// center-panned noise artifact instead of diffuse noise).
+    rng_state: Vec<u64>,
 }
+
+/// Base seed for the per-channel TPDF RNG streams.
+const NOISE_SHAPER_RNG_SEED: u64 = 0x1234_5678_9ABC_DEF0;
 
 impl NoiseShaper {
     /// Create new NoiseShaper with auto-selected curve
@@ -255,7 +261,24 @@ impl NoiseShaper {
             enabled: true,
             curve,
             sample_rate,
-            rng_state: 0x1234_5678_9ABC_DEF0, // Fixed seed for reproducibility
+            rng_state: (0..channels).map(Self::channel_seed).collect(),
+        }
+    }
+
+    /// Derive a distinct, non-zero, decorrelated xorshift64 seed for a channel by
+    /// running the base seed mixed with the channel index through the splitmix64
+    /// finalizer. Independent seeds keep each channel's dither stream uncorrelated.
+    fn channel_seed(ch: usize) -> u64 {
+        let mut z = NOISE_SHAPER_RNG_SEED
+            .wrapping_add((ch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        // xorshift64 requires a non-zero state.
+        if z == 0 {
+            NOISE_SHAPER_RNG_SEED
+        } else {
+            z
         }
     }
 
@@ -265,13 +288,15 @@ impl NoiseShaper {
     }
 
     /// Set target bit depth (Defect 37 fix)
+    ///
+    /// Reachable from the audio thread via `NoiseShaperProcessor::sync_params`, so
+    /// this must stay allocation- and log-free.
     pub fn set_bits(&mut self, bits: u32) {
         if bits != self.bits && bits >= 8 && bits <= 32 {
             self.bits = bits;
             let (cached_scale, cached_lsb) = Self::scale_for_bits(bits);
             self.cached_scale = cached_scale;
             self.cached_lsb = cached_lsb;
-            log::info!("NoiseShaper bit depth: {} bits", bits);
         }
     }
 
@@ -296,22 +321,14 @@ impl NoiseShaper {
         self.bits
     }
 
-    /// Switch to a different noise shaping curve
-    /// IMPORTANT: Clears error history to prevent artifacts from coefficient mismatch
+    /// Switch to a different noise shaping curve.
     ///
-    /// When curve is not recommended for current sample rate, logs a warning
-    /// but respects user's explicit choice (does not force-replace).
+    /// Clears error history to prevent artifacts from coefficient mismatch, and
+    /// respects the caller's explicit choice even when the curve is not recommended
+    /// for the current sample rate (callers can query [`NoiseShaperCurve::is_recommended_for`]
+    /// beforehand). Reachable from the audio thread via
+    /// `NoiseShaperProcessor::sync_params`, so it stays allocation- and log-free.
     pub fn set_curve(&mut self, curve: NoiseShaperCurve) {
-        // Warn if curve not recommended for current sample rate
-        // But respect user's explicit choice (don't force-replace)
-        if !curve.is_recommended_for(self.sample_rate) {
-            log::warn!(
-                "Curve {:?} not recommended at {} Hz, frequency response will be degraded",
-                curve,
-                self.sample_rate
-            );
-        }
-
         self.curve = curve;
         self.coeffs = curve.coeffs();
         self.active_taps = curve.active_taps();
@@ -324,8 +341,6 @@ impl NoiseShaper {
             *h = [0.0; 18];
         }
         self.error_history_9tap_heads.fill(0);
-
-        log::info!("NoiseShaper curve: {:?} @ {} Hz", curve, self.sample_rate);
     }
 
     /// Update sample rate (triggers curve auto-selection)
@@ -337,24 +352,25 @@ impl NoiseShaper {
         }
     }
 
-    /// xorshift64 PRNG - fast, deterministic, period 2^64-1
+    /// xorshift64 PRNG for channel `ch` - fast, deterministic, period 2^64-1
     #[inline(always)]
-    fn next_u64(&mut self) -> u64 {
+    fn next_u64(&mut self, ch: usize) -> u64 {
         // Classic xorshift64 parameters (13, 7, 17)
-        self.rng_state ^= self.rng_state << 13;
-        self.rng_state ^= self.rng_state >> 7;
-        self.rng_state ^= self.rng_state << 17;
-        self.rng_state
+        let s = &mut self.rng_state[ch];
+        *s ^= *s << 13;
+        *s ^= *s >> 7;
+        *s ^= *s << 17;
+        *s
     }
 
-    /// Generate TPDF sample: triangular distribution over (-1, 1)
+    /// Generate TPDF sample for channel `ch`: triangular distribution over (-1, 1)
     /// This gives ±1 LSB amplitude when multiplied by lsb
     /// Standard TPDF: two independent uniform samples subtracted
     #[inline(always)]
-    fn tpdf(&mut self) -> f64 {
-        // Two independent U(0,1) samples
-        let r1 = self.next_u64() as f64 * INV_U64_MAX;
-        let r2 = self.next_u64() as f64 * INV_U64_MAX;
+    fn tpdf(&mut self, ch: usize) -> f64 {
+        // Two independent U(0,1) samples from this channel's stream
+        let r1 = self.next_u64(ch) as f64 * INV_U64_MAX;
+        let r2 = self.next_u64(ch) as f64 * INV_U64_MAX;
         // Triangular distribution: U(0,1) - U(0,1) = T(-1, 1)
         r1 - r2
     }
@@ -399,7 +415,7 @@ impl NoiseShaper {
         // 1. Generate TPDF dither FIRST (before borrowing error_history)
         //    tpdf() returns (-1, 1) which is ±1 LSB in the integer domain
         //    This is the standard TPDF amplitude for dither
-        let dither = self.tpdf();
+        let dither = self.tpdf(ch);
 
         // 2. Get error history and compute feedback
         let e = &mut self.error_history[ch];
@@ -486,7 +502,7 @@ impl NoiseShaper {
             return sample;
         }
 
-        let dither = self.tpdf();
+        let dither = self.tpdf(ch);
         let head = self.error_history_9tap_heads[ch];
         let e = &mut self.error_history_9tap[ch];
         let feedback = self.coeffs[0] * e[head]
@@ -553,8 +569,10 @@ impl NoiseShaper {
             *h = [0.0; 18];
         }
         self.error_history_9tap_heads.fill(0);
-        // Reset RNG state for reproducibility
-        self.rng_state = 0x1234_5678_9ABC_DEF0;
+        // Reset each channel's RNG stream to its seed for reproducibility
+        for (ch, state) in self.rng_state.iter_mut().enumerate() {
+            *state = Self::channel_seed(ch);
+        }
     }
 }
 
@@ -585,7 +603,7 @@ mod tests {
             return sample;
         }
 
-        let dither = ns.tpdf();
+        let dither = ns.tpdf(ch);
         let e = &mut ns.error_history[ch];
         let feedback: f64 = ns.coeffs.iter().zip(e.iter()).map(|(c, ei)| c * ei).sum();
         let x = sample * ns.cached_scale + feedback;
@@ -610,7 +628,7 @@ mod tests {
         let mut max = f64::MIN;
 
         for _ in 0..n_samples {
-            let t = ns.tpdf();
+            let t = ns.tpdf(0);
             sum += t;
             sum_sq += t * t;
             min = min.min(t);
@@ -863,6 +881,26 @@ mod tests {
         assert_eq!(ns.bits(), 16);
         assert_eq!(ns.cached_scale, 2.0_f64.powi(15));
         assert_eq!(ns.cached_lsb, 1.0 / 2.0_f64.powi(15));
+    }
+
+    #[test]
+    fn test_channel_dither_streams_use_independent_seeds() {
+        // Same channel is reproducible across fresh instances (deterministic seed).
+        let mut a = NoiseShaper::new(2, 44_100, 24);
+        let mut b = NoiseShaper::new(2, 44_100, 24);
+        assert_eq!(a.tpdf(0).to_bits(), b.tpdf(0).to_bits());
+
+        // Different channels must draw from independently seeded streams. A single
+        // shared RNG would make channel 1's first draw equal channel 0's, leaving
+        // the two channels' dither correlated.
+        let mut c = NoiseShaper::new(2, 44_100, 24);
+        let ch0_first = c.tpdf(0);
+        let mut d = NoiseShaper::new(2, 44_100, 24);
+        let ch1_first = d.tpdf(1);
+        assert!(
+            (ch0_first - ch1_first).abs() > 1e-12,
+            "channel 0 and 1 must use independent seeds (got identical first draws)"
+        );
     }
 
     #[test]

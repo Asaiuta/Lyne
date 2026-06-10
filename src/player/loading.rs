@@ -27,6 +27,8 @@ use crate::processor::{LoudnessDatabase, StreamingResampler};
 
 const STREAMING_CHUNK_FRAMES: usize = 4096;
 const STREAMING_START_BUFFER_FRAMES: u64 = 12_288;
+const STREAMING_SEEK_START_BUFFER_FRAMES: u64 = STREAMING_CHUNK_FRAMES as u64;
+const STREAMING_REMOTE_START_BUFFER_FRAMES: u64 = STREAMING_CHUNK_FRAMES as u64 * 12;
 /// Minimum retained-prefix length (output frames) required for an in-window seek
 /// to be served from the retention ring. Set to twice the start-buffer cushion so
 /// the deferred continuation open + seek + decode is fully hidden behind prefix
@@ -38,6 +40,40 @@ const STREAMING_PROGRESS_WATCHDOG_DELAY: Duration = Duration::from_millis(300);
 const STREAMING_PROGRESS_WATCHDOG_RECHECK: Duration = Duration::from_millis(50);
 const STREAMING_PROGRESS_WATCHDOG_MAX_OBSERVE: Duration = Duration::from_secs(2);
 const F64_SAMPLE_BYTES: u128 = std::mem::size_of::<f64>() as u128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamingSourceKind {
+    Local,
+    RemoteHttp,
+}
+
+impl StreamingSourceKind {
+    fn from_path(path: &str) -> Self {
+        if is_remote_http_path(path) {
+            Self::RemoteHttp
+        } else {
+            Self::Local
+        }
+    }
+
+    fn forces_memory_mode(self) -> bool {
+        matches!(self, Self::RemoteHttp)
+    }
+}
+
+fn is_remote_http_path(path: &str) -> bool {
+    path.starts_with("http://") || path.starts_with("https://")
+}
+
+fn streaming_start_buffer_frames(start_time_secs: f64, source_kind: StreamingSourceKind) -> u64 {
+    if start_time_secs > 0.0 {
+        STREAMING_SEEK_START_BUFFER_FRAMES
+    } else if source_kind == StreamingSourceKind::RemoteHttp {
+        STREAMING_REMOTE_START_BUFFER_FRAMES
+    } else {
+        STREAMING_START_BUFFER_FRAMES
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamingFullBufferMode {
@@ -65,7 +101,12 @@ fn streaming_full_buffer_mode(
     estimated_output_frames: Option<u64>,
     channels: usize,
     config: &EngineSettings,
+    source_kind: StreamingSourceKind,
 ) -> StreamingFullBufferMode {
+    if source_kind.forces_memory_mode() {
+        return StreamingFullBufferMode::MemoryOnly;
+    }
+
     let limit_bytes = streaming_full_buffer_limit_bytes(config);
     if limit_bytes == 0 {
         return StreamingFullBufferMode::MemoryOnly;
@@ -188,7 +229,7 @@ pub(super) fn decode_file_internal(
         hasher.update(estimated_input_frames.to_le_bytes());
         hasher.update([config.phase_response as u8]);
 
-        if !path.starts_with("http://") && !path.starts_with("https://") {
+        if !is_remote_http_path(path) {
             if let Ok(metadata) = std::fs::metadata(path) {
                 hasher.update(metadata.len().to_le_bytes());
                 if let Ok(modified) = metadata.modified() {
@@ -458,12 +499,14 @@ pub(super) fn decode_file_streaming_first_buffer(
     let decode_started_at = std::time::Instant::now();
     shared_state.mark_decode_started();
     let cancel_token = DecodeCancelToken::new(Arc::clone(load_cancel));
+    shared_state.mark_seek_decoder_open_started(generation);
     let mut decoder =
         StreamingDecoder::open_with_credentials_and_cancel(path, credentials, Some(cancel_token))
             .map_err(|e| {
             log::error!("Failed to open decoder for {}: {}", path, e);
             e.to_string()
         })?;
+    shared_state.mark_seek_decoder_open_finished(generation);
 
     let info = decoder.info.clone();
     let original_sr = info.sample_rate;
@@ -486,7 +529,9 @@ pub(super) fn decode_file_streaming_first_buffer(
         .map(|total| estimated_start_frame.min(total))
         .unwrap_or(estimated_start_frame);
     let estimated_input_frames_for_progress = estimated_input_frames.unwrap_or(0);
-    let full_buffer_mode = streaming_full_buffer_mode(estimated_output_frames, channels, config);
+    let source_kind = StreamingSourceKind::from_path(path);
+    let full_buffer_mode =
+        streaming_full_buffer_mode(estimated_output_frames, channels, config, source_kind);
     let estimated_pcm_mib = estimated_output_frames
         .and_then(|frames| estimated_decoded_pcm_bytes(frames, channels))
         .map(|bytes| bytes / 1024 / 1024);
@@ -511,8 +556,9 @@ pub(super) fn decode_file_streaming_first_buffer(
         None
     };
     log::info!(
-        "Streaming first-buffer mode for '{}': {:?}, estimated_pcm_mib={:?}, full_buffer_limit_mib={}",
+        "Streaming first-buffer mode for '{}': source={:?}, mode={:?}, estimated_pcm_mib={:?}, full_buffer_limit_mib={}",
         path,
+        source_kind,
         full_buffer_mode,
         estimated_pcm_mib,
         config.streaming_full_buffer_limit_mib
@@ -524,6 +570,7 @@ pub(super) fn decode_file_streaming_first_buffer(
     let mut decoded_frames = 0_u64;
     let mut output_samples = 0_u64;
     let mut chunk_count = 0_u64;
+    let start_buffer_frames = streaming_start_buffer_frames(start_time_secs, source_kind);
 
     let mut resampler = if final_need_resample {
         Some(
@@ -546,12 +593,14 @@ pub(super) fn decode_file_streaming_first_buffer(
     };
 
     if start_time_secs > 0.0 {
+        shared_state.mark_seek_decoder_seek_started(generation);
         decoder.seek(start_time_secs).map_err(|e| {
             format!(
                 "Failed to seek streaming decoder to {:.3}s: {}",
                 start_time_secs, e
             )
         })?;
+        shared_state.mark_seek_decoder_seek_finished(generation);
     }
 
     let track = StreamingTrackStart {
@@ -605,7 +654,7 @@ pub(super) fn decode_file_streaming_first_buffer(
         output_samples = output_samples.saturating_add(produced_samples as u64);
 
         let pre_ready_frame_limit =
-            (!ready_sent).then(|| STREAMING_START_BUFFER_FRAMES.saturating_sub(queued_frames));
+            (!ready_sent).then(|| start_buffer_frames.saturating_sub(queued_frames));
         queued_frames += push_ready_streaming_chunks(
             shared_state,
             load_cancel,
@@ -616,7 +665,7 @@ pub(super) fn decode_file_streaming_first_buffer(
             full_buffer_mode,
             pre_ready_frame_limit,
         )?;
-        if !ready_sent && queued_frames >= STREAMING_START_BUFFER_FRAMES {
+        if !ready_sent && queued_frames >= start_buffer_frames {
             publish_streaming_ready(shared_state, cmd_tx, generation, &track, autoplay);
             ready_sent = true;
             // Keep the producer filling memory-mode queues while the audio command
@@ -830,6 +879,7 @@ pub(super) fn replay_streaming_in_window(
         / f64::from(request.output_sample_rate.max(1));
 
     let cancel_token = DecodeCancelToken::new(Arc::clone(load_cancel));
+    shared_state.mark_seek_decoder_open_started(request.generation);
     let mut decoder =
         StreamingDecoder::open_with_credentials_and_cancel(&request.path, None, Some(cancel_token))
             .map_err(|e| {
@@ -840,6 +890,7 @@ pub(super) fn replay_streaming_in_window(
                 );
                 e.to_string()
             })?;
+    shared_state.mark_seek_decoder_open_finished(request.generation);
 
     let info = decoder.info.clone();
     let original_sr = info.sample_rate;
@@ -869,12 +920,14 @@ pub(super) fn replay_streaming_in_window(
         None
     };
 
+    shared_state.mark_seek_decoder_seek_started(request.generation);
     decoder.seek(continuation_secs).map_err(|e| {
         format!(
             "Failed to seek streaming decoder to {:.3}s for in-window continuation: {}",
             continuation_secs, e
         )
     })?;
+    shared_state.mark_seek_decoder_seek_finished(request.generation);
 
     let mut pending_samples = Vec::with_capacity(STREAMING_CHUNK_FRAMES * channels);
     let mut decoded_chunk = Vec::new();
@@ -992,6 +1045,7 @@ fn publish_streaming_ready(
     });
     if ready_sent.is_ok() {
         shared_state.mark_streaming_ready_sent();
+        shared_state.mark_seek_ready_sent(generation);
         if autoplay {
             let cmd_tx = cmd_tx.clone();
             let shared_state = Arc::clone(shared_state);
@@ -1180,6 +1234,7 @@ fn push_streaming_chunk(
         match shared_state.streaming_chunks.push(chunk) {
             Ok(()) => {
                 shared_state.mark_streaming_first_chunk();
+                shared_state.mark_seek_first_chunk(generation);
                 shared_state.mark_streaming_queue_chunk_pushed(shared_state.streaming_chunks.len());
                 return Ok(true);
             }
@@ -1205,6 +1260,17 @@ fn push_streaming_chunk(
 mod tests {
     use super::*;
 
+    /// Ensure the process-start monotonic playback clock has advanced past
+    /// `floor_ms` so tests that synthesize "play returned `grace` ago" via
+    /// `playback_phase_time_ms().saturating_sub(grace)` get a non-zero,
+    /// well-ordered timestamp even when a fresh test process started the clock
+    /// only microseconds earlier.
+    fn advance_playback_clock_past(floor_ms: u64) {
+        while playback_phase_time_ms() <= floor_ms {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     #[test]
     fn streaming_full_buffer_mode_keeps_small_outputs_publishable() {
         let mut config = EngineSettings {
@@ -1215,7 +1281,7 @@ mod tests {
 
         let frames = 44_100 * 60;
         assert_eq!(
-            streaming_full_buffer_mode(Some(frames), 2, &config),
+            streaming_full_buffer_mode(Some(frames), 2, &config, StreamingSourceKind::Local),
             StreamingFullBufferMode::PublishFullBuffer
         );
     }
@@ -1230,7 +1296,21 @@ mod tests {
 
         let frames = 44_100 * 60 * 10;
         assert_eq!(
-            streaming_full_buffer_mode(Some(frames), 2, &config),
+            streaming_full_buffer_mode(Some(frames), 2, &config, StreamingSourceKind::Local),
+            StreamingFullBufferMode::MemoryOnly
+        );
+    }
+
+    #[test]
+    fn streaming_full_buffer_mode_forces_remote_sources_to_memory_only() {
+        let mut config = EngineSettings {
+            streaming_full_buffer_limit_mib: 256,
+            ..EngineSettings::default()
+        };
+        config = config.normalized();
+
+        assert_eq!(
+            streaming_full_buffer_mode(Some(44_100), 2, &config, StreamingSourceKind::RemoteHttp),
             StreamingFullBufferMode::MemoryOnly
         );
     }
@@ -1244,7 +1324,7 @@ mod tests {
         config = config.normalized();
 
         assert_eq!(
-            streaming_full_buffer_mode(Some(44_100), 2, &config),
+            streaming_full_buffer_mode(Some(44_100), 2, &config, StreamingSourceKind::Local),
             StreamingFullBufferMode::MemoryOnly
         );
     }
@@ -1254,8 +1334,20 @@ mod tests {
         let config = EngineSettings::default().normalized();
 
         assert_eq!(
-            streaming_full_buffer_mode(None, 2, &config),
+            streaming_full_buffer_mode(None, 2, &config, StreamingSourceKind::Local),
             StreamingFullBufferMode::MemoryOnly
+        );
+    }
+
+    #[test]
+    fn remote_streaming_uses_larger_start_watermark_for_initial_play() {
+        assert_eq!(
+            streaming_start_buffer_frames(0.0, StreamingSourceKind::Local),
+            STREAMING_START_BUFFER_FRAMES
+        );
+        assert_eq!(
+            streaming_start_buffer_frames(0.0, StreamingSourceKind::RemoteHttp),
+            STREAMING_REMOTE_START_BUFFER_FRAMES
         );
     }
 
@@ -1299,6 +1391,53 @@ mod tests {
         assert_eq!(
             shared.streaming_queue_max_len.load(Ordering::Relaxed),
             start_chunks as u64
+        );
+    }
+
+    #[test]
+    fn streaming_seek_uses_single_chunk_start_threshold() {
+        assert_eq!(
+            streaming_start_buffer_frames(0.0, StreamingSourceKind::Local),
+            STREAMING_START_BUFFER_FRAMES
+        );
+        assert_eq!(
+            streaming_start_buffer_frames(0.5, StreamingSourceKind::Local),
+            STREAMING_SEEK_START_BUFFER_FRAMES
+        );
+        assert_eq!(
+            streaming_start_buffer_frames(0.5, StreamingSourceKind::RemoteHttp),
+            STREAMING_SEEK_START_BUFFER_FRAMES
+        );
+
+        let shared = SharedState::new();
+        let cancel = AtomicBool::new(false);
+        shared.load_generation.store(7, Ordering::Release);
+        shared.reset_streaming_queue_window_for_generation(7);
+
+        let channels = 2;
+        let chunk_samples = STREAMING_CHUNK_FRAMES * channels;
+        let mut pending_samples = vec![0.25; chunk_samples * 3];
+
+        let pushed = push_ready_streaming_chunks(
+            &shared,
+            &cancel,
+            7,
+            channels,
+            &mut pending_samples,
+            false,
+            StreamingFullBufferMode::MemoryOnly,
+            Some(STREAMING_SEEK_START_BUFFER_FRAMES),
+        )
+        .expect("seek pre-ready push should not block or fail");
+
+        assert_eq!(pushed, STREAMING_SEEK_START_BUFFER_FRAMES);
+        assert_eq!(shared.streaming_chunks.len(), 1);
+        assert_eq!(pending_samples.len(), chunk_samples * 2);
+        assert_eq!(
+            shared
+                .streaming_queue_chunks_pushed_count
+                .load(Ordering::Relaxed),
+            1
         );
     }
 
@@ -1470,6 +1609,7 @@ mod tests {
     #[test]
     fn streaming_progress_watchdog_sends_after_play_grace_without_progress() {
         let shared = SharedState::new();
+        advance_playback_clock_past(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1);
         shared.load_generation.store(9, Ordering::Release);
         shared.state.store(state::PlayerState::Playing);
         shared.stream_play_returned_ms.store(
@@ -1528,6 +1668,7 @@ mod tests {
     #[test]
     fn streaming_progress_watchdog_waits_for_replay_command_and_short_replay_grace() {
         let shared = SharedState::new();
+        advance_playback_clock_past(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1);
         shared.load_generation.store(9, Ordering::Release);
         shared.state.store(state::PlayerState::Playing);
         let replay_requested_ms = playback_phase_time_ms();
@@ -1600,6 +1741,7 @@ mod tests {
     #[test]
     fn streaming_progress_watchdog_stops_when_output_callback_is_alive_without_position_progress() {
         let shared = SharedState::new();
+        advance_playback_clock_past(PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS + 1);
         shared.load_generation.store(9, Ordering::Release);
         shared.state.store(state::PlayerState::Playing);
         shared.mark_stream_play_returned();
@@ -1687,7 +1829,7 @@ mod tests {
         let first = shared.streaming_chunks.pop().expect("chunk queued");
         assert_eq!(first.generation, generation);
 
-        // Ready was published from RAM; the start frame is the snapped audible
+        // Ready was published from RAM; the start frame is the exact audible
         // start, and memory mode is preserved.
         let cmd = rx.try_recv().expect("ready command sent");
         match cmd {

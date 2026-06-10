@@ -598,6 +598,14 @@ impl DynamicLoudness {
     }
 
     /// Process interleaved audio buffer
+    ///
+    /// Coefficient ramps now track the per-block smoother *within* the buffer:
+    /// each `BLOCK_SIZE`-frame chunk advances the smoothers, applies any changed
+    /// band gain, then filters only that chunk's frames. This avoids the
+    /// end-of-buffer "zipper" that occurred when the whole buffer was filtered
+    /// with only the final block's coefficients. Total smoother advancement is
+    /// unchanged (Σ chunk_frames == frames), so end-of-buffer state matches the
+    /// previous behavior; buffers ≤ BLOCK_SIZE are filtered as a single block.
     pub fn process(&mut self, buffer: &mut [f64]) {
         if !self.enabled || self.can_bypass_for_zero_strength() {
             return;
@@ -608,39 +616,27 @@ impl DynamicLoudness {
             return;
         }
 
-        // Apply pre-gain for headroom
-        // Update filter coefficients once per block for CPU efficiency
+        // Interleave per-block coefficient updates with filtering so the gain
+        // ramp is applied as it is computed.
         for chunk_start in (0..frames).step_by(BLOCK_SIZE) {
             let chunk_end = (chunk_start + BLOCK_SIZE).min(frames);
             let chunk_frames = chunk_end - chunk_start;
 
-            // Update filter coefficients once per block
             for i in 0..self.smoothers.len() {
                 let gain = self.smoothers[i].next_block(chunk_frames);
                 self.apply_band_gain_if_changed(i, gain);
             }
-        }
 
-        if self.active_bands.iter().all(|&active| !active) {
-            self.apply_pre_gain_only(buffer, frames);
-            return;
-        }
-
-        // Process all samples
-        self.process_samples(buffer);
-    }
-
-    fn apply_pre_gain_only(&self, buffer: &mut [f64], frames: usize) {
-        for sample in buffer.iter_mut().take(frames * self.channels) {
-            *sample *= self.pre_gain_linear;
+            self.process_samples_range(buffer, chunk_start, chunk_end);
         }
     }
 
-    /// Internal: process samples after coefficient update
-    fn process_samples(&mut self, buffer: &mut [f64]) {
-        let frames = buffer.len() / self.channels;
-
-        for frame in 0..frames {
+    /// Internal: apply pre-gain and active-band filtering to `[start_frame, end_frame)`.
+    ///
+    /// When no band is active the band loop is skipped, so this reduces to
+    /// applying pre-gain only.
+    fn process_samples_range(&mut self, buffer: &mut [f64], start_frame: usize, end_frame: usize) {
+        for frame in start_frame..end_frame {
             for ch in 0..self.channels {
                 let idx = frame * self.channels + ch;
                 let mut sample = buffer[idx] * self.pre_gain_linear;
@@ -761,6 +757,32 @@ impl Default for AtomicDynamicLoudnessState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_tracks_block_coefficient_ramp_within_buffer() {
+        let make = || {
+            let mut dl = DynamicLoudness::new(2, 44_100.0);
+            dl.set_strength(1.0);
+            dl.set_volume(0.05);
+            dl
+        };
+        let frames = BLOCK_SIZE * 4 + 17;
+        let input: Vec<f64> = (0..frames * 2)
+            .map(|i| ((i as f64) * 0.013).sin() * 0.3)
+            .collect();
+        let mut whole = make();
+        let mut wbuf = input.clone();
+        whole.process(&mut wbuf);
+        let mut chunked = make();
+        let mut cbuf = input.clone();
+        for cs in (0..frames).step_by(BLOCK_SIZE) {
+            let ce = (cs + BLOCK_SIZE).min(frames);
+            chunked.process(&mut cbuf[cs * 2..ce * 2]);
+        }
+        for (w, c) in wbuf.iter().zip(&cbuf) {
+            assert!((w - c).abs() < 1e-9, "{} vs {}", w, c);
+        }
+    }
 
     fn legacy_peaking_coeffs(freq: f64, gain_db: f64, q: f64, sample_rate: f64) -> BiquadCoeffs {
         if gain_db.abs() < 0.0001 {
