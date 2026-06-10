@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for Rust audio-engine package work"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module ownership and package boundary conventions"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Current Result/String and domain error handling conventions"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Realtime audio callback and backend quality constraints"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Logging rules, especially hot-path constraints"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Package boundary and data-flow ownership review"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Avoid duplicate sources of truth during extraction"}
