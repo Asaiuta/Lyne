@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "SolidJS frontend patterns and current local library contracts"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Worker refactor crosses API, controller, and component data-flow boundaries"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing library worker rather than introducing duplicate virtualization logic"}

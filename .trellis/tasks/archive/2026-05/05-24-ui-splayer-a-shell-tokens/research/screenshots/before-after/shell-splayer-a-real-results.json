@@ -1,0 +1,3267 @@
+{
+  "initial": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 168,
+      "y": 280,
+      "width": 55,
+      "height": 32
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.06724, 0, 0, 1.06724, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "",
+    "activeElementLabel": null,
+    "overflowX": 0,
+    "roleButtonCount": 0,
+    "positiveTabIndexCount": 1
+  },
+  "searchOpen": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 300,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 300,
+      "height": 40
+    },
+    "searchMask": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900
+    },
+    "searchPanel": {
+      "x": 354,
+      "y": 69,
+      "width": 360,
+      "height": 91
+    },
+    "searchMaskBackdrop": "none",
+    "searchPanelBackdrop": "none",
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 170,
+      "y": 281,
+      "width": 53,
+      "height": 30
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.01275, 0, 0, 1.01275, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "",
+    "activeElementLabel": "搜索",
+    "overflowX": 0,
+    "roleButtonCount": 0,
+    "positiveTabIndexCount": 1
+  },
+  "searchCleared": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 300,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 300,
+      "height": 40
+    },
+    "searchMask": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900
+    },
+    "searchPanel": {
+      "x": 354,
+      "y": 69,
+      "width": 360,
+      "height": 195
+    },
+    "searchMaskBackdrop": "none",
+    "searchPanelBackdrop": "none",
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 168,
+      "y": 280,
+      "width": 56,
+      "height": 32
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.08, 0, 0, 1.08, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "",
+    "activeElementLabel": "搜索",
+    "overflowX": 0,
+    "roleButtonCount": 0,
+    "positiveTabIndexCount": 1,
+    "value": ""
+  },
+  "searchAfterMaskClose": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 205,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 205,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 169,
+      "y": 280,
+      "width": 55,
+      "height": 31
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.04856, 0, 0, 1.04856, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "",
+    "activeElementLabel": null,
+    "overflowX": 0,
+    "roleButtonCount": 0,
+    "positiveTabIndexCount": 1
+  },
+  "accountOpen": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": {
+      "x": 1136,
+      "y": 62,
+      "width": 240,
+      "height": 358
+    },
+    "accountMenuZ": "70",
+    "accountMenuRadius": "8px",
+    "accountMenuBackdrop": "none",
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 169,
+      "y": 280,
+      "width": 55,
+      "height": 32
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.05345, 0, 0, 1.05345, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "top-nav-account is-open",
+    "activeElementLabel": "当前账号：SPlayer QA",
+    "overflowX": 0,
+    "roleButtonCount": 0,
+    "positiveTabIndexCount": 1
+  },
+  "accountAfterEscape": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 168,
+      "y": 280,
+      "width": 56,
+      "height": 32
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.07318, 0, 0, 1.07318, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "top-nav-account",
+    "activeElementLabel": "当前账号：SPlayer QA",
+    "overflowX": 0,
+    "roleButtonCount": 0,
+    "positiveTabIndexCount": 1
+  },
+  "settingsOpenSolid": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900
+    },
+    "settingsModalZ": "60",
+    "settingsModalBackdrop": "none",
+    "settingsModalCard": {
+      "x": 208,
+      "y": 113,
+      "width": 1024,
+      "height": 675
+    },
+    "settingsModalCardRadius": "8px",
+    "settingsModalCardBackdrop": "none",
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 169,
+      "y": 280,
+      "width": 55,
+      "height": 32
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.05343, 0, 0, 1.05343, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "top-nav-icon-button",
+    "activeElementLabel": "设置",
+    "overflowX": 0,
+    "roleButtonCount": 1,
+    "positiveTabIndexCount": 6
+  },
+  "settingsAfterEscape": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "none",
+    "queueDrawer": null,
+    "queueDrawerRadius": null,
+    "queueDrawerBackdrop": null,
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 168,
+      "y": 280,
+      "width": 56,
+      "height": 32
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.07815, 0, 0, 1.07815, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "top-nav-icon-button",
+    "activeElementLabel": "设置",
+    "overflowX": 0,
+    "roleButtonCount": 1,
+    "positiveTabIndexCount": 2
+  },
+  "playerMoreOverlay": {
+    "name": "more",
+    "open": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": {
+        "x": 444,
+        "y": 658,
+        "width": 168,
+        "height": 166
+      },
+      "playerMoreMenuZ": "30",
+      "playerMoreMenuRadius": "8px",
+      "playerMoreMenuBackdrop": "none",
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 169,
+        "y": 280,
+        "width": 54,
+        "height": 31
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.03417, 0, 0, 1.03417, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "player-inline-icon grid place-items-center w-28px h-28px flex-none",
+      "activeElementLabel": "更多操作",
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    },
+    "afterEscape": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 170,
+        "y": 281,
+        "width": 52,
+        "height": 30
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.00362, 0, 0, 1.00362, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "player-inline-icon grid place-items-center w-28px h-28px flex-none",
+      "activeElementLabel": "更多操作",
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    },
+    "afterOutside": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 170,
+        "y": 281,
+        "width": 52,
+        "height": 30
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.00469, 0, 0, 1.00469, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "",
+      "activeElementLabel": null,
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    }
+  },
+  "playerQualityOverlay": {
+    "name": "quality",
+    "open": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": {
+        "x": 1115,
+        "y": 657,
+        "width": 220,
+        "height": 180
+      },
+      "playerQualityPopoverZ": "30",
+      "playerQualityPopoverRadius": "8px",
+      "playerQualityPopoverBackdrop": "none",
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 169,
+        "y": 280,
+        "width": 55,
+        "height": 32
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.05342, 0, 0, 1.05342, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "",
+      "activeElementLabel": null,
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    },
+    "afterEscape": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 168,
+        "y": 280,
+        "width": 56,
+        "height": 32
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.07769, 0, 0, 1.07769, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "player-inline-tag player-right-tag player-utility-hidden player-quality-tag cursor-pointer bg-transparent border-0 text-xs",
+      "activeElementLabel": "打开音质菜单",
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    },
+    "afterOutside": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 168,
+        "y": 280,
+        "width": 56,
+        "height": 32
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.07055, 0, 0, 1.07055, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "",
+      "activeElementLabel": null,
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    }
+  },
+  "playerControlsOverlay": {
+    "name": "controls",
+    "open": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": {
+        "x": 1204,
+        "y": 615,
+        "width": 220,
+        "height": 216
+      },
+      "playerControlsPopoverZ": "30",
+      "playerControlsPopoverRadius": "8px",
+      "playerControlsPopoverBackdrop": "none",
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 170,
+        "y": 281,
+        "width": 53,
+        "height": 31
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.01797, 0, 0, 1.01797, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "player-inline-icon player-utility-button player-utility-hidden w-38px h-38px is-open",
+      "activeElementLabel": "更多控制",
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    },
+    "afterEscape": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 170,
+        "y": 281,
+        "width": 52,
+        "height": 30
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.00133, 0, 0, 1.00133, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "player-inline-icon player-utility-button player-utility-hidden w-38px h-38px",
+      "activeElementLabel": "更多控制",
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    },
+    "afterOutside": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 170,
+        "y": 281,
+        "width": 53,
+        "height": 30
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.01274, 0, 0, 1.01274, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "",
+      "activeElementLabel": null,
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    }
+  },
+  "playerVolumeOverlay": {
+    "name": "volume",
+    "open": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": {
+        "x": 1331,
+        "y": 651,
+        "width": 58,
+        "height": 180
+      },
+      "playerVolumePopoverZ": "30",
+      "playerVolumePopoverRadius": "8px",
+      "playerVolumePopoverBackdrop": "none",
+      "heartbeatButton": {
+        "x": 168,
+        "y": 280,
+        "width": 55,
+        "height": 32
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.0643, 0, 0, 1.0643, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "player-inline-icon player-utility-button volume-toggle player-utility-hidden w-38px h-38px",
+      "activeElementLabel": "打开音量控制",
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 3
+    },
+    "afterEscape": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 168,
+        "y": 280,
+        "width": 56,
+        "height": 32
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.07935, 0, 0, 1.07935, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "player-inline-icon player-utility-button volume-toggle player-utility-hidden w-38px h-38px",
+      "activeElementLabel": "打开音量控制",
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    },
+    "afterOutside": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "topNav": {
+        "x": 240,
+        "y": 0,
+        "width": 1200,
+        "height": 70
+      },
+      "sidebar": {
+        "x": 0,
+        "y": 0,
+        "width": 240,
+        "height": 900
+      },
+      "playerBar": {
+        "x": 0,
+        "y": 820,
+        "width": 1440,
+        "height": 80
+      },
+      "playerBarColumns": "527px 356px 527px",
+      "playerCover": {
+        "x": 15,
+        "y": 832,
+        "width": 56,
+        "height": 56
+      },
+      "playerTitleFont": "16px",
+      "playerTitleWeight": "700",
+      "playerSecondaryFont": "13px",
+      "playerTimeFont": "12px",
+      "playerTimeButtonFont": "13px",
+      "progressRailHeight": "3px",
+      "progressThumbCssWidth": "14px",
+      "progressThumbCssHeight": "14px",
+      "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+      "progressThumb": {
+        "x": 504,
+        "y": 816,
+        "width": 8,
+        "height": 8
+      },
+      "sidebarIcon": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarIconSvg": {
+        "x": 26,
+        "y": 86,
+        "width": 22,
+        "height": 22
+      },
+      "sidebarActiveStripWidth": "auto",
+      "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+      "topNavButton": {
+        "x": 256,
+        "y": 15,
+        "width": 40,
+        "height": 40
+      },
+      "searchWrap": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchInput": {
+        "x": 354,
+        "y": 15,
+        "width": 200,
+        "height": 40
+      },
+      "searchMask": null,
+      "searchPanel": null,
+      "searchMaskBackdrop": null,
+      "searchPanelBackdrop": null,
+      "playerBackdrop": "none",
+      "queueDrawer": null,
+      "queueDrawerRadius": null,
+      "queueDrawerBackdrop": null,
+      "settingsModal": null,
+      "settingsModalZ": null,
+      "settingsModalBackdrop": null,
+      "settingsModalCard": null,
+      "settingsModalCardRadius": null,
+      "settingsModalCardBackdrop": null,
+      "accountMenu": null,
+      "accountMenuZ": null,
+      "accountMenuRadius": null,
+      "accountMenuBackdrop": null,
+      "playerMoreMenu": null,
+      "playerMoreMenuZ": null,
+      "playerMoreMenuRadius": null,
+      "playerMoreMenuBackdrop": null,
+      "playerQualityPopover": null,
+      "playerQualityPopoverZ": null,
+      "playerQualityPopoverRadius": null,
+      "playerQualityPopoverBackdrop": null,
+      "playerControlsPopover": null,
+      "playerControlsPopoverZ": null,
+      "playerControlsPopoverRadius": null,
+      "playerControlsPopoverBackdrop": null,
+      "playerVolumePopover": null,
+      "playerVolumePopoverZ": null,
+      "playerVolumePopoverRadius": null,
+      "playerVolumePopoverBackdrop": null,
+      "heartbeatButton": {
+        "x": 169,
+        "y": 280,
+        "width": 55,
+        "height": 31
+      },
+      "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+      "heartbeatButtonTransform": "matrix(1.0486, 0, 0, 1.0486, 0, -15)",
+      "heartbeatButtonAriaPressed": "true",
+      "activeElementClass": "",
+      "activeElementLabel": null,
+      "overflowX": 0,
+      "roleButtonCount": 1,
+      "positiveTabIndexCount": 2
+    }
+  },
+  "queueOpenSolid": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "none",
+    "queueDrawer": {
+      "x": 1040,
+      "y": 0,
+      "width": 400,
+      "height": 900
+    },
+    "queueDrawerRadius": "12px 0px 0px 12px",
+    "queueDrawerBackdrop": "none",
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 170,
+      "y": 281,
+      "width": 52,
+      "height": 30
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.0001, 0, 0, 1.0001, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "player-inline-icon player-utility-button player-queue-button w-38px h-38px relative overflow-visible is-open",
+    "activeElementLabel": "播放队列",
+    "overflowX": 0,
+    "roleButtonCount": 1,
+    "positiveTabIndexCount": 2,
+    "queueDrawerOpened": true,
+    "queueButtonAriaPressed": "true"
+  },
+  "coverBlur": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "blur(20px) saturate(1.2)",
+    "queueDrawer": {
+      "x": 1040,
+      "y": 0,
+      "width": 400,
+      "height": 900
+    },
+    "queueDrawerRadius": "12px 0px 0px 12px",
+    "queueDrawerBackdrop": "blur(26px) saturate(1.14)",
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 169,
+      "y": 280,
+      "width": 55,
+      "height": 31
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.0498, 0, 0, 1.0498, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "player-inline-icon player-utility-button player-queue-button w-38px h-38px relative overflow-visible is-open",
+    "activeElementLabel": "播放队列",
+    "overflowX": 0,
+    "roleButtonCount": 1,
+    "positiveTabIndexCount": 2
+  },
+  "coverImmersive": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "topNav": {
+      "x": 240,
+      "y": 0,
+      "width": 1200,
+      "height": 70
+    },
+    "sidebar": {
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 900
+    },
+    "playerBar": {
+      "x": 0,
+      "y": 820,
+      "width": 1440,
+      "height": 80
+    },
+    "playerBarColumns": "527px 356px 527px",
+    "playerCover": {
+      "x": 15,
+      "y": 832,
+      "width": 56,
+      "height": 56
+    },
+    "playerTitleFont": "16px",
+    "playerTitleWeight": "700",
+    "playerSecondaryFont": "13px",
+    "playerTimeFont": "12px",
+    "playerTimeButtonFont": "13px",
+    "progressRailHeight": "3px",
+    "progressThumbCssWidth": "14px",
+    "progressThumbCssHeight": "14px",
+    "progressThumbTransform": "matrix(0.6, 0, 0, 0.6, 7, -7)",
+    "progressThumb": {
+      "x": 504,
+      "y": 816,
+      "width": 8,
+      "height": 8
+    },
+    "sidebarIcon": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarIconSvg": {
+      "x": 26,
+      "y": 86,
+      "width": 22,
+      "height": 22
+    },
+    "sidebarActiveStripWidth": "auto",
+    "sidebarActiveBackground": "rgba(0, 0, 0, 0)",
+    "topNavButton": {
+      "x": 256,
+      "y": 15,
+      "width": 40,
+      "height": 40
+    },
+    "searchWrap": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchInput": {
+      "x": 354,
+      "y": 15,
+      "width": 200,
+      "height": 40
+    },
+    "searchMask": null,
+    "searchPanel": null,
+    "searchMaskBackdrop": null,
+    "searchPanelBackdrop": null,
+    "playerBackdrop": "blur(20px) saturate(1.2)",
+    "queueDrawer": {
+      "x": 1040,
+      "y": 0,
+      "width": 400,
+      "height": 900
+    },
+    "queueDrawerRadius": "12px 0px 0px 12px",
+    "queueDrawerBackdrop": "blur(26px) saturate(1.14)",
+    "settingsModal": null,
+    "settingsModalZ": null,
+    "settingsModalBackdrop": null,
+    "settingsModalCard": null,
+    "settingsModalCardRadius": null,
+    "settingsModalCardBackdrop": null,
+    "accountMenu": null,
+    "accountMenuZ": null,
+    "accountMenuRadius": null,
+    "accountMenuBackdrop": null,
+    "playerMoreMenu": null,
+    "playerMoreMenuZ": null,
+    "playerMoreMenuRadius": null,
+    "playerMoreMenuBackdrop": null,
+    "playerQualityPopover": null,
+    "playerQualityPopoverZ": null,
+    "playerQualityPopoverRadius": null,
+    "playerQualityPopoverBackdrop": null,
+    "playerControlsPopover": null,
+    "playerControlsPopoverZ": null,
+    "playerControlsPopoverRadius": null,
+    "playerControlsPopoverBackdrop": null,
+    "playerVolumePopover": null,
+    "playerVolumePopoverZ": null,
+    "playerVolumePopoverRadius": null,
+    "playerVolumePopoverBackdrop": null,
+    "heartbeatButton": {
+      "x": 168,
+      "y": 280,
+      "width": 56,
+      "height": 32
+    },
+    "heartbeatButtonAnimation": "sidebar-heartbeat-pulse",
+    "heartbeatButtonTransform": "matrix(1.0712, 0, 0, 1.0712, 0, -15)",
+    "heartbeatButtonAriaPressed": "true",
+    "activeElementClass": "player-inline-icon player-utility-button player-queue-button w-38px h-38px relative overflow-visible is-open",
+    "activeElementLabel": "播放队列",
+    "overflowX": 0,
+    "roleButtonCount": 1,
+    "positiveTabIndexCount": 2
+  },
+  "consoleMessages": [
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "error",
+      "text": "WebSocket connection to 'ws://127.0.0.1:63790/ws' failed: HTTP Authentication failed; no valid credentials available"
+    },
+    {
+      "type": "warning",
+      "text": "[Sidebar] failed to load local playlists Invalid local playlists payload"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "warning",
+      "text": "[useNcmTrackEnrichment] failed to load liked song ids Error: Invalid NCM likelist payload\n    at parseNcmLikelistIdsResponse (http://127.0.0.1:5173/src/shared/api/ncmUserParsers.ts:11:11)\n    at Object.getNcmLikelistIds (http://127.0.0.1:5173/src/shared/api/ncmClient.ts:165:37)\n    at async http://127.0.0.1:5173/src/app/useNcmTrackEnrichment.ts:239:24"
+    },
+    {
+      "type": "warning",
+      "text": "[Sidebar] failed to load playlists Invalid NCM playlists payload"
+    },
+    {
+      "type": "warning",
+      "text": "[Sidebar] failed to load playlists Invalid NCM playlists payload"
+    },
+    {
+      "type": "warning",
+      "text": "[useNcmTrackEnrichment] failed to load liked song ids Error: Invalid NCM likelist payload\n    at parseNcmLikelistIdsResponse (http://127.0.0.1:5173/src/shared/api/ncmUserParsers.ts:11:11)\n    at Object.getNcmLikelistIds (http://127.0.0.1:5173/src/shared/api/ncmClient.ts:165:37)\n    at async http://127.0.0.1:5173/src/app/useNcmTrackEnrichment.ts:239:24"
+    },
+    {
+      "type": "warning",
+      "text": "[useNcmTrackEnrichment] failed to load liked song ids Error: Invalid NCM likelist payload\n    at parseNcmLikelistIdsResponse (http://127.0.0.1:5173/src/shared/api/ncmUserParsers.ts:11:11)\n    at Object.getNcmLikelistIds (http://127.0.0.1:5173/src/shared/api/ncmClient.ts:165:37)\n    at async http://127.0.0.1:5173/src/app/useNcmTrackEnrichment.ts:239:24"
+    },
+    {
+      "type": "warning",
+      "text": "[useNcmTrackEnrichment] failed to load liked song ids Error: Invalid NCM likelist payload\n    at parseNcmLikelistIdsResponse (http://127.0.0.1:5173/src/shared/api/ncmUserParsers.ts:11:11)\n    at Object.getNcmLikelistIds (http://127.0.0.1:5173/src/shared/api/ncmClient.ts:165:37)\n    at async http://127.0.0.1:5173/src/app/useNcmTrackEnrichment.ts:239:24"
+    },
+    {
+      "type": "warning",
+      "text": "[Sidebar] failed to load playlists Invalid NCM playlists payload"
+    },
+    {
+      "type": "error",
+      "text": "WebSocket connection to 'ws://127.0.0.1:63790/ws' failed: HTTP Authentication failed; no valid credentials available"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "error",
+      "text": "WebSocket connection to 'ws://127.0.0.1:63790/ws' failed: HTTP Authentication failed; no valid credentials available"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "warning",
+      "text": "[Sidebar] failed to load playlists Invalid NCM playlists payload"
+    },
+    {
+      "type": "warning",
+      "text": "[useNcmTrackEnrichment] failed to load liked song ids Error: Invalid NCM likelist payload\n    at parseNcmLikelistIdsResponse (http://127.0.0.1:5173/src/shared/api/ncmUserParsers.ts:11:11)\n    at Object.getNcmLikelistIds (http://127.0.0.1:5173/src/shared/api/ncmClient.ts:165:37)\n    at async http://127.0.0.1:5173/src/app/useNcmTrackEnrichment.ts:239:24"
+    },
+    {
+      "type": "warning",
+      "text": "[useNcmTrackEnrichment] failed to load liked song ids Error: Invalid NCM likelist payload\n    at parseNcmLikelistIdsResponse (http://127.0.0.1:5173/src/shared/api/ncmUserParsers.ts:11:11)\n    at Object.getNcmLikelistIds (http://127.0.0.1:5173/src/shared/api/ncmClient.ts:165:37)\n    at async http://127.0.0.1:5173/src/app/useNcmTrackEnrichment.ts:239:24"
+    },
+    {
+      "type": "warning",
+      "text": "[Sidebar] failed to load playlists Invalid NCM playlists payload"
+    },
+    {
+      "type": "error",
+      "text": "WebSocket connection to 'ws://127.0.0.1:63790/ws' failed: HTTP Authentication failed; no valid credentials available"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "warning",
+      "text": "computations created outside a `createRoot` or `render` will never be disposed"
+    },
+    {
+      "type": "warning",
+      "text": "computations created outside a `createRoot` or `render` will never be disposed"
+    },
+    {
+      "type": "warning",
+      "text": "[NeteaseHomeFeed] feed fetch failed Error: Invalid NCM home feed payload\n    at parseNcmHomeFeedResponse (http://127.0.0.1:5173/src/shared/api/ncmHomeParsers.ts:71:11)\n    at Object.getNcmHomeFeed (http://127.0.0.1:5173/src/shared/api/ncmClient.ts:198:36)\n    at async loadHomeFeed (http://127.0.0.1:5173/src/features/online/NeteaseHomeFeed.tsx:90:12)"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "error",
+      "text": "WebSocket connection to 'ws://127.0.0.1:63790/ws' failed: HTTP Authentication failed; no valid credentials available"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    },
+    {
+      "type": "debug",
+      "text": "[vite] hot updated: /__uno.css"
+    }
+  ]
+}
