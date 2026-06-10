@@ -39,6 +39,7 @@ const parseArgs = (argv) => {
     timeoutMs: 5000,
     serverReadyMs: 30000,
     progressTimeoutMs: 12000,
+    progressDeltaSecs: 0.02,
     seekTimeoutMs: 8000,
     pollMs: 50,
     settleMs: 350,
@@ -107,6 +108,11 @@ const parseArgs = (argv) => {
         break;
       case "--progress-timeout-ms":
         options.progressTimeoutMs = readInteger(arg);
+        break;
+      case "--progress-delta-secs":
+        if (!next) throw new Error("--progress-delta-secs requires a value");
+        index += 1;
+        options.progressDeltaSecs = positiveNumber(next.trim(), arg);
         break;
       case "--seek-timeout-ms":
         options.seekTimeoutMs = readInteger(arg);
@@ -222,6 +228,7 @@ Options:
   --control-toggles <n>          Toggle native DSP controls while playing and record latency
   --stability-seconds <seconds>  Sample playback diagnostics after latency trials
   --no-loop                      Do not seek near track end during stability sampling
+  --progress-delta-secs <secs>   /state current_time delta required for progress (default: 0.02)
   --poll-ms <ms>                 State polling interval (default: 50)
   --sample-ms <ms>               Process metric sampling interval (default: 250)
   --keep-server                  Leave the isolated server running after the benchmark
@@ -330,7 +337,7 @@ const waitForProgressAdvance = async (options, baselineTime, label, timeoutMs = 
       state.is_playing === true &&
       state.is_loading === false &&
       typeof state.current_time === "number" &&
-      state.current_time > baselineTime + 0.02
+      state.current_time > baselineTime + options.progressDeltaSecs
   });
 
 const waitForSeekConvergence = async (options, targetSecs) =>
@@ -355,7 +362,7 @@ const waitForTrackSwitch = async (options, expectedPath) =>
       state.is_playing === true &&
       typeof state.file_path === "string" &&
       comparablePath(state.file_path) === comparablePath(expectedPath) &&
-      state.current_time > 0.02
+      state.current_time > options.progressDeltaSecs
   });
 
 const playbackPhasesFromSnapshot = (snapshot) =>
@@ -431,6 +438,43 @@ const readPlaybackPhaseDiagnostics = async (options) => {
   };
 };
 
+const phaseDurations = (phaseDiagnostics) =>
+  phaseDiagnostics && phaseDiagnostics.playback_phases && phaseDiagnostics.playback_phases.durations_ms
+    ? phaseDiagnostics.playback_phases.durations_ms
+    : {};
+
+const firstPositionAdvanceMs = (operation, durations) => {
+  switch (operation) {
+    case "load_to_progress":
+      return (
+        durations.request_returned_to_first_position_advanced_ms ??
+        durations.request_started_to_first_position_advanced_ms ??
+        null
+      );
+    case "play_resume_to_progress":
+      return durations.stream_play_to_first_position_advanced_ms ?? null;
+    case "seek_convergence":
+    case "in_window_backward_seek":
+      return (
+        durations.seek_request_returned_to_first_position_advanced_ms ??
+        durations.seek_request_started_to_first_position_advanced_ms ??
+        null
+      );
+    default:
+      return null;
+  }
+};
+
+const progressProxyMinusFirstPositionMs = (timeToProgressMs, firstPositionMs) =>
+  typeof timeToProgressMs === "number" && typeof firstPositionMs === "number"
+    ? Number((timeToProgressMs - firstPositionMs).toFixed(3))
+    : null;
+
+const seekProgressProxyFromRequestReturnedMs = (convergenceMs, progressAfterConvergenceMs) =>
+  typeof convergenceMs === "number" && typeof progressAfterConvergenceMs === "number"
+    ? Number((convergenceMs + progressAfterConvergenceMs).toFixed(3))
+    : null;
+
 const measureLoadToProgress = async (options, trial) => {
   await requestJson(options, "POST", "/stop");
   await sleep(options.settleMs);
@@ -440,12 +484,15 @@ const measureLoadToProgress = async (options, trial) => {
   const baselineTime = command.state && typeof command.state.current_time === "number" ? command.state.current_time : 0;
   const progress = await waitForProgressAdvance(options, baselineTime, `trial ${trial} load-to-progress`);
   const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
+  const durations = phaseDurations(phaseDiagnosticsAtSuccess);
   return {
     trial,
     operation: "load_to_progress",
     request_latency_ms: Number(command.response.latencyMs.toFixed(3)),
     request_elapsed_ms: command.elapsed_ms,
     time_to_progress_ms: progress.elapsed_ms,
+    first_position_advance_ms: firstPositionAdvanceMs("load_to_progress", durations),
+    stream_play_to_first_position_advanced_ms: durations.stream_play_to_first_position_advanced_ms ?? null,
     polls: progress.polls,
     state_at_success: {
       current_time: progress.value.state.current_time,
@@ -475,12 +522,17 @@ const measurePausePlayResume = async (options, trial) => {
     `trial ${trial} play-resume-to-progress`
   );
   const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
+  const durations = phaseDurations(phaseDiagnosticsAtSuccess);
+  const firstPositionMs = firstPositionAdvanceMs("play_resume_to_progress", durations);
   return {
     trial,
     operation: "play_resume_to_progress",
     request_latency_ms: Number(command.response.latencyMs.toFixed(3)),
     request_elapsed_ms: command.elapsed_ms,
     time_to_progress_ms: progress.elapsed_ms,
+    first_position_advance_ms: firstPositionMs,
+    progress_proxy_minus_first_position_ms: progressProxyMinusFirstPositionMs(progress.elapsed_ms, firstPositionMs),
+    stream_play_to_first_position_advanced_ms: durations.stream_play_to_first_position_advanced_ms ?? null,
     polls: progress.polls,
     current_time_before_play: before.state.current_time,
     current_time_at_success: progress.value.state.current_time,
@@ -505,6 +557,12 @@ const measureSeek = async (options, trial, fraction, duration) => {
     options.seekTimeoutMs
   );
   const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
+  const durations = phaseDurations(phaseDiagnosticsAtSuccess);
+  const firstPositionMs = firstPositionAdvanceMs("seek_convergence", durations);
+  const progressProxyFromRequestReturnedMs = seekProgressProxyFromRequestReturnedMs(
+    convergence.elapsed_ms,
+    progress.elapsed_ms
+  );
   return {
     trial,
     operation: "seek_convergence",
@@ -514,6 +572,17 @@ const measureSeek = async (options, trial, fraction, duration) => {
     request_elapsed_ms: command.elapsed_ms,
     convergence_ms: convergence.elapsed_ms,
     progress_after_convergence_ms: progress.elapsed_ms,
+    progress_proxy_from_request_returned_ms: progressProxyFromRequestReturnedMs,
+    first_position_advance_ms: firstPositionMs,
+    progress_proxy_minus_first_position_ms: progressProxyMinusFirstPositionMs(
+      progressProxyFromRequestReturnedMs,
+      firstPositionMs
+    ),
+    seek_first_chunk_to_ready_sent_ms: durations.seek_first_chunk_to_ready_sent_ms ?? null,
+    seek_ready_to_first_position_advanced_ms: durations.seek_ready_to_first_position_advanced_ms ?? null,
+    seek_request_returned_to_streaming_ready_ms:
+      durations.seek_request_returned_to_streaming_ready_ms ?? null,
+    request_returned_to_streaming_ready_ms: durations.request_returned_to_streaming_ready_ms ?? null,
     polls: convergence.polls + progress.polls,
     current_time_at_convergence: convergence.value.state.current_time,
     current_time_at_progress: progress.value.state.current_time,
@@ -569,6 +638,12 @@ const measureInWindowBackwardSeek = async (options, trial, duration) => {
     options.seekTimeoutMs
   );
   const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
+  const durations = phaseDurations(phaseDiagnosticsAtSuccess);
+  const firstPositionMs = firstPositionAdvanceMs("in_window_backward_seek", durations);
+  const progressProxyFromRequestReturnedMs = seekProgressProxyFromRequestReturnedMs(
+    convergence.elapsed_ms,
+    progress.elapsed_ms
+  );
   return {
     trial,
     operation: "in_window_backward_seek",
@@ -579,6 +654,17 @@ const measureInWindowBackwardSeek = async (options, trial, duration) => {
     request_elapsed_ms: command.elapsed_ms,
     convergence_ms: convergence.elapsed_ms,
     progress_after_convergence_ms: progress.elapsed_ms,
+    progress_proxy_from_request_returned_ms: progressProxyFromRequestReturnedMs,
+    first_position_advance_ms: firstPositionMs,
+    progress_proxy_minus_first_position_ms: progressProxyMinusFirstPositionMs(
+      progressProxyFromRequestReturnedMs,
+      firstPositionMs
+    ),
+    seek_first_chunk_to_ready_sent_ms: durations.seek_first_chunk_to_ready_sent_ms ?? null,
+    seek_ready_to_first_position_advanced_ms: durations.seek_ready_to_first_position_advanced_ms ?? null,
+    seek_request_returned_to_streaming_ready_ms:
+      durations.seek_request_returned_to_streaming_ready_ms ?? null,
+    request_returned_to_streaming_ready_ms: durations.request_returned_to_streaming_ready_ms ?? null,
     polls: convergence.polls + progress.polls,
     current_time_at_convergence: convergence.value.state.current_time,
     current_time_at_progress: progress.value.state.current_time,
@@ -814,6 +900,26 @@ const summarizeOperations = (measurements) => {
       time_to_progress_ms: summarizeNumeric(rows.map((row) => row.time_to_progress_ms)),
       convergence_ms: summarizeNumeric(rows.map((row) => row.convergence_ms)),
       progress_after_convergence_ms: summarizeNumeric(rows.map((row) => row.progress_after_convergence_ms)),
+      progress_proxy_from_request_returned_ms: summarizeNumeric(
+        rows.map((row) => row.progress_proxy_from_request_returned_ms)
+      ),
+      first_position_advance_ms: summarizeNumeric(rows.map((row) => row.first_position_advance_ms)),
+      progress_proxy_minus_first_position_ms: summarizeNumeric(
+        rows.map((row) => row.progress_proxy_minus_first_position_ms)
+      ),
+      stream_play_to_first_position_advanced_ms: summarizeNumeric(
+        rows.map((row) => row.stream_play_to_first_position_advanced_ms)
+      ),
+      seek_first_chunk_to_ready_sent_ms: summarizeNumeric(rows.map((row) => row.seek_first_chunk_to_ready_sent_ms)),
+      seek_ready_to_first_position_advanced_ms: summarizeNumeric(
+        rows.map((row) => row.seek_ready_to_first_position_advanced_ms)
+      ),
+      seek_request_returned_to_streaming_ready_ms: summarizeNumeric(
+        rows.map((row) => row.seek_request_returned_to_streaming_ready_ms)
+      ),
+      request_returned_to_streaming_ready_ms: summarizeNumeric(
+        rows.map((row) => row.request_returned_to_streaming_ready_ms)
+      ),
       switch_to_progress_ms: summarizeNumeric(rows.map((row) => row.switch_to_progress_ms)),
       diagnostics_delta: summarizeOperationDiagnosticDeltas(rows)
     };
@@ -854,6 +960,7 @@ const runBenchmark = async (options) => {
       trials: options.trials,
       timeout_ms: options.timeoutMs,
       progress_timeout_ms: options.progressTimeoutMs,
+      progress_delta_secs: options.progressDeltaSecs,
       seek_timeout_ms: options.seekTimeoutMs,
       poll_ms: options.pollMs,
       settle_ms: options.settleMs,
@@ -879,9 +986,9 @@ const runBenchmark = async (options) => {
     stability: null,
     process_metrics: null,
     limitations: [
-      "This benchmark uses /state progress as an audible-playback proxy; it does not capture analog output.",
+      `This benchmark uses /state progress beyond ${options.progressDeltaSecs}s as an audible-playback proxy; it does not capture analog output.`,
       "Latency includes HTTP, server handler, decode/load, and state polling resolution.",
-      "Native control timing includes HTTP/server handling; WebAudio control timing is in-renderer JavaScript parameter update latency.",
+      "Native control timing uses ack-only realtime control routes and includes HTTP/server handling; WebAudio control timing is in-renderer JavaScript parameter update latency.",
       "Process CPU/RSS sampling is coarse Windows Get-Process data, not a profiler trace."
     ]
   };
@@ -1046,6 +1153,21 @@ const main = async () => {
       console.log(
         `[lyne-playback-latency] ${operation} count=${summary.count} p50=${metric.p50}ms p95=${metric.p95}ms max=${metric.max}ms`
       );
+      if (summary.first_position_advance_ms && summary.first_position_advance_ms.count > 0) {
+        const first = summary.first_position_advance_ms;
+        console.log(
+          `[lyne-playback-latency] ${operation} first_position_advance p50=${first.p50}ms p95=${first.p95}ms max=${first.max}ms`
+        );
+      }
+      if (
+        summary.progress_proxy_minus_first_position_ms &&
+        summary.progress_proxy_minus_first_position_ms.count > 0
+      ) {
+        const delta = summary.progress_proxy_minus_first_position_ms;
+        console.log(
+          `[lyne-playback-latency] ${operation} progress_proxy_minus_first_position p50=${delta.p50}ms p95=${delta.p95}ms max=${delta.max}ms`
+        );
+      }
       if (summary.progress_after_convergence_ms && summary.progress_after_convergence_ms.count > 0) {
         const pac = summary.progress_after_convergence_ms;
         console.log(

@@ -2,6 +2,8 @@
 
 Date: 2026-06-05
 
+Latest seek/resume-phase retest: 2026-06-06
+
 This page records local real-file playback benchmarks used to compare Lyne's
 native audio engine with a plain Electron/WebAudio baseline. These numbers are
 evidence for the machine, files, and settings below; they are not a universal
@@ -115,6 +117,77 @@ the primary 96 kHz FLAC run. The native callback/DSP/resampler microbenchmarks
 below also show that Lyne's realtime processing budget is small relative to a
 typical audio callback buffer, but those microbenchmarks do not measure final
 analog output quality.
+
+## Seek And Resume Phase Retests
+
+On 2026-06-06, a 5-trial release smoke retest was run on the primary 96 kHz
+FLAC with streaming first-buffer enabled, preemptive resampling disabled,
+`AUDIO_STREAMING_FULL_BUFFER_LIMIT_MIB=256`, and 10 ms polling. The benchmark
+now records both the historical `/state current_time > 0.02s` progress proxy
+and player-side first-position phase timestamps from `/diagnostics/runtime`.
+
+| Metric, p50 unless noted | Current Lyne release smoke |
+| --- | ---: |
+| load-to-progress proxy | 1.4 ms |
+| load first-position advance | 12 ms |
+| resume-to-progress proxy | 35.5 ms |
+| resume first-position advance | 13 ms |
+| regular seek convergence | 21.4 ms |
+| regular seek progress-after | 45.7 ms |
+| regular seek first-position advance | 14 ms |
+| regular seek first chunk to ready sent | 0 ms |
+| regular seek request returned to streaming ready | 8 ms |
+| in-window backward seek convergence | 1.3 ms |
+| in-window backward seek progress-after | 16.2 ms |
+| in-window backward seek first-position advance | 8 ms |
+| Global diagnostics | 0 recovery / 0 underrun / 0 shortfall |
+| Peak working set | 64.9 MB |
+
+After the warm shared-stream resume cleanup, a second 5-trial release smoke was
+run with the same track/settings and the updated benchmark field
+`progress_proxy_minus_first_position_ms`. This follow-up did not enable the
+optional in-window backward-seek scenario.
+
+| Metric, p50 unless noted | Resume-focused release smoke |
+| --- | ---: |
+| load-to-progress proxy | 1.4 ms |
+| load first-position advance | 16 ms |
+| resume-to-progress proxy | 34.3 ms |
+| resume first-position advance | 10 ms |
+| resume proxy minus first-position | 31.3 ms |
+| regular seek convergence | 18.0 ms |
+| regular seek progress-after | 31.6 ms |
+| regular seek first-position advance | 12 ms |
+| regular seek request returned to streaming ready | 8 ms |
+| Operation-local resume diagnostics | 0 recovery / 0 underrun / 0 shortfall |
+| Operation-local seek diagnostics | 0 recovery / 0 underrun / 0 shortfall |
+| Full-run diagnostics | 0 recovery / 1 underrun / 170 audio-buffer shortfall frames / 0 streaming shortfall |
+| Peak working set | 49.9 MB |
+
+Interpretation:
+
+- The earlier in-window seek convergence regression is no longer reproduced in
+  the current release smoke: convergence is back to ~1 ms and first-position
+  advance is under one callback-sized interval on this machine.
+- The 700-800 ms tail from the earlier recovery/shortfall investigation is not
+  present in this run. `playback_recovery_count`, global underrun counters,
+  audio-buffer shortfall counters, streaming shortfall counters, and streaming
+  queue drops all stayed at zero.
+- The historical progress proxy is still useful for end-to-end user-visible
+  `/state` behavior, but resume and seek progress-after include the 0.02 s
+  threshold plus polling quantization. The new first-position fields better
+  isolate player-side audio progress.
+- The resume-focused follow-up shows the same measurement split more directly:
+  `/state` resume proxy p50 was 34.3 ms, while player-side first-position
+  advance was 10 ms. The new proxy-minus-first-position field reports a 31.3 ms
+  p50 gap, so the remaining headline resume cost is mostly the 0.02 s progress
+  threshold plus 10 ms polling/HTTP observation, not additional player-side
+  resume work.
+
+Result file:
+
+- `apps/desktop/output/lyne-evidence/seek-phase-smoke-release-streaming-current-inwindow-5trial/playback-latency-benchmark.json`
+- `apps/desktop/output/lyne-evidence/resume-phase-current-5trial/playback-latency-benchmark.json`
 
 ## Multi-Format Smoke Matrix
 
@@ -246,6 +319,14 @@ profile uses `panic = "abort"`; plain `cargo bench` can build the custom
 no-harness benchmark with Cargo's default bench panic strategy and fail before
 running the probe.
 
+On this machine the current full run used the equivalent direct bench
+executable path after compiling with a one-shot panic-strategy override:
+
+```powershell
+cargo build --profile release --config "profile.release.panic='unwind'" --bench audio_quality_measurements
+.\target\release\deps\audio_quality_measurements-2b863f7868f74c8b.exe --enforce --out apps/desktop/output/lyne-evidence/audio-quality-2026-06-05/audio_quality_measurements_full.json
+```
+
 Conditions:
 
 | Condition | Value |
@@ -258,6 +339,8 @@ Conditions:
 | Limiter | `PeakLimiter` sample-peak ceiling and below-threshold transparency |
 | Noise shaping | 16-bit `NoiseShaper` error signal FFT with Hann window; equal-width 2-6/6-10/14-18 kHz RMS bands |
 | Loudness reference | Lyne `LoudnessMeter` wrapper compared with direct `ebur128` over deterministic f64 fixtures |
+| Public loudness corpus | Direct `ebur128` expected-value checks against the EBU Tech 3341/3342 corpus in `libebur128/test` |
+| Full output true peak | source f64 -> `PeakLimiter` -> optional `StreamingResampler` -> 24-bit final `NoiseShaper` -> f32 output -> true-peak meter |
 
 Results:
 
@@ -282,6 +365,14 @@ Results:
 | Loudness fixture max momentary / short-term delta | 0.000000 / 0.000000 LU |
 | Loudness fixture max LRA delta | 0.000000 LU |
 | Loudness fixture max true-peak delta | 0.000000023 dB |
+| Public EBU loudness corpus pass count | 55 / 55 files |
+| EBU global loudness max abs error | 0.029032 LU |
+| EBU LRA max abs error | 0.000432 LU |
+| EBU max momentary / short-term max abs error | 0.006402 / 0.066260 LU |
+| EBU true-peak corpus pass count | 9 / 9 files |
+| EBU true-peak max abs expected error | 0.181438 dB |
+| Full output-chain worst true peak | +1.977 dBTP |
+| Full output-chain points above -1 dBTP | 6 / 10 |
 
 Result files:
 
@@ -303,6 +394,16 @@ Interpretation:
   deterministic fixtures, including integrated, momentary, short-term, LRA, and
   true peak. It is not an independent laboratory certification of BS.1770
   compliance.
+- The public EBU Tech 3341/3342 corpus now adds expected-value checks for
+  integrated loudness, LRA, max momentary, max short-term, and true peak. These
+  are direct `ebur128` corpus checks with explicit channel mapping; the Lyne
+  wrapper parity evidence remains the deterministic stereo fixture section
+  above.
+- The full output-chain true-peak probe is intentionally report-only for the
+  `-1 dBTP` ceiling. It shows the current sample-peak/lookahead limiter can
+  still produce intersample true peaks above `-1 dBTP` after the output chain
+  on stressed material, with a worst observed value of `+1.977 dBTP`. That is a
+  real limitation, not a benchmark failure.
 - This does not yet prove analog-device output, OS mixer behavior, headphone
   perception, or every DSP effect setting. It also does not replace listening
   tests.
@@ -366,9 +467,9 @@ not a complete "better audio experience" proof. Remaining evidence gaps:
   rather than a looped single track.
 - More format coverage: AAC/M4A samples, long files, and more high-resolution
   files beyond the single large-FLAC sample above.
-- Additional audio-quality measurements: intersample true-peak behavior after
-  the full output chain, more published reference loudness corpora, and
-  analog/device loopback captures.
+- Additional audio-quality measurements: analog/device loopback captures and a
+  true-peak-limiting improvement if Lyne wants to guarantee a post-chain
+  intersample ceiling such as `-1 dBTP`.
 - UI/runtime evidence: renderer FPS, lyrics scrolling, visualizer cost, and
   settings interaction while audio is active.
 - SPlayer end-to-end playback comparison with the same response metrics.

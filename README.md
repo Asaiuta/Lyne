@@ -212,7 +212,9 @@ cargo bench
 
 在同一首本地 96 kHz FLAC 的 warm-cache 播放基准中，Lyne streaming-first-buffer 的 light-DSP 配置首播 p50 约 1.2 ms、窗口内后退 seek 合计 p50 约 15.7 ms、queue next-track 到播放推进约 14.3 ms；同口径 WebAudio light-DSP 对照分别约 30.4 ms、32.4 ms、388.1 ms。WebAudio 在 resume 和普通 seek convergence 上仍更快。
 
-这些结果用于约束播放响应和资源占用，不等同于完整音质体验证明。额外的 44.1 kHz FLAC、MP3、120 MB 级 FLAC 矩阵、30 分钟 native 稳定性样本、callback/DSP/resampler 实时预算证据，以及 THD+N、频响、限幅、重采样 stopband、dither/noise-shaping 频谱和响度参考夹具的离线客观质量测量，见 [Playback Latency Benchmark](docs/performance/playback-latency-benchmark.md)。
+这些结果用于约束播放响应和资源占用，不等同于完整音质体验证明。额外的 44.1 kHz FLAC、MP3、120 MB 级 FLAC 矩阵、30 分钟 native 稳定性样本、callback/DSP/resampler 实时预算证据，以及 THD+N、频响、限幅、重采样 stopband、dither/noise-shaping 频谱、公开 EBU 响度/true-peak 参考语料和全输出链 intersample true-peak 的离线客观质量测量，见 [Playback Latency Benchmark](docs/performance/playback-latency-benchmark.md)。
+
+当前离线音质证据显示：EBU Tech 3341/3342 响度参考 55/55 通过，EBU true-peak 参考 9/9 通过；但全输出链 true-peak 压限仍暴露边界，压力样本最坏到 +1.977 dBTP，说明现有 `PeakLimiter` 是 sample-peak/lookahead 限制器，不是已证明的 oversampled true-peak limiter。
 
 ## 致谢
 

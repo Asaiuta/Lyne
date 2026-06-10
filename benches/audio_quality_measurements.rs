@@ -31,6 +31,10 @@ const LOUDNESS_STEPPED_DURATION_SECS: f64 = 12.0;
 const DEFAULT_EBU_CORPUS_DIR: &str = "libebur128/test";
 const FULL_OUTPUT_TRUE_PEAK_LIMIT_DBTP: f64 = -1.0;
 const FULL_OUTPUT_CHAIN_BITS: u32 = 24;
+const EBU_LOUDNESS_TOLERANCE_LU: f64 = 0.1;
+const EBU_LRA_TOLERANCE_LU: f64 = 1.0;
+const EBU_TRUE_PEAK_LOWER_TOLERANCE_DB: f64 = -0.4;
+const EBU_TRUE_PEAK_UPPER_TOLERANCE_DB: f64 = 0.2;
 
 const EBU_TRUE_PEAK_FILES: [EbuExpectedFile; 9] = [
     EbuExpectedFile::new("seq-3341-15-24bit.wav.wav", -6.0),
@@ -972,8 +976,8 @@ fn measure_ebu_expected_files(
         };
         let error = measured - expected_file.expected;
         let tolerance = match metric {
-            EbuLoudnessMetric::Range => 1.0,
-            _ => 0.1,
+            EbuLoudnessMetric::Range => EBU_LRA_TOLERANCE_LU,
+            _ => EBU_LOUDNESS_TOLERANCE_LU,
         };
         points.push(EbuCorpusPoint {
             file_name: expected_file.file_name,
@@ -1255,7 +1259,9 @@ fn measure_ebu_true_peak_corpus(ebu_dir: &Path) -> Result<EbuTruePeakCorpusSecti
             full_output_true_peak_dbtp,
             full_output_margin_to_limiter_threshold_db: full_output_true_peak_dbtp
                 - FULL_OUTPUT_TRUE_PEAK_LIMIT_DBTP,
-            passed_reference_tolerance: input_error_db >= -0.4 && input_error_db <= 0.2,
+            passed_reference_tolerance: (EBU_TRUE_PEAK_LOWER_TOLERANCE_DB
+                ..=EBU_TRUE_PEAK_UPPER_TOLERANCE_DB)
+                .contains(&input_error_db),
         });
     }
 
@@ -1896,6 +1902,40 @@ fn write_report(path: &Path, report: &QualityReport) -> Result<(), String> {
         .map_err(|err| format!("failed to write '{}': {err}", path.display()))
 }
 
+fn ebu_loudness_point_count(corpus: &EbuLoudnessCorpusSection) -> usize {
+    corpus.global_loudness_points.len()
+        + corpus.loudness_range_points.len()
+        + corpus.max_momentary_points.len()
+        + corpus.max_short_term_points.len()
+}
+
+fn first_failed_ebu_loudness_point(corpus: &EbuLoudnessCorpusSection) -> Option<&EbuCorpusPoint> {
+    corpus
+        .global_loudness_points
+        .iter()
+        .chain(corpus.loudness_range_points.iter())
+        .chain(corpus.max_momentary_points.iter())
+        .chain(corpus.max_short_term_points.iter())
+        .find(|point| !point.passed)
+}
+
+fn first_failed_ebu_true_peak_point(
+    corpus: &EbuTruePeakCorpusSection,
+) -> Option<&EbuTruePeakPoint> {
+    corpus
+        .points
+        .iter()
+        .find(|point| !point.passed_reference_tolerance)
+}
+
+fn full_output_true_peak_over_limit_count(section: &FullOutputTruePeakSection) -> usize {
+    section
+        .points
+        .iter()
+        .filter(|point| point.output_margin_to_limiter_threshold_db > 0.0)
+        .count()
+}
+
 fn print_report(report: &QualityReport) {
     println!(
         "audio_quality_measurements mode={} path={}",
@@ -1994,6 +2034,51 @@ fn print_report(report: &QualityReport) {
             fixture.reference_true_peak_dbtp
         );
     }
+    let ebu_loudness = &report.loudness_reference.ebu_corpus;
+    if ebu_loudness.available {
+        println!(
+            "quality_ebu_loudness_corpus source_dir={} files={} max_global_error_lu={:.6} max_lra_error_lu={:.6} max_momentary_error_lu={:.6} max_short_term_error_lu={:.6} passed={}",
+            ebu_loudness.source_dir,
+            ebu_loudness_point_count(ebu_loudness),
+            ebu_loudness.max_abs_global_error_lu,
+            ebu_loudness.max_abs_loudness_range_error_lu,
+            ebu_loudness.max_abs_max_momentary_error_lu,
+            ebu_loudness.max_abs_max_short_term_error_lu,
+            first_failed_ebu_loudness_point(ebu_loudness).is_none()
+        );
+    } else {
+        println!(
+            "quality_ebu_loudness_corpus source_dir={} available=false missing_files={}",
+            ebu_loudness.source_dir,
+            ebu_loudness.missing_files.len()
+        );
+    }
+    let full_output = &report.full_output_true_peak;
+    println!(
+        "quality_full_output_true_peak output_rate={} limiter_threshold_dbfs={:.2} final_noise_shaper_bits={} worst_output_true_peak_dbtp={:.3} worst_margin_to_limiter_db={:.3} over_limit_points={}",
+        full_output.output_sample_rate_hz,
+        full_output.limiter_threshold_dbfs,
+        full_output.final_noise_shaper_bits,
+        full_output.worst_output_true_peak_dbtp,
+        full_output.worst_margin_to_limiter_threshold_db,
+        full_output_true_peak_over_limit_count(full_output)
+    );
+    let ebu_true_peak = &full_output.ebu_true_peak_corpus;
+    if ebu_true_peak.available {
+        println!(
+            "quality_ebu_true_peak_corpus source_dir={} files={} max_abs_expected_error_db={:.6} passed={}",
+            ebu_true_peak.source_dir,
+            ebu_true_peak.points.len(),
+            ebu_true_peak.max_abs_expected_error_db,
+            first_failed_ebu_true_peak_point(ebu_true_peak).is_none()
+        );
+    } else {
+        println!(
+            "quality_ebu_true_peak_corpus source_dir={} available=false missing_files={}",
+            ebu_true_peak.source_dir,
+            ebu_true_peak.missing_files.len()
+        );
+    }
 }
 
 fn enforce_limits(report: &QualityReport) -> Result<(), String> {
@@ -2062,6 +2147,27 @@ fn enforce_limits(report: &QualityReport) -> Result<(), String> {
             "loudness range delta too high: {:.9} LU",
             report.loudness_reference.max_loudness_range_delta_lu
         ));
+    }
+    let ebu_loudness = &report.loudness_reference.ebu_corpus;
+    if ebu_loudness.available {
+        if let Some(point) = first_failed_ebu_loudness_point(ebu_loudness) {
+            return Err(format!(
+                "EBU loudness reference failed for {}: expected {:.6}, measured {:.6}, error {:.6}",
+                point.file_name, point.expected, point.measured, point.error
+            ));
+        }
+    }
+    let ebu_true_peak = &report.full_output_true_peak.ebu_true_peak_corpus;
+    if ebu_true_peak.available {
+        if let Some(point) = first_failed_ebu_true_peak_point(ebu_true_peak) {
+            return Err(format!(
+                "EBU true-peak reference failed for {}: expected {:.3} dBTP, measured {:.3} dBTP, error {:.3} dB",
+                point.file_name,
+                point.expected_dbtp,
+                point.measured_input_true_peak_dbtp,
+                point.input_error_db
+            ));
+        }
     }
     Ok(())
 }
