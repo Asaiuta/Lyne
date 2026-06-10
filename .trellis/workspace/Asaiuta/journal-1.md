@@ -97,7 +97,10 @@ Removed root runtime/build dependencies now owned by audio-engine-core, kept ben
 
 ### Main Changes
 
-(Add details)
+- Added `audio-engine-core` Cargo publication metadata: AGPL-3.0-only license, repository/homepage/docs links, README, keywords, and categories.
+- Added a crate-specific README covering scope, non-scope, SoXR setup, a small decode/loudness example, realtime notes, and license.
+- Replaced rustdoc links to private processor modules with links to public exported processor types.
+- Recorded and archived the Trellis release-prep task.
 
 ### Git Commits
 
@@ -105,6 +108,46 @@ Removed root runtime/build dependencies now owned by audio-engine-core, kept ben
 |------|---------|
 | `75058c3` | (see git log) |
 | `a84936e` | (see git log) |
+
+### Testing
+
+- [OK] `cargo check -p audio-engine-core`
+- [OK] `cargo fmt -p audio-engine-core --check`
+- [OK] `cargo doc -p audio-engine-core --no-deps`
+- [OK] `cargo test -p audio-engine-core --lib` (152 passed)
+- [OK] `cargo package -p audio-engine-core --allow-dirty --list`
+- [OK] `cargo package -p audio-engine-core --allow-dirty`
+- [OK] `cargo publish -p audio-engine-core --dry-run --allow-dirty`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 4: Prepare audio-engine-core packaging
+
+**Date**: 2026-06-11
+**Task**: Prepare audio-engine-core packaging
+**Branch**: `master`
+
+### Summary
+
+Added audio-engine-core publication metadata and crate README, fixed rustdoc links, and verified package/publish dry-run.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `388cdde` | (see git log) |
+| `3e559e3` | (see git log) |
 
 ### Testing
 
