@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "RT-safety + streaming-queue/backpressure/recover patterns the persistent worker MUST follow (ArrayQueue, no audio-thread allocation, generation/cancel)"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "How to surface worker decode/seek failures as LoadError for the current generation without silent hangs"}
-{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Logging conventions for the new worker control/seek/teardown paths"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Change spans transport -> player::mod -> loading -> decoder -> resampler; keep generation/state contracts consistent across layers"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing generation/cancel model, push_ready_streaming_chunks, and prepare_memory_streaming_seek prep instead of duplicating"}
-{"file": ".trellis/tasks/06-03-reduce-false-playback-recovery/research/recovery-watchdog-results.md", "reason": "Source code-level analysis: shortfall mechanism, per-seek costs (#1-#3), baseline metrics, and the optimization rationale driving this task"}

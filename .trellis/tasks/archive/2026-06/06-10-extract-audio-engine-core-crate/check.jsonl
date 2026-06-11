@@ -1,7 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for verification"}
-{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify module ownership and crate boundary shape"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify error context survives extraction"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify realtime and backend quality constraints"}
-{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify no hot-path logging regressions"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify boundary contracts remain coherent"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify no duplicated definitions after split"}

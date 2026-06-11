@@ -1,3 +1,0 @@
-{"file":".trellis/tasks/05-31-prove-lyne-core-playback-library-value/research/playback-dsp-harness-options.md","reason":"Records the selected literal Electron/WebAudio baseline strategy and implementation shape."}
-{"file":".trellis/tasks/05-31-prove-lyne-core-playback-library-value/research/electron-webaudio-baseline-results.md","reason":"Records the implemented fixture command, validation results, Electron baseline output, and formal Lyne bench retry results."}
-{"file":".trellis/tasks/05-31-prove-lyne-core-playback-library-value/research/runtime-probe-results.md","reason":"Records the isolated audio-server runtime probe commands, active playback control result, fixture scan result, and limitations."}

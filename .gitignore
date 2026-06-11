@@ -51,8 +51,13 @@ apps/desktop/output/
 test-results/
 
 # Local agent config / migration backups
+.claude/
+.codex/
 .claude/settings.local.json
 .claude/**/*.backup
+
+# Trellis task-management workspace (internal dev process, not for public repo)
+.trellis/
 
 
 

@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/index.md", "reason": "Verify SolidJS patterns and updated local library behavior"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check data-flow consistency across API, worker, and UI"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Check worker reuse and avoid duplicated list logic"}
