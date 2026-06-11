@@ -32,33 +32,34 @@ pub enum SaturationType {
 /// When highpass_mode is enabled, only high frequencies (>4kHz) are saturated,
 /// creating a more transparent "exciter" effect without muddying the low end.
 ///
-/// Note: HPF state fields require mutable access. This struct should be wrapped
-/// in `Arc<Mutex<Saturation>>` for thread-safe usage.
+/// Configuration is done through the `set_*` methods; current values can be read
+/// back with [`Saturation::get_settings`]. For shared mutable access from another
+/// thread, wrap this in `Arc<Mutex<Saturation>>`.
 pub struct Saturation {
     /// Saturation type
-    pub sat_type: SaturationType,
+    sat_type: SaturationType,
     /// Drive amount (0.0 - 2.0, default 0.25)
-    pub drive: f64,
+    drive: f64,
     /// Threshold where saturation begins (linear, default 0.88)
-    pub threshold: f64,
+    threshold: f64,
     /// Mix between dry and wet (0.0 - 1.0, default 0.2)
-    pub mix: f64,
+    mix: f64,
     /// Input gain (dB, applied before saturation, default 0.0)
-    pub input_gain_db: f64,
+    input_gain_db: f64,
     /// Output gain compensation (dB, default 0.0)
-    pub output_gain_db: f64,
+    output_gain_db: f64,
     /// Cached linear input gain.
     input_gain_linear: f64,
     /// Cached linear output gain.
     output_gain_linear: f64,
     /// Enable/disable
-    pub enabled: bool,
+    enabled: bool,
 
     // High-pass mode for exciter functionality
     /// Enable high-pass separation (only saturate highs)
-    pub highpass_mode: bool,
+    highpass_mode: bool,
     /// HPF cutoff frequency in Hz (default: 4000)
-    pub highpass_cutoff: f64,
+    highpass_cutoff: f64,
 
     // Sample rate for HPF coefficient calculation
     sample_rate: f64,

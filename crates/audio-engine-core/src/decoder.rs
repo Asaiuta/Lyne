@@ -8,7 +8,9 @@ mod metadata;
 mod source;
 mod streaming;
 
-pub use error::{DecodeCancelToken, DecoderError, NetworkError};
+#[cfg(feature = "http")]
+pub use error::NetworkError;
+pub use error::{DecodeCancelToken, DecoderError};
 pub use metadata::{AudioInfo, TrackMetadata};
 pub use source::HttpCredentials;
 pub use streaming::StreamingDecoder;

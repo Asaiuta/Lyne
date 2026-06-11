@@ -29,6 +29,28 @@ larger player continues to evolve.
 
 Those layers remain in the root Lyne application crate.
 
+## Cargo Features
+
+Both features below are enabled by default. Disable them with
+`default-features = false` to drop the corresponding dependency.
+
+- `http` (default): HTTP/HTTPS streaming decode via `reqwest`, including Range
+  streaming and full-download fallback. With this off, `StreamingDecoder` only
+  opens local files; passing an `http(s)://` path returns a decoder error, and
+  the `reqwest` dependency and `NetworkError` type are not compiled.
+- `loudness-db` (default): SQLite-backed loudness metadata persistence
+  (`LoudnessDatabase`, `TrackLoudness`, `DatabaseStats`) via `rusqlite`. With
+  this off, the EBU R128 measurement helpers (`LoudnessMeter`,
+  `LoudnessNormalizer`, `TruePeakDetector`) still work; only the on-disk cache
+  is removed.
+
+DSP-only consumers can take a much smaller dependency tree:
+
+```toml
+[dependencies]
+audio-engine-core = { version = "0.1", default-features = false }
+```
+
 ## Native Dependency: SoXR
 
 The resampler depends on `soxr`, which requires the SoXR native library during
@@ -69,6 +91,20 @@ fn analyze_file(path: &str) -> Result<f64, Box<dyn std::error::Error>> {
 }
 ```
 
+## Runnable Examples
+
+The `examples/` directory contains self-contained programs that need no audio
+files and no optional features:
+
+- `resample_sine` — streams a synthetic 48 kHz sine through the SoX VHQ
+  resampler down to 44.1 kHz, demonstrating the chunked feed-then-flush pattern.
+- `equalizer_curve` — runs a stereo buffer through the 10-band `Equalizer`.
+
+```bash
+cargo run --example resample_sine
+cargo run --example equalizer_curve
+```
+
 ## Realtime Notes
 
 The crate exposes lock-free parameter containers and processor adapters used by
@@ -79,4 +115,22 @@ snapshot types.
 
 ## License
 
-This crate is licensed under AGPL-3.0-only, matching the Lyne repository.
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+  <http://opensource.org/licenses/MIT>)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
+
+### Native dependency licensing
+
+This crate links the SoXR native library (libsoxr), which is distributed under
+the LGPL-2.1. The Rust source in this crate is MIT OR Apache-2.0, but binaries
+that statically link libsoxr carry LGPL-2.1 relinking obligations. See
+[NOTICE](NOTICE) for details.

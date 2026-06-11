@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 const TRUE_PEAK_PHASES: usize = 4;
 const TRUE_PEAK_FIR_TAPS: usize = 49;
-const TRUE_PEAK_DELAY: usize = (TRUE_PEAK_FIR_TAPS + TRUE_PEAK_PHASES - 1) / TRUE_PEAK_PHASES;
+const TRUE_PEAK_DELAY: usize = TRUE_PEAK_FIR_TAPS.div_ceil(TRUE_PEAK_PHASES);
 const TRUE_PEAK_HISTORY_LEN: usize = TRUE_PEAK_DELAY * 2;
 const TRUE_PEAK_INTER_SAMPLE_TAPS: usize = TRUE_PEAK_DELAY - 1;
 

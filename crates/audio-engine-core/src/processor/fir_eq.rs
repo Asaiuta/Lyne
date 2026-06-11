@@ -50,7 +50,7 @@ impl FirEq {
     /// * `num_taps` - Number of FIR taps (must be odd, will be forced to odd if even)
     pub fn new(sample_rate: f64, num_taps: usize) -> Self {
         // Ensure odd number of taps for symmetric IR
-        let num_taps = if num_taps % 2 == 0 {
+        let num_taps = if num_taps.is_multiple_of(2) {
             num_taps + 1
         } else {
             num_taps
@@ -77,7 +77,11 @@ impl FirEq {
 
     /// Set number of taps (triggers IR regeneration)
     pub fn set_num_taps(&mut self, taps: usize) {
-        self.num_taps = if taps % 2 == 0 { taps + 1 } else { taps };
+        self.num_taps = if taps.is_multiple_of(2) {
+            taps + 1
+        } else {
+            taps
+        };
         self.regenerate_ir();
     }
 
@@ -157,9 +161,9 @@ impl FirEq {
         let num_bins = fft_size / 2 + 1;
         let mut magnitude = vec![1.0f64; num_bins];
 
-        for bin in 0..num_bins {
+        for (bin, mag) in magnitude.iter_mut().enumerate() {
             let freq = bin as f64 * sr / fft_size as f64;
-            magnitude[bin] = self.interpolate_gain(freq);
+            *mag = self.interpolate_gain(freq);
         }
 
         // 2. Convert dB magnitude to linear
@@ -255,7 +259,7 @@ impl FirEq {
             if i == 0 || i == half {
                 // Keep DC and Nyquist as-is
             } else if i < half {
-                *s = *s * 2.0; // Double positive frequencies
+                *s *= 2.0; // Double positive frequencies
             } else {
                 *s = Complex::new(0.0, 0.0); // Zero negative frequencies
             }

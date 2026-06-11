@@ -642,9 +642,9 @@ impl DynamicLoudness {
                 let mut sample = buffer[idx] * self.pre_gain_linear;
 
                 let ch_filters = &mut self.filters[ch];
-                for band in 0..LOUDNESS_BANDS_N {
+                for (band, filter) in ch_filters.iter_mut().enumerate() {
                     if self.active_bands[band] {
-                        sample = ch_filters[band].process(sample);
+                        sample = filter.process(sample);
                     }
                 }
 
@@ -979,7 +979,7 @@ mod tests {
         dl.process(&mut buffer);
 
         assert!(dl.last_applied_gains.iter().all(|gain| gain.is_finite()));
-        assert_eq!(dl.active_bands[3], false);
+        assert!(!dl.active_bands[3]);
         assert!(dl
             .active_bands
             .iter()

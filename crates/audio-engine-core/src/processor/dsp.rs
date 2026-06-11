@@ -106,10 +106,11 @@ impl Default for VolumeController {
 
 /// Noise shaping curve presets
 /// All coefficients from SoX src/dither.c, NTF zeros verified |z| < 1
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum NoiseShaperCurve {
     /// Lipshitz 5-tap - general purpose, works well at 44.1/48kHz
     /// NTF max|z| = 0.961, 4kHz notch -27.2dB
+    #[default]
     Lipshitz5,
 
     /// F-weighted 9-tap - psychoacoustically optimized for 44.1kHz
@@ -191,12 +192,6 @@ impl NoiseShaperCurve {
             Self::TpdfOnly => true,     // Always safe
             _ => sample_rate <= 50_000, // Unified boundary
         }
-    }
-}
-
-impl Default for NoiseShaperCurve {
-    fn default() -> Self {
-        Self::Lipshitz5
     }
 }
 
@@ -292,7 +287,7 @@ impl NoiseShaper {
     /// Reachable from the audio thread via `NoiseShaperProcessor::sync_params`, so
     /// this must stay allocation- and log-free.
     pub fn set_bits(&mut self, bits: u32) {
-        if bits != self.bits && bits >= 8 && bits <= 32 {
+        if bits != self.bits && (8..=32).contains(&bits) {
             self.bits = bits;
             let (cached_scale, cached_lsb) = Self::scale_for_bits(bits);
             self.cached_scale = cached_scale;

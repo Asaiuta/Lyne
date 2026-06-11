@@ -1,24 +1,34 @@
 use std::fs::File;
+#[cfg(feature = "http")]
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
+#[cfg(feature = "http")]
 use std::time::Duration;
 
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
 
-use super::error::{
-    network_error_to_decoder_error, with_network_retry, DecodeCancelToken, DecoderError,
-    NetworkError,
-};
+#[cfg(feature = "http")]
+use super::error::{network_error_to_decoder_error, with_network_retry, NetworkError};
+use super::error::{DecodeCancelToken, DecoderError};
 
+#[cfg(feature = "http")]
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(feature = "http")]
 const HTTP_RANGE_STREAM_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(feature = "http")]
 const HTTP_FULL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 pub(super) const BYTES_PER_MIB: usize = 1024 * 1024;
 pub(super) const F64_SAMPLE_BYTES: usize = std::mem::size_of::<f64>();
+#[cfg(feature = "http")]
 const NON_RANGE_DOWNLOAD_MEMORY_DIVISOR: usize = 8;
+#[cfg(feature = "http")]
 pub(super) const RANGE_PREFETCH: usize = 256 * 1024;
 
+/// HTTP Basic authentication credentials for remote audio sources.
+///
+/// Ignored for local file paths. Only consulted by the HTTP source paths,
+/// which require the `http` feature.
 #[derive(Debug, Clone, Default)]
 pub struct HttpCredentials {
     pub username: String,
@@ -48,7 +58,17 @@ pub(super) fn open_media_source(
     }
 
     if path_str.starts_with("http://") || path_str.starts_with("https://") {
-        open_http_media_source(path_str.as_ref(), credentials, cancel_token)
+        #[cfg(feature = "http")]
+        {
+            open_http_media_source(path_str.as_ref(), credentials, cancel_token)
+        }
+        #[cfg(not(feature = "http"))]
+        {
+            let _ = credentials;
+            Err(DecoderError::Probe(
+                "HTTP sources require the `http` feature of audio-engine-core".to_string(),
+            ))
+        }
     } else {
         let file = File::open(path)?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -60,6 +80,7 @@ pub(super) fn open_media_source(
     }
 }
 
+#[cfg(feature = "http")]
 fn open_http_media_source(
     url: &str,
     credentials: Option<&HttpCredentials>,
@@ -85,6 +106,7 @@ fn open_http_media_source(
     }
 }
 
+#[cfg(feature = "http")]
 fn hint_from_url(url: &str) -> Hint {
     let mut hint = Hint::new();
     if let Some(ext) = url
@@ -98,6 +120,7 @@ fn hint_from_url(url: &str) -> Hint {
     hint
 }
 
+#[cfg(feature = "http")]
 fn download_full_source(
     url: &str,
     credentials: Option<&HttpCredentials>,
@@ -201,6 +224,7 @@ fn download_full_source(
     Ok(Cursor::new(buffer))
 }
 
+#[cfg(feature = "http")]
 fn checked_download_capacity(
     content_length: Option<u64>,
     max_download_bytes: usize,
@@ -223,12 +247,14 @@ fn checked_download_capacity(
     Ok(Some(len as usize))
 }
 
+#[cfg(feature = "http")]
 fn response_network_error(response: &reqwest::blocking::Response) -> Option<NetworkError> {
     let status = response.status();
     (!status.is_success() && status.as_u16() != 206)
         .then_some(NetworkError::HttpStatus(status.as_u16()))
 }
 
+#[cfg(feature = "http")]
 pub(super) fn fetch_range_once(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -268,6 +294,7 @@ pub(super) fn fetch_range_once(
     Ok(bytes.to_vec())
 }
 
+#[cfg(feature = "http")]
 struct RangeStream {
     url: String,
     credentials: Option<HttpCredentials>,
@@ -280,6 +307,7 @@ struct RangeStream {
     cancel_token: Option<DecodeCancelToken>,
 }
 
+#[cfg(feature = "http")]
 impl RangeStream {
     fn new(
         url: String,
@@ -358,7 +386,7 @@ impl RangeStream {
                         .headers()
                         .get("content-range")
                         .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.split('/').last().and_then(|s| s.parse().ok()));
+                        .and_then(|s| s.split('/').next_back().and_then(|s| s.parse().ok()));
                     let range_content_length = range_response
                         .headers()
                         .get("content-length")
@@ -442,13 +470,14 @@ impl RangeStream {
         }
         let data = self
             .fetch_range(self.pos, fetch_len)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         self.buf_start = self.pos;
         self.buf = data;
         Ok(())
     }
 }
 
+#[cfg(feature = "http")]
 impl Read for RangeStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if buf.is_empty() {
@@ -477,6 +506,7 @@ impl Read for RangeStream {
     }
 }
 
+#[cfg(feature = "http")]
 impl Seek for RangeStream {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         let new_pos = match pos {
@@ -504,6 +534,7 @@ impl Seek for RangeStream {
     }
 }
 
+#[cfg(feature = "http")]
 impl symphonia::core::io::MediaSource for RangeStream {
     fn is_seekable(&self) -> bool {
         self.is_usable_range_stream()
@@ -514,7 +545,7 @@ impl symphonia::core::io::MediaSource for RangeStream {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http"))]
 mod tests {
     use super::*;
 

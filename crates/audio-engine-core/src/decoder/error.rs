@@ -1,23 +1,40 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(feature = "http")]
 use std::time::Duration;
 
 use thiserror::Error;
 
+#[cfg(feature = "http")]
 const NETWORK_MAX_ATTEMPTS: usize = 3;
+#[cfg(feature = "http")]
 const NETWORK_BACKOFF_DELAYS: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
 
+/// Classification of network failures encountered while decoding from an
+/// HTTP(S) source.
+///
+/// Only available with the `http` feature.
+#[cfg(feature = "http")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkError {
+    /// The request exceeded its configured timeout.
     HttpTimeout,
+    /// The connection was reset by the peer mid-transfer.
     ConnectionReset,
+    /// The server returned a non-success status code.
     HttpStatus(u16),
+    /// DNS resolution failed for the request host.
     DnsFailure(String),
+    /// The TLS handshake or certificate validation failed.
     TlsError(String),
+    /// Any other transport error, carrying its description.
     Other(String),
 }
 
+#[cfg(feature = "http")]
 impl NetworkError {
+    /// Returns `true` when retrying the operation may succeed (transient
+    /// timeouts, connection resets, and 408/429/5xx statuses).
     pub fn is_retriable(&self) -> bool {
         match self {
             NetworkError::HttpTimeout | NetworkError::ConnectionReset => true,
@@ -41,6 +58,7 @@ impl NetworkError {
     }
 }
 
+#[cfg(feature = "http")]
 pub(super) fn network_error_to_decoder_error(error: NetworkError) -> DecoderError {
     if error.is_decode_cancelled() {
         DecoderError::Canceled
@@ -49,6 +67,7 @@ pub(super) fn network_error_to_decoder_error(error: NetworkError) -> DecoderErro
     }
 }
 
+#[cfg(feature = "http")]
 impl From<reqwest::Error> for NetworkError {
     fn from(e: reqwest::Error) -> Self {
         if e.is_timeout() {
@@ -71,6 +90,7 @@ impl From<reqwest::Error> for NetworkError {
     }
 }
 
+#[cfg(feature = "http")]
 impl std::fmt::Display for NetworkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -84,39 +104,56 @@ impl std::fmt::Display for NetworkError {
     }
 }
 
+/// Cooperative cancellation handle shared with a running decode operation.
 #[derive(Clone, Debug)]
 pub struct DecodeCancelToken {
     cancelled: Arc<AtomicBool>,
 }
 
 impl DecodeCancelToken {
+    /// Wrap a shared cancellation flag for use with the decoder open/decode
+    /// entry points.
     pub fn new(cancelled: Arc<AtomicBool>) -> Self {
         Self { cancelled }
     }
 
+    /// Returns `true` once the underlying flag has been set, signalling that
+    /// the decode should stop as soon as possible.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
 }
 
+/// Errors returned by the streaming decoder.
 #[derive(Error, Debug)]
 pub enum DecoderError {
+    /// A local file could not be opened.
     #[error("Failed to open file: {0}")]
     FileOpen(#[from] std::io::Error),
+    /// An HTTP(S) source failed. Only constructible with the `http` feature.
+    #[cfg(feature = "http")]
     #[error("Network error: {0}")]
     Network(NetworkError),
+    /// The container format is not supported.
     #[error("Unsupported format")]
     UnsupportedFormat,
+    /// No decodable audio track was found in the container.
     #[error("No audio track found")]
     NoAudioTrack,
+    /// The codec failed to decode a packet.
     #[error("Decoder error: {0}")]
     Decoder(String),
+    /// Format probing failed.
     #[error("Probe error: {0}")]
     Probe(String),
+    /// The decode was cancelled via a [`DecodeCancelToken`].
     #[error("Decode cancelled")]
     Canceled,
 }
 
+#[cfg(feature = "http")]
+// `attempt` indexes NETWORK_BACKOFF_DELAYS, a different array than the loop range.
+#[allow(clippy::needless_range_loop)]
 pub(super) fn with_network_retry<T, F>(operation_name: &str, mut op: F) -> Result<T, NetworkError>
 where
     F: FnMut() -> Result<T, NetworkError>,

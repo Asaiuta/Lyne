@@ -185,14 +185,15 @@ impl Resampler {
         }
     }
 
-    /// Resample audio data using SoX VHQ polyphase filter
-    /// Input and output are interleaved f64 samples for Hi-Fi transparency
-    /// Resample audio data using SoX VHQ polyphase filter
+    /// Resample audio data using SoX VHQ polyphase filter.
     ///
-    /// optimised for multi-channel parallelism:
+    /// Input and output are interleaved f64 samples for Hi-Fi transparency.
+    ///
+    /// Optimised for multi-channel parallelism:
     /// - De-interleaves channels
     /// - Processes each channel on a separate thread (Rayon)
     /// - Re-interleaves result
+    ///
     /// This avoids phase discontinuities from time-chunking while maintaining high performance.
     ///
     /// Returns Err if Soxr initialization fails (e.g., invalid sample rate combination).

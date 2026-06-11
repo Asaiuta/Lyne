@@ -5,12 +5,14 @@
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::sync::Arc;
 
-/// 基于 FFT 的高性能卷积器 (Overlap-Save 算法)
-/// 零分配实现：所有 scratch buffers 在构造时预分配
+/// High-performance FFT convolver (Overlap-Save algorithm).
+///
+/// Zero-allocation implementation: all scratch buffers are pre-allocated at
+/// construction time so `process_into`/`process_inplace` are realtime-safe.
 pub struct FFTConvolver {
     fft_size: usize,
-    impulse_response_fft: Vec<Vec<Complex<f64>>>, // 每个通道一个频域响应
-    overlap_buffers: Vec<Vec<f64>>,               // 每个通道的重叠缓冲区
+    impulse_response_fft: Vec<Vec<Complex<f64>>>, // one frequency-domain response per channel
+    overlap_buffers: Vec<Vec<f64>>,               // overlap buffer per channel
     channels: usize,
     ir_len: usize,
     // Cached FFT plans to avoid recreating on each process call
@@ -45,7 +47,7 @@ impl FFTConvolver {
         let ir_len_total = ir_data.len();
         let ir_len_per_ch = ir_len_total / channels;
 
-        // 选择合适的 FFT 大小 (通常是 2 的幂，且大于 2*ir_len)
+        // Pick a suitable FFT size (a power of two larger than 2*ir_len).
         let mut fft_size = 1;
         while fft_size < (ir_len_per_ch * 2) {
             fft_size <<= 1;
@@ -63,7 +65,7 @@ impl FFTConvolver {
 
         for ch in 0..channels {
             let mut buffer = vec![Complex::new(0.0, 0.0); fft_size];
-            // 填充 IR 并补零
+            // Load the IR for this channel and zero-pad the rest.
             for i in 0..ir_len_per_ch {
                 buffer[i] = Complex::new(ir_data[i * channels + ch], 0.0);
             }
@@ -106,6 +108,7 @@ impl FFTConvolver {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn prepare_channel_chunk(
         scratch: &mut [Complex<f64>],
         overlap: &[f64],
@@ -153,6 +156,7 @@ impl FFTConvolver {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn write_channel_output(
         scratch: &[Complex<f64>],
         output: &mut [f64],

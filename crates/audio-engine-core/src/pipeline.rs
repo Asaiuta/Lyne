@@ -10,8 +10,16 @@ use std::thread::{self, JoinHandle};
 // Channel imports unused in current implementation
 
 use crate::config::ResampleQuality;
-use crate::decoder::StreamingDecoder;
+use crate::decoder::{DecoderError, StreamingDecoder};
 use crate::processor::StreamingResampler;
+
+/// Error returned when constructing an [`AudioPipeline`].
+#[derive(Debug, thiserror::Error)]
+pub enum PipelineError {
+    /// The underlying decoder could not open the source.
+    #[error("failed to open decoder: {0}")]
+    Decoder(#[from] DecoderError),
+}
 
 /// Ring buffer size in frames (per channel)
 /// ~4MB for stereo f64 at 192kHz ≈ 0.5 seconds buffer
@@ -48,9 +56,9 @@ pub struct AudioPipeline {
     worker_handle: Option<JoinHandle<()>>,
 
     // Audio format info
-    pub channels: usize,
-    pub sample_rate: u32,
-    pub original_sample_rate: u32,
+    channels: usize,
+    sample_rate: u32,
+    original_sample_rate: u32,
 }
 
 /// Simple ring buffer for audio data
@@ -204,14 +212,18 @@ impl RingBuffer {
 }
 
 impl AudioPipeline {
-    /// Create a new pipeline from a file path
+    /// Create a new pipeline from a file path.
+    ///
+    /// This opens the decoder once to read the source format (sample rate,
+    /// channel count, and frame count) so callers can query the pipeline before
+    /// starting the background worker. Call [`AudioPipeline::start`] to begin
+    /// decoding and resampling.
     pub fn new(
         path: &str,
         target_sample_rate: Option<u32>,
         _resample_quality: ResampleQuality,
-    ) -> Result<Self, String> {
-        let decoder =
-            StreamingDecoder::open(path).map_err(|e| format!("Failed to open decoder: {}", e))?;
+    ) -> Result<Self, PipelineError> {
+        let decoder = StreamingDecoder::open(path)?;
 
         let info = decoder.info.clone();
         let original_sr = info.sample_rate;
@@ -303,6 +315,7 @@ impl AudioPipeline {
     }
 
     /// Background worker that decodes and resamples
+    #[allow(clippy::too_many_arguments)]
     fn worker_loop(
         path: String,
         channels: usize,
@@ -479,6 +492,21 @@ impl AudioPipeline {
         self.buffered_frames
             .load(Ordering::Relaxed)
             .saturating_sub(read_pos)
+    }
+
+    /// Number of channels in the output stream.
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// Output (post-resample) sample rate in Hz.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// Source (pre-resample) sample rate in Hz.
+    pub fn original_sample_rate(&self) -> u32 {
+        self.original_sample_rate
     }
 }
 

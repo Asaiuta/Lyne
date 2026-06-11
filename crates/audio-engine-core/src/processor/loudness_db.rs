@@ -98,14 +98,14 @@ impl TrackLoudness {
 
         std::fs::metadata(path)
             .ok()
-            .and_then(|m| {
+            .map(|m| {
                 let mtime = m
                     .modified()
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs() as i64);
                 let size = Some(m.len() as i64);
-                Some((mtime, size))
+                (mtime, size)
             })
             .unwrap_or((None, None))
     }

@@ -1,9 +1,11 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use super::source::fetch_range_once;
-use super::{DecodeCancelToken, DecoderError, NetworkError, StreamingDecoder};
+#[cfg(feature = "http")]
+use super::{source::fetch_range_once, NetworkError};
+use super::{DecodeCancelToken, DecoderError, StreamingDecoder};
 
+#[cfg(feature = "http")]
 #[test]
 fn network_error_classifies_retriable_errors() {
     assert!(NetworkError::HttpTimeout.is_retriable());
@@ -15,6 +17,7 @@ fn network_error_classifies_retriable_errors() {
     assert!(NetworkError::HttpStatus(504).is_retriable());
 }
 
+#[cfg(feature = "http")]
 #[test]
 fn network_error_classifies_non_retriable_errors() {
     assert!(!NetworkError::HttpStatus(401).is_retriable());
@@ -39,6 +42,7 @@ fn cancelled_open_returns_before_touching_source() {
     assert!(matches!(result, Err(DecoderError::Canceled)));
 }
 
+#[cfg(feature = "http")]
 #[test]
 fn cancelled_range_fetch_returns_before_network_request() {
     let cancelled = Arc::new(AtomicBool::new(true));

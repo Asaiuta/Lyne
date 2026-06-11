@@ -22,15 +22,11 @@ const FFT_SIZE: usize = 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AutomixAnalysisMode {
     Head,
+    #[default]
     Full,
-}
-
-impl Default for AutomixAnalysisMode {
-    fn default() -> Self {
-        Self::Full
-    }
 }
 
 impl AutomixAnalysisMode {
@@ -612,6 +608,7 @@ fn detect_drop(envelope: &[f32], rate: f64) -> Option<f64> {
     (best_ratio > 1.5).then_some(best_idx as f64 / rate)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn detect_vocals(
     head_env: &[f32],
     head_ratio: &[f32],

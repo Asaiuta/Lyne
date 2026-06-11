@@ -31,6 +31,7 @@ mod dynamic_loudness;
 mod eq;
 mod fir_eq;
 mod loudness;
+#[cfg(feature = "loudness-db")]
 mod loudness_db;
 mod resampler;
 mod saturation;
@@ -57,6 +58,7 @@ pub use loudness::{
     AtomicLoudnessState, GainRamp, LoudnessInfo, LoudnessMeter, LoudnessNormalizer, PeakLimiter,
     TruePeakDetector,
 };
+#[cfg(feature = "loudness-db")]
 pub use loudness_db::{
     DatabaseStats, LoudnessDatabase, TrackLoudness, CURRENT_SCAN_VERSION,
     DEFAULT_BROADCAST_TARGET_LUFS, DEFAULT_STREAMING_TARGET_LUFS,
