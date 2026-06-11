@@ -6,10 +6,17 @@ description = "Hi-Fi Audio Engine - Full Rust Native"
 
 [workspace]
 members = [
-    "crates/audio-engine-core",
     "crates/audio-runtime-paths",
 ]
 resolver = "2"
+
+# NOTE: crates/audio-engine-core/ is kept on disk for reference but is no longer
+# a workspace member. The crate is consumed as a git dependency from its own
+# repository (see audio-engine-core in [dependencies] below). Keeping it as a
+# member would path-override the git dependency.
+exclude = [
+    "crates/audio-engine-core",
+]
 
 [lib]
 name = "audio_engine"
@@ -84,7 +91,7 @@ name = "backend_library_scan_perf"
 harness = false
 
 [dependencies]
-audio-engine-core = { path = "crates/audio-engine-core" }
+audio-engine-core = { git = "https://github.com/Asaiuta/audio-engine-core", branch = "main" }
 audio-runtime-paths = { path = "crates/audio-runtime-paths" }
 # --- Core Audio ---
 lofty = "0.22"
