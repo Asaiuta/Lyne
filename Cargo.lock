@@ -385,7 +385,7 @@ checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
 [[package]]
 name = "audio-engine-core"
 version = "0.1.0"
-source = "git+https://github.com/Asaiuta/audio-engine-core?branch=main#12f806ca1555887297960c6fa936e09c9a050a0b"
+source = "git+https://github.com/Asaiuta/audio-engine-core?branch=main#b44f28e63e0cd20ad1bf0e6471b494d4638272b9"
 dependencies = [
  "arc-swap",
  "atomic_float",
