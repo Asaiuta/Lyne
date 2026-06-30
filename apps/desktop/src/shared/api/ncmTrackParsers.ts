@@ -49,7 +49,9 @@ const parseResolvedNcmTrack = (value: unknown, errorMessage: string): ResolvedNc
     artist: value.artist,
     album: value.album,
     coverUrl: value.cover_url,
-    durationSecs: value.duration_secs
+    durationSecs: value.duration_secs,
+    // Optional: omitted by the backend when unknown (serde skip_if none).
+    actualLevel: isString(value.actual_level) ? value.actual_level : null
   };
 };
 

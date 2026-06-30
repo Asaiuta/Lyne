@@ -1331,6 +1331,13 @@ export const zhCN: TranslationDict = {
   "settings.ncm.songLevel.jyeffect": "高清臻音",
   "settings.ncm.songLevel.sky": "沉浸环绕声",
   "settings.ncm.songLevel.jymaster": "超清母带",
+  "settings.ncm.resilience.title": "在线播放健壮性",
+  "settings.ncm.cacheEnabled": "缓存在线音频",
+  "settings.ncm.cacheEnabled.desc": "将解析到的歌曲缓存到本地，二次播放秒开，且不受链接过期影响。",
+  "settings.ncm.qualityFallback": "音质回落",
+  "settings.ncm.qualityFallback.desc": "请求的音质档不可用时自动降档播放，而非直接失败。",
+  "settings.ncm.allowTrial": "播放试听片段",
+  "settings.ncm.allowTrial.desc": "对仅提供试听的歌曲播放其试听片段（默认关闭）。",
 
   // Lyric settings
   "settings.lyric.title": "歌词",

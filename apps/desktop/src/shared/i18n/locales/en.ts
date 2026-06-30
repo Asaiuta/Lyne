@@ -1329,6 +1329,16 @@ export const en = {
   "settings.ncm.songLevel.jyeffect": "Spatial Audio",
   "settings.ncm.songLevel.sky": "Surround Audio",
   "settings.ncm.songLevel.jymaster": "Master",
+  "settings.ncm.resilience.title": "Online Playback Resilience",
+  "settings.ncm.cacheEnabled": "Cache online audio",
+  "settings.ncm.cacheEnabled.desc":
+    "Save resolved tracks to disk so replays are instant and survive URL expiry.",
+  "settings.ncm.qualityFallback": "Quality fallback",
+  "settings.ncm.qualityFallback.desc":
+    "Step down the quality ladder when the requested tier is unavailable, instead of failing.",
+  "settings.ncm.allowTrial": "Play trial previews",
+  "settings.ncm.allowTrial.desc":
+    "Play the short preview clip for tracks that only offer a trial (off by default).",
 
   // Lyric settings
   "settings.lyric.title": "Lyrics",

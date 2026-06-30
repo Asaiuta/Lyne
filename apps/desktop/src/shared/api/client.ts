@@ -25,6 +25,11 @@ import {
   type SettingsApiClient,
   type SettingsApiTransport
 } from "./settings";
+import {
+  createOnlineSettingsApiClient,
+  type OnlineSettingsApiClient,
+  type OnlineSettingsApiTransport
+} from "./onlineSettings";
 import { requestEnvelope as requestTransportEnvelope, requestJson } from "./transport";
 import {
   createEffectsApiClient,
@@ -136,7 +141,7 @@ export type {
 } from "./effects";
 export type { NcmApiClient } from "./ncmClient";
 
-export interface ApiClient extends PlaybackApiClient, QueueApiClient, SettingsApiClient, EffectsApiClient, LibraryApiClient, NcmApiClient {
+export interface ApiClient extends PlaybackApiClient, QueueApiClient, SettingsApiClient, OnlineSettingsApiClient, EffectsApiClient, LibraryApiClient, NcmApiClient {
   // WebDAV
   listWebDavSources: () => Promise<WebDavSource[]>;
   upsertWebDavSource: (sourceKey: string, displayName: string, baseUrl: string, username?: string, password?: string, isDefault?: boolean) => Promise<WebDavSource>;
@@ -197,6 +202,9 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
   const settingsTransport: SettingsApiTransport = {
     requestJson: (path, init) => requestJson(baseUrl, path, init)
   };
+  const onlineSettingsTransport: OnlineSettingsApiTransport = {
+    requestJson: (path, init) => requestJson(baseUrl, path, init)
+  };
   const libraryTransport: LibraryApiTransport = {
     requestJson: (path, init) => requestJson(baseUrl, path, init)
   };
@@ -208,6 +216,7 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
   const playbackClient = createPlaybackApiClient(playbackTransport);
   const queueClient = createQueueApiClient(queueTransport);
   const settingsClient = createSettingsApiClient(settingsTransport);
+  const onlineSettingsClient = createOnlineSettingsApiClient(onlineSettingsTransport);
   const libraryClient = createLibraryApiClient(libraryTransport);
   const ncmClient = createNcmApiClient(ncmTransport);
 
@@ -215,6 +224,7 @@ export const createApiClient = (baseUrl = resolveBaseUrl()): ApiClient => {
   ...playbackClient,
   ...queueClient,
   ...settingsClient,
+  ...onlineSettingsClient,
   ...effectsClient,
   ...libraryClient,
   ...ncmClient,

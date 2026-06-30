@@ -1,5 +1,13 @@
-import { Show, createEffect, createMemo, createSignal } from "solid-js";
+import {
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  onMount
+} from "solid-js";
 import { usePlayback } from "../../../app/PlaybackContext";
+import { createApiClient } from "../../../shared/api/client";
+import type { OnlineSettings } from "../../../shared/api/onlineSettings";
 import type { TranslationKey } from "../../../shared/i18n";
 import { useTranslation } from "../../../shared/i18n";
 import {
@@ -35,6 +43,8 @@ const SONG_LEVEL_LABEL_KEYS: Record<NcmSongLevel, TranslationKey> = {
   jymaster: "settings.ncm.songLevel.jymaster"
 };
 
+const api = createApiClient();
+
 export function PlaybackSection(props: PlaybackSectionProps) {
   const { t } = useTranslation();
   const audioSettings = usePlayback().audioSettings;
@@ -54,6 +64,7 @@ export function PlaybackSection(props: PlaybackSectionProps) {
     createSignal<boolean>(initialSettings.progressAdjustLyric);
   const [ncmSongLevel, setNcmSongLevel] =
     createSignal<NcmSongLevel>(initialSettings.ncmSongLevel);
+  const [online, setOnline] = createSignal<OnlineSettings | null>(null);
 
   const songLevelOptions = createMemo<SelectOption[]>(() =>
     NCM_SONG_LEVELS.map((level) => ({
@@ -72,6 +83,29 @@ export function PlaybackSection(props: PlaybackSectionProps) {
       setUseNextPrefetch(desired.use_next_prefetch);
     }
   });
+
+  onMount(() => {
+    void api
+      .getOnlineSettings()
+      .then(setOnline)
+      .catch(() => {
+        setOnline(null);
+      });
+  });
+
+  // Optimistically apply an online-settings change, persisting the full object;
+  // revert on failure.
+  const updateOnline = (patch: Partial<OnlineSettings>) => {
+    const current = online();
+    if (!current) {
+      return;
+    }
+    const next = { ...current, ...patch };
+    setOnline(next);
+    void api.saveOnlineSettings(next).then(setOnline).catch(() => {
+      setOnline(current);
+    });
+  };
 
   const handleAutoPlay = (checked: boolean) => {
     commitUISettingField("autoPlay", checked, autoPlay, setAutoPlay);
@@ -233,6 +267,40 @@ export function PlaybackSection(props: PlaybackSectionProps) {
           onChange={handleNcmSongLevel}
         />
       </SettingGroup>
+
+      <Show when={online()}>
+        {(settings) => (
+          <SettingGroup title={t("settings.ncm.resilience.title")}>
+            <BooleanSettingItem
+              id="ncmCacheEnabled"
+              label={t("settings.ncm.cacheEnabled")}
+              description={t("settings.ncm.cacheEnabled.desc")}
+              highlighted={isHi("ncmCacheEnabled")}
+              index={nextIndex()}
+              checked={settings().cacheEnabled}
+              onChange={(checked) => updateOnline({ cacheEnabled: checked })}
+            />
+            <BooleanSettingItem
+              id="ncmQualityFallback"
+              label={t("settings.ncm.qualityFallback")}
+              description={t("settings.ncm.qualityFallback.desc")}
+              highlighted={isHi("ncmQualityFallback")}
+              index={nextIndex()}
+              checked={settings().qualityFallbackEnabled}
+              onChange={(checked) => updateOnline({ qualityFallbackEnabled: checked })}
+            />
+            <BooleanSettingItem
+              id="ncmAllowTrial"
+              label={t("settings.ncm.allowTrial")}
+              description={t("settings.ncm.allowTrial.desc")}
+              highlighted={isHi("ncmAllowTrial")}
+              index={nextIndex()}
+              checked={settings().allowTrialPlayback}
+              onChange={(checked) => updateOnline({ allowTrialPlayback: checked })}
+            />
+          </SettingGroup>
+        )}
+      </Show>
     </section>
   );
 }

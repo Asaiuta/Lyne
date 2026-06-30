@@ -31,7 +31,8 @@ const resolvedFor = (input: ResolveNcmTrackInput): ResolvedNcmTrack => ({
   artist: input.artist ?? null,
   album: input.album ?? null,
   coverUrl: input.artworkUrl ?? null,
-  durationSecs: input.durationSecs ?? null
+  durationSecs: input.durationSecs ?? null,
+  actualLevel: null
 });
 
 function createDeferred<T>() {

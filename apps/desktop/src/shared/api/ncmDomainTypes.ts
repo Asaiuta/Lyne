@@ -21,6 +21,9 @@ export interface ResolvedNcmTrack {
   album: string | null;
   coverUrl: string | null;
   durationSecs: number | null;
+  /** Quality tier actually resolved (may differ from the requested tier when
+   *  the fallback ladder downgraded). Null when unknown. */
+  actualLevel: string | null;
 }
 
 export interface NcmTrackPlaybackResult {
