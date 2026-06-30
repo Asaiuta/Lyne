@@ -41,7 +41,11 @@ import {
   IconVolumeMute
 } from "./icons";
 import { useUISettings } from "../shared/state/useUISettings";
-import type { LyricPriority, NcmSongLevel } from "../shared/state/uiSettingsModel";
+import {
+  type LyricPriority,
+  type NcmSongLevel,
+  isNcmSongLevel
+} from "../shared/state/uiSettingsModel";
 import { persistUISettingField } from "../shared/state/uiSettingsStorage";
 import { usePlayback } from "../app/PlaybackContext";
 import { SImage } from "./SImage";
@@ -289,6 +293,10 @@ export function FullPlayer(props: FullPlayerProps) {
   const qualityLabel = () => {
     const current = player();
     if (currentSongId() !== null) {
+      const actual = playback.ncmActualLevel();
+      if (actual !== null && isNcmSongLevel(actual)) {
+        return ncmSongLevelShortLabel(actual);
+      }
       return ncmSongLevelShortLabel(uiSettings.ncmSongLevel);
     }
     if (!current) return t("fullPlayer.meta.quality.unknown");

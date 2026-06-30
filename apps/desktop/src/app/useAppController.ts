@@ -273,6 +273,7 @@ export function useAppController(api: ApiClient): AppController {
     currentTrackPath: playback.currentTrackPath,
     currentMediaId: playback.currentMediaId,
     currentSongId: ncm.currentNcmSongId,
+    ncmActualLevel: () => ncm.currentTrackRef()?.actualLevel ?? null,
     currentCoverUrl: ncm.currentNcmCoverUrl,
     resolvedCoverUrl: ncm.resolvedCoverUrl,
     lyrics: ncm.currentLyricLines,

@@ -314,6 +314,7 @@ function AppContent() {
               onSelectQuality={playback.changeCurrentNcmQuality}
               desktopLyricActive={controller.desktopLyric.active()}
               onToggleDesktopLyric={controller.desktopLyric.toggle}
+              ncmActualLevel={controller.ncm.currentTrackRef()?.actualLevel ?? null}
               queueOpen={queue.queueDrawerOpen()}
             />
           }
@@ -392,6 +393,7 @@ function AppContent() {
                         isPlaying={playback.isPlaying()}
                         onRegisterPlayback={playback.registerNcmPlayback}
                         onNavigateToSongWiki={navigation.handleNavigateToSongWiki}
+                        onNavigateToMv={navigation.handleNavigateToMv}
                       />
                     </Match>
                     <Match when={displayedPage() === "download"}>
@@ -404,12 +406,14 @@ function AppContent() {
                       <CloudPage
                         onRequireNcmLogin={requireNcmLogin}
                         onNavigateToSongWiki={navigation.handleNavigateToSongWiki}
+                        onNavigateToMv={navigation.handleNavigateToMv}
                       />
                     </Match>
                     <Match when={displayedPage() === "personal-fm"}>
                       <PersonalFmPage
                         onRequireNcmLogin={() => requireNcmLogin({ disableUid: true })}
                         onNavigateToSongWiki={navigation.handleNavigateToSongWiki}
+                        onNavigateToMv={navigation.handleNavigateToMv}
                         reloadTick={ui.personalFmReloadTick()}
                       />
                     </Match>

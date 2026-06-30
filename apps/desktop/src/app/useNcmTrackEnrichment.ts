@@ -132,7 +132,8 @@ export function useNcmTrackEnrichment(deps: NcmTrackEnrichmentDeps): NcmTrackEnr
       artist: currentPlayerArtist(),
       album: currentPlayerAlbum(),
       coverUrl: currentPlayerCoverUrl(),
-      durationSecs: currentPlayerDuration()
+      durationSecs: currentPlayerDuration(),
+      actualLevel: null
     };
   });
   const currentNcmSongId = createMemo(() => currentTrackRef()?.songId ?? null);

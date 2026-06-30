@@ -13,6 +13,9 @@ export interface NcmTrackReference {
   album: string | null;
   coverUrl: string | null;
   durationSecs: number | null;
+  /** Quality tier actually resolved for playback (may differ from the
+   *  requested tier after a fallback). Null when unknown. */
+  actualLevel: string | null;
 }
 
 export interface NcmTrackSupplement {
@@ -40,5 +43,6 @@ export const mergeNcmTrackReference = (
   artist: next.artist ?? previous?.artist ?? null,
   album: next.album ?? previous?.album ?? null,
   coverUrl: next.coverUrl ?? previous?.coverUrl ?? null,
-  durationSecs: next.durationSecs ?? previous?.durationSecs ?? null
+  durationSecs: next.durationSecs ?? previous?.durationSecs ?? null,
+  actualLevel: next.actualLevel ?? previous?.actualLevel ?? null
 });

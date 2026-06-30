@@ -71,6 +71,9 @@ interface PlayerBarProps {
   onSelectQuality?: (level: NcmSongLevel) => void;
   desktopLyricActive?: boolean;
   onToggleDesktopLyric?: () => void;
+  /** Quality tier actually resolved for the current NCM track (from the backend
+   *  fallback chain). May differ from the requested tier. */
+  ncmActualLevel?: string | null;
   isLiked?: boolean;
   onToggleLike?: () => void;
 }
@@ -179,6 +182,7 @@ export function PlayerBar(props: PlayerBarProps) {
   const ncmQuality = usePlayerBarNcmQuality({
     songId: currentNcmSongId,
     selectedLevel: () => uiSettings.ncmSongLevel,
+    actualLevel: () => props.ncmActualLevel ?? null,
     t
   });
   const isOnlineNcmTrack = () => currentNcmSongId() !== null;
@@ -271,7 +275,9 @@ export function PlayerBar(props: PlayerBarProps) {
   };
   const utilityQuality = () => ({
     open: qualityOpen(),
-    buttonValue: isOnlineNcmTrack() ? ncmQuality.selectedLabel() : qualityLabel(),
+    buttonValue: isOnlineNcmTrack()
+      ? ncmQuality.actualLabel() ?? ncmQuality.selectedLabel()
+      : qualityLabel(),
     buttonLabel: t("player.aria.qualityPopover"),
     dialogLabel: t("player.quality.title"),
     mode: isOnlineNcmTrack() ? "online" as const : "output" as const,

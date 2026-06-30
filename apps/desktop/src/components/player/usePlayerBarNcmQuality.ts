@@ -3,7 +3,7 @@ import type { Accessor } from "solid-js";
 import { songMusicDetail } from "../../shared/api/ncm/search";
 import type { TranslationKey, TranslationParams } from "../../shared/i18n";
 import { isNumber, isRecord } from "../../shared/jsonReaders";
-import type { NcmSongLevel } from "../../shared/state/uiSettingsModel";
+import { isNcmSongLevel, type NcmSongLevel } from "../../shared/state/uiSettingsModel";
 
 export interface PlayerBarNcmQualityOption {
   key: string;
@@ -16,6 +16,9 @@ export interface PlayerBarNcmQualityOption {
 interface UsePlayerBarNcmQualityOptions {
   songId: Accessor<number | null>;
   selectedLevel: Accessor<NcmSongLevel>;
+  /** Quality tier actually resolved for the current track (from the backend
+   *  fallback chain). May differ from `selectedLevel`. Null when unknown. */
+  actualLevel?: Accessor<string | null>;
   t: (key: TranslationKey, params?: TranslationParams) => string;
 }
 
@@ -131,9 +134,19 @@ export function usePlayerBarNcmQuality(options: UsePlayerBarNcmQualityOptions) {
     return selectedOption()?.shortLabel ?? QUALITY_LEVELS.find((item) => item.level === level)?.shortLabel ?? "EX";
   });
 
+  // Short label of the tier actually playing, when known and recognized.
+  const actualLabel = createMemo(() => {
+    const actual = options.actualLevel?.() ?? null;
+    if (actual === null || !isNcmSongLevel(actual)) {
+      return null;
+    }
+    return ncmSongLevelShortLabel(actual);
+  });
+
   return {
     state,
     selectedLabel,
+    actualLabel,
     ensureLoaded
   };
 }

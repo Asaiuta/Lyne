@@ -30,6 +30,9 @@ export interface PlaybackContextValue {
   currentTrackPath: Accessor<string | null>;
   currentMediaId: Accessor<string | null>;
   currentSongId: Accessor<number | null>;
+  /** Quality tier actually resolved for the current NCM track (fallback chain).
+   *  Null when unknown or not an NCM track. */
+  ncmActualLevel: Accessor<string | null>;
   currentCoverUrl: Accessor<string | null>;
   resolvedCoverUrl: Accessor<string | null>;
   lyrics: Accessor<readonly NcmLyricLine[]>;
