@@ -1,20 +1,113 @@
 use super::{
-    active_ncm_cookie, ncm_upstream_error_response, read_song_detail, read_song_dynamic_cover_url,
-    read_song_url, AppState, NcmTrackResolveError, ResolveNcmTrackLyricsRequest,
-    ResolveNcmTrackRequest, ResolveNcmTrackSupplementRequest, ResolvedNcmTrack,
-    ResolvedNcmTrackLyrics, ResolvedNcmTrackSupplement,
+    active_ncm_cookie, ncm_upstream_error_response, quality_fallback_ladder, read_song_detail,
+    read_song_dynamic_cover_url, read_song_url_rich, AppState, NcmTrackDetail,
+    NcmTrackResolveError, NcmUrlInfo, ResolveNcmTrackLyricsRequest, ResolveNcmTrackRequest,
+    ResolveNcmTrackSupplementRequest, ResolvedNcmTrack, ResolvedNcmTrackLyrics,
+    ResolvedNcmTrackSupplement,
 };
 use crate::server::lyrics;
 use crate::server::{bad_gateway_response, bad_request_response, internal_server_error_response};
 use actix_web::{web, HttpResponse};
-use ncm_api_rs::Query;
+use ncm_api_rs::{NcmError, Query};
 use std::sync::Arc;
+
+/// Fetches and parses the `song/url/v1` response for a single quality tier.
+async fn fetch_ncm_url_info(
+    data: &web::Data<Arc<AppState>>,
+    song_id: i64,
+    level: &str,
+    cookie: Option<&str>,
+) -> Result<Option<NcmUrlInfo>, NcmError> {
+    let mut query = Query::new()
+        .param("id", &song_id.to_string())
+        .param("level", level);
+    if let Some(cookie) = cookie {
+        query.cookie = Some(cookie.to_string());
+    }
+    let response = data.ncm_client.song_url_v1(&query).await?;
+    Ok(read_song_url_rich(&response.body))
+}
+
+/// Accepts a resolved URL only when it is playable and either non-trial or
+/// trials are explicitly allowed by the caller.
+fn accept_ncm_url(info: Option<NcmUrlInfo>, allow_trial: bool) -> Option<NcmUrlInfo> {
+    let info = info?;
+    if info.url.is_some() && (!info.is_trial || allow_trial) {
+        Some(info)
+    } else {
+        None
+    }
+}
+
+/// Whether a resolved stream source is a remote URL (vs a local cache file path).
+fn is_remote_url(stream_url: &str) -> bool {
+    let lower = stream_url.trim_start().to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+/// Fetches song detail metadata (title/artist/album/cover), tolerating upstream
+/// failures by returning the default (empty) detail.
+async fn fetch_ncm_detail(
+    data: &web::Data<Arc<AppState>>,
+    song_id: i64,
+    cookie: Option<&str>,
+) -> NcmTrackDetail {
+    let mut query = Query::new().param("ids", &song_id.to_string());
+    if let Some(cookie) = cookie {
+        query.cookie = Some(cookie.to_string());
+    }
+    match data.ncm_client.song_detail(&query).await {
+        Ok(response) => read_song_detail(&response.body, song_id).unwrap_or_default(),
+        Err(err) => {
+            log::warn!("NCM resolve track {} detail -> ERROR: {}", song_id, err);
+            NcmTrackDetail::default()
+        }
+    }
+}
+
+/// Persists external-media metadata and the URL -> NCM song id mapping for a
+/// resolved track. Best-effort: logs and continues on failure.
+async fn persist_resolved_track(data: &web::Data<Arc<AppState>>, track: &ResolvedNcmTrack) {
+    if let Err(err) = data
+        .repo
+        .record_external_media_metadata(
+            track.stream_url.clone(),
+            track.title.clone(),
+            track.artist.clone(),
+            track.album.clone(),
+            track.duration_secs,
+            track.cover_url.clone(),
+        )
+        .await
+    {
+        log::warn!(
+            "Failed to persist NCM metadata for song {}: {}",
+            track.song_id,
+            err
+        );
+    }
+    if let Err(err) = data
+        .repo
+        .record_ncm_track_source(
+            track.stream_url.clone(),
+            track.song_id,
+            Some(track.source_page_url.clone()),
+        )
+        .await
+    {
+        log::warn!(
+            "Failed to persist NCM track source for song {}: {}",
+            track.song_id,
+            err
+        );
+    }
+}
 
 pub(super) async fn resolve_ncm_track(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ResolveNcmTrackRequest>,
 ) -> HttpResponse {
-    match resolve_ncm_track_inner(&data, body.into_inner()).await {
+    match resolve_ncm_track_inner(&data, body.into_inner(), false).await {
         Ok(track) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "track": track
@@ -23,26 +116,20 @@ pub(super) async fn resolve_ncm_track(
     }
 }
 
-pub(super) async fn play_ncm_track(
-    data: web::Data<Arc<AppState>>,
-    body: web::Json<ResolveNcmTrackRequest>,
-) -> HttpResponse {
-    let track = match resolve_ncm_track_inner(&data, body.into_inner()).await {
-        Ok(track) => track,
-        Err(err) => return ncm_track_resolve_error_response(err),
-    };
-
-    // `load_validated_path_for_playback` is fully synchronous: it acquires the
-    // `parking_lot::Mutex<AudioPlayer>` (a `!Send` guard) and performs a decoder
-    // open plus several blocking SQLite writes. Offload it onto the blocking pool
-    // so it never blocks the async executor. The player lock is acquired and
-    // released entirely inside the closure (no `.await` there), so the `!Send`
-    // guard never crosses an await point. Only owned `Send` data is moved in
-    // (`Arc<AppState>` clone, `String` path) and only owned `Send` data
-    // (`StateResponse`) is returned.
+/// Loads a resolved stream URL into the player on the blocking pool.
+///
+/// `load_validated_path_for_playback` is fully synchronous: it acquires the
+/// `parking_lot::Mutex<AudioPlayer>` (a `!Send` guard) and performs a decoder
+/// open plus several blocking SQLite writes. Offloading it keeps the async
+/// executor free; the player lock is acquired and released entirely inside the
+/// closure (no `.await`), so the `!Send` guard never crosses an await point.
+async fn load_ncm_stream(
+    data: &web::Data<Arc<AppState>>,
+    stream_url: &str,
+) -> Result<crate::server::StateResponse, String> {
     let state_for_task = data.get_ref().clone();
-    let stream_url = track.stream_url.clone();
-    let play_result = actix_web::rt::task::spawn_blocking(move || {
+    let stream_url = stream_url.to_string();
+    actix_web::rt::task::spawn_blocking(move || {
         let data = web::Data::new(state_for_task);
         crate::server::playback::load_public_path_for_playback(
             &data,
@@ -52,20 +139,65 @@ pub(super) async fn play_ncm_track(
         )
         .map(|(state, _shared_state)| state)
     })
-    .await;
+    .await
+    .map_err(|err| format!("join error {}", err))?
+}
 
-    match play_result {
-        Ok(Ok(state)) => HttpResponse::Ok().json(serde_json::json!({
+pub(super) async fn play_ncm_track(
+    data: web::Data<Arc<AppState>>,
+    body: web::Json<ResolveNcmTrackRequest>,
+) -> HttpResponse {
+    let request = body.into_inner();
+    let mut track = match resolve_ncm_track_inner(&data, request.clone(), false).await {
+        Ok(track) => track,
+        Err(err) => return ncm_track_resolve_error_response(err),
+    };
+
+    let mut load_result = load_ncm_stream(&data, &track.stream_url).await;
+
+    // A failed open most often means an expired anonymous URL or a stale/corrupt
+    // cached file. Re-resolve once with the cache bypassed (forcing a fresh
+    // remote URL) and retry. A second failure is reported.
+    if let Err(first_err) = &load_result {
+        log::warn!(
+            "NCM play track {} failed to open ({}); re-resolving fresh and retrying",
+            track.song_id,
+            first_err
+        );
+        // If the failed source was a local cache file, delete it so the fresh
+        // download can rebuild it (otherwise the cache would keep serving the
+        // broken file on every play). Remote URLs (http/https) are left alone.
+        if !is_remote_url(&track.stream_url) {
+            if let Err(err) = std::fs::remove_file(&track.stream_url) {
+                log::warn!(
+                    "Failed to remove broken NCM cache file for song {}: {}",
+                    track.song_id,
+                    err
+                );
+            }
+        }
+        match resolve_ncm_track_inner(&data, request, true).await {
+            Ok(fresh_track) => {
+                track = fresh_track;
+                load_result = load_ncm_stream(&data, &track.stream_url).await;
+            }
+            Err(err) => {
+                log::warn!(
+                    "NCM play track {} re-resolve failed: {:?}",
+                    track.song_id,
+                    err
+                );
+            }
+        }
+    }
+
+    match load_result {
+        Ok(state) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "track": track,
             "state": state
         })),
-        Ok(Err(err)) => {
-            internal_server_error_response(format!("Failed to play NCM track: {}", err))
-        }
-        Err(err) => {
-            internal_server_error_response(format!("Failed to play NCM track: join error {}", err))
-        }
+        Err(err) => internal_server_error_response(format!("Failed to play NCM track: {}", err)),
     }
 }
 
@@ -73,7 +205,7 @@ pub(super) async fn enqueue_ncm_track(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ResolveNcmTrackRequest>,
 ) -> HttpResponse {
-    let track = match resolve_ncm_track_inner(&data, body.into_inner()).await {
+    let track = match resolve_ncm_track_inner(&data, body.into_inner(), false).await {
         Ok(track) => track,
         Err(err) => return ncm_track_resolve_error_response(err),
     };
@@ -113,6 +245,7 @@ pub(super) async fn enqueue_ncm_track(
 async fn resolve_ncm_track_inner(
     data: &web::Data<Arc<AppState>>,
     request: ResolveNcmTrackRequest,
+    bypass_cache: bool,
 ) -> Result<ResolvedNcmTrack, NcmTrackResolveError> {
     if request.song_id <= 0 {
         return Err(NcmTrackResolveError::BadRequest(
@@ -120,12 +253,15 @@ async fn resolve_ncm_track_inner(
         ));
     }
 
+    // Application-level online configuration (cache / fallback / trial).
+    let online = data.online_settings.get();
+
     let level = request
         .level
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("exhigh");
+        .unwrap_or(online.default_level.as_str());
     let cookie = request
         .cookie
         .as_deref()
@@ -134,23 +270,68 @@ async fn resolve_ncm_track_inner(
         .map(str::to_string)
         .or_else(|| active_ncm_cookie(data));
 
-    let mut url_query = Query::new()
-        .param("id", &request.song_id.to_string())
-        .param("level", level);
-    let mut detail_query = Query::new().param("ids", &request.song_id.to_string());
-    if let Some(cookie) = cookie.as_deref() {
-        url_query.cookie = Some(cookie.to_string());
-        detail_query.cookie = Some(cookie.to_string());
+    // Fallback descends the quality ladder when a tier yields no playable URL;
+    // trial-only (grey) previews are rejected (unless explicitly allowed) so we
+    // never play a 30s clip as if it were the full track.
+    let fallback_enabled = online.quality_fallback_enabled;
+    let allow_trial = online.allow_trial_playback;
+
+    // A. Cache hit: serve the locally cached file (at or above the requested
+    // tier) and skip URL resolution entirely. Metadata still comes from the
+    // detail endpoint so the UI stays consistent. Skipped when `bypass_cache`
+    // is set (e.g. a retry after a stale cached file failed to open).
+    if !bypass_cache {
+        if let Some(cached) = data.ncm_audio_cache.lookup(request.song_id, level) {
+            match crate::server::validate_path(&cached.path.to_string_lossy()) {
+                Ok(local_path) => {
+                    let detail = fetch_ncm_detail(data, request.song_id, cookie.as_deref()).await;
+                    let track = ResolvedNcmTrack {
+                        song_id: request.song_id,
+                        stream_url: local_path,
+                        source_page_url: request.source_page_url,
+                        title: detail.title.or(request.title),
+                        artist: detail.artist.or(request.artist),
+                        album: detail.album.or(request.album),
+                        cover_url: detail.cover_url.or(request.artwork_url),
+                        duration_secs: request.duration_secs,
+                        actual_level: Some(cached.level),
+                    };
+                    persist_resolved_track(data, &track).await;
+                    log::info!("NCM resolve track {} -> CACHE HIT", track.song_id);
+                    return Ok(track);
+                }
+                Err(err) => {
+                    // Stale/invalid cached path: fall through to a fresh resolve.
+                    log::warn!(
+                        "NCM cached path for song {} rejected ({}); resolving fresh",
+                        request.song_id,
+                        err
+                    );
+                }
+            }
+        }
     }
 
-    let start = std::time::Instant::now();
-    let (url_result, detail_result) = tokio::join!(
-        data.ncm_client.song_url_v1(&url_query),
-        data.ncm_client.song_detail(&detail_query)
-    );
+    let detail_query = {
+        let mut detail_query = Query::new().param("ids", &request.song_id.to_string());
+        if let Some(cookie) = cookie.as_deref() {
+            detail_query.cookie = Some(cookie.to_string());
+        }
+        detail_query
+    };
 
-    let url_response = match url_result {
-        Ok(response) => response,
+    let start = std::time::Instant::now();
+
+    // First attempt at the requested tier, resolved in parallel with the song
+    // detail lookup (which is tier-independent).
+    let first_url_future = fetch_ncm_url_info(data, request.song_id, level, cookie.as_deref());
+    let (first_url_result, detail_result) =
+        tokio::join!(first_url_future, data.ncm_client.song_detail(&detail_query));
+
+    // A transport-level failure on the first call surfaces as an upstream error,
+    // matching the prior behaviour (do not mask infrastructure problems).
+    let first_info = match first_url_result {
+        Ok(info) => info,
         Err(err) => {
             log::warn!(
                 "NCM resolve track {} URL -> ERROR: {} ({:.1?})",
@@ -162,22 +343,61 @@ async fn resolve_ncm_track_inner(
         }
     };
 
-    let stream_url = match read_song_url(&url_response.body) {
-        Some(url) => match crate::server::validate_path(&url) {
-            Ok(value) => value,
-            Err(err) => {
-                return Err(NcmTrackResolveError::BadGateway(format!(
-                    "NCM song URL rejected: {}",
-                    err
-                )));
+    let mut chosen = accept_ncm_url(first_info, allow_trial);
+
+    // Walk the rest of the ladder only when the requested tier was unusable.
+    if chosen.is_none() && fallback_enabled {
+        for tier in quality_fallback_ladder(level)
+            .into_iter()
+            .filter(|tier| !tier.eq_ignore_ascii_case(level))
+        {
+            match fetch_ncm_url_info(data, request.song_id, tier, cookie.as_deref()).await {
+                Ok(info) => {
+                    if let Some(found) = accept_ncm_url(info, allow_trial) {
+                        chosen = Some(found);
+                        break;
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "NCM resolve track {} fallback tier {} -> ERROR: {}",
+                        request.song_id,
+                        tier,
+                        err
+                    );
+                }
             }
-        },
+        }
+    }
+
+    let chosen = match chosen {
+        Some(info) => info,
+        None => {
+            return Err(NcmTrackResolveError::BadGateway(
+                "NCM song URL unavailable after fallback".to_string(),
+            ));
+        }
+    };
+
+    let raw_url = match chosen.url.as_deref() {
+        Some(url) => url,
         None => {
             return Err(NcmTrackResolveError::BadGateway(
                 "NCM song URL unavailable".to_string(),
             ));
         }
     };
+
+    let stream_url = match crate::server::validate_path(raw_url) {
+        Ok(value) => value,
+        Err(err) => {
+            return Err(NcmTrackResolveError::BadGateway(format!(
+                "NCM song URL rejected: {}",
+                err
+            )));
+        }
+    };
+    let actual_level = chosen.level.clone();
 
     let detail = match detail_result {
         Ok(response) => read_song_detail(&response.body, request.song_id),
@@ -202,41 +422,21 @@ async fn resolve_ncm_track_inner(
         album: detail.album.or(request.album),
         cover_url: detail.cover_url.or(request.artwork_url),
         duration_secs: request.duration_secs,
+        actual_level,
     };
 
-    if let Err(err) = data
-        .repo
-        .record_external_media_metadata(
-            track.stream_url.clone(),
-            track.title.clone(),
-            track.artist.clone(),
-            track.album.clone(),
-            track.duration_secs,
-            track.cover_url.clone(),
-        )
-        .await
-    {
-        log::warn!(
-            "Failed to persist NCM metadata for song {}: {}",
-            track.song_id,
-            err
-        );
-    }
-    if let Err(err) = data
-        .repo
-        .record_ncm_track_source(
-            track.stream_url.clone(),
-            track.song_id,
-            Some(track.source_page_url.clone()),
-        )
-        .await
-    {
-        log::warn!(
-            "Failed to persist NCM track source for song {}: {}",
-            track.song_id,
-            err
-        );
-    }
+    // D. Schedule a background cache download of the freshly resolved remote
+    // stream so the next playback resolves to a local file. Fire-and-forget;
+    // never affects this request's latency. Uses the resolved tier (falling
+    // back to the requested tier label) for the cache key.
+    let cache_tier = track
+        .actual_level
+        .clone()
+        .unwrap_or_else(|| level.to_string());
+    data.ncm_audio_cache
+        .spawn_download(track.song_id, cache_tier, track.stream_url.clone());
+
+    persist_resolved_track(data, &track).await;
 
     log::info!(
         "NCM resolve track {} -> OK ({:.1?})",
@@ -396,5 +596,20 @@ pub(super) async fn resolve_ncm_track_lyrics(
             );
             ncm_upstream_error_response(err)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_remote_url;
+
+    #[test]
+    fn is_remote_url_distinguishes_urls_from_local_paths() {
+        assert!(is_remote_url("https://m701.music.126.net/song.flac"));
+        assert!(is_remote_url("http://example.com/x"));
+        assert!(is_remote_url("HTTPS://EXAMPLE.COM/x"));
+        assert!(!is_remote_url(r"D:\AI\cache\42_lossless.flac"));
+        assert!(!is_remote_url("/home/user/cache/42_lossless.flac"));
+        assert!(!is_remote_url(r"\\?\D:\cache\song.mp3"));
     }
 }

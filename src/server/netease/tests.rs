@@ -320,17 +320,90 @@ fn request_option_never_forwards_proxy_override() {
 }
 
 #[test]
-fn read_song_url_extracts_first_stream_url() {
+fn read_song_url_rich_extracts_playable_metadata() {
     let payload = json!({
         "data": [
-            { "id": 42, "url": "https://m701.music.126.net/song.flac" }
+            {
+                "id": 42,
+                "url": "https://m701.music.126.net/song.flac",
+                "level": "lossless",
+                "br": 999000,
+                "size": 41_000_000,
+                "fee": 1,
+                "freeTrialInfo": null
+            }
         ]
     });
 
+    let info = read_song_url_rich(&payload).expect("data[0] present");
     assert_eq!(
-        read_song_url(&payload).as_deref(),
+        info.url.as_deref(),
         Some("https://m701.music.126.net/song.flac")
     );
+    assert_eq!(info.level.as_deref(), Some("lossless"));
+    assert_eq!(info.br, Some(999000));
+    assert_eq!(info.size, Some(41_000_000));
+    assert_eq!(info.fee, 1);
+    assert!(!info.is_trial);
+}
+
+#[test]
+fn read_song_url_rich_flags_trial_tracks() {
+    let payload = json!({
+        "data": [
+            {
+                "id": 7,
+                "url": "https://m701.music.126.net/trial.mp3",
+                "level": "standard",
+                "fee": 1,
+                "freeTrialInfo": { "start": 0, "end": 30 }
+            }
+        ]
+    });
+
+    let info = read_song_url_rich(&payload).expect("data[0] present");
+    assert!(info.is_trial);
+    assert_eq!(
+        info.url.as_deref(),
+        Some("https://m701.music.126.net/trial.mp3")
+    );
+}
+
+#[test]
+fn read_song_url_rich_handles_missing_url() {
+    let payload = json!({ "data": [{ "id": 9, "url": null, "fee": 1 }] });
+    let info = read_song_url_rich(&payload).expect("data[0] present");
+    assert_eq!(info.url, None);
+    assert_eq!(info.fee, 1);
+    assert!(!info.is_trial);
+}
+
+#[test]
+fn read_song_url_rich_returns_none_without_data() {
+    assert_eq!(read_song_url_rich(&json!({ "data": [] })), None);
+    assert_eq!(read_song_url_rich(&json!({})), None);
+}
+
+#[test]
+fn quality_fallback_ladder_descends_from_requested() {
+    assert_eq!(
+        quality_fallback_ladder("lossless"),
+        vec!["lossless", "exhigh", "higher", "standard"]
+    );
+    assert_eq!(quality_fallback_ladder("standard"), vec!["standard"]);
+    // Tier matching is case-insensitive.
+    assert_eq!(
+        quality_fallback_ladder("EXHIGH"),
+        vec!["exhigh", "higher", "standard"]
+    );
+}
+
+#[test]
+fn quality_fallback_ladder_unknown_tier_returns_full_ladder() {
+    let ladder = quality_fallback_ladder("nonsense");
+    assert_eq!(ladder.len(), 8);
+    assert_eq!(ladder.first(), Some(&"jymaster"));
+    assert_eq!(ladder.last(), Some(&"standard"));
 }
 
 #[test]

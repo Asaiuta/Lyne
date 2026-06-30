@@ -1009,6 +1009,14 @@ mod tests {
                 ws_events: ws_handlers::websocket_event_broadcast_channel(),
                 ncm_scrobble: Mutex::new(NcmScrobbleState::default()),
             },
+            ncm_audio_cache: Arc::new(crate::server::netease::NcmAudioCache::new(
+                runtime_paths.cache_dir.join("ncm-audio"),
+                crate::server::netease::DEFAULT_NCM_AUDIO_CACHE_MAX_BYTES,
+                false,
+            )),
+            online_settings: Arc::new(crate::server::online_settings::OnlineSettingsManager::load(
+                runtime_paths.app_data_dir.join("online-settings.json"),
+            )),
             runtime_paths,
         })
     }

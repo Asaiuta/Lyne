@@ -10,7 +10,7 @@ pub(super) struct NeteasePath {
     pub(super) tail: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(super) struct ResolveNcmTrackRequest {
     pub(super) song_id: i64,
     pub(super) level: Option<String>,
@@ -192,6 +192,10 @@ pub(super) struct ResolvedNcmTrack {
     pub(super) album: Option<String>,
     pub(super) cover_url: Option<String>,
     pub(super) duration_secs: Option<f64>,
+    /// Quality tier actually resolved for `stream_url`. May differ from the
+    /// requested tier when the fallback ladder downgraded to a playable source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) actual_level: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

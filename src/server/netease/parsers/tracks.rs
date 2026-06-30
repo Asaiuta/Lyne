@@ -107,13 +107,77 @@ fn read_cover_url_from_object(item: &serde_json::Map<String, Value>) -> Option<S
     .find_map(|key| item.get(*key).and_then(read_non_empty_string))
 }
 
-pub(in crate::server::netease) fn read_song_url(payload: &Value) -> Option<String> {
-    payload
+/// Richer view over the first `song/url/v1` `data[0]` entry. Surfaces the
+/// resolved quality level, bitrate, size, trial status, and fee so the resolve
+/// flow can decide whether to accept the URL or fall back to a lower tier /
+/// unlock provider.
+///
+/// Returns `None` only when `data[0]` is missing entirely. A present entry with
+/// no playable `url` still returns `Some` so the caller can inspect `is_trial` /
+/// `fee` and react accordingly.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(in crate::server::netease) struct NcmUrlInfo {
+    pub(in crate::server::netease) url: Option<String>,
+    pub(in crate::server::netease) level: Option<String>,
+    pub(in crate::server::netease) br: Option<i64>,
+    pub(in crate::server::netease) size: Option<i64>,
+    pub(in crate::server::netease) is_trial: bool,
+    pub(in crate::server::netease) fee: i64,
+}
+
+pub(in crate::server::netease) fn read_song_url_rich(payload: &Value) -> Option<NcmUrlInfo> {
+    let item = payload
         .get("data")
         .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(|item| item.get("url"))
-        .and_then(read_non_empty_string)
+        .and_then(|items| items.first())?;
+
+    let url = item.get("url").and_then(read_non_empty_string);
+    let level = item.get("level").and_then(read_non_empty_string);
+    let br = item.get("br").and_then(Value::as_i64);
+    let size = item.get("size").and_then(Value::as_i64);
+    // `freeTrialInfo` is `null` for fully playable tracks and an object that
+    // describes the trial window for preview-only (grey) tracks.
+    let is_trial = item
+        .get("freeTrialInfo")
+        .is_some_and(|value| !value.is_null());
+    let fee = item.get("fee").and_then(Value::as_i64).unwrap_or(0);
+
+    Some(NcmUrlInfo {
+        url,
+        level,
+        br,
+        size,
+        is_trial,
+        fee,
+    })
+}
+
+/// Quality tiers from highest to lowest. Used as the fallback ladder when a
+/// requested tier returns no playable URL or only a trial preview.
+const QUALITY_LADDER: [&str; 8] = [
+    "jymaster", "sky", "jyeffect", "hires", "lossless", "exhigh", "higher", "standard",
+];
+
+/// Returns the fallback ladder starting at `requested` (inclusive) and
+/// descending to the lowest tier. Unknown tiers fall back to the full ladder so
+/// playback still has a chance to succeed.
+pub(in crate::server::netease) fn quality_fallback_ladder(requested: &str) -> Vec<&'static str> {
+    match QUALITY_LADDER
+        .iter()
+        .position(|tier| tier.eq_ignore_ascii_case(requested))
+    {
+        Some(idx) => QUALITY_LADDER[idx..].to_vec(),
+        None => QUALITY_LADDER.to_vec(),
+    }
+}
+
+/// Rank of a quality tier in the ladder (0 = best). Lower rank means higher
+/// quality. `None` for tiers outside the ladder. Used to compare cached tiers
+/// against a requested tier ("at or above requested" == rank <= requested rank).
+pub(in crate::server::netease) fn quality_rank(level: &str) -> Option<usize> {
+    QUALITY_LADDER
+        .iter()
+        .position(|tier| tier.eq_ignore_ascii_case(level))
 }
 
 pub(in crate::server::netease) fn read_song_detail(

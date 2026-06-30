@@ -51,6 +51,11 @@ pub struct AppState {
     /// Runtime directories and files, retained for local diagnostics without
     /// exposing their absolute paths.
     pub runtime_paths: RuntimePaths,
+    /// On-disk cache for resolved NCM audio streams (background download +
+    /// LRU eviction). Independent of the decoder frame cache.
+    pub ncm_audio_cache: Arc<crate::server::netease::NcmAudioCache>,
+    /// Application-level online settings (NCM cache / quality fallback / trial).
+    pub online_settings: Arc<online_settings::OnlineSettingsManager>,
 }
 
 /// Local control-plane state shared by auth, WebSocket upgrade, and shutdown.
@@ -214,6 +219,7 @@ mod diagnostics;
 mod effects;
 mod lyrics;
 mod netease;
+mod online_settings;
 mod path_security;
 mod playback;
 mod repository;
@@ -359,6 +365,14 @@ pub(crate) fn test_app_state_for_analysis(
             ws_events: ws_handlers::websocket_event_broadcast_channel(),
             ncm_scrobble: Mutex::new(NcmScrobbleState::default()),
         },
+        ncm_audio_cache: Arc::new(crate::server::netease::NcmAudioCache::new(
+            runtime_paths.cache_dir.join("ncm-audio"),
+            crate::server::netease::DEFAULT_NCM_AUDIO_CACHE_MAX_BYTES,
+            true,
+        )),
+        online_settings: Arc::new(online_settings::OnlineSettingsManager::load(
+            runtime_paths.app_data_dir.join("online-settings.json"),
+        )),
         runtime_paths,
     })
 }
@@ -503,6 +517,11 @@ pub async fn run_server(
     let allowed_origins = config.server.allowed_origins.clone();
     let ncm_client = Arc::new(ncm_api_rs::create_client(None));
 
+    let online_settings = Arc::new(online_settings::OnlineSettingsManager::load(
+        runtime_paths.app_data_dir.join("online-settings.json"),
+    ));
+    let online_cfg = online_settings.get();
+
     let state = Arc::new(AppState {
         player: Mutex::new(player),
         webdav_config: Mutex::new(webdav_config),
@@ -539,6 +558,12 @@ pub async fn run_server(
             ws_events: ws_handlers::websocket_event_broadcast_channel(),
             ncm_scrobble: Mutex::new(NcmScrobbleState::default()),
         },
+        ncm_audio_cache: Arc::new(crate::server::netease::NcmAudioCache::new(
+            runtime_paths.cache_dir.join("ncm-audio"),
+            online_cfg.cache_max_bytes,
+            online_cfg.cache_enabled,
+        )),
+        online_settings,
         runtime_paths: runtime_paths.clone(),
     });
 
@@ -633,6 +658,7 @@ pub async fn run_server(
             .configure(playback::configure_routes)
             .configure(effects::configure_routes)
             .configure(settings_handlers::configure_routes)
+            .configure(online_settings::configure_routes)
             .configure(webdav_handlers::configure_routes)
             .configure(diagnostics::configure_routes)
             .configure(netease::configure_routes)
