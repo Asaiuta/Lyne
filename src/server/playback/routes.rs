@@ -96,6 +96,10 @@ pub(super) fn configure_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(super::delete_media_items),
         )
         .route(
+            "/domain/media_items/delete_file",
+            web::post().to(super::delete_media_item_file),
+        )
+        .route(
             "/domain/media_items/metadata",
             web::post().to(super::upsert_external_media_metadata),
         )

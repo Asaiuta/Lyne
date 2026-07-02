@@ -97,6 +97,7 @@ export interface LibraryApiClient {
   replaceQueueFromMediaIds: (input: LibraryQueueMediaIdsInput) => Promise<LibraryQueuePlaybackResult>;
   enqueueQueueFromMediaIds: (input: LibraryQueueMediaIdsInput) => Promise<QueueEntry[]>;
   deleteMediaItems: (mediaIds: string[]) => Promise<number>;
+  deleteMediaItemFile: (mediaId: string) => Promise<number>;
   listLocalPlaylists: () => Promise<LocalPlaylist[]>;
   createLocalPlaylist: (input: LocalPlaylistCreateInput) => Promise<LocalPlaylist>;
   updateLocalPlaylist: (playlistId: string, input: LocalPlaylistUpdateInput) => Promise<LocalPlaylist>;
@@ -503,6 +504,16 @@ export const createLibraryApiClient = (transport: LibraryApiTransport): LibraryA
     );
     if (!isRecord(json) || json.status !== "success" || !isInteger(json.deleted_count)) {
       throw new Error("Failed to delete media items");
+    }
+    return json.deleted_count;
+  },
+  deleteMediaItemFile: async (mediaId) => {
+    const json = await transport.requestJson(
+      "/domain/media_items/delete_file",
+      postJson({ media_id: mediaId })
+    );
+    if (!isRecord(json) || json.status !== "success" || !isInteger(json.deleted_count)) {
+      throw new Error("Failed to delete media file");
     }
     return json.deleted_count;
   },

@@ -1,7 +1,7 @@
 import { onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 import { createApiClient, type ApiClient } from "../../shared/api/client";
-import { deleteFile, revealPathInFolder } from "../../shared/api/os";
+import { revealPathInFolder } from "../../shared/api/os";
 import type { LibraryRoot, MediaItem, PlayerState } from "../../shared/api/types";
 import type { TranslationKey } from "../../shared/i18n";
 import { copyToClipboard } from "../../shared/utils/clipboard";
@@ -35,6 +35,7 @@ export type LibraryDataControllerApi = Pick<
   | "createLocalPlaylist"
   | "deleteLibraryRoot"
   | "deleteLocalPlaylist"
+  | "deleteMediaItemFile"
   | "deleteMediaItems"
   | "enqueueQueueFromMediaIds"
   | "enqueueTracks"
@@ -482,11 +483,12 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     await withFeedback(
       async () => {
         const detail = await ensureItemDetail(item);
-        if (!detail || !detail.source_path) {
+        if (!detail || !detail.media_id) {
           throw new Error(t("common.error.requestFailed"));
         }
-        await deleteFile(detail.source_path);
-        await deleteItemsFromLibrary([item]);
+        await api.deleteMediaItemFile(detail.media_id);
+        await Promise.all([refreshItems(), refreshPlaylists({ force: true })]);
+        await refreshSelectedPlaylist();
       },
       () =>
         setRawFeedback("success", t("library.feedback.deletedFromDisk", { name: item.title ?? "" }))

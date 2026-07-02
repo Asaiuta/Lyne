@@ -19,15 +19,3 @@ export const revealPathInFolder = async (sourcePath: string): Promise<void> => {
     throw normalizeInvokeError(error, "Cannot reveal path in folder");
   }
 };
-
-export const deleteFile = async (filePath: string): Promise<void> => {
-  const trimmedPath = filePath.trim();
-  if (!trimmedPath) {
-    throw new Error("Cannot delete an empty path");
-  }
-  try {
-    await invoke<void>("delete_file", { path: trimmedPath });
-  } catch (error) {
-    throw normalizeInvokeError(error, "Cannot delete file");
-  }
-};

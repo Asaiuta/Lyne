@@ -89,23 +89,6 @@ fn reveal_path_in_folder(path: String) -> Result<(), String> {
   reveal_canonical_path_in_folder(&canonical_target)
 }
 
-#[tauri::command]
-fn delete_file(path: String) -> Result<(), String> {
-  let target = PathBuf::from(&path);
-  let canonical_target = target
-    .canonicalize()
-    .map_err(|error| format!("Failed to resolve path: {error}"))?;
-
-  if !canonical_target.is_file() {
-    return Err(format!("Path is not a file: {}", canonical_target.display()));
-  }
-
-  std::fs::remove_file(&canonical_target)
-    .map_err(|error| format!("Failed to delete file: {error}"))?;
-
-  Ok(())
-}
-
 #[cfg(target_os = "windows")]
 fn reveal_canonical_path_in_folder(path: &Path) -> Result<(), String> {
   let mut select_arg = std::ffi::OsString::from("/select,");
@@ -566,7 +549,7 @@ fn main() {
   let app = tauri::Builder::default()
     .manage(SidecarState::new())
     .manage(ApiToken(token_value.clone()))
-    .invoke_handler(tauri::generate_handler![get_api_token, reveal_path_in_folder, delete_file])
+    .invoke_handler(tauri::generate_handler![get_api_token, reveal_path_in_folder])
     .setup(move |app| {
       let app_handle = app.handle();
       let mut child = spawn_sidecar(&app_handle, &token_value)?;

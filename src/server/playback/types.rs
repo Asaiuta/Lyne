@@ -65,6 +65,11 @@ pub(super) struct MediaItemsDeleteRequest {
 }
 
 #[derive(Deserialize)]
+pub(super) struct MediaItemFileDeleteRequest {
+    pub(super) media_id: String,
+}
+
+#[derive(Deserialize)]
 pub(super) struct LibraryTrackPath {
     pub(super) track_key: i64,
 }
@@ -173,6 +178,23 @@ pub(super) enum LibraryQueueFailure {
 }
 
 impl LibraryQueueFailure {
+    pub(super) fn into_response(self) -> HttpResponse {
+        match self {
+            Self::BadRequest(message) => bad_request_response(message),
+            Self::NotFound(message) => not_found_response(message),
+            Self::Internal(message) => internal_server_error_response(message),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum LibraryFileDeleteFailure {
+    BadRequest(String),
+    NotFound(String),
+    Internal(String),
+}
+
+impl LibraryFileDeleteFailure {
     pub(super) fn into_response(self) -> HttpResponse {
         match self {
             Self::BadRequest(message) => bad_request_response(message),
