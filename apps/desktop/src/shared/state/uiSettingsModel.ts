@@ -28,6 +28,8 @@ export type PlayerExpandAnimation = "up" | "flow";
 
 export type LyricsPosition = "flex-start" | "center" | "flex-end";
 
+export type DesktopLyricPosition = "left" | "center" | "right" | "both";
+
 export type LyricsBlendMode = "screen" | "plus-lighter";
 
 export type LyricPriority = "auto" | "official";
@@ -217,6 +219,13 @@ export interface UISettings {
   lyricHorizontalOffset: number;
   lyricAlignRight: boolean;
   lyricsBlendMode: LyricsBlendMode;
+  desktopLyricFontSize: number;
+  desktopLyricDoubleLine: boolean;
+  desktopLyricPosition: DesktopLyricPosition;
+  desktopLyricShowTranslation: boolean;
+  desktopLyricShowWordByWord: boolean;
+  desktopLyricPlayedColor: string;
+  desktopLyricShowPlayInfo: boolean;
 }
 
 export const DEFAULT_HOME_SECTIONS: HomeSectionConfig[] = [

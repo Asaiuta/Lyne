@@ -1,6 +1,7 @@
-import { Show, createMemo, createSignal } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { useTranslation } from "../../../shared/i18n";
 import type {
+  DesktopLyricPosition,
   LyricsBlendMode,
   LyricsPosition
 } from "../../../shared/state/uiSettingsModel";
@@ -14,8 +15,17 @@ import {
   SelectSettingItem,
   type SelectOption
 } from "../components/SettingControls";
-import { settingsSectionClass } from "../components/SettingItem";
+import { SettingItem, settingsSectionClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
+
+const DESKTOP_LYRIC_COLORS = [
+  "#ffffff",
+  "#fe7971",
+  "#22c55e",
+  "#38bdf8",
+  "#fbbf24",
+  "#a78bfa"
+] as const;
 
 interface LyricsSectionProps {
   highlightId: string | null;
@@ -50,6 +60,28 @@ export function LyricsSection(props: LyricsSectionProps) {
     createSignal<boolean>(initialSettings.lyricAlignRight);
   const [lyricsBlendMode, setLyricsBlendMode] =
     createSignal<LyricsBlendMode>(initialSettings.lyricsBlendMode);
+
+  const [desktopLyricFontSize, setDesktopLyricFontSize] =
+    createSignal<number>(initialSettings.desktopLyricFontSize);
+  const [desktopLyricDoubleLine, setDesktopLyricDoubleLine] =
+    createSignal<boolean>(initialSettings.desktopLyricDoubleLine);
+  const [desktopLyricPosition, setDesktopLyricPosition] =
+    createSignal<DesktopLyricPosition>(initialSettings.desktopLyricPosition);
+  const [desktopLyricShowTranslation, setDesktopLyricShowTranslation] =
+    createSignal<boolean>(initialSettings.desktopLyricShowTranslation);
+  const [desktopLyricShowWordByWord, setDesktopLyricShowWordByWord] =
+    createSignal<boolean>(initialSettings.desktopLyricShowWordByWord);
+  const [desktopLyricPlayedColor, setDesktopLyricPlayedColor] =
+    createSignal<string>(initialSettings.desktopLyricPlayedColor);
+  const [desktopLyricShowPlayInfo, setDesktopLyricShowPlayInfo] =
+    createSignal<boolean>(initialSettings.desktopLyricShowPlayInfo);
+
+  const desktopLyricPositionOptions = createMemo<SelectOption[]>(() => [
+    { value: "left", label: t("settings.desktopLyric.position.left") },
+    { value: "center", label: t("settings.desktopLyric.position.center") },
+    { value: "right", label: t("settings.desktopLyric.position.right") },
+    { value: "both", label: t("settings.desktopLyric.position.both") }
+  ]);
 
   const lyricsPositionOptions = createMemo<SelectOption[]>(() => [
     { value: "flex-start", label: t("settings.lyric.position.left") },
@@ -133,6 +165,58 @@ export function LyricsSection(props: LyricsSectionProps) {
   };
   const handleLyricsBlendMode = (value: LyricsBlendMode) => {
     commitUISettingField("lyricsBlendMode", value, lyricsBlendMode, setLyricsBlendMode);
+  };
+
+  const handleDesktopLyricFontSize = (v: number) => {
+    commitUISettingField("desktopLyricFontSize", v, desktopLyricFontSize, setDesktopLyricFontSize);
+  };
+  const handleDesktopLyricDoubleLine = (checked: boolean) => {
+    commitUISettingField(
+      "desktopLyricDoubleLine",
+      checked,
+      desktopLyricDoubleLine,
+      setDesktopLyricDoubleLine
+    );
+  };
+  const handleDesktopLyricPosition = (value: DesktopLyricPosition) => {
+    commitUISettingField(
+      "desktopLyricPosition",
+      value,
+      desktopLyricPosition,
+      setDesktopLyricPosition
+    );
+  };
+  const handleDesktopLyricShowTranslation = (checked: boolean) => {
+    commitUISettingField(
+      "desktopLyricShowTranslation",
+      checked,
+      desktopLyricShowTranslation,
+      setDesktopLyricShowTranslation
+    );
+  };
+  const handleDesktopLyricShowWordByWord = (checked: boolean) => {
+    commitUISettingField(
+      "desktopLyricShowWordByWord",
+      checked,
+      desktopLyricShowWordByWord,
+      setDesktopLyricShowWordByWord
+    );
+  };
+  const handleDesktopLyricPlayedColor = (color: string) => {
+    commitUISettingField(
+      "desktopLyricPlayedColor",
+      color,
+      desktopLyricPlayedColor,
+      setDesktopLyricPlayedColor
+    );
+  };
+  const handleDesktopLyricShowPlayInfo = (checked: boolean) => {
+    commitUISettingField(
+      "desktopLyricShowPlayInfo",
+      checked,
+      desktopLyricShowPlayInfo,
+      setDesktopLyricShowPlayInfo
+    );
   };
 
   return (
@@ -308,6 +392,96 @@ export function LyricsSection(props: LyricsSectionProps) {
           value={lyricsBlendMode()}
           options={lyricsBlendModeOptions()}
           onChange={(v) => handleLyricsBlendMode(v as LyricsBlendMode)}
+        />
+      </SettingGroup>
+
+      <SettingGroup title={t("settings.desktopLyric.title")}>
+        <RangeSettingItem
+          id="desktopLyricFontSize"
+          label={t("settings.desktopLyric.fontSize")}
+          description={t("settings.desktopLyric.fontSize.desc")}
+          highlighted={isHi("desktopLyricFontSize")}
+          index={nextIndex()}
+          min={18}
+          max={80}
+          step={1}
+          value={desktopLyricFontSize()}
+          onPreview={setDesktopLyricFontSize}
+          onCommit={handleDesktopLyricFontSize}
+          formatSuffix="px"
+        />
+
+        <SelectSettingItem
+          id="desktopLyricPosition"
+          label={t("settings.desktopLyric.position")}
+          description={t("settings.desktopLyric.position.desc")}
+          highlighted={isHi("desktopLyricPosition")}
+          index={nextIndex()}
+          value={desktopLyricPosition()}
+          options={desktopLyricPositionOptions()}
+          onChange={(v) => handleDesktopLyricPosition(v as DesktopLyricPosition)}
+        />
+
+        <SettingItem
+          id="desktopLyricPlayedColor"
+          label={t("settings.desktopLyric.playedColor")}
+          description={t("settings.desktopLyric.playedColor.desc")}
+          highlighted={isHi("desktopLyricPlayedColor")}
+          index={nextIndex()}
+        >
+          <div class="settings-color-control">
+            <For each={DESKTOP_LYRIC_COLORS}>
+              {(color) => (
+                <button
+                  type="button"
+                  class={`settings-color-swatch${desktopLyricPlayedColor().toLowerCase() === color ? " is-active" : ""}`}
+                  style={{ "--swatch-color": color }}
+                  onClick={() => handleDesktopLyricPlayedColor(color)}
+                  aria-label={color}
+                />
+              )}
+            </For>
+          </div>
+        </SettingItem>
+
+        <BooleanSettingItem
+          id="desktopLyricDoubleLine"
+          label={t("settings.desktopLyric.doubleLine")}
+          description={t("settings.desktopLyric.doubleLine.desc")}
+          highlighted={isHi("desktopLyricDoubleLine")}
+          index={nextIndex()}
+          checked={desktopLyricDoubleLine()}
+          onChange={handleDesktopLyricDoubleLine}
+        />
+
+        <BooleanSettingItem
+          id="desktopLyricShowWordByWord"
+          label={t("settings.desktopLyric.showWordByWord")}
+          description={t("settings.desktopLyric.showWordByWord.desc")}
+          highlighted={isHi("desktopLyricShowWordByWord")}
+          index={nextIndex()}
+          checked={desktopLyricShowWordByWord()}
+          onChange={handleDesktopLyricShowWordByWord}
+        />
+
+        <BooleanSettingItem
+          id="desktopLyricShowTranslation"
+          label={t("settings.desktopLyric.showTranslation")}
+          description={t("settings.desktopLyric.showTranslation.desc")}
+          highlighted={isHi("desktopLyricShowTranslation")}
+          index={nextIndex()}
+          checked={desktopLyricShowTranslation()}
+          onChange={handleDesktopLyricShowTranslation}
+        />
+
+        <BooleanSettingItem
+          id="desktopLyricShowPlayInfo"
+          label={t("settings.desktopLyric.showPlayInfo")}
+          description={t("settings.desktopLyric.showPlayInfo.desc")}
+          highlighted={isHi("desktopLyricShowPlayInfo")}
+          index={nextIndex()}
+          checked={desktopLyricShowPlayInfo()}
+          onChange={handleDesktopLyricShowPlayInfo}
         />
       </SettingGroup>
     </section>

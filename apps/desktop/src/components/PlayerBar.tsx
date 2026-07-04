@@ -67,6 +67,8 @@ interface PlayerBarProps {
   onNavigate?: (page: ActivePage) => void;
   onSelectArtist?: (artist: NcmArtistSummary) => void;
   onSelectQuality?: (level: NcmSongLevel) => void;
+  desktopLyricActive?: boolean;
+  onToggleDesktopLyric?: () => void;
   isLiked?: boolean;
   onToggleLike?: () => void;
 }
@@ -447,6 +449,8 @@ export function PlayerBar(props: PlayerBarProps) {
           quality={utilityQuality()}
           desktopLyricLabel={t("player.aria.desktopLyric")}
           showDesktopLyric={uiSettings.fullPlayerShowDesktopLyric}
+          desktopLyricActive={props.desktopLyricActive}
+          onToggleDesktopLyric={props.onToggleDesktopLyric}
           controls={utilityControls()}
           volume={utilityVolume()}
           queue={utilityQueue()}

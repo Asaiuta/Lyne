@@ -20,7 +20,10 @@ use tauri::{
   Manager,
   RunEvent,
   Runtime,
+  WindowEvent,
 };
+
+mod desktop_lyric;
 
 struct SidecarState {
   child: Mutex<Option<Child>>,
@@ -549,7 +552,27 @@ fn main() {
   let app = tauri::Builder::default()
     .manage(SidecarState::new())
     .manage(ApiToken(token_value.clone()))
-    .invoke_handler(tauri::generate_handler![get_api_token, reveal_path_in_folder])
+    .invoke_handler(tauri::generate_handler![
+      get_api_token,
+      reveal_path_in_folder,
+      desktop_lyric::open_desktop_lyric,
+      desktop_lyric::close_desktop_lyric,
+      desktop_lyric::set_desktop_lyric_locked,
+      desktop_lyric::desktop_lyric_is_open
+    ])
+    // Tie the desktop-lyric overlay's lifetime to the main window. `Destroyed`
+    // covers every real close path (exit button, Alt+F4, taskbar close,
+    // programmatic close) but NOT minimize-to-tray, which only hides the
+    // window. With the overlay closed too, the last window going away raises
+    // `RunEvent::ExitRequested`, which runs the sidecar shutdown below —
+    // without this the overlay lingers as an unclosable always-on-top zombie.
+    .on_window_event(|window, event| {
+      if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
+        if let Some(overlay) = window.app_handle().get_webview_window("desktop-lyric") {
+          let _ = overlay.close();
+        }
+      }
+    })
     .setup(move |app| {
       let app_handle = app.handle();
       let mut child = spawn_sidecar(&app_handle, &token_value)?;

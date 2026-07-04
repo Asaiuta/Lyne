@@ -260,6 +260,8 @@ function AppContent() {
                 description: null
               })}
               onSelectQuality={playback.changeCurrentNcmQuality}
+              desktopLyricActive={controller.desktopLyric.active()}
+              onToggleDesktopLyric={controller.desktopLyric.toggle}
               queueOpen={queue.queueDrawerOpen()}
             />
           }

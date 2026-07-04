@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import type { Accessor, Setter } from "solid-js";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getNcmLikedPlaylistCached } from "../features/online/ncmPlaylistSummaryCache";
 import type { NcmSongLevel } from "../shared/state/uiSettingsModel";
 import {
@@ -35,6 +36,10 @@ import {
   type PlaybackController
 } from "./usePlaybackController";
 import { useQueueController, type QueueController } from "./useQueueController";
+import {
+  useDesktopLyricBridge,
+  type DesktopLyricBridge
+} from "./useDesktopLyricBridge";
 import type { PlaybackContextValue } from "./PlaybackContext";
 
 export interface AppController {
@@ -42,6 +47,7 @@ export interface AppController {
   queue: QueueController;
   navigation: NavigationController;
   ncm: NcmTrackEnrichment;
+  desktopLyric: DesktopLyricBridge;
   ui: AppUiController;
   refreshPlayback: (expectedPath?: string | null) => Promise<void>;
 }
@@ -306,11 +312,43 @@ export function useAppController(api: ApiClient): AppController {
     ]);
   };
 
+  const desktopLyric = useDesktopLyricBridge({
+    title: ncm.fullPlayerTitle,
+    artist: ncm.fullPlayerArtist,
+    songId: ncm.currentNcmSongId,
+    lyrics: ncm.currentLyricLines,
+    isPlaying: () => Boolean(playback.player()?.is_playing),
+    position: playback.displayPosition,
+    fontSize: () => uiSettings.desktopLyricFontSize,
+    doubleLine: () => uiSettings.desktopLyricDoubleLine,
+    lyricPosition: () => uiSettings.desktopLyricPosition,
+    playedColor: () => uiSettings.desktopLyricPlayedColor,
+    showWordLyrics: () => uiSettings.desktopLyricShowWordByWord,
+    showTranslation: () => uiSettings.desktopLyricShowTranslation,
+    showPlayInfo: () => uiSettings.desktopLyricShowPlayInfo,
+    play: playback.handlePlay,
+    pause: playback.handlePause,
+    skipNext: queue.handleSkipNext,
+    skipPrevious: queue.handleSkipPrev,
+    openSettings: () => setSettingsOpen(true),
+    focusMain: () => {
+      try {
+        const win = getCurrentWindow();
+        void win.show();
+        void win.unminimize();
+        void win.setFocus();
+      } catch (error) {
+        console.warn("Failed to focus main window", error);
+      }
+    }
+  });
+
   return {
     playback: playbackContext,
     queue,
     navigation,
     ncm,
+    desktopLyric,
     refreshPlayback,
     ui: {
       fullPlayerOpen,

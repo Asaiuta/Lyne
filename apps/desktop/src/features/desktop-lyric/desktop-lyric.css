@@ -1,0 +1,270 @@
+/* Desktop lyric overlay — transparent always-on-top window.
+   Visual language mirrors SPlayer's desktop lyric: chrome hidden until hover,
+   current line emphasised with karaoke word fill, secondary line dimmed. */
+
+:root,
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: transparent !important;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+.desktop-lyric {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  color: #fff;
+  border-radius: 14px;
+  background-color: transparent;
+  transition: background-color 0.3s ease;
+}
+
+.desktop-lyric.hovered:not(.locked) {
+  background-color: rgba(0, 0, 0, 0.55);
+}
+
+/* ---- header ---- */
+.dl-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  min-height: 32px;
+}
+
+.dl-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dl-header-center,
+.dl-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dl-header-center {
+  justify-content: center;
+}
+
+.dl-header-right {
+  justify-content: flex-end;
+}
+
+.dl-song {
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 4px var(--dl-shadow, rgba(0, 0, 0, 0.85));
+}
+
+.dl-song small {
+  opacity: 0.65;
+}
+
+.dl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  filter: drop-shadow(0 0 3px var(--dl-shadow, rgba(0, 0, 0, 0.85)));
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.dl-btn:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.dl-btn:active {
+  transform: scale(0.94);
+}
+
+/* Chrome is hidden until hover (SPlayer behaviour). */
+.dl-song,
+.dl-btn {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.desktop-lyric.hovered .dl-song,
+.desktop-lyric.hovered .dl-btn {
+  opacity: 1;
+}
+
+/* When locked the window is click-through; only reveal the lock button on hover
+   so the user can unlock again. */
+.desktop-lyric.locked.hovered .dl-lock {
+  opacity: 1;
+}
+
+/* ---- persistent play info (alwaysShowPlayInfo) ---- */
+.dl-play-title {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.25s ease;
+}
+
+.dl-play-title.align-center,
+.dl-play-title.align-both {
+  align-items: center;
+  text-align: center;
+}
+
+.dl-play-title.align-right {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.dl-play-name,
+.dl-play-artist {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 0 4px var(--dl-shadow, rgba(0, 0, 0, 0.85));
+}
+
+.dl-play-name {
+  font-size: 13px;
+}
+
+.dl-play-artist {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* ---- lyric body: absolute stage with vertical slide ---- */
+.dl-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dl-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  box-sizing: border-box;
+  max-width: 100%;
+  font-size: calc(var(--dl-font-size, 34px) * 0.78);
+  line-height: 1.2;
+  color: var(--dl-unplayed, rgba(255, 255, 255, 0.45));
+  overflow: hidden;
+  text-shadow: 0 0 4px var(--dl-shadow, rgba(0, 0, 0, 0.85));
+  will-change: transform, opacity;
+  transition: transform 0.5s cubic-bezier(0.42, 0, 0.1, 1),
+    font-size 0.45s cubic-bezier(0.42, 0, 0.1, 1), color 0.45s ease, opacity 0.45s ease;
+}
+
+.dl-line.active {
+  font-size: var(--dl-font-size, 34px);
+  color: var(--dl-played, #fff);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-line {
+    transition: opacity 0.2s ease, color 0.2s ease;
+  }
+}
+
+.dl-body.align-left .dl-line {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.dl-body.align-center .dl-line,
+.dl-body.align-both .dl-line {
+  align-items: center;
+  text-align: center;
+}
+
+.dl-body.align-right .dl-line {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.dl-body.align-both .dl-line-start {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.dl-body.align-both .dl-line-end {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.dl-line-content {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.dl-line-tran {
+  margin-top: 2px;
+  font-size: 0.62em;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.dl-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-words {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.dl-word {
+  display: inline-block;
+  white-space: pre;
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  background-position-x: 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 1px var(--dl-shadow, rgba(0, 0, 0, 0.85)));
+  will-change: background-position-x;
+}

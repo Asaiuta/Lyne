@@ -14,6 +14,7 @@ import {
   type HomeSectionKey,
   type LyricsBlendMode,
   type LyricsPosition,
+  type DesktopLyricPosition,
   type LyricPriority,
   type NcmSongLevel,
   type PlayerBackgroundType,
@@ -102,6 +103,13 @@ const VALID_SEARCH_INPUT_BEHAVIORS = new Set<SearchInputBehavior>([
 ]);
 
 const VALID_LYRICS_POSITIONS = new Set<LyricsPosition>(["flex-start", "center", "flex-end"]);
+
+const VALID_DESKTOP_LYRIC_POSITIONS = new Set<DesktopLyricPosition>([
+  "left",
+  "center",
+  "right",
+  "both"
+]);
 
 const VALID_LYRICS_BLEND_MODES = new Set<LyricsBlendMode>(["screen", "plus-lighter"]);
 
@@ -431,7 +439,18 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   lyricsPosition: createEnumField("ui.lyric.position", "flex-start", VALID_LYRICS_POSITIONS),
   lyricHorizontalOffset: createNumberField("ui.lyric.horizontalOffset", 10),
   lyricAlignRight: createBoolField("ui.lyric.alignRight", false),
-  lyricsBlendMode: createEnumField("ui.lyric.blendMode", "screen", VALID_LYRICS_BLEND_MODES)
+  lyricsBlendMode: createEnumField("ui.lyric.blendMode", "screen", VALID_LYRICS_BLEND_MODES),
+  desktopLyricFontSize: createClampedNumberField("ui.desktopLyric.fontSize", 34, 18, 80),
+  desktopLyricDoubleLine: createBoolField("ui.desktopLyric.doubleLine", true),
+  desktopLyricPosition: createEnumField(
+    "ui.desktopLyric.position",
+    "center",
+    VALID_DESKTOP_LYRIC_POSITIONS
+  ),
+  desktopLyricShowTranslation: createBoolField("ui.desktopLyric.showTranslation", true),
+  desktopLyricShowWordByWord: createBoolField("ui.desktopLyric.showWordByWord", true),
+  desktopLyricPlayedColor: createStringField("ui.desktopLyric.playedColor", "#ffffff"),
+  desktopLyricShowPlayInfo: createBoolField("ui.desktopLyric.showPlayInfo", false)
 };
 
 export const STORAGE_KEYS = Object.fromEntries(

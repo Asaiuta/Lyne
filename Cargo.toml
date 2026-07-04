@@ -14,7 +14,10 @@ resolver = "2"
 # a workspace member. The crate is consumed as a git dependency from its own
 # repository (see audio-engine-core in [dependencies] below). Keeping it as a
 # member would path-override the git dependency.
+# apps/desktop/src-tauri owns its own Cargo.lock; keep it out of the root
+# workspace while still allowing it to depend on workspace crates by path.
 exclude = [
+    "apps/desktop/src-tauri",
     "crates/audio-engine-core",
 ]
 
