@@ -8,14 +8,12 @@ import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
 import { usePresenceTransition } from "../../../shared/ui/usePresenceTransition";
 import { NaiveP } from "../../../shared/ui/naive";
-import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { AlbumDetail } from "../details/AlbumDetail";
 import { ArtistDetail } from "../details/ArtistDetail";
 import { DailySongsDetail } from "../details/DailySongsDetail";
 import { OnlineLikedPlaylistDetailRoute } from "../details/OnlineLikedPlaylistDetailRoute";
 import { OnlinePlaylistDetailRoute } from "../details/OnlinePlaylistDetailRoute";
 import { VideoDetail } from "../details/VideoDetail";
-import { cloudsearch } from "../../../shared/api/ncm/search";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import {
   ALL_PLAYLIST_CATEGORY,
@@ -26,18 +24,10 @@ import {
   DISCOVER_MV_TYPES,
   DISCOVER_NEW_AREAS,
   DISCOVER_PAGE_LIMIT,
-  DISCOVER_SEARCH_LIMIT,
   safeLoadDiscover
 } from "../shared/parsers";
 import type { PlaybackController } from "../shared/playback";
-import {
-  NCM_SEARCH_TYPES,
-  parseNcmMvAllCards,
-  parseNcmSearchAlbums,
-  parseNcmSearchArtists,
-  parseNcmSearchRadios,
-  parseNcmSearchVideos
-} from "../searchParsers";
+import { parseNcmMvAllCards } from "../searchParsers";
 import type {
   DiscoverNewKind,
   DiscoverPlaylistKind,
@@ -45,8 +35,7 @@ import type {
   DiscoverTab,
   FeedCardItem,
   NcmProfile,
-  OnlineTrackItem,
-  SearchTab
+  OnlineTrackItem
 } from "../shared/types";
 import { createDetailViewReporter, type OnlineDetailViewReporterProps } from "../shared/detailViewReporter";
 import { useDetailNavigation } from "../shared/useDetailNavigation";
@@ -58,7 +47,6 @@ import {
   DiscoverPlaylistShowcase,
   DiscoverToplistShowcase
 } from "./discoverShowcases";
-import { SearchMode } from "./SearchMode";
 import { mvAll } from "../../../shared/api/ncm/video";
 
 const api = createApiClient();
@@ -91,10 +79,6 @@ type DiscoverDetailView =
 
 export interface DiscoverModeProps extends OnlineDetailViewReporterProps {
   loginProfile: Accessor<NcmProfile | null>;
-  globalQuery: Accessor<string>;
-  submitNonce: Accessor<number>;
-  pendingDiscoverSearch: Accessor<boolean>;
-  clearPendingDiscoverSearch: () => void;
   discoverTabRequest?: { tab: string; version: number };
   onDiscoverTabChange?: (tab: DiscoverTab) => void;
   artistDetailRequest?: { artist: FeedCardItem | null; version: number };
@@ -109,15 +93,7 @@ export interface DiscoverModeProps extends OnlineDetailViewReporterProps {
 export function DiscoverMode(props: DiscoverModeProps) {
   const { t } = useTranslation();
 
-  const [searchTab, setSearchTab] = createSignal<SearchTab>("songs");
   const [discoverTab, setDiscoverTab] = createSignal<DiscoverTab>("playlists");
-  const [isSearching, setIsSearching] = createSignal(false);
-  const [songResults, setSongResults] = createSignal<OnlineTrackItem[]>([]);
-  const [playlistResults, setPlaylistResults] = createSignal<OnlinePlaylistSummary[]>([]);
-  const [artistResults, setArtistResults] = createSignal<FeedCardItem[]>([]);
-  const [albumResults, setAlbumResults] = createSignal<FeedCardItem[]>([]);
-  const [videoResults, setVideoResults] = createSignal<FeedCardItem[]>([]);
-  const [radioResults, setRadioResults] = createSignal<FeedCardItem[]>([]);
 
   const [discoverPlaylistKind, setDiscoverPlaylistKind] = createSignal<DiscoverPlaylistKind>("normal");
   const [discoverArtistInitial, setDiscoverArtistInitial] = createSignal<number | string>(-1);
@@ -290,56 +266,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
     (type) => safeLoadDiscover(() => api.listNcmDiscoverSongs({ type }), [])
   );
 
-  const hasSearchResults = () =>
-    songResults().length > 0 ||
-    playlistResults().length > 0 ||
-    artistResults().length > 0 ||
-    albumResults().length > 0 ||
-    videoResults().length > 0 ||
-    radioResults().length > 0;
-  const shouldShowDiscoverResults = () => isSearching() || hasSearchResults();
-
-  const runSearch = async () => {
-    const query = props.globalQuery().trim();
-    if (!query) {
-      props.setFeedback("error", t("ncm.error.emptySearch"));
-      return;
-    }
-    setIsSearching(true);
-    detailNav.clearAllDetailViews();
-    setSongResults([]);
-    setPlaylistResults([]);
-    setArtistResults([]);
-    setAlbumResults([]);
-    setVideoResults([]);
-    setRadioResults([]);
-    try {
-      const [songs, playlists, artists, albums, videos, radios] = await Promise.all([
-        api.searchNcmTracks({ keywords: query, limit: DISCOVER_SEARCH_LIMIT }),
-        api.searchNcmPlaylists({ keywords: query, limit: DISCOVER_SEARCH_LIMIT }),
-        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.artists }),
-        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.albums }),
-        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.videos }),
-        cloudsearch({ keywords: query, limit: DISCOVER_SEARCH_LIMIT, type: NCM_SEARCH_TYPES.radios })
-      ]);
-      setSongResults(songs);
-      setPlaylistResults(playlists);
-      setArtistResults(parseNcmSearchArtists(artists));
-      setAlbumResults(parseNcmSearchAlbums(albums));
-      setVideoResults(parseNcmSearchVideos(videos));
-      setRadioResults(parseNcmSearchRadios(radios));
-    } catch (error) {
-      props.setFeedback("error", readErrorMessage(error));
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
   onMount(async () => {
-    if (props.pendingDiscoverSearch() && props.globalQuery().trim()) {
-      props.clearPendingDiscoverSearch();
-      void runSearch();
-    }
     try {
       const categories = await api.getNcmDiscoverPlaylistCategories();
       setCatTypes(categories.categories);
@@ -351,12 +278,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
     }
   });
 
-  createEffect(
-    on(props.submitNonce, () => {
-      if (!props.globalQuery().trim()) return;
-      void runSearch();
-    })
-  );
 
   createEffect(
     on(
@@ -753,29 +674,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 hasMoreVideos={mvCards.hasMore()}
                 onLoadVideo={(video) => detailNav.enterVideo(video)}
                 onLoadMore={() => { void mvCards.loadMore(); }}
-              />
-            </Show>
-            <Show when={shouldShowDiscoverResults()}>
-              <SearchMode
-                searchTab={searchTab()}
-                onSearchTabChange={setSearchTab}
-                isSearching={isSearching()}
-                songResults={songResults()}
-                playlistResults={playlistResults()}
-                artistResults={artistResults()}
-                albumResults={albumResults()}
-                videoResults={videoResults()}
-                radioResults={radioResults()}
-                globalQuery={props.globalQuery}
-                parentMode="discover"
-                onSelectPlaylist={(playlist) => void detailNav.loadPlaylistTracks(playlist)}
-                onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
-                onSelectAlbum={(album) => void detailNav.loadAlbumTracks(album)}
-                onSelectVideo={(video) => detailNav.enterVideo(video)}
-                onSelectRadio={(radio) => props.onNavigateToRadioDetail?.(radio)}
-                onNavigateToSongWiki={props.onNavigateToSongWiki}
-                discoverSectionSubtitle={discoverSectionSubtitle()}
-                playback={props.playback}
               />
             </Show>
           </div>

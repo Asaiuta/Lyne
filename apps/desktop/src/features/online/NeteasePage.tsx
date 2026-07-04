@@ -17,6 +17,8 @@ import { DiscoverMode } from "./modes/DiscoverMode";
 import { LikedCollectionMode } from "./modes/LikedCollectionMode";
 import { LikedSongsMode } from "./modes/LikedSongsMode";
 import { RecommendMode } from "./modes/RecommendMode";
+import { OnlineSearchMode } from "./modes/OnlineSearchMode";
+import { createOnlineSearchController } from "./shared/useOnlineSearchController";
 import { UserPlaylistsMode } from "./modes/UserPlaylistsMode";
 
 const api = createApiClient();
@@ -25,7 +27,7 @@ interface NeteasePageProps {
   mode: NeteasePageMode;
   selectedPlaylistId?: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
-  onNavigate?: (page: "recommend" | "discover" | "radio") => void;
+  onNavigate?: (page: "recommend" | "discover" | "search" | "radio") => void;
   onNavigateToRecommend?: () => void;
   onNavigateToDiscover?: (tab: string) => void;
   onDiscoverTabChange?: (tab: string) => void;
@@ -50,7 +52,6 @@ export function NeteasePage(props: NeteasePageProps) {
   const [isLoginBusy, setIsLoginBusy] = createSignal(false);
   const [hasDetailView, setHasDetailView] = createSignal(false);
   const [feedback, setFeedback] = createSignal<Feedback>(createInitialFeedback(t));
-  const [pendingDiscoverSearch, setPendingDiscoverSearch] = createSignal(false);
 
   const loginProfile = createMemo<NcmProfile | null>(() => {
     const acct = accountStore.activeAccount();
@@ -67,6 +68,12 @@ export function NeteasePage(props: NeteasePageProps) {
     onRegisterPlayback: playbackContext.registerNcmPlayback,
     onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
+  });
+  const onlineSearch = createOnlineSearchController({
+    api,
+    t,
+    setFeedback: setRawFeedback,
+    readErrorMessage
   });
 
   const refreshLoginStatus = async () => {
@@ -115,20 +122,27 @@ export function NeteasePage(props: NeteasePageProps) {
     () => setHasDetailView(false)
   ));
 
+  createEffect(
+    on(
+      submitNonce,
+      () => {
+        props.onNavigate?.("search");
+        void onlineSearch.runSearch(globalQuery());
+      },
+      { defer: true }
+    )
+  );
+
   return (
     <div class={`panel panel-page online-page${props.mode === "recommend" ? " is-recommend-page" : ""}${isDiscoverMode() ? " is-discover-page" : ""}`}>
       <Switch>
         <Match when={props.mode === "recommend"}>
           <RecommendMode
             loginProfile={loginProfile}
-            globalQuery={globalQuery}
-            submitNonce={submitNonce}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
-            onNavigate={props.onNavigate}
             onNavigateToDiscover={props.onNavigateToDiscover}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
-            onMarkPendingDiscoverSearch={() => setPendingDiscoverSearch(true)}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
@@ -137,14 +151,22 @@ export function NeteasePage(props: NeteasePageProps) {
         <Match when={props.mode === "discover"}>
           <DiscoverMode
             loginProfile={loginProfile}
-            globalQuery={globalQuery}
-            submitNonce={submitNonce}
-            pendingDiscoverSearch={pendingDiscoverSearch}
-            clearPendingDiscoverSearch={() => setPendingDiscoverSearch(false)}
             discoverTabRequest={props.discoverTabRequest}
             onDiscoverTabChange={props.onDiscoverTabChange}
             artistDetailRequest={props.artistDetailRequest}
             albumDetailRequest={props.albumDetailRequest}
+            onNavigateToRadioDetail={props.onNavigateToRadioDetail}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onSelectedPlaylistChange={props.onSelectedPlaylistChange}
+            setFeedback={setRawFeedback}
+            playback={onlinePlayback}
+            onDetailViewChange={setHasDetailView}
+          />
+        </Match>
+        <Match when={props.mode === "search"}>
+          <OnlineSearchMode
+            loginProfile={loginProfile}
+            search={onlineSearch}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}

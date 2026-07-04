@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createEffect, createMemo, createSignal, on } from "solid-js";
+import { Match, Show, Switch, createMemo, createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
@@ -21,14 +21,10 @@ import { useDetailNavigation } from "../shared/useDetailNavigation";
 
 export interface RecommendModeProps extends OnlineDetailViewReporterProps {
   loginProfile: Accessor<NcmProfile | null>;
-  globalQuery: Accessor<string>;
-  submitNonce: Accessor<number>;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
-  onNavigate?: (page: "recommend" | "discover" | "radio") => void;
   onNavigateToDiscover?: (tab: string) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
-  onMarkPendingDiscoverSearch: () => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
 }
@@ -135,13 +131,6 @@ export function RecommendMode(props: RecommendModeProps) {
     props.onNavigateToDiscover?.(tab);
   };
 
-  createEffect(
-    on(props.submitNonce, () => {
-      if (!props.globalQuery().trim()) return;
-      props.onMarkPendingDiscoverSearch();
-      props.onNavigate?.("discover");
-    })
-  );
 
   return (
     <>

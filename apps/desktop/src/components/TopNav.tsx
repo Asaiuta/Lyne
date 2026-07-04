@@ -53,8 +53,8 @@ interface TopNavProps {
 const TOP_NAV_HOT_LIMIT = 8;
 const TOP_NAV_SUGGESTION_DEBOUNCE_MS = 180;
 
-const isNcmSearchEntryPage = (page: ActivePage): page is "recommend" | "discover" =>
-  page === "recommend" || page === "discover";
+const isNcmSearchEntryPage = (page: ActivePage): page is "recommend" | "discover" | "search" =>
+  page === "recommend" || page === "discover" || page === "search";
 
 const loadNcmSuggestionItems = async (
   keywords: string,
@@ -100,6 +100,8 @@ export function TopNav(props: TopNavProps) {
         return t("nav.search.scope.recommend");
       case "discover":
         return t("nav.search.scope.discover");
+      case "search":
+        return t("nav.search.scope.search");
       default:
         return t("nav.search.scope.disabled");
     }

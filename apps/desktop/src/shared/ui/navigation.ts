@@ -1,6 +1,7 @@
 export const ACTIVE_PAGES = [
   "recommend",
   "discover",
+  "search",
   "personal-fm",
   "radio",
   "liked-songs",
@@ -21,13 +22,14 @@ export const PLAYLIST_PAGES = ["created-playlists", "collected-playlists"] as co
 
 export type PlaylistPage = (typeof PLAYLIST_PAGES)[number];
 
-export const SEARCH_ENABLED_PAGES = ["recommend", "discover", "library"] as const;
+export const SEARCH_ENABLED_PAGES = ["recommend", "discover", "search", "library"] as const;
 
 export const PLACEHOLDER_PAGES = [] as const satisfies readonly ActivePage[];
 
 export const ONLINE_ONLY_PAGES = [
   "recommend",
   "discover",
+  "search",
   "personal-fm",
   "radio",
   "liked-songs",

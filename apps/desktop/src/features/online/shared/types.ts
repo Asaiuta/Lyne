@@ -4,6 +4,7 @@ import type { MediaListItem } from "../../../shared/media/mediaListItem";
 export type NeteasePageMode =
   | "recommend"
   | "discover"
+  | "search"
   | "liked-songs"
   | "liked"
   | "created-playlists"

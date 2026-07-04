@@ -79,6 +79,7 @@ const LoginModal = lazyComponent(() =>
 const NETEASE_PAGES = [
   "recommend",
   "discover",
+  "search",
   "liked-songs",
   "liked",
   "created-playlists",

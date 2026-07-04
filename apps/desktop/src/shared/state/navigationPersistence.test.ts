@@ -67,6 +67,23 @@ test("normalizeNavigationStateSnapshot falls back from stale page and tab values
   );
 });
 
+test("normalizeNavigationStateSnapshot restores search without playlist selection", () => {
+  assert.deepEqual(
+    normalizeNavigationStateSnapshot({
+      activePage: "search",
+      selectedPlaylistId: 12,
+      discoverTab: "mvs",
+      likedCollectionTab: "artists"
+    }),
+    {
+      activePage: "search",
+      selectedPlaylistId: null,
+      discoverTab: "mvs",
+      likedCollectionTab: "artists"
+    }
+  );
+});
+
 test("playlist id is restored only for playlist pages", () => {
   assert.deepEqual(
     normalizeNavigationStateSnapshot({

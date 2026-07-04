@@ -21,15 +21,14 @@ export interface SearchModeProps {
   albumResults: FeedCardItem[];
   videoResults: FeedCardItem[];
   radioResults: FeedCardItem[];
-  globalQuery: Accessor<string>;
-  parentMode: "recommend" | "discover";
+  searchQuery: Accessor<string>;
   onSelectPlaylist: (playlist: OnlinePlaylistSummary) => void | Promise<void>;
   onSelectArtist: (artist: FeedCardItem) => void | Promise<void>;
   onSelectAlbum: (album: FeedCardItem) => void | Promise<void>;
   onSelectVideo: (video: FeedCardItem) => void | Promise<void>;
   onSelectRadio?: (radio: FeedCardItem) => void | Promise<void>;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
-  discoverSectionSubtitle: string;
+  playlistEmptyHint: string;
   playback: PlaybackController;
 }
 
@@ -43,7 +42,7 @@ export function SearchMode(props: SearchModeProps) {
     { value: "videos", label: t("ncm.tabs.videos") },
     { value: "radios", label: t("ncm.tabs.radios") }
   ]);
-  const searchKeyword = createMemo(() => props.globalQuery().trim());
+  const searchKeyword = createMemo(() => props.searchQuery().trim());
 
   return (
     <section class="online-search-page">
@@ -52,9 +51,7 @@ export function SearchMode(props: SearchModeProps) {
         <span>
           {searchKeyword()
             ? t("ncm.search.relatedSuffix")
-            : props.parentMode === "recommend"
-              ? t("ncm.results.idle.recommend")
-              : t("ncm.results.idle.discover")}
+            : t("ncm.results.idle.search")}
         </span>
       </div>
       <div class="online-search-tabs">
@@ -129,13 +126,11 @@ function SongsResultPanel(props: SearchModeProps) {
       isLoading={props.isSearching}
       emptyState={
         <SearchEmptyState
-          title={props.globalQuery().trim() ? t("ncm.empty.noSongs") : t("ncm.empty.searchPrompt")}
+          title={props.searchQuery().trim() ? t("ncm.empty.noSongs") : t("ncm.empty.searchPrompt")}
           hint={
-            props.globalQuery().trim()
+            props.searchQuery().trim()
               ? t("ncm.empty.noSongsHint")
-              : props.parentMode === "recommend"
-                ? t("ncm.empty.searchPromptHint.recommend")
-                : t("ncm.empty.searchPromptHint.discover")
+              : t("ncm.empty.searchPromptHint.search")
           }
         />
       }
@@ -152,7 +147,7 @@ function PlaylistResultsPanel(props: SearchModeProps) {
       fallback={
         <SearchEmptyState
           title={props.isSearching ? t("ncm.search.searching") : t("ncm.empty.noPlaylists")}
-          hint={props.discoverSectionSubtitle}
+          hint={props.playlistEmptyHint}
         />
       }
     >
