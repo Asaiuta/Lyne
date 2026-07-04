@@ -17,6 +17,7 @@ const GENERAL_ITEM_IDS = [
   "closeAppMethod",
   "showCloseAppTip",
   "showTaskbarProgress",
+  "smtcEnabled",
   "checkUpdateOnStart",
   "updateChannel",
   "showSearchHistory",
@@ -199,8 +200,7 @@ const NETWORK_ITEM_IDS = [
   "discordEnabled",
   "discordPaused",
   "socketEnabled",
-  "socketTest",
-  "smtcOpen"
+  "socketTest"
 ] as const;
 
 const ABOUT_ITEM_IDS = [

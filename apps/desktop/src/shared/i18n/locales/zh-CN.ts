@@ -1043,6 +1043,8 @@ export const zhCN: TranslationDict = {
   "settings.general.showCloseAppTip.desc": "关闭应用前显示确认提示",
   "settings.general.showTaskbarProgress": "任务栏显示播放进度",
   "settings.general.showTaskbarProgress.desc": "为系统任务栏播放进度集成保留偏好",
+  "settings.general.smtcEnabled": "系统媒体控制（SMTC）",
+  "settings.general.smtcEnabled.desc": "在 Windows 系统媒体弹窗中显示当前曲目与封面，并响应键盘媒体键",
   "settings.general.persistFailed": "设置保存失败。",
   "settings.general.useOnlineService.resetFailed": "设置已保存，但部分在线运行状态在重新加载前未能重置。",
   "settings.general.update.title": "更新",
@@ -1473,9 +1475,6 @@ export const zhCN: TranslationDict = {
   "settings.network.socketEnabled.desc": "允许 AMLL 等外部应用接收播放状态。",
   "settings.network.socketTest": "测试 WebSocket 连接",
   "settings.network.socketTest.action": "测试连接",
-  "settings.network.other.title": "其他",
-  "settings.network.smtcOpen": "Windows 媒体控件 (SMTC)",
-  "settings.network.smtcOpen.desc": "在 Windows 媒体控制面板中显示当前播放的歌曲。",
 
   // Settings — About (WIP scaffolds + version display)
   "settings.about.app.title": "应用信息",

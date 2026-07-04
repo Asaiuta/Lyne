@@ -303,6 +303,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   closeAppMethod: createEnumField("ui.general.closeAppMethod", "hide", VALID_CLOSE_APP_METHODS),
   showCloseAppTip: createBoolField("ui.general.showCloseAppTip", true),
   showTaskbarProgress: createBoolField("ui.general.showTaskbarProgress", false),
+  smtcEnabled: createBoolField("ui.general.smtcEnabled", true),
   checkUpdateOnStart: createBoolField("ui.general.checkUpdateOnStart", true),
   updateChannel: createEnumField("ui.general.updateChannel", "stable", VALID_UPDATE_CHANNELS),
   showSearchHistory: createBoolField("ui.search.showHistory", true),

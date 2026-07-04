@@ -159,18 +159,6 @@ export function NetworkSection(props: NetworkSectionProps) {
           wip
         />
       </SettingGroup>
-
-      <SettingGroup title={t("settings.network.other.title")}>
-        <BooleanSettingItem
-          id="smtcOpen"
-          label={t("settings.network.smtcOpen")}
-          description={t("settings.network.smtcOpen.desc")}
-          highlighted={isHi("smtcOpen")}
-          index={nextIndex()}
-          checked={false}
-          wip
-        />
-      </SettingGroup>
     </section>
   );
 }

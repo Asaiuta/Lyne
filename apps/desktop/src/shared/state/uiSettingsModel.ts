@@ -125,6 +125,7 @@ export interface UISettings {
   closeAppMethod: CloseAppMethod;
   showCloseAppTip: boolean;
   showTaskbarProgress: boolean;
+  smtcEnabled: boolean;
   checkUpdateOnStart: boolean;
   updateChannel: UpdateChannel;
   showSearchHistory: boolean;

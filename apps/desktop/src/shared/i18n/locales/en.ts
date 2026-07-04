@@ -1041,6 +1041,8 @@ export const en = {
   "settings.general.showCloseAppTip.desc": "Show a confirmation hint before closing the app",
   "settings.general.showTaskbarProgress": "Show taskbar progress",
   "settings.general.showTaskbarProgress.desc": "Reserve the player position indicator for system taskbar integration",
+  "settings.general.smtcEnabled": "System media controls",
+  "settings.general.smtcEnabled.desc": "Show the current track in the Windows media overlay and respond to hardware media keys",
   "settings.general.persistFailed": "Failed to save this setting.",
   "settings.general.useOnlineService.resetFailed": "The setting was saved, but some online runtime state could not be reset before reload.",
   "settings.general.update.title": "Updates",
@@ -1471,9 +1473,6 @@ export const en = {
   "settings.network.socketEnabled.desc": "Allow external apps such as AMLL to receive playback state.",
   "settings.network.socketTest": "Test WebSocket connection",
   "settings.network.socketTest.action": "Test connection",
-  "settings.network.other.title": "Other",
-  "settings.network.smtcOpen": "Windows media controls (SMTC)",
-  "settings.network.smtcOpen.desc": "Show the currently playing track on the Windows media overlay.",
 
   // Settings — About (WIP scaffolds + version display)
   "settings.about.app.title": "Application",

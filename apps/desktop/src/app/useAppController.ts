@@ -40,6 +40,7 @@ import {
   useDesktopLyricBridge,
   type DesktopLyricBridge
 } from "./useDesktopLyricBridge";
+import { useSmtcBridge } from "./useSmtcBridge";
 import type { PlaybackContextValue } from "./PlaybackContext";
 
 export interface AppController {
@@ -340,6 +341,27 @@ export function useAppController(api: ApiClient): AppController {
       } catch (error) {
         console.warn("Failed to focus main window", error);
       }
+    }
+  });
+
+  // System media controls (Windows SMTC): same bridge-push composition as the
+  // desktop-lyric bridge — enriched NCM display strings for metadata, playback
+  // state for status/timeline, existing handlers for forwarded media keys.
+  useSmtcBridge({
+    enabled: () => uiSettings.smtcEnabled,
+    title: ncm.fullPlayerTitle,
+    artist: ncm.fullPlayerArtist,
+    album: ncm.fullPlayerAlbum,
+    coverUrl: ncm.resolvedCoverUrl,
+    durationSec: () => playback.player()?.duration ?? null,
+    isPlaying: () => Boolean(playback.player()?.is_playing),
+    position: playback.displayPosition,
+    play: playback.handlePlay,
+    pause: playback.handlePause,
+    skipNext: queue.handleSkipNext,
+    skipPrevious: queue.handleSkipPrev,
+    seek: (positionSec) => {
+      void playback.handleSeek(positionSec);
     }
   });
 

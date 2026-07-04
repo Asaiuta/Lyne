@@ -15,6 +15,7 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "general", itemId: "closeAppMethod", labelKey: "settings.general.closeAppMethod", descriptionKey: "settings.general.closeAppMethod.desc", keywords: ["close", "exit", "tray", "关闭", "退出"] },
   { category: "general", itemId: "showCloseAppTip", labelKey: "settings.general.showCloseAppTip", descriptionKey: "settings.general.showCloseAppTip.desc", keywords: ["close", "tip", "confirm", "提醒"] },
   { category: "general", itemId: "showTaskbarProgress", labelKey: "settings.general.showTaskbarProgress", descriptionKey: "settings.general.showTaskbarProgress.desc", keywords: ["taskbar", "progress", "任务栏", "进度"] },
+  { category: "general", itemId: "smtcEnabled", labelKey: "settings.general.smtcEnabled", descriptionKey: "settings.general.smtcEnabled.desc", keywords: ["smtc", "media", "controls", "media keys", "windows", "媒体", "控件", "媒体键"] },
   { category: "general", itemId: "checkUpdateOnStart", labelKey: "settings.general.checkUpdateOnStart", descriptionKey: "settings.general.checkUpdateOnStart.desc", keywords: ["update", "startup", "更新"] },
   { category: "general", itemId: "updateChannel", labelKey: "settings.general.updateChannel", descriptionKey: "settings.general.updateChannel.desc", keywords: ["update", "channel", "nightly", "更新通道"] },
   { category: "general", itemId: "showSearchHistory", labelKey: "settings.general.showSearchHistory", descriptionKey: "settings.general.showSearchHistory.desc", keywords: ["search", "history", "搜索历史"] },
@@ -241,7 +242,6 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "network", itemId: "discordPaused", labelKey: "settings.network.discordPaused", keywords: ["discord", "paused", "暂停"] },
   { category: "network", itemId: "socketEnabled", labelKey: "settings.network.socketEnabled", descriptionKey: "settings.network.socketEnabled.desc", keywords: ["websocket", "socket", "amll", "ws"] },
   { category: "network", itemId: "socketTest", labelKey: "settings.network.socketTest", keywords: ["websocket", "test", "测试"] },
-  { category: "network", itemId: "smtcOpen", labelKey: "settings.network.smtcOpen", descriptionKey: "settings.network.smtcOpen.desc", keywords: ["smtc", "windows", "media", "控件", "媒体"] },
 
   // ── about ────────────────────────────────────────────
   { category: "about", itemId: "appVersion", labelKey: "settings.nav.about", descriptionKey: "settings.about.appVersion.desc", keywords: ["version", "lyne", "about", "版本", "关于"] },

@@ -24,6 +24,7 @@ use tauri::{
 };
 
 mod desktop_lyric;
+mod smtc;
 
 struct SidecarState {
   child: Mutex<Option<Child>>,
@@ -552,13 +553,17 @@ fn main() {
   let app = tauri::Builder::default()
     .manage(SidecarState::new())
     .manage(ApiToken(token_value.clone()))
+    .manage(smtc::SmtcState::new())
     .invoke_handler(tauri::generate_handler![
       get_api_token,
       reveal_path_in_folder,
       desktop_lyric::open_desktop_lyric,
       desktop_lyric::close_desktop_lyric,
       desktop_lyric::set_desktop_lyric_locked,
-      desktop_lyric::desktop_lyric_is_open
+      desktop_lyric::desktop_lyric_is_open,
+      smtc::smtc_set_enabled,
+      smtc::smtc_update_metadata,
+      smtc::smtc_update_playback
     ])
     // Tie the desktop-lyric overlay's lifetime to the main window. `Destroyed`
     // covers every real close path (exit button, Alt+F4, taskbar close,

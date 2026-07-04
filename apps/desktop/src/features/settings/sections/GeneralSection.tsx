@@ -106,6 +106,7 @@ export function GeneralSection(props: GeneralSectionProps) {
     createSignal<boolean>(initialSettings.showCloseAppTip);
   const [showTaskbarProgress, setShowTaskbarProgress] =
     createSignal<boolean>(initialSettings.showTaskbarProgress);
+  const [smtcEnabled, setSmtcEnabled] = createSignal<boolean>(initialSettings.smtcEnabled);
   const [checkUpdateOnStart, setCheckUpdateOnStart] =
     createSignal<boolean>(initialSettings.checkUpdateOnStart);
   const [updateChannel, setUpdateChannel] =
@@ -246,6 +247,17 @@ export function GeneralSection(props: GeneralSectionProps) {
           index={nextIndex()}
           checked={showTaskbarProgress()}
           onChange={handleTaskbarProgressChange}
+        />
+        <BooleanSettingItem
+          id="smtcEnabled"
+          label={t("settings.general.smtcEnabled")}
+          description={t("settings.general.smtcEnabled.desc")}
+          highlighted={isHi("smtcEnabled")}
+          index={nextIndex()}
+          checked={smtcEnabled()}
+          onChange={(checked) =>
+            commitUISettingField("smtcEnabled", checked, smtcEnabled, setSmtcEnabled)
+          }
         />
       </SettingGroup>
 
