@@ -13,6 +13,7 @@ export interface OnlineLikedPlaylistDetailRouteProps {
   playback: PlaybackController;
   onRefresh?: (playlist: OnlinePlaylistSummary) => void | Promise<void>;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
 }
 
 export function OnlineLikedPlaylistDetailRoute(props: OnlineLikedPlaylistDetailRouteProps) {
@@ -54,6 +55,7 @@ export function OnlineLikedPlaylistDetailRoute(props: OnlineLikedPlaylistDetailR
       onPlaylistUpdated={props.detailNav.updateSelectedPlaylist}
       onReorderTracks={props.detailNav.reorderPlaylistTracks}
       onNavigateToSongWiki={props.onNavigateToSongWiki}
+      onNavigateToMv={props.onNavigateToMv}
       onScroll={props.detailNav.handlePlaylistTrackScroll}
       showCommentsTab={false}
       emptyStateText={t("ncm.liked.empty")}

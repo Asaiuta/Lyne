@@ -1,10 +1,9 @@
 import { Match, Switch, createEffect, createMemo, on } from "solid-js";
 import type { Accessor } from "solid-js";
 import { useTranslation } from "../../../shared/i18n";
-import { AlbumDetail } from "../details/AlbumDetail";
 import { ArtistDetail } from "../details/ArtistDetail";
-import { OnlinePlaylistDetailRoute } from "../details/OnlinePlaylistDetailRoute";
 import { VideoDetail } from "../details/VideoDetail";
+import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import type { FeedbackSetter } from "../shared/feedback";
 import { createDetailViewReporter, type OnlineDetailViewReporterProps } from "../shared/detailViewReporter";
 import type { PlaybackController } from "../shared/playback";
@@ -14,10 +13,8 @@ import { useDetailNavigation } from "../shared/useDetailNavigation";
 import { SearchMode } from "./SearchMode";
 
 type SearchDetailView =
-  | { kind: "album" }
   | { kind: "artist" }
   | { kind: "video" }
-  | { kind: "playlist" }
   | { kind: "results" };
 
 export interface OnlineSearchModeProps extends OnlineDetailViewReporterProps {
@@ -25,6 +22,9 @@ export interface OnlineSearchModeProps extends OnlineDetailViewReporterProps {
   search: OnlineSearchController;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
+  onNavigateToAlbumDetail?: (album: FeedCardItem) => void;
+  onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
@@ -41,10 +41,8 @@ export function OnlineSearchMode(props: OnlineSearchModeProps) {
   });
 
   const detailView = createMemo<SearchDetailView>(() => {
-    if (detailNav.selectedAlbum()) return { kind: "album" };
     if (detailNav.selectedArtist()) return { kind: "artist" };
     if (detailNav.selectedVideo()) return { kind: "video" };
-    if (detailNav.selectedPlaylist()) return { kind: "playlist" };
     return { kind: "results" };
   });
   const hasDetailView = createMemo<boolean>(() => detailView().kind !== "results");
@@ -63,20 +61,6 @@ export function OnlineSearchMode(props: OnlineSearchModeProps) {
 
   return (
     <Switch>
-      <Match when={detailView().kind === "album"}>
-        <AlbumDetail
-          album={detailNav.selectedAlbum()}
-          detail={detailNav.albumDetailInfo()}
-          tracks={detailNav.albumTracksState()}
-          isLoading={detailNav.isLoadingAlbumTracks()}
-          isLoadingDetail={detailNav.isLoadingAlbumDetail()}
-          isTogglingSubscribe={detailNav.isTogglingAlbumSubscribe()}
-          onToggleSubscribe={detailNav.toggleAlbumSubscribe}
-          onBack={detailNav.exitAlbum}
-          onNavigateToSongWiki={props.onNavigateToSongWiki}
-          playback={props.playback}
-        />
-      </Match>
       <Match when={detailView().kind === "artist"}>
         <ArtistDetail
           artist={detailNav.selectedArtist()}
@@ -99,7 +83,7 @@ export function OnlineSearchMode(props: OnlineSearchModeProps) {
           onLoadMoreTracks={() => detailNav.loadArtistTrackPage({ append: true })}
           onLoadMoreAlbums={() => detailNav.loadArtistAlbums({ append: true })}
           onLoadMoreVideos={() => detailNav.loadArtistVideos({ append: true })}
-          onSelectAlbum={(album) => void detailNav.loadAlbumTracks(album)}
+          onSelectAlbum={(album) => props.onNavigateToAlbumDetail?.(album)}
           onSelectVideo={(video) => detailNav.enterVideo(video)}
           onToggleSubscribe={detailNav.toggleArtistSubscribe}
           onBack={detailNav.exitArtist}
@@ -114,16 +98,6 @@ export function OnlineSearchMode(props: OnlineSearchModeProps) {
           onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
         />
       </Match>
-      <Match when={detailView().kind === "playlist"}>
-        <OnlinePlaylistDetailRoute
-          detailNav={detailNav}
-          subtitleText={props.search.submittedQuery() || t("ncm.search.title")}
-          loginProfile={props.loginProfile()}
-          setFeedback={props.setFeedback}
-          playback={props.playback}
-          onNavigateToSongWiki={props.onNavigateToSongWiki}
-        />
-      </Match>
       <Match when={detailView().kind === "results"}>
         <SearchMode
           searchTab={props.search.searchTab()}
@@ -136,9 +110,9 @@ export function OnlineSearchMode(props: OnlineSearchModeProps) {
           videoResults={props.search.videoResults()}
           radioResults={props.search.radioResults()}
           searchQuery={props.search.submittedQuery}
-          onSelectPlaylist={(playlist) => void detailNav.loadPlaylistTracks(playlist)}
+          onSelectPlaylist={(playlist) => props.onNavigateToPlaylistDetail?.(playlist)}
           onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
-          onSelectAlbum={(album) => void detailNav.loadAlbumTracks(album)}
+          onSelectAlbum={(album) => props.onNavigateToAlbumDetail?.(album)}
           onSelectVideo={(video) => detailNav.enterVideo(video)}
           onSelectRadio={(radio) => props.onNavigateToRadioDetail?.(radio)}
           onNavigateToSongWiki={props.onNavigateToSongWiki}

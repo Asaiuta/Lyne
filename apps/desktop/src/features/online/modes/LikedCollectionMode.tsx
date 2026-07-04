@@ -35,9 +35,7 @@ import {
   loadNcmUserPlaylistGroupsCached,
   subscribeNcmUserPlaylistGroups
 } from "../ncmPlaylistSummaryCache";
-import { AlbumDetail } from "../details/AlbumDetail";
 import { ArtistDetail } from "../details/ArtistDetail";
-import { OnlinePlaylistDetailRoute } from "../details/OnlinePlaylistDetailRoute";
 import { VideoDetail } from "../details/VideoDetail";
 import {
   createErrorMessageReader,
@@ -74,6 +72,9 @@ interface LikedCollectionModeProps extends OnlineDetailViewReporterProps {
   playback: PlaybackController;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
+  onNavigateToAlbumDetail?: (album: FeedCardItem) => void;
+  onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
 }
 
 const api = createApiClient();
@@ -495,8 +496,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
   ));
 
   const handlePlaylistClick = (playlist: OnlinePlaylistSummary) => {
-    props.onSelectedPlaylistChange?.(playlist.id);
-    void detailNav.loadPlaylistTracks(playlist);
+    props.onNavigateToPlaylistDetail?.(playlist);
   };
 
   const setActiveTabAndPersist = (tab: CollectionTab) => {
@@ -507,9 +507,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
   };
 
   const hasDetailView = createMemo<boolean>(() =>
-    detailNav.selectedAlbum() !== null ||
     detailNav.selectedArtist() !== null ||
-    detailNav.selectedPlaylist() !== null ||
     detailNav.selectedVideo() !== null
   );
 
@@ -648,7 +646,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
                             coverUrl={playlist.coverUrl}
                             coverVisible={!uiSettings.hiddenCovers.like}
                             size="md"
-                            active={detailNav.selectedPlaylist()?.id === playlist.id}
                             onClick={() => handlePlaylistClick(playlist)}
                           />
                         )}
@@ -661,7 +658,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
                 {renderCollectionGrid(
                   collectionAlbums,
                   "ncm.collection.empty.albums",
-                  (item) => void detailNav.loadAlbumTracks(item)
+                  (item) => props.onNavigateToAlbumDetail?.(item)
                 )}
               </Match>
               <Match when={activeTab() === "artists"}>
@@ -692,30 +689,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
         </section>
       </Show>
 
-      <Show when={detailNav.selectedPlaylist()}>
-        <OnlinePlaylistDetailRoute
-          detailNav={detailNav}
-          subtitleText={t("ncm.collection.title")}
-          loginProfile={props.loginProfile()}
-          setFeedback={props.setFeedback}
-          playback={props.playback}
-          onNavigateToSongWiki={props.onNavigateToSongWiki}
-        />
-      </Show>
-      <Show when={detailNav.selectedAlbum() !== null}>
-        <AlbumDetail
-          album={detailNav.selectedAlbum()}
-          detail={detailNav.albumDetailInfo()}
-          tracks={detailNav.albumTracksState()}
-          isLoading={detailNav.isLoadingAlbumTracks()}
-          isLoadingDetail={detailNav.isLoadingAlbumDetail()}
-          isTogglingSubscribe={detailNav.isTogglingAlbumSubscribe()}
-          onToggleSubscribe={detailNav.toggleAlbumSubscribe}
-          onBack={detailNav.exitAlbum}
-          onNavigateToSongWiki={props.onNavigateToSongWiki}
-          playback={props.playback}
-        />
-      </Show>
       <Show when={detailNav.selectedArtist() !== null}>
         <ArtistDetail
           artist={detailNav.selectedArtist()}
@@ -738,7 +711,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
           onLoadMoreTracks={() => detailNav.loadArtistTrackPage({ append: true })}
           onLoadMoreAlbums={() => detailNav.loadArtistAlbums({ append: true })}
           onLoadMoreVideos={() => detailNav.loadArtistVideos({ append: true })}
-          onSelectAlbum={(album) => void detailNav.loadAlbumTracks(album)}
+          onSelectAlbum={(album) => props.onNavigateToAlbumDetail?.(album)}
           onSelectVideo={(video) => detailNav.enterVideo(video)}
           onToggleSubscribe={detailNav.toggleArtistSubscribe}
           onBack={detailNav.exitArtist}

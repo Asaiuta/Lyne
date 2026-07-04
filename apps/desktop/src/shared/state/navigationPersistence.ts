@@ -33,7 +33,10 @@ const DEFAULT_NAVIGATION_STATE: NavigationStateSnapshot = {
   likedCollectionTab: "playlists"
 };
 
-const VALID_ACTIVE_PAGES = new Set<ActivePage>(ACTIVE_PAGES);
+const RESTORABLE_ACTIVE_PAGES = ACTIVE_PAGES.filter(
+  (page) => page !== "album-detail" && page !== "playlist-detail"
+);
+const VALID_ACTIVE_PAGES = new Set<ActivePage>(RESTORABLE_ACTIVE_PAGES);
 const VALID_LIKED_COLLECTION_TABS = new Set<PersistedLikedCollectionTab>([
   "playlists",
   "albums",

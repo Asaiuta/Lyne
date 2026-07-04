@@ -11,6 +11,8 @@ export interface OnlinePlaylistDetailRouteProps {
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
+  showInlineBack?: boolean;
 }
 
 export function OnlinePlaylistDetailRoute(props: OnlinePlaylistDetailRouteProps) {
@@ -35,12 +37,13 @@ export function OnlinePlaylistDetailRoute(props: OnlinePlaylistDetailRouteProps)
       detailTab={props.detailNav.playlistDetailTab()}
       setFilter={props.detailNav.setPlaylistFilter}
       setDetailTab={props.detailNav.setPlaylistDetailTab}
-      onBack={props.detailNav.handleBackToPlaylists}
+      onBack={props.showInlineBack === false ? undefined : props.detailNav.handleBackToPlaylists}
       onPlayAll={props.detailNav.playAllPlaylistTracks}
       onRefresh={refreshPlaylist}
       onToggleSubscribe={props.detailNav.togglePlaylistSubscribe}
       onPlaylistUpdated={props.detailNav.updateSelectedPlaylist}
       onNavigateToSongWiki={props.onNavigateToSongWiki}
+      onNavigateToMv={props.onNavigateToMv}
       onScroll={props.detailNav.handlePlaylistTrackScroll}
       loginProfile={props.loginProfile}
       setFeedback={props.setFeedback}

@@ -11,11 +11,9 @@ import {
   type OnlinePlaylistSummary
 } from "../ncmPlaylistSummary";
 import {
-  applyNcmPlaylistSubscribeCacheUpdate,
   loadNcmUserPlaylistsByModeCached,
   subscribeNcmUserPlaylistGroups
 } from "../ncmPlaylistSummaryCache";
-import { OnlinePlaylistDetailRoute } from "../details/OnlinePlaylistDetailRoute";
 import {
   createErrorMessageReader,
   createLoginStatusText,
@@ -23,8 +21,7 @@ import {
 } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
 import type { NcmProfile, OnlineTrackItem } from "../shared/types";
-import { createDetailViewReporter, type OnlineDetailViewReporterProps } from "../shared/detailViewReporter";
-import { useDetailNavigation } from "../shared/useDetailNavigation";
+import type { OnlineDetailViewReporterProps } from "../shared/detailViewReporter";
 
 export type UserPlaylistsKind = "created-playlists" | "collected-playlists";
 
@@ -40,7 +37,9 @@ export interface UserPlaylistsModeProps extends OnlineDetailViewReporterProps {
   selectedPlaylistId: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   onStaleSelectedPlaylist?: () => void;
+  onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
 }
@@ -52,27 +51,6 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
   const [userPlaylistsState, setUserPlaylistsState] = createSignal<OnlinePlaylistSummary[]>([]);
   const [isLoadingUserPlaylists, setIsLoadingUserPlaylists] = createSignal(false);
 
-  const detailNav = useDetailNavigation({
-    t,
-    loginProfile: props.loginProfile,
-    playback: props.playback,
-    setFeedback: props.setFeedback,
-    onSelectedPlaylistChange: props.onSelectedPlaylistChange,
-    onPlaylistSubscribeChange: (playlist, subscribed) => {
-      const profile = props.loginProfile();
-      if (profile) {
-        applyNcmPlaylistSubscribeCacheUpdate(profile.userId, playlist, subscribed);
-      }
-      if (props.kind !== "collected-playlists") return;
-      setUserPlaylistsState((current) => {
-        if (!subscribed) {
-          return current.filter((item) => item.id !== playlist.id);
-        }
-        return current.some((item) => item.id === playlist.id) ? current : [playlist, ...current];
-      });
-    }
-  });
-
   const pageTitle = () =>
     props.kind === "created-playlists"
       ? t("ncm.title.createdPlaylists")
@@ -83,10 +61,6 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
   const loginStatusText = createLoginStatusText(t, props.isCheckingLogin, props.loginProfile);
 
   const readErrorMessage = createErrorMessageReader(t);
-  const hasDetailView = () => detailNav.selectedPlaylist() !== null;
-
-  createDetailViewReporter(hasDetailView, props.onDetailViewChange);
-
   createEffect(on(props.loginProfile, (profile, prev) => {
     if (prev !== undefined && prev !== null && profile === null) {
       setUserPlaylistsState([]);
@@ -124,148 +98,86 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
   });
 
   createEffect(() => {
+    if (isLoadingUserPlaylists()) {
+      return;
+    }
+
     const playlistId = props.selectedPlaylistId ?? null;
     if (playlistId === null) {
-      detailNav.setSelectedPlaylist(null);
-      detailNav.setPlaylistTracksState([]);
       return;
     }
 
-    const matchedPlaylist = userPlaylistsState().find((item) => item.id === playlistId) ?? null;
-    if (!matchedPlaylist) {
-      if (!isLoadingUserPlaylists()) {
-        props.onStaleSelectedPlaylist?.();
-      }
-      return;
+    if (!userPlaylistsState().some((item) => item.id === playlistId)) {
+      props.onStaleSelectedPlaylist?.();
     }
-
-    if (
-      detailNav.selectedPlaylist()?.id === playlistId &&
-      detailNav.playlistTracksState().length > 0
-    ) {
-      return;
-    }
-
-    void detailNav.loadPlaylistTracks(matchedPlaylist);
-  });
-
-  createEffect(() => {
-    if (isLoadingUserPlaylists()) {
-      return;
-    }
-
-    const playlistId = props.selectedPlaylistId ?? null;
-    if (playlistId !== null) {
-      return;
-    }
-
-    if (detailNav.selectedPlaylist() === null) {
-      return;
-    }
-
-    detailNav.setSelectedPlaylist(null);
-    detailNav.setPlaylistTracksState([]);
-  });
-
-  createEffect(() => {
-    if (isLoadingUserPlaylists()) {
-      return;
-    }
-
-    if ((props.selectedPlaylistId ?? null) !== null || detailNav.selectedPlaylist() !== null) {
-      return;
-    }
-
-    const firstPlaylist = userPlaylistsState()[0] ?? null;
-    if (!firstPlaylist) {
-      return;
-    }
-
-    void detailNav.loadPlaylistTracks(firstPlaylist);
   });
 
   const playlistEmptyText = () => t("ncm.empty.noUserPlaylists");
 
   return (
     <>
-      <Show when={!detailNav.selectedPlaylist()}>
-        <PageHeader
-          title={pageTitle()}
-          meta={
-            <>
-              <span class="page-header-meta-line">{pageSubtitle()}</span>
-              <span class="page-header-meta-line">{loginStatusText()}</span>
-            </>
-          }
-          actions={
-            props.loginProfile() === null ? (
-              <button
-                type="button"
-                class="primary-button page-action"
-                onClick={props.onBeginLogin}
-                disabled={props.isLoginBusy()}
-              >
-                <IconPlayCircle />
-                {t("ncm.login.action.qr")}
-              </button>
-            ) : (
-              <button
-                type="button"
-                class="ghost-button page-action"
-                onClick={() => void props.onLogout()}
-                disabled={props.isLoginBusy()}
-              >
-                {t("ncm.login.action.logout")}
-              </button>
-            )
-          }
-        />
-      </Show>
-      <Show when={props.loginProfile() !== null} fallback={<NaiveP class="panel-note">{t("ncm.empty.loginRequired")}</NaiveP>}>
-      <Show
-        when={detailNav.selectedPlaylist()}
-        fallback={
-          <Show
-            when={userPlaylistsState().length > 0}
-            fallback={
-              <NaiveP class="panel-note">
-                {isLoadingUserPlaylists() ? t("ncm.playlist.loading") : playlistEmptyText()}
-              </NaiveP>
-            }
-          >
-            <section class="playlist-grid-section">
-              <div class="album-grid content-fade-in">
-                <For each={userPlaylistsState()}>
-                  {(playlist) => (
-                    <AlbumCard
-                      title={playlist.name}
-                      subtitle={t("ncm.playlist.meta", {
-                        count: playlist.trackCount ?? 0,
-                        creator: playlist.creator ?? t("ncm.playlist.creatorUnknown")
-                      })}
-                      coverUrl={playlist.coverUrl}
-                      coverVisible={!uiSettings.hiddenCovers.playlist}
-                      size="md"
-                      active={detailNav.selectedPlaylist()?.id === playlist.id}
-                      onClick={() => void detailNav.loadPlaylistTracks(playlist)}
-                    />
-                  )}
-                </For>
-              </div>
-            </section>
-          </Show>
+      <PageHeader
+        title={pageTitle()}
+        meta={
+          <>
+            <span class="page-header-meta-line">{pageSubtitle()}</span>
+            <span class="page-header-meta-line">{loginStatusText()}</span>
+          </>
         }
-      >
-        <OnlinePlaylistDetailRoute
-          detailNav={detailNav}
-          subtitleText={pageTitle()}
-          loginProfile={props.loginProfile()}
-          setFeedback={props.setFeedback}
-          playback={props.playback}
-          onNavigateToSongWiki={props.onNavigateToSongWiki}
-        />
+        actions={
+          props.loginProfile() === null ? (
+            <button
+              type="button"
+              class="primary-button page-action"
+              onClick={props.onBeginLogin}
+              disabled={props.isLoginBusy()}
+            >
+              <IconPlayCircle />
+              {t("ncm.login.action.qr")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              class="ghost-button page-action"
+              onClick={() => void props.onLogout()}
+              disabled={props.isLoginBusy()}
+            >
+              {t("ncm.login.action.logout")}
+            </button>
+          )
+        }
+      />
+      <Show when={props.loginProfile() !== null} fallback={<NaiveP class="panel-note">{t("ncm.empty.loginRequired")}</NaiveP>}>
+        <Show
+          when={userPlaylistsState().length > 0}
+          fallback={
+            <NaiveP class="panel-note">
+              {isLoadingUserPlaylists() ? t("ncm.playlist.loading") : playlistEmptyText()}
+            </NaiveP>
+          }
+        >
+          <section class="playlist-grid-section">
+            <div class="album-grid content-fade-in">
+              <For each={userPlaylistsState()}>
+                {(playlist) => (
+                  <AlbumCard
+                    title={playlist.name}
+                    subtitle={t("ncm.playlist.meta", {
+                      count: playlist.trackCount ?? 0,
+                      creator: playlist.creator ?? t("ncm.playlist.creatorUnknown")
+                    })}
+                    coverUrl={playlist.coverUrl}
+                    coverVisible={!uiSettings.hiddenCovers.playlist}
+                    size="md"
+                    active={(props.selectedPlaylistId ?? null) === playlist.id}
+                    onClick={() => props.onNavigateToPlaylistDetail?.(playlist)}
+                  />
+                )}
+              </For>
+            </div>
+          </section>
+        </Show>
       </Show>
-    </Show>
     </>
   );
 }

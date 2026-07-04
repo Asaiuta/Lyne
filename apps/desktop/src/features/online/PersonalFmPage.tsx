@@ -32,6 +32,7 @@ const api = createApiClient();
 interface PersonalFmPageProps {
   onRequireNcmLogin: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
   reloadTick?: number;
 }
 
@@ -156,7 +157,7 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
       return;
     }
     if (action === "mv") {
-      // TODO: Navigate to MV page
+      props.onNavigateToMv?.(item);
       return;
     }
     if (action === "copy-song-info") {

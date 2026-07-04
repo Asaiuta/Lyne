@@ -20,6 +20,10 @@ import { RecommendMode } from "./modes/RecommendMode";
 import { OnlineSearchMode } from "./modes/OnlineSearchMode";
 import { createOnlineSearchController } from "./shared/useOnlineSearchController";
 import { UserPlaylistsMode } from "./modes/UserPlaylistsMode";
+import type { OnlinePlaylistSummary } from "./ncmPlaylistSummary";
+import { applyNcmPlaylistSubscribeCacheUpdate } from "./ncmPlaylistSummaryCache";
+import { OnlineAlbumDetailRoute } from "./details/OnlineAlbumDetailRoute";
+import { OnlineStandalonePlaylistDetailRoute } from "./details/OnlineStandalonePlaylistDetailRoute";
 
 const api = createApiClient();
 
@@ -33,11 +37,16 @@ interface NeteasePageProps {
   onDiscoverTabChange?: (tab: string) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
+  onNavigateToAlbumDetail?: (album: FeedCardItem) => void;
+  onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
+  videoDetailRequest?: { video: FeedCardItem | null; version: number };
   discoverTabRequest?: { tab: string; version: number };
   likedCollectionTabRequest?: { tab: "playlists" | "albums" | "artists"; version: number };
   onLikedCollectionTabChange?: (tab: "playlists" | "albums" | "artists") => void;
   artistDetailRequest?: { artist: FeedCardItem | null; version: number };
   albumDetailRequest?: { album: FeedCardItem | null; version: number };
+  playlistDetailRequest?: { playlist: OnlinePlaylistSummary | null; version: number };
   radioSubscribeEvent?: RadioSubscribeEvent | null;
   onRequireNcmLogin: () => void;
 }
@@ -111,11 +120,23 @@ export function NeteasePage(props: NeteasePageProps) {
   const loginStatusText = createLoginStatusText(t, isCheckingLogin, loginProfile);
 
   const isDiscoverMode = () => props.mode === "discover";
+  const isStandaloneDetailMode = () =>
+    props.mode === "album-detail" || props.mode === "playlist-detail";
   const shouldShowFeedbackCard = createMemo<boolean>(() =>
+    !isStandaloneDetailMode() &&
     !hasDetailView() &&
     Boolean(feedback().message) &&
     feedback().message !== t("ncm.feedback.initial")
   );
+
+  const handlePlaylistSubscribeChange = (
+    playlist: OnlinePlaylistSummary,
+    subscribed: boolean
+  ) => {
+    const profile = loginProfile();
+    if (!profile) return;
+    applyNcmPlaylistSubscribeCacheUpdate(profile.userId, playlist, subscribed);
+  };
 
   createEffect(on(
     () => props.mode,
@@ -143,6 +164,9 @@ export function NeteasePage(props: NeteasePageProps) {
             onNavigateToDiscover={props.onNavigateToDiscover}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
+            onNavigateToAlbumDetail={props.onNavigateToAlbumDetail}
+            onNavigateToPlaylistDetail={props.onNavigateToPlaylistDetail}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
@@ -154,9 +178,12 @@ export function NeteasePage(props: NeteasePageProps) {
             discoverTabRequest={props.discoverTabRequest}
             onDiscoverTabChange={props.onDiscoverTabChange}
             artistDetailRequest={props.artistDetailRequest}
-            albumDetailRequest={props.albumDetailRequest}
+            videoDetailRequest={props.videoDetailRequest}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
+            onNavigateToAlbumDetail={props.onNavigateToAlbumDetail}
+            onNavigateToPlaylistDetail={props.onNavigateToPlaylistDetail}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
@@ -169,10 +196,34 @@ export function NeteasePage(props: NeteasePageProps) {
             search={onlineSearch}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
+            onNavigateToAlbumDetail={props.onNavigateToAlbumDetail}
+            onNavigateToPlaylistDetail={props.onNavigateToPlaylistDetail}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
+          />
+        </Match>
+        <Match when={props.mode === "album-detail"}>
+          <OnlineAlbumDetailRoute
+            request={props.albumDetailRequest}
+            loginProfile={loginProfile}
+            setFeedback={setRawFeedback}
+            playback={onlinePlayback}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
+          />
+        </Match>
+        <Match when={props.mode === "playlist-detail"}>
+          <OnlineStandalonePlaylistDetailRoute
+            request={props.playlistDetailRequest}
+            loginProfile={loginProfile}
+            setFeedback={setRawFeedback}
+            playback={onlinePlayback}
+            onSelectedPlaylistChange={props.onSelectedPlaylistChange}
+            onPlaylistSubscribeChange={handlePlaylistSubscribeChange}
+            onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
           />
         </Match>
         <Match when={props.mode === "liked-songs"}>
@@ -182,6 +233,7 @@ export function NeteasePage(props: NeteasePageProps) {
             isLoginBusy={isLoginBusy}
             onBeginLogin={props.onRequireNcmLogin}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}
@@ -201,6 +253,9 @@ export function NeteasePage(props: NeteasePageProps) {
             playback={onlinePlayback}
             onNavigateToRadioDetail={props.onNavigateToRadioDetail}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
+            onNavigateToAlbumDetail={props.onNavigateToAlbumDetail}
+            onNavigateToPlaylistDetail={props.onNavigateToPlaylistDetail}
             radioSubscribeEvent={props.radioSubscribeEvent}
             onDetailViewChange={setHasDetailView}
           />
@@ -220,6 +275,8 @@ export function NeteasePage(props: NeteasePageProps) {
               props.onNavigateToRecommend?.();
             }}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
+            onNavigateToPlaylistDetail={props.onNavigateToPlaylistDetail}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
             onDetailViewChange={setHasDetailView}

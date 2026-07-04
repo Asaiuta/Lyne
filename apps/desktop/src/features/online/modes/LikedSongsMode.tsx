@@ -26,6 +26,7 @@ export interface LikedSongsModeProps extends OnlineDetailViewReporterProps {
   isLoginBusy: Accessor<boolean>;
   onBeginLogin: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
 }
@@ -144,6 +145,7 @@ export function LikedSongsMode(props: LikedSongsModeProps) {
               forceRefresh: true
             })}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
           />
         </Show>
       </Show>

@@ -30,6 +30,7 @@ interface HistoryPageProps {
   isPlaying: boolean;
   onRegisterPlayback: (track: NcmTrackReference) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
 }
 
 interface Feedback {
@@ -238,6 +239,11 @@ export function HistoryPage(props: HistoryPageProps) {
       const onlineItem = toOnlineTrackItem(item);
       if (onlineItem) {
         props.onNavigateToSongWiki?.(onlineItem);
+      }
+    } else if (action === "mv") {
+      const onlineItem = toOnlineTrackItem(item);
+      if (onlineItem) {
+        props.onNavigateToMv?.(onlineItem);
       }
     }
   };

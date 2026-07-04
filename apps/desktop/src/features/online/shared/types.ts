@@ -5,6 +5,8 @@ export type NeteasePageMode =
   | "recommend"
   | "discover"
   | "search"
+  | "album-detail"
+  | "playlist-detail"
   | "liked-songs"
   | "liked"
   | "created-playlists"

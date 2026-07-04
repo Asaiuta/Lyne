@@ -47,6 +47,7 @@ let cloudCache: CloudCacheSnapshot | null = null;
 interface CloudPageProps {
   onRequireNcmLogin: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
 }
 
 const formatGb = (bytes: number): string => {
@@ -326,7 +327,7 @@ export function CloudPage(props: CloudPageProps) {
       return;
     }
     if (action === "mv") {
-      // TODO: Navigate to MV page
+      props.onNavigateToMv?.(item);
       return;
     }
     if (action === "cloud-import") {

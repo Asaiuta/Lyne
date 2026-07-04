@@ -84,6 +84,38 @@ test("normalizeNavigationStateSnapshot restores search without playlist selectio
   );
 });
 
+test("detail pages are not restored without their navigation request payload", () => {
+  assert.deepEqual(
+    normalizeNavigationStateSnapshot({
+      activePage: "album-detail",
+      selectedPlaylistId: 12,
+      discoverTab: "new",
+      likedCollectionTab: "albums"
+    }),
+    {
+      activePage: "recommend",
+      selectedPlaylistId: null,
+      discoverTab: "new",
+      likedCollectionTab: "albums"
+    }
+  );
+
+  assert.deepEqual(
+    normalizeNavigationStateSnapshot({
+      activePage: "playlist-detail",
+      selectedPlaylistId: 12,
+      discoverTab: "playlists",
+      likedCollectionTab: "playlists"
+    }),
+    {
+      activePage: "recommend",
+      selectedPlaylistId: null,
+      discoverTab: "playlists",
+      likedCollectionTab: "playlists"
+    }
+  );
+});
+
 test("playlist id is restored only for playlist pages", () => {
   assert.deepEqual(
     normalizeNavigationStateSnapshot({

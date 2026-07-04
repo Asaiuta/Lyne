@@ -7,12 +7,11 @@ import { usePlayback } from "../../../app/PlaybackContext";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { NaiveP } from "../../../shared/ui/naive";
 import { NeteaseHomeFeed } from "../NeteaseHomeFeed";
-import { AlbumDetail } from "../details/AlbumDetail";
 import { ArtistDetail } from "../details/ArtistDetail";
 import { DailySongsDetail } from "../details/DailySongsDetail";
 import { OnlineLikedPlaylistDetailRoute } from "../details/OnlineLikedPlaylistDetailRoute";
-import { OnlinePlaylistDetailRoute } from "../details/OnlinePlaylistDetailRoute";
 import { VideoDetail } from "../details/VideoDetail";
+import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
 import type { FeedCardItem, NcmProfile, OnlineTrackItem } from "../shared/types";
@@ -25,6 +24,9 @@ export interface RecommendModeProps extends OnlineDetailViewReporterProps {
   onNavigateToDiscover?: (tab: string) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
+  onNavigateToAlbumDetail?: (album: FeedCardItem) => void;
+  onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
 }
@@ -63,14 +65,10 @@ export function RecommendMode(props: RecommendModeProps) {
   });
 
   const readErrorMessage = createErrorMessageReader(t);
-  const pageTitle = () => t("ncm.title.recommend");
-
   const hasDetailView = createMemo<boolean>(() =>
     detailNav.selectedDailySongs() ||
     detailNav.selectedLikedSongs() ||
-    detailNav.selectedAlbum() !== null ||
     detailNav.selectedArtist() !== null ||
-    detailNav.selectedPlaylist() !== null ||
     detailNav.selectedVideo() !== null
   );
 
@@ -81,12 +79,12 @@ export function RecommendMode(props: RecommendModeProps) {
       <NeteaseHomeFeed
         isLoggedIn={props.loginProfile() !== null}
         userId={props.loginProfile()?.userId ?? null}
-        onSelectPlaylist={(playlist) => void detailNav.loadPlaylistTracks(playlist)}
+        onSelectPlaylist={(playlist) => props.onNavigateToPlaylistDetail?.(playlist)}
         onSelectDailySongs={detailNav.enterDailySongs}
         onSelectLikedSongs={detailNav.enterLikedSongs}
         onPlayPersonalFm={() => void playPersonalFmRadio()}
         onDislikePersonalFm={(songId) => void dislikePersonalFmTrack(songId)}
-        onSelectAlbum={(item) => void detailNav.loadAlbumTracks(item)}
+        onSelectAlbum={(item) => props.onNavigateToAlbumDetail?.(item)}
         onSelectArtist={(item) => void detailNav.loadArtistTracks(item)}
         onSelectVideo={(item) => detailNav.enterVideo(item)}
         onNavigateToDiscover={(tab) => handleNavigateToDiscover(tab)}
@@ -152,6 +150,7 @@ export function RecommendMode(props: RecommendModeProps) {
             onPlayAll={detailNav.playAllDailySongs}
             onDislike={detailNav.dislikeDailySong}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
+            onNavigateToMv={props.onNavigateToMv}
             setFeedback={props.setFeedback}
             playback={props.playback}
           />
@@ -167,22 +166,9 @@ export function RecommendMode(props: RecommendModeProps) {
               setFeedback={props.setFeedback}
               playback={props.playback}
               onNavigateToSongWiki={props.onNavigateToSongWiki}
+              onNavigateToMv={props.onNavigateToMv}
             />
           </Show>
-        </Match>
-        <Match when={detailNav.selectedAlbum() !== null}>
-          <AlbumDetail
-            album={detailNav.selectedAlbum()}
-            detail={detailNav.albumDetailInfo()}
-            tracks={detailNav.albumTracksState()}
-            isLoading={detailNav.isLoadingAlbumTracks()}
-            isLoadingDetail={detailNav.isLoadingAlbumDetail()}
-            isTogglingSubscribe={detailNav.isTogglingAlbumSubscribe()}
-            onToggleSubscribe={detailNav.toggleAlbumSubscribe}
-            onBack={detailNav.exitAlbum}
-            onNavigateToSongWiki={props.onNavigateToSongWiki}
-            playback={props.playback}
-          />
         </Match>
         <Match when={detailNav.selectedArtist() !== null}>
           <ArtistDetail
@@ -206,22 +192,12 @@ export function RecommendMode(props: RecommendModeProps) {
             onLoadMoreTracks={() => detailNav.loadArtistTrackPage({ append: true })}
             onLoadMoreAlbums={() => detailNav.loadArtistAlbums({ append: true })}
             onLoadMoreVideos={() => detailNav.loadArtistVideos({ append: true })}
-            onSelectAlbum={(album) => void detailNav.loadAlbumTracks(album)}
+            onSelectAlbum={(album) => props.onNavigateToAlbumDetail?.(album)}
             onSelectVideo={(video) => detailNav.enterVideo(video)}
             onToggleSubscribe={detailNav.toggleArtistSubscribe}
             onBack={detailNav.exitArtist}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             playback={props.playback}
-          />
-        </Match>
-        <Match when={detailNav.selectedPlaylist() !== null}>
-          <OnlinePlaylistDetailRoute
-            detailNav={detailNav}
-            subtitleText={pageTitle()}
-            loginProfile={props.loginProfile()}
-            setFeedback={props.setFeedback}
-            playback={props.playback}
-            onNavigateToSongWiki={props.onNavigateToSongWiki}
           />
         </Match>
         <Match when={detailNav.selectedVideo() !== null}>

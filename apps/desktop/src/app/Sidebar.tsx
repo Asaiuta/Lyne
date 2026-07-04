@@ -103,7 +103,7 @@ const LOGIN_REQUIRED_PAGES = new Set<ActivePage>([
 ]);
 
 type CreatedPlaylistSource = "online" | "local";
-type SidebarPage = Exclude<ActivePage, "song-wiki" | "search">;
+type SidebarPage = Exclude<ActivePage, "song-wiki" | "search" | "album-detail" | "playlist-detail">;
 
 const CREATED_PLAYLIST_SOURCE_OPTIONS: ReadonlyArray<{
   value: CreatedPlaylistSource;
@@ -180,7 +180,7 @@ interface SidebarProps {
   activePage: ActivePage;
   onChange: (page: ActivePage) => void;
   selectedPlaylistId?: number | null;
-  onSelectPlaylist?: (page: UserPlaylistMode, playlistId: number) => void;
+  onSelectPlaylist?: (page: UserPlaylistMode, playlist: OnlinePlaylistSummary) => void;
   onSelectLocalPlaylist?: (playlistId: string) => void;
   isNcmLoggedIn: boolean;
   onRequireNcmLogin: () => void;
@@ -338,10 +338,10 @@ export function Sidebar(props: SidebarProps) {
     if (!canOpenPage(page)) return;
     props.onChange(page);
   };
-  const handlePlaylistSelect = (page: UserPlaylistMode, playlistId: number) => {
+  const handlePlaylistSelect = (page: UserPlaylistMode, playlist: OnlinePlaylistSummary) => {
     if (!canOpenPage(page)) return;
     setSelectedLocalPlaylistId(null);
-    props.onSelectPlaylist?.(page, playlistId);
+    props.onSelectPlaylist?.(page, playlist);
   };
   const handleLocalPlaylistSelect = (playlistId: string) => {
     setSelectedLocalPlaylistId(playlistId);
@@ -500,7 +500,8 @@ export function Sidebar(props: SidebarProps) {
         <For each={playlistItemsForGroup(groupKey)}>
           {(playlist) => {
             const isActive = () =>
-              props.activePage === page && (props.selectedPlaylistId ?? null) === playlist.id;
+              (props.activePage === page || props.activePage === "playlist-detail") &&
+              (props.selectedPlaylistId ?? null) === playlist.id;
 
             return (
               <li>
@@ -509,7 +510,7 @@ export function Sidebar(props: SidebarProps) {
                   active={isActive()}
                   showCover={uiSettings.menuShowCover}
                   icon={IconPlaylist}
-                  onClick={() => handlePlaylistSelect(page, playlist.id)}
+                  onClick={() => handlePlaylistSelect(page, playlist)}
                   cover={
                     <Show when={playlist.coverUrl} fallback={<span>{playlist.name.slice(0, 1)}</span>}>
                       {(coverUrl) => (

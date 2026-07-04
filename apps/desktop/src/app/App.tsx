@@ -80,6 +80,8 @@ const NETEASE_PAGES = [
   "recommend",
   "discover",
   "search",
+  "album-detail",
+  "playlist-detail",
   "liked-songs",
   "liked",
   "created-playlists",
@@ -307,11 +309,16 @@ function AppContent() {
                           onDiscoverTabChange={navigation.handleDiscoverTabChange}
                           onNavigateToRadioDetail={navigation.handleNavigateToRadioDetail}
                           onNavigateToSongWiki={navigation.handleNavigateToSongWiki}
+                          onNavigateToMv={navigation.handleNavigateToMv}
+                          onNavigateToAlbumDetail={navigation.handleNavigateToAlbumDetail}
+                          onNavigateToPlaylistDetail={navigation.handleNavigateToPlaylistDetail}
                           discoverTabRequest={navigation.discoverTabRequest()}
                           likedCollectionTabRequest={navigation.likedCollectionTabRequest()}
                           onLikedCollectionTabChange={navigation.handleLikedCollectionTabChange}
                           artistDetailRequest={navigation.artistDetailRequest()}
                           albumDetailRequest={navigation.albumDetailRequest()}
+                          playlistDetailRequest={navigation.playlistDetailRequest()}
+                          videoDetailRequest={navigation.videoDetailRequest()}
                           radioSubscribeEvent={navigation.radioSubscribeEvent()}
                           onRequireNcmLogin={requireNcmLogin}
                         />

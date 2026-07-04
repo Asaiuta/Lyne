@@ -41,6 +41,16 @@ export function NcmMediaList<T extends MediaListItem>(props: NcmMediaListProps<T
     await copyToClipboard(ncmSongShareUrl(item.songId, uiSettings.shareUrlFormat));
   };
 
+  const copySongInfo = async (item: T) => {
+    const parts = [
+      displayTitle(item).trim(),
+      item.artist?.trim() || "",
+      item.album?.trim() || ""
+    ].filter((part) => part.length > 0);
+    if (parts.length === 0) return;
+    await copyToClipboard(parts.join(" - "));
+  };
+
   const loadComments = async (item: T) => {
     if (typeof item.songId !== "number") return;
     const title = displayTitle(item);
@@ -80,6 +90,9 @@ export function NcmMediaList<T extends MediaListItem>(props: NcmMediaListProps<T
         break;
       case "share-link":
         void copyShareLink(item);
+        break;
+      case "copy-song-info":
+        void copySongInfo(item);
         break;
       case "view-comments":
         void loadComments(item);

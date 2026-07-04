@@ -24,6 +24,7 @@ export interface DailySongsDetailProps {
   onPlayAll: () => Promise<void>;
   onDislike: (item: OnlineTrackItem) => Promise<void>;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
 }
@@ -100,9 +101,9 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
     } else if (action === "song-wiki") {
       props.onNavigateToSongWiki?.(item);
     } else if (action === "mv") {
-      // TODO: Navigate to MV page
+      props.onNavigateToMv?.(item);
     } else if (action === "copy-song-info") {
-      // TODO: Implement copy song info
+      // handled in NcmMediaList
     } else if (action === "download") {
       // TODO: Implement download — developer mode only
     }

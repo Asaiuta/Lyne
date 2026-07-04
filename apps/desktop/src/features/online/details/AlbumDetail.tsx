@@ -25,7 +25,7 @@ export interface AlbumDetailProps {
   isLoadingDetail: boolean;
   isTogglingSubscribe: boolean;
   onToggleSubscribe: () => void | Promise<void>;
-  onBack: () => void;
+  onBack?: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   playback: PlaybackController;
 }
@@ -71,97 +71,102 @@ export function AlbumDetail(props: AlbumDetailProps) {
     albumId();
     setDetailTab("songs");
   });
-  if (!album()) return null;
   return (
-    <PageSurface class="ncm-daily-detail" persistKey={`discover:album:${albumId()}`} resetKey={albumId()}>
-      <PageStickyHeader threshold={10}>
-        {({ compact }) => (
-          <>
-            <PageHero size="lg" compact={compact()}>
-              <button
-                type="button"
-                class="ghost-button ncm-daily-detail-back"
-                onClick={props.onBack}
-              >
-                <IconChevronLeft />
-                {t("ncm.album.backToFeed")}
-              </button>
-              <NcmListDetail
-                title={album()?.title ?? ""}
-                coverUrl={album()?.coverUrl}
-                hiddenCover={uiSettings.hiddenCovers.album}
-                compact={compact()}
-                description={album()?.description ?? album()?.subtitle}
-                metaItems={metaItems()}
-                playLabel={props.isLoading ? t("ncm.playlist.loading") : t("ncm.playlist.play")}
-                playDisabled={props.tracks.length === 0}
-                loading={props.isLoading}
-                onPlay={() => {
-                  void props.playback.playAll(props.tracks);
-                }}
-                activeTab={detailTab()}
-                onTabChange={(next) => setDetailTab(next === "comments" ? "comments" : "songs")}
-                tabs={[
-                  { value: "songs", label: t("ncm.playlist.tab.songs"), count: props.tracks.length },
-                  { value: "comments", label: t("ncm.playlist.tab.comments"), count: props.detail?.commentCount }
-                ]}
-                actionButtons={
-                  <button
-                    type="button"
-                    class={`ghost-button page-action ncm-artist-subscribe${props.detail?.subscribed === true ? " is-active" : ""}`}
-                    disabled={props.isLoadingDetail || props.isTogglingSubscribe}
-                    onClick={() => void props.onToggleSubscribe()}
-                  >
-                    <Show when={props.isTogglingSubscribe} fallback={props.detail?.subscribed === true ? <IconHeartFilled /> : <IconHeart />}>
-                      <NaiveSpin size={18} ariaHidden />
-                    </Show>
-                    {props.isTogglingSubscribe ? t("ncm.album.subscribeWorking") : subscribeLabel()}
-                  </button>
-                }
-              />
-              <div class="ncm-detail-tabs ncm-detail-tabs--mobile">
-                <SegmentedTabs
-                  value={detailTab()}
-                  onChange={(next) => setDetailTab(next === "comments" ? "comments" : "songs")}
-                  items={detailTabItems()}
-                  ariaLabel={t("ncm.playlist.tabs.aria")}
-                />
-              </div>
-            </PageHero>
-            <PageBody class="ncm-detail-page-body">
-              <Show
-                when={detailTab() === "songs"}
-                fallback={
-                  <ResourceCommentsPanel
-                    class="ncm-album-comments"
-                    resourceId={album()?.id ?? 0}
-                    resourceType={3}
-                    title={t("ncm.playlist.tab.comments")}
-                    grouped
-                    pageScrollRoot
-                  />
-                }
-              >
-                <NcmMediaList
-                  items={props.tracks}
-                  currentSourcePath={playbackContext.currentTrackPath()}
-                  currentSongId={playbackContext.currentSongId()}
-                  isPlayingNow={playbackContext.isPlaying()}
-                  onPlay={(item) => void props.playback.playOnlineTrack(item)}
-                  onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
-                  onContextAction={(action, item) => {
-                    if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
+    <Show when={album()}>
+      <PageSurface class="ncm-daily-detail" persistKey={`discover:album:${albumId()}`} resetKey={albumId()}>
+        <PageStickyHeader threshold={10}>
+          {({ compact }) => (
+            <>
+              <PageHero size="lg" compact={compact()}>
+                <Show when={props.onBack}>
+                  {(onBack) => (
+                    <button
+                      type="button"
+                      class="ghost-button ncm-daily-detail-back"
+                      onClick={onBack()}
+                    >
+                      <IconChevronLeft />
+                      {t("ncm.album.backToFeed")}
+                    </button>
+                  )}
+                </Show>
+                <NcmListDetail
+                  title={album()?.title ?? ""}
+                  coverUrl={album()?.coverUrl}
+                  hiddenCover={uiSettings.hiddenCovers.album}
+                  compact={compact()}
+                  description={album()?.description ?? album()?.subtitle}
+                  metaItems={metaItems()}
+                  playLabel={props.isLoading ? t("ncm.playlist.loading") : t("ncm.playlist.play")}
+                  playDisabled={props.tracks.length === 0}
+                  loading={props.isLoading}
+                  onPlay={() => {
+                    void props.playback.playAll(props.tracks);
                   }}
-                  isLoading={props.isLoading}
-                  emptyState={<NaiveP class="panel-note">{t("ncm.album.empty")}</NaiveP>}
-                  hideTopScrollTool
+                  activeTab={detailTab()}
+                  onTabChange={(next) => setDetailTab(next === "comments" ? "comments" : "songs")}
+                  tabs={[
+                    { value: "songs", label: t("ncm.playlist.tab.songs"), count: props.tracks.length },
+                    { value: "comments", label: t("ncm.playlist.tab.comments"), count: props.detail?.commentCount }
+                  ]}
+                  actionButtons={
+                    <button
+                      type="button"
+                      class={`ghost-button page-action ncm-artist-subscribe${props.detail?.subscribed === true ? " is-active" : ""}`}
+                      disabled={props.isLoadingDetail || props.isTogglingSubscribe}
+                      onClick={() => void props.onToggleSubscribe()}
+                    >
+                      <Show when={props.isTogglingSubscribe} fallback={props.detail?.subscribed === true ? <IconHeartFilled /> : <IconHeart />}>
+                        <NaiveSpin size={18} ariaHidden />
+                      </Show>
+                      {props.isTogglingSubscribe ? t("ncm.album.subscribeWorking") : subscribeLabel()}
+                    </button>
+                  }
                 />
-              </Show>
-            </PageBody>
-            <BackToTop label={t("media.scroll.top")} />
-          </>
-        )}
-      </PageStickyHeader>
-    </PageSurface>
+                <div class="ncm-detail-tabs ncm-detail-tabs--mobile">
+                  <SegmentedTabs
+                    value={detailTab()}
+                    onChange={(next) => setDetailTab(next === "comments" ? "comments" : "songs")}
+                    items={detailTabItems()}
+                    ariaLabel={t("ncm.playlist.tabs.aria")}
+                  />
+                </div>
+              </PageHero>
+              <PageBody class="ncm-detail-page-body">
+                <Show
+                  when={detailTab() === "songs"}
+                  fallback={
+                    <ResourceCommentsPanel
+                      class="ncm-album-comments"
+                      resourceId={album()?.id ?? 0}
+                      resourceType={3}
+                      title={t("ncm.playlist.tab.comments")}
+                      grouped
+                      pageScrollRoot
+                    />
+                  }
+                >
+                  <NcmMediaList
+                    items={props.tracks}
+                    currentSourcePath={playbackContext.currentTrackPath()}
+                    currentSongId={playbackContext.currentSongId()}
+                    isPlayingNow={playbackContext.isPlaying()}
+                    onPlay={(item) => void props.playback.playOnlineTrack(item)}
+                    onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
+                    onContextAction={(action, item) => {
+                      if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
+                    }}
+                    isLoading={props.isLoading}
+                    emptyState={<NaiveP class="panel-note">{t("ncm.album.empty")}</NaiveP>}
+                    hideTopScrollTool
+                  />
+                </Show>
+              </PageBody>
+              <BackToTop label={t("media.scroll.top")} />
+            </>
+          )}
+        </PageStickyHeader>
+      </PageSurface>
+    </Show>
   );
 }

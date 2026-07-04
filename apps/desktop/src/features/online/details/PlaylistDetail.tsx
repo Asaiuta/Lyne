@@ -62,6 +62,7 @@ export interface PlaylistDetailProps {
   onPlaylistUpdated?: (playlist: OnlinePlaylistSummary) => void;
   onReorderTracks?: (fromIndex: number, toIndex: number) => void | Promise<void>;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
+  onNavigateToMv?: (track: OnlineTrackItem) => void;
   onScroll: (event: Event) => void;
   showCommentsTab?: boolean;
   emptyStateText?: string;
@@ -177,9 +178,9 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
     } else if (action === "song-wiki") {
       props.onNavigateToSongWiki?.(item);
     } else if (action === "mv") {
-      // TODO: Navigate to MV page
+      props.onNavigateToMv?.(item);
     } else if (action === "copy-song-info") {
-      // TODO: Implement copy song info
+      // handled in NcmMediaList
     } else if (action === "download") {
       // TODO: Implement download — developer mode only
     }
