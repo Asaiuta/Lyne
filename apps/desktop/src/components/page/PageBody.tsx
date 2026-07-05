@@ -1,5 +1,6 @@
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
+import { DEFAULT_PAGE_SCROLL_ROOT_SELECTOR, isScrollableY } from "../../shared/ui/scrollRoot";
 import { usePageSurfaceContext } from "./PageSurface";
 
 interface PageBodyProps {
@@ -10,7 +11,19 @@ interface PageBodyProps {
   scrollRootSelector?: string;
 }
 
-const DEFAULT_SCROLL_ROOT_SELECTOR = "[data-page-scroll-root]";
+const SCROLL_EPSILON_PX = 1;
+
+const canElementScroll = (element: HTMLElement): boolean =>
+  isScrollableY(element) && element.scrollHeight > element.clientHeight + SCROLL_EPSILON_PX;
+
+const findScrollableAncestor = (element: HTMLElement): HTMLElement | null => {
+  let current = element.parentElement;
+  while (current) {
+    if (canElementScroll(current)) return current;
+    current = current.parentElement;
+  }
+  return null;
+};
 
 export function PageBody(props: PageBodyProps) {
   const surface = usePageSurfaceContext();
@@ -21,9 +34,10 @@ export function PageBody(props: PageBodyProps) {
   const resolveScrollRoot = (): HTMLElement | null => {
     if (!bodyRef) return null;
     if (props.scrollable === true) return bodyRef;
-    return bodyRef.querySelector<HTMLElement>(
-      props.scrollRootSelector ?? DEFAULT_SCROLL_ROOT_SELECTOR
+    const roots = Array.from(
+      bodyRef.querySelectorAll<HTMLElement>(props.scrollRootSelector ?? DEFAULT_PAGE_SCROLL_ROOT_SELECTOR)
     );
+    return roots.find(canElementScroll) ?? findScrollableAncestor(bodyRef) ?? roots[0] ?? null;
   };
 
   const bindScrollRoot = (nextRoot: HTMLElement | null) => {

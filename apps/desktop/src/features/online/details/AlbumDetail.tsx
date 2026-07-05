@@ -1,5 +1,5 @@
 import { Show, createEffect, createMemo, createSignal } from "solid-js";
-import { IconChat, IconChevronLeft, IconHeart, IconHeartFilled, IconMusic, IconShare } from "../../../components/icons";
+import { IconChat, IconChevronLeft, IconHeart, IconHeartFilled, IconMusic, IconSearch, IconShare } from "../../../components/icons";
 import { NcmMediaList } from "../NcmMediaList";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { BackToTop } from "../../../components/page/BackToTop";
@@ -35,6 +35,7 @@ export function AlbumDetail(props: AlbumDetailProps) {
   const uiSettings = useUISettings();
   const playbackContext = usePlayback();
   const [detailTab, setDetailTab] = createSignal<"songs" | "comments">("songs");
+  const [filter, setFilter] = createSignal<string>("");
   const album = () => props.detail ?? props.album;
   const albumId = createMemo<number | null>(() => album()?.id ?? null);
   const detailTabItems = createMemo<SegmentedTabItem[]>(() => [
@@ -67,17 +68,33 @@ export function AlbumDetail(props: AlbumDetailProps) {
     }
     return items.filter((item) => item.text.trim().length > 0);
   });
+  const normalizedFilter = createMemo<string>(() => filter().trim().toLowerCase());
+  const filteredTracks = createMemo<OnlineTrackItem[]>(() => {
+    const query = normalizedFilter();
+    if (!query) return props.tracks;
+    return props.tracks.filter((track) =>
+      [track.title, track.artist, track.album]
+        .some((value) => value?.toLowerCase().includes(query))
+    );
+  });
+  const emptyText = createMemo<string>(() => {
+    const query = filter().trim();
+    return query
+      ? t("ncm.playlist.searchEmpty", { query })
+      : t("ncm.album.empty");
+  });
   createEffect(() => {
     albumId();
     setDetailTab("songs");
+    setFilter("");
   });
   return (
     <Show when={album()}>
-      <PageSurface class="ncm-daily-detail" persistKey={`discover:album:${albumId()}`} resetKey={albumId()}>
+      <PageSurface class="ncm-daily-detail ncm-detail-page ncm-detail-page--album" persistKey={`discover:album:${albumId()}`} resetKey={albumId()}>
         <PageStickyHeader threshold={10}>
           {({ compact }) => (
             <>
-              <PageHero size="lg" compact={compact()}>
+              <PageHero size="lg" offset={236} compact={compact()}>
                 <Show when={props.onBack}>
                   {(onBack) => (
                     <button
@@ -109,6 +126,17 @@ export function AlbumDetail(props: AlbumDetailProps) {
                     { value: "songs", label: t("ncm.playlist.tab.songs"), count: props.tracks.length },
                     { value: "comments", label: t("ncm.playlist.tab.comments"), count: props.detail?.commentCount }
                   ]}
+                  rightControls={
+                    <label class="ncm-detail-search">
+                      <IconSearch />
+                      <input
+                        type="search"
+                        value={filter()}
+                        placeholder={t("ncm.playlist.search")}
+                        onInput={(event) => setFilter(event.currentTarget.value)}
+                      />
+                    </label>
+                  }
                   actionButtons={
                     <button
                       type="button"
@@ -147,7 +175,7 @@ export function AlbumDetail(props: AlbumDetailProps) {
                   }
                 >
                   <NcmMediaList
-                    items={props.tracks}
+                    items={filteredTracks()}
                     currentSourcePath={playbackContext.currentTrackPath()}
                     currentSongId={playbackContext.currentSongId()}
                     isPlayingNow={playbackContext.isPlaying()}
@@ -157,7 +185,8 @@ export function AlbumDetail(props: AlbumDetailProps) {
                       if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
                     }}
                     isLoading={props.isLoading}
-                    emptyState={<NaiveP class="panel-note">{t("ncm.album.empty")}</NaiveP>}
+                    emptyState={<NaiveP class="panel-note">{emptyText()}</NaiveP>}
+                    hideSize
                     hideTopScrollTool
                   />
                 </Show>

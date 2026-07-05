@@ -33,6 +33,7 @@ interface NcmListDetailProps {
   compact?: boolean;
   coverShape?: "square" | "round";
   actionButtons?: JSX.Element;
+  rightControls?: JSX.Element;
   onPlay: () => void;
   onTabChange?: (value: string) => void;
 }
@@ -122,24 +123,29 @@ export function NcmListDetail(props: NcmListDetailProps) {
               </button>
               {props.actionButtons}
             </div>
-            <Show when={(props.tabs ?? []).length > 0}>
-              <div class="ncm-list-detail-tabs" role="tablist">
-                <For each={props.tabs ?? []}>
-                  {(tab) => (
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={tab.value === props.activeTab}
-                      class={tab.value === props.activeTab ? "is-active" : ""}
-                      onClick={() => props.onTabChange?.(tab.value)}
-                    >
-                      {tab.label}
-                      <Show when={tab.count != null}>
-                        <span>{formatCount(tab.count ?? 0)}</span>
-                      </Show>
-                    </button>
-                  )}
-                </For>
+            <Show when={props.rightControls || (props.tabs ?? []).length > 0}>
+              <div class="ncm-list-detail-menu-right">
+                {props.rightControls}
+                <Show when={(props.tabs ?? []).length > 0}>
+                  <div class="ncm-list-detail-tabs" role="tablist">
+                    <For each={props.tabs ?? []}>
+                      {(tab) => (
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={tab.value === props.activeTab}
+                          class={tab.value === props.activeTab ? "is-active" : ""}
+                          onClick={() => props.onTabChange?.(tab.value)}
+                        >
+                          {tab.label}
+                          <Show when={tab.count != null}>
+                            <span>{formatCount(tab.count ?? 0)}</span>
+                          </Show>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
               </div>
             </Show>
           </div>

@@ -253,6 +253,17 @@
     font-weight: 500;
   }
 
+  .ncm-detail-page--playlist .playlist-detail-play {
+    border-color: transparent;
+    color: var(--text);
+    background: color-mix(in oklch, var(--surface-3) 82%, transparent);
+    font-weight: 600;
+  }
+
+  .ncm-detail-page--playlist .playlist-detail-play:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--surface-3) 94%, var(--text) 4%);
+  }
+
   .playlist-detail-title-row {
     display: flex;
     align-items: center;
@@ -383,6 +394,16 @@
   .playlist-detail-tabs button.is-active {
     color: var(--accent-foreground);
     background: var(--accent);
+  }
+
+  .ncm-detail-page--playlist .playlist-detail-tabs button.is-active {
+    color: var(--text);
+    background: color-mix(in oklch, var(--surface-3) 86%, var(--text) 8%);
+  }
+
+  .ncm-detail-page--playlist .playlist-detail-tabs {
+    outline-color: color-mix(in oklch, var(--border) 36%, transparent);
+    background: color-mix(in oklch, var(--surface-2) 84%, transparent);
   }
 
   .playlist-detail-tabs span {

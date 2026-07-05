@@ -210,7 +210,7 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
     <Show when={detailPlaylist()}>
       {(playlist) => (
         <PageSurface
-          class="playlist-detail playlist-detail-shell"
+          class="playlist-detail playlist-detail-shell ncm-detail-page ncm-detail-page--playlist"
           floatingHero
           persistKey={`playlist:${playlist().id}`}
           resetKey={playlist().id}

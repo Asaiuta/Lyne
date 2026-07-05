@@ -111,11 +111,11 @@ export function ArtistDetail(props: ArtistDetailProps) {
   };
   return (
     <Show when={artist()}>
-      <PageSurface class="ncm-daily-detail" persistKey={`discover:artist:${artistId()}`} resetKey={artistId()}>
+      <PageSurface class="ncm-daily-detail ncm-detail-page ncm-detail-page--artist" persistKey={`discover:artist:${artistId()}`} resetKey={artistId()}>
         <PageStickyHeader threshold={10}>
           {({ compact }) => (
             <>
-              <PageHero size="lg" compact={compact()}>
+              <PageHero size="lg" offset={236} compact={compact()}>
                 <Show when={(props.showInlineBack ?? true) && props.onBack}>
                   <button
                     type="button"
@@ -141,17 +141,29 @@ export function ArtistDetail(props: ArtistDetailProps) {
                   void props.playback.playAll(props.tracks);
                 }}
                 actionButtons={
-                  <button
-                    type="button"
-                    class={`ghost-button page-action ncm-artist-subscribe${props.detail?.followed === true ? " is-active" : ""}`}
-                    disabled={props.isLoadingDetail || props.isTogglingSubscribe}
-                    onClick={() => void props.onToggleSubscribe()}
-                  >
-                    <Show when={props.isTogglingSubscribe} fallback={props.detail?.followed === true ? <IconHeartFilled /> : <IconHeart />}>
-                      <NaiveSpin size={18} ariaHidden />
+                  <>
+                    <button
+                      type="button"
+                      class={`ghost-button page-action ncm-artist-subscribe${props.detail?.followed === true ? " is-active" : ""}`}
+                      disabled={props.isLoadingDetail || props.isTogglingSubscribe}
+                      onClick={() => void props.onToggleSubscribe()}
+                    >
+                      <Show when={props.isTogglingSubscribe} fallback={props.detail?.followed === true ? <IconHeartFilled /> : <IconHeart />}>
+                        <NaiveSpin size={18} ariaHidden />
+                      </Show>
+                      {props.isTogglingSubscribe ? t("ncm.artist.subscribeWorking") : subscribeLabel()}
+                    </button>
+                    <Show when={detailTab() === "songs"}>
+                      <div class="ncm-artist-order-inline">
+                        <SegmentedTabs
+                          value={props.trackOrder}
+                          onChange={(next) => void props.onChangeTrackOrder(next === "time" ? "time" : "hot")}
+                          items={trackOrderItems()}
+                          ariaLabel={t("ncm.artist.songs.orderAria")}
+                        />
+                      </div>
                     </Show>
-                    {props.isTogglingSubscribe ? t("ncm.artist.subscribeWorking") : subscribeLabel()}
-                  </button>
+                  </>
                 }
               />
               <div class="ncm-detail-tabs">
@@ -166,14 +178,6 @@ export function ArtistDetail(props: ArtistDetailProps) {
             <PageBody class="ncm-detail-page-body">
               <Show when={detailTab() === "songs"}>
                 <div class="ncm-artist-song-panel">
-                  <div class="ncm-artist-song-toolbar">
-                    <SegmentedTabs
-                      value={props.trackOrder}
-                      onChange={(next) => void props.onChangeTrackOrder(next === "time" ? "time" : "hot")}
-                      items={trackOrderItems()}
-                      ariaLabel={t("ncm.artist.songs.orderAria")}
-                    />
-                  </div>
                   <NcmMediaList
                     items={props.tracks}
                     currentSourcePath={playbackContext.currentTrackPath()}
@@ -186,6 +190,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
                     }}
                     isLoading={props.isLoading}
                     emptyState={<NaiveP class="panel-note">{t("ncm.artist.empty")}</NaiveP>}
+                    hideSize
                     hideTopScrollTool
                   />
                   <Show when={props.hasMoreTracks && props.tracks.length > 0}>
@@ -273,7 +278,7 @@ interface ArtistResourceGridProps {
 
 function ArtistResourceGrid(props: ArtistResourceGridProps) {
   return (
-    <div class="ncm-artist-resource-panel">
+    <div class="ncm-artist-resource-panel" data-page-scroll-root="true">
       <Show
         when={props.items.length > 0}
         fallback={<NaiveP class="panel-note">{props.isLoading ? props.loadingText : props.emptyText}</NaiveP>}
@@ -285,6 +290,7 @@ function ArtistResourceGrid(props: ArtistResourceGridProps) {
                 title={item.title}
                 subtitle={item.subtitle}
                 coverUrl={item.coverUrl}
+                size={props.variant === "videos" ? "md" : "sm"}
                 coverVisible={!props.coverHidden}
                 playCount={item.playCount}
                 description={item.description}

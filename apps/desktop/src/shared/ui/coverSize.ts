@@ -23,8 +23,17 @@ const SIZE_MAP: Record<CoverSize, number> = {
 export function coverSizeUrl(url: string | null | undefined, size: CoverSize): string | undefined {
   if (!url) return undefined;
   const px = SIZE_MAP[size];
-  const https = url.replace(/^http:/, "https:");
-  return `${https}?param=${px}y${px}`;
+  if (!/^https?:\/\//i.test(url)) return url;
+
+  const https = url.replace(/^http:/i, "https:");
+  try {
+    const parsed = new URL(https);
+    parsed.searchParams.set("param", `${px}y${px}`);
+    return parsed.toString();
+  } catch {
+    const separator = https.includes("?") ? "&" : "?";
+    return `${https}${separator}param=${px}y${px}`;
+  }
 }
 
 /**
