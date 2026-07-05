@@ -7,6 +7,7 @@ import {
   createDefaultPalette,
   createMonotonousPalette,
   createPaletteFromExtractedSource,
+  createPaletteFromSeed,
   createPaletteFromSource,
   extractPaletteSourceFromPixels
 } from "./paletteEngine";
@@ -50,6 +51,14 @@ test("createPaletteFromSource produces role-separated colors from a cover seed",
   assert.equal(palette.tokens.tertiary, "rgb(224 187 221)");
   assert.equal(palette.tokens.neutralContainer, "rgb(70 70 74)");
   assert.equal(palette.tokens.primary === palette.tokens.secondary, false);
+});
+
+test("createPaletteFromSeed falls back to the SPlayer coral seed for invalid input", () => {
+  const palette = createPaletteFromSeed("not-a-color", "dark");
+
+  assert.equal(palette.tokens.primary, "rgb(255 179 173)");
+  assert.equal(palette.theme.primary, "rgb(255 218 214)");
+  assert.equal(palette.theme.background, "rgb(68 41 39)");
 });
 
 test("extractPaletteSourceFromPixels returns SPlayer monotonous source for near-gray covers", () => {

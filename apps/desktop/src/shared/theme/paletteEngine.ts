@@ -355,19 +355,31 @@ export async function extractPaletteSource(coverUrl: string | null): Promise<Ext
   }
 }
 
-export async function applyCover(coverUrl: string | null, root: HTMLElement = document.documentElement): Promise<void> {
+export async function applyCover(
+  coverUrl: string | null,
+  root: HTMLElement = document.documentElement
+): Promise<DynamicPalette> {
   const source = await extractPaletteSource(coverUrl);
-  applyPalette(source === null ? createDefaultPalette(readScheme(root)) : createPaletteFromExtractedSource(source, readScheme(root)), root);
+  const palette =
+    source === null ? createDefaultPalette(readScheme(root)) : createPaletteFromExtractedSource(source, readScheme(root));
+  applyPalette(palette, root);
+  return palette;
 }
 
-export function applySeed(seedHex: string, root: HTMLElement = document.documentElement): void {
+export function createPaletteFromSeed(seedHex: string, scheme: ThemeScheme): DynamicPalette {
   let sourceArgb = DEFAULT_SEED_ARGB;
   try {
     sourceArgb = argbFromHex(seedHex.trim() || DEFAULT_SEED_HEX);
   } catch {
     sourceArgb = DEFAULT_SEED_ARGB;
   }
-  applyPalette(createPaletteFromSource(sourceArgb, readScheme(root)), root);
+  return createPaletteFromSource(sourceArgb, scheme);
+}
+
+export function applySeed(seedHex: string, root: HTMLElement = document.documentElement): DynamicPalette {
+  const palette = createPaletteFromSeed(seedHex, readScheme(root));
+  applyPalette(palette, root);
+  return palette;
 }
 
 export const paletteEngine = {
@@ -380,6 +392,7 @@ export const paletteEngine = {
   createMonotonousPalette,
   createPaletteFromExtractedSource,
   createPaletteFromSource,
+  createPaletteFromSeed,
   createPlayerCoverColorFromSource,
   createPlayerCoverRgbChannelsFromSource,
   extractPaletteSource,

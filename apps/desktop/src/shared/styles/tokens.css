@@ -41,7 +41,14 @@
   --radius-card-prominent: var(--radius-lg);  /* hero / large cards */
   --radius-icon-btn: var(--radius-pill);      /* icon buttons, transport, search bars */
 
-  /* ---------- Color: surface ladder (SPlayer near-neutral desktop skin) ---------- */
+  /* ---------- Color contract ----------
+     1. paletteEngine owns --color-* and --splayer-* palette aliases.
+     2. customAppearance owns --*-dynamic semantic entry points.
+     3. Component-facing bridges such as --naive-* and --player-* derive
+        from those palette/semantic tokens; feature CSS should not create
+        new peer color roots. */
+
+  /* ---------- Color: app semantic surface ladder (SPlayer near-neutral desktop skin) ---------- */
   --bg-base: oklch(0.135 0.004 280);
   --surface-1-base: oklch(0.175 0.005 280);
   --surface-2-base: oklch(0.215 0.006 280);
@@ -52,6 +59,8 @@
   --surface-2: var(--surface-2-base);
   --surface-3: var(--surface-3-base);
   --surface-4: var(--surface-4-base);
+  --surface-container-opaque-default: var(--surface-1-base);
+  --floating-surface-opaque-default: var(--surface-2-base);
   --surface-container-default: oklch(0.175 0.005 280 / 0.85);
   --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
   --player-bar-surface-default: rgb(24 24 28);
@@ -61,6 +70,9 @@
   --player-cover-accent-default: rgb(239 239 239);
   --player-cover-accent: var(--player-cover-accent-dynamic, var(--player-cover-accent-default));
   --player-cover-accent-rgb: 239, 239, 239;
+  /* Palette aliases written by paletteEngine. Keep these public for custom
+     CSS compatibility, but treat them as palette aliases rather than
+     component styling roots. */
   --splayer-primary: rgb(255 218 214);
   --splayer-primary-rgb: 255, 218, 214;
   --splayer-background: rgb(68 41 39);
@@ -101,7 +113,7 @@
   --floating-radius: var(--radius-sm);
   --floating-shadow: var(--elev-4);
 
-  /* ---------- Color: role palette — Material tone roles from cover art ---------- */
+  /* ---------- Color: palette source roles from manual seed or cover art ---------- */
   --color-primary: rgb(255 179 173);
   --color-on-primary: rgb(102 6 12);
   --color-primary-container: rgb(134 32 32);
@@ -142,8 +154,10 @@
   --color-primary-tonal-85: color-mix(in oklch, var(--color-primary) 85%, transparent);
   --color-primary-text-soft: color-mix(in oklch, var(--color-primary) 48%, var(--text-soft));
 
-  /* SPlayer-compatible Naive provider bridge. Runtime settings update these
-     variables from customAppearance.ts; CSS defaults keep first paint stable. */
+  /* SPlayer-compatible Naive provider adapter. customAppearance.ts only
+     toggles data-theme-global-color; these variables derive from the palette
+     and semantic layers in CSS. Do not use --naive-* as a new app color
+     source in feature CSS. */
   --naive-primary-color: var(--splayer-primary);
   --naive-primary-color-hover: color-mix(in srgb, var(--splayer-primary) 78%, transparent);
   --naive-primary-color-pressed: color-mix(in srgb, var(--splayer-primary) 26%, transparent);
@@ -288,6 +302,53 @@
   --z-modal-popover: 70;
 }
 
+[data-theme-global-color="true"] {
+  --surface-container-opaque-dynamic: var(--splayer-surface-container);
+  --floating-surface-opaque-dynamic: var(--splayer-surface-container);
+  --player-bar-surface-opaque-dynamic: var(--splayer-surface-container);
+  --naive-text-color-1: var(--splayer-primary);
+  --naive-text-color-2: color-mix(in srgb, var(--splayer-primary) 82%, transparent);
+  --naive-text-color-3: color-mix(in srgb, var(--splayer-primary) 52%, transparent);
+  --naive-text-color-disabled: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
+  --naive-placeholder-color-disabled: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
+  --naive-icon-color-hover: color-mix(in srgb, var(--splayer-primary) 47.5%, transparent);
+  --naive-icon-color-disabled: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
+  --naive-close-icon-color: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
+  --naive-hover-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-border-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-card-color: var(--splayer-surface-container);
+  --naive-tag-color: var(--splayer-surface-container);
+  --naive-modal-color: var(--splayer-surface-container);
+  --naive-popover-color: var(--splayer-surface-container);
+  --naive-button-color-2: color-mix(in srgb, var(--splayer-primary) 8%, transparent);
+  --naive-button-color-2-hover: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
+  --naive-button-color-2-pressed: color-mix(in srgb, var(--splayer-primary) 8%, transparent);
+  --naive-button-text-color-hover: color-mix(in srgb, var(--splayer-primary) 78%, transparent);
+  --naive-button-text-color-focus: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
+  --naive-button-color-primary: color-mix(in srgb, var(--splayer-primary) 90%, transparent);
+  --naive-button-color-hover-primary: var(--splayer-primary);
+  --naive-button-color-pressed-primary: color-mix(in srgb, var(--splayer-primary) 80%, transparent);
+  --naive-button-color-focus-primary: var(--splayer-primary);
+  --naive-switch-rail-color-active: color-mix(in srgb, var(--splayer-primary) 80%, transparent);
+  --naive-input-color: color-mix(in srgb, var(--splayer-primary) 10%, transparent);
+  --naive-input-color-focus: var(--splayer-surface-container);
+  --naive-input-placeholder-color: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
+  --naive-input-border: 1px solid color-mix(in srgb, var(--splayer-primary) 10%, transparent);
+  --naive-input-clear-color: color-mix(in srgb, var(--splayer-primary) 38%, transparent);
+  --naive-input-clear-color-hover: color-mix(in srgb, var(--splayer-primary) 48%, transparent);
+  --naive-input-clear-color-pressed: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
+  --naive-empty-text-color: color-mix(in srgb, var(--splayer-primary) 38%, transparent);
+  --naive-divider-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-dropdown-divider-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-layout-sider-border-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-drawer-header-border-bottom: 1px solid color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-drawer-footer-border-top: 1px solid color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-menu-divider-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
+  --naive-progress-rail-color: color-mix(in srgb, var(--splayer-primary) 16%, transparent);
+  --naive-tabs-color-segment: color-mix(in srgb, var(--splayer-primary) 8%, transparent);
+  --naive-tabs-tab-color-segment: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
+}
+
 /* ---------- Appearance modes and centralized backdrop registry ---------- */
 :root {
   --surface-backdrop-filter: blur(20px);
@@ -380,6 +441,8 @@
   --surface-2: var(--surface-2-base);
   --surface-3: var(--surface-3-base);
   --surface-4: var(--surface-4-base);
+  --surface-container-opaque-default: var(--surface-2-base);
+  --floating-surface-opaque-default: var(--surface-2-base);
   --surface-container-default: oklch(0.99 0.002 280 / 0.92);
   --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
   --player-bar-surface-default: rgb(255 255 255);
@@ -490,9 +553,10 @@
   --surface-1: var(--surface-1-soft);
   --surface-2: color-mix(in oklch, var(--surface-2-soft) 88%, var(--surface-2-base));
   --surface-3: color-mix(in oklch, var(--surface-3-soft) 88%, var(--surface-3-base));
-  --surface-container: color-mix(in oklch, var(--surface-container-dynamic, var(--surface-container-default)) 82%, transparent);
-  --player-bar-surface: var(--surface-container);
-  --floating-surface: color-mix(in oklch, var(--floating-surface-dynamic, var(--surface-2)) 88%, transparent);
+  /* Background blur belongs to the backdrop layer, not menus or modal shells. */
+  --surface-container: var(--surface-container-opaque-dynamic, var(--surface-container-opaque-default));
+  --player-bar-surface: var(--player-bar-surface-opaque-dynamic, var(--player-bar-surface-default));
+  --floating-surface: var(--floating-surface-opaque-dynamic, var(--floating-surface-opaque-default));
 }
 
 [data-appearance-mode="cover-immersive"] {
