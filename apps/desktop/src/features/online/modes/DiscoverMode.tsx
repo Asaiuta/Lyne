@@ -15,15 +15,11 @@ import {
   ALL_PLAYLIST_CATEGORY,
   DISCOVER_ARTIST_AREAS,
   DISCOVER_ARTIST_INITIALS,
-  DISCOVER_MV_AREAS,
-  DISCOVER_MV_ORDERS,
-  DISCOVER_MV_TYPES,
   DISCOVER_NEW_AREAS,
   DISCOVER_PAGE_LIMIT,
   safeLoadDiscover
 } from "../shared/parsers";
 import type { PlaybackController } from "../shared/playback";
-import { parseNcmMvAllCards } from "../searchParsers";
 import type {
   DiscoverNewKind,
   DiscoverPlaylistKind,
@@ -38,20 +34,13 @@ import { useDetailNavigation } from "../shared/useDetailNavigation";
 import { createPagedDiscoverCards } from "../shared/usePagedDiscoverCards";
 import {
   DiscoverArtistShowcase,
-  DiscoverMvShowcase,
   DiscoverNewShowcase,
   DiscoverPlaylistShowcase,
   DiscoverToplistShowcase
 } from "./discoverShowcases";
-import { mvAll } from "../../../shared/api/ncm/video";
+import { DISCOVER_TABS, normalizeDiscoverTab } from "../../../shared/ui/navigation";
 
 const api = createApiClient();
-
-const SPLAYER_DISCOVER_TABS = ["playlists", "toplists", "artists", "new"] as const;
-type SplayerDiscoverTab = typeof SPLAYER_DISCOVER_TABS[number];
-
-const isSplayerDiscoverTab = (tab: string | undefined): tab is SplayerDiscoverTab =>
-  tab !== undefined && (SPLAYER_DISCOVER_TABS as readonly string[]).includes(tab);
 
 const toFeedCardItem = (item: DiscoverCardItem): FeedCardItem => ({
   id: item.id,
@@ -95,9 +84,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
   const [discoverArtistAreaIndex, setDiscoverArtistAreaIndex] = createSignal<number>(0);
   const [discoverNewKind, setDiscoverNewKind] = createSignal<DiscoverNewKind>("albums");
   const [discoverNewAreaIndex, setDiscoverNewAreaIndex] = createSignal<number>(0);
-  const [discoverMvAreaIndex, setDiscoverMvAreaIndex] = createSignal<number>(0);
-  const [discoverMvTypeIndex, setDiscoverMvTypeIndex] = createSignal<number>(0);
-  const [discoverMvOrderIndex, setDiscoverMvOrderIndex] = createSignal<number>(0);
 
   const [catName, setCatName] = createSignal(ALL_PLAYLIST_CATEGORY);
   const [catModalOpen, setCatModalOpen] = createSignal(false);
@@ -125,15 +111,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
   );
   const selectedNewArea = createMemo(
     () => DISCOVER_NEW_AREAS[discoverNewAreaIndex()] ?? DISCOVER_NEW_AREAS[0]
-  );
-  const selectedMvArea = createMemo(
-    () => DISCOVER_MV_AREAS[discoverMvAreaIndex()] ?? DISCOVER_MV_AREAS[0]
-  );
-  const selectedMvType = createMemo(
-    () => DISCOVER_MV_TYPES[discoverMvTypeIndex()] ?? DISCOVER_MV_TYPES[0]
-  );
-  const selectedMvOrder = createMemo(
-    () => DISCOVER_MV_ORDERS[discoverMvOrderIndex()] ?? DISCOVER_MV_ORDERS[0]
   );
 
   const playlistCards = createPagedDiscoverCards(
@@ -187,37 +164,14 @@ export function DiscoverMode(props: DiscoverModeProps) {
     }
   );
 
-  const mvCards = createPagedDiscoverCards(
-    async ({ offset }) => {
-      const payload = await mvAll({
-        area: selectedMvArea().value,
-        type: selectedMvType().value,
-        order: selectedMvOrder().value,
-        limit: DISCOVER_PAGE_LIMIT,
-        offset
-      });
-      const items = parseNcmMvAllCards(payload);
-      return {
-        items,
-        hasMore: items.length >= DISCOVER_PAGE_LIMIT
-      };
-    },
-    {
-      pageSize: DISCOVER_PAGE_LIMIT,
-      onError: (error) => console.warn("[NeteasePage] discover MVs fetch failed", error)
-    }
-  );
-
   const shouldShowPlaylistCards = () => discoverTab() === "playlists";
   const shouldShowAlbumCards = () => discoverTab() === "new" && discoverNewKind() === "albums";
   const shouldShowArtistCards = () => discoverTab() === "artists";
-  const shouldShowMvCards = () => discoverTab() === "mvs";
 
   createEffect(() => {
     if (shouldShowPlaylistCards()) void playlistCards.ensureLoaded();
     if (shouldShowAlbumCards()) void albumCards.ensureLoaded();
     if (shouldShowArtistCards()) void artistCards.ensureLoaded();
-    if (shouldShowMvCards()) void mvCards.ensureLoaded();
   });
 
   createEffect(on(
@@ -240,15 +194,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
     () => {
       if (!artistCards.hasLoaded() && !shouldShowArtistCards()) return;
       void artistCards.reset();
-    },
-    { defer: true }
-  ));
-
-  createEffect(on(
-    () => [selectedMvArea().value, selectedMvType().value, selectedMvOrder().value] as const,
-    () => {
-      if (!mvCards.hasLoaded() && !shouldShowMvCards()) return;
-      void mvCards.reset();
     },
     { defer: true }
   ));
@@ -279,23 +224,23 @@ export function DiscoverMode(props: DiscoverModeProps) {
       () => props.discoverTabRequest?.version,
       (version) => {
         if (version === undefined || version === 0) return;
-        const tab = props.discoverTabRequest?.tab;
-        if (isSplayerDiscoverTab(tab)) {
-          setDiscoverTab(tab);
-        } else if (tab) {
-          setDiscoverTab("playlists");
-        }
+        setDiscoverTab(normalizeDiscoverTab(props.discoverTabRequest?.tab));
       }
     )
   );
 
-  const discoverTabs = createMemo(() => [
-    { value: "playlists", label: t("ncm.discover.tab.playlists") },
-    { value: "toplists", label: t("ncm.discover.tab.toplists") },
-    { value: "artists", label: t("ncm.discover.tab.artists") },
-    { value: "new", label: t("ncm.discover.tab.new") },
-    { value: "mvs", label: t("ncm.discover.tab.mvs") }
-  ]);
+  const discoverTabLabel = (tab: DiscoverTab) => {
+    switch (tab) {
+      case "playlists": return t("ncm.discover.tab.playlists");
+      case "toplists": return t("ncm.discover.tab.toplists");
+      case "artists": return t("ncm.discover.tab.artists");
+      case "new": return t("ncm.discover.tab.new");
+      default: { const _exhaustive: never = tab; return _exhaustive; }
+    }
+  };
+  const discoverTabs = createMemo(() =>
+    DISCOVER_TABS.map((tab) => ({ value: tab, label: discoverTabLabel(tab) }))
+  );
   const discoverSectionTitle = createMemo(() => {
     const tab = discoverTab();
     switch (tab) {
@@ -303,7 +248,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
       case "toplists": return t("ncm.discover.section.toplists");
       case "artists": return t("ncm.discover.section.artists");
       case "new": return t("ncm.discover.section.new");
-      case "mvs": return t("ncm.discover.section.mvs");
       default: { const _exhaustive: never = tab; return _exhaustive; }
     }
   });
@@ -314,7 +258,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
       case "toplists": return t("ncm.discover.subtitle.toplists");
       case "artists": return t("ncm.discover.subtitle.artists");
       case "new": return t("ncm.discover.subtitle.new");
-      case "mvs": return t("ncm.discover.subtitle.mvs");
       default: { const _exhaustive: never = tab; return _exhaustive; }
     }
   });
@@ -391,7 +334,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
           tabs={
             <SegmentedTabs
               value={discoverTab()}
-              onChange={(next) => setDiscoverTabAndPersist(next as DiscoverTab)}
+              onChange={(next) => setDiscoverTabAndPersist(normalizeDiscoverTab(next))}
               items={discoverTabs()}
               ariaLabel={t("ncm.discover.tabs.aria")}
             />
@@ -543,26 +486,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 onLoadMoreAlbums={() => { void albumCards.loadMore(); }}
                 onLoadAlbum={(album) => props.onNavigateToAlbumDetail?.(toFeedCardItem(album))}
                 playback={props.playback}
-              />
-            </Show>
-            <Show when={discoverTab() === "mvs"}>
-              <DiscoverMvShowcase
-                mvAreas={DISCOVER_MV_AREAS}
-                mvTypes={DISCOVER_MV_TYPES}
-                mvOrders={DISCOVER_MV_ORDERS}
-                discoverMvAreaIndex={discoverMvAreaIndex()}
-                setDiscoverMvAreaIndex={setDiscoverMvAreaIndex}
-                discoverMvTypeIndex={discoverMvTypeIndex()}
-                setDiscoverMvTypeIndex={setDiscoverMvTypeIndex}
-                discoverMvOrderIndex={discoverMvOrderIndex()}
-                setDiscoverMvOrderIndex={setDiscoverMvOrderIndex}
-                discoverSectionTitle={discoverSectionTitle()}
-                discoverSectionSubtitle={discoverSectionSubtitle()}
-                allVideos={mvCards.items().map(toFeedCardItem)}
-                isLoadingVideos={mvCards.isLoading()}
-                hasMoreVideos={mvCards.hasMore()}
-                onLoadVideo={(video) => props.onNavigateToVideoDetail?.(video)}
-                onLoadMore={() => { void mvCards.loadMore(); }}
               />
             </Show>
           </div>

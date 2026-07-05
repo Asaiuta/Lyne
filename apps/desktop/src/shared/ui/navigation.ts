@@ -28,6 +28,12 @@ export const PLAYLIST_PAGES = ["created-playlists", "collected-playlists"] as co
 
 export type PlaylistPage = (typeof PLAYLIST_PAGES)[number];
 
+export const DISCOVER_TABS = ["playlists", "toplists", "artists", "new"] as const;
+
+export type DiscoverTab = (typeof DISCOVER_TABS)[number];
+
+export const DEFAULT_DISCOVER_TAB: DiscoverTab = "playlists";
+
 export const SEARCH_ENABLED_PAGES = ["recommend", "discover", "search", "library"] as const;
 
 export const PLACEHOLDER_PAGES = [] as const satisfies readonly ActivePage[];
@@ -57,6 +63,12 @@ export const LOCAL_FALLBACK_PAGE: ActivePage = "library";
 
 export const isPlaylistPage = (page: ActivePage): page is PlaylistPage =>
   (PLAYLIST_PAGES as readonly ActivePage[]).includes(page);
+
+export const isDiscoverTab = (tab: string | undefined): tab is DiscoverTab =>
+  tab !== undefined && (DISCOVER_TABS as readonly string[]).includes(tab);
+
+export const normalizeDiscoverTab = (tab: unknown): DiscoverTab =>
+  typeof tab === "string" && isDiscoverTab(tab) ? tab : DEFAULT_DISCOVER_TAB;
 
 export const isSearchEnabledPage = (page: ActivePage): boolean =>
   (SEARCH_ENABLED_PAGES as readonly ActivePage[]).includes(page);

@@ -10,7 +10,6 @@ import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { getNcmLikedPlaylistCached } from "../ncmPlaylistSummaryCache";
 import {
   createErrorMessageReader,
-  createLoginStatusText,
   type FeedbackSetter
 } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
@@ -22,7 +21,6 @@ const api = createApiClient();
 
 export interface LikedSongsModeProps extends OnlineDetailViewReporterProps {
   loginProfile: Accessor<NcmProfile | null>;
-  isCheckingLogin: Accessor<boolean>;
   isLoginBusy: Accessor<boolean>;
   onBeginLogin: () => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
@@ -46,7 +44,6 @@ export function LikedSongsMode(props: LikedSongsModeProps) {
 
   const readErrorMessage = createErrorMessageReader(t);
 
-  const loginStatusText = createLoginStatusText(t, props.isCheckingLogin, props.loginProfile);
   const hasDetailView = () => detailNav.selectedPlaylist() !== null;
 
   createDetailViewReporter(hasDetailView, props.onDetailViewChange);
@@ -106,10 +103,7 @@ export function LikedSongsMode(props: LikedSongsModeProps) {
         <PageHeader
           title={t("ncm.liked.title")}
           meta={
-            <>
-              <span class="page-header-meta-line">{t("ncm.liked.description")}</span>
-              <span class="page-header-meta-line">{loginStatusText()}</span>
-            </>
+            <span class="page-header-meta-line">{t("ncm.liked.description")}</span>
           }
           actions={
             <button

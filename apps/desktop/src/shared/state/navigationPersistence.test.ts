@@ -78,10 +78,28 @@ test("normalizeNavigationStateSnapshot restores search without playlist selectio
     {
       activePage: "search",
       selectedPlaylistId: null,
-      discoverTab: "mvs",
+      discoverTab: "playlists",
       likedCollectionTab: "artists"
     }
   );
+});
+
+test("legacy Discover MV tab normalizes to the default visible tab", () => {
+  const runtime = createMutableRuntime({
+    [NAVIGATION_STATE_STORAGE_KEY]: JSON.stringify({
+      activePage: "discover",
+      selectedPlaylistId: null,
+      discoverTab: "mvs",
+      likedCollectionTab: "playlists"
+    })
+  });
+
+  assert.deepEqual(readNavigationStateSnapshot({ runtime }), {
+    activePage: "discover",
+    selectedPlaylistId: null,
+    discoverTab: "playlists",
+    likedCollectionTab: "playlists"
+  });
 });
 
 test("detail pages are not restored without their navigation request payload", () => {
@@ -143,7 +161,7 @@ test("persistNavigationStateSnapshot writes normalized state", () => {
       {
         activePage: "library",
         selectedPlaylistId: 5,
-        discoverTab: "mvs",
+        discoverTab: "new",
         likedCollectionTab: "playlists"
       },
       { runtime }
@@ -154,7 +172,7 @@ test("persistNavigationStateSnapshot writes normalized state", () => {
   assert.deepEqual(JSON.parse(runtime.values[NAVIGATION_STATE_STORAGE_KEY] ?? "null"), {
     activePage: "library",
     selectedPlaylistId: null,
-    discoverTab: "mvs",
+    discoverTab: "new",
     likedCollectionTab: "playlists"
   });
 });

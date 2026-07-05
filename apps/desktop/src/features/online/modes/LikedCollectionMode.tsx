@@ -36,7 +36,6 @@ import {
 } from "../ncmPlaylistSummaryCache";
 import {
   createErrorMessageReader,
-  createLoginStatusText,
   type FeedbackSetter
 } from "../shared/feedback";
 import type { FeedCardItem, NcmProfile, OnlineTrackItem, RadioSubscribeEvent } from "../shared/types";
@@ -55,10 +54,8 @@ interface CollectionStat {
 
 interface LikedCollectionModeProps {
   loginProfile: Accessor<NcmProfile | null>;
-  isCheckingLogin: Accessor<boolean>;
   isLoginBusy: Accessor<boolean>;
   onBeginLogin: () => void;
-  onLogout: () => void | Promise<void>;
   tabRequest?: { tab: "playlists" | "albums" | "artists"; version: number };
   onTabChange?: (tab: "playlists" | "albums" | "artists") => void;
   radioSubscribeEvent?: RadioSubscribeEvent | null;
@@ -277,8 +274,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
       icon: IconVolumeHigh
     }
   ]);
-
-  const loginStatusText = createLoginStatusText(t, props.isCheckingLogin, props.loginProfile);
 
   createEffect(on(props.loginProfile, (profile, prev) => {
     if (prev !== undefined && prev !== null && profile === null) {
@@ -503,7 +498,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
           <header class="liked-collection-head">
             <div class="liked-collection-title">
               <NaiveH1>{t("ncm.collection.title")}</NaiveH1>
-              <div class="liked-collection-status" aria-label={loginStatusText()}>
+              <div class="liked-collection-status">
                 <For each={stats()}>
                   {(item) => {
                     const Icon = item.icon;
@@ -521,19 +516,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
                 </For>
               </div>
             </div>
-            <Show
-              when={props.loginProfile() === null}
-              fallback={
-                <button
-                  type="button"
-                  class="ghost-button page-action"
-                  onClick={() => void props.onLogout()}
-                  disabled={props.isLoginBusy()}
-                >
-                  {t("ncm.login.action.logout")}
-                </button>
-              }
-            >
+            <Show when={props.loginProfile() === null}>
               <button
                 type="button"
                 class="primary-button page-action"

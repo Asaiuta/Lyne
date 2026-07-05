@@ -1,5 +1,6 @@
 import type { TranslationKey } from "../../../shared/i18n";
 import type { MediaListItem } from "../../../shared/media/mediaListItem";
+export type { DiscoverTab } from "../../../shared/ui/navigation";
 
 export type NeteasePageMode =
   | "recommend"
@@ -15,7 +16,6 @@ export type NeteasePageMode =
   | "created-playlists"
   | "collected-playlists";
 export type SearchTab = "songs" | "playlists" | "artists" | "albums" | "videos" | "radios";
-export type DiscoverTab = "playlists" | "toplists" | "artists" | "new" | "mvs";
 export type DiscoverPlaylistKind = "normal" | "hq";
 export type DiscoverNewKind = "albums" | "songs";
 

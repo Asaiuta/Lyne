@@ -1,7 +1,6 @@
 import type { Setter } from "solid-js";
-import type { Accessor } from "solid-js";
 import type { TranslationKey, TranslationParams } from "../../../shared/i18n";
-import type { Feedback, NcmProfile } from "./types";
+import type { Feedback } from "./types";
 
 export type Translator = (key: TranslationKey, params?: TranslationParams) => string;
 
@@ -19,21 +18,4 @@ export const createFeedbackSetter = (setFeedback: Setter<Feedback>): FeedbackSet
 export const createErrorMessageReader = (t: Translator) => {
   return (error: unknown): string =>
     error instanceof Error ? error.message : t("common.error.requestFailed");
-};
-
-export const createLoginStatusText = (
-  t: Translator,
-  isCheckingLogin: Accessor<boolean>,
-  loginProfile: Accessor<NcmProfile | null>
-) => {
-  return (): string => {
-    if (isCheckingLogin()) return t("ncm.login.status.checking");
-    const profile = loginProfile();
-    if (profile) {
-      return t("ncm.login.status.loggedIn", {
-        name: profile.nickname ?? profile.userId
-      });
-    }
-    return t("ncm.login.status.loggedOut");
-  };
 };

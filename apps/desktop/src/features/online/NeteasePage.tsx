@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createEffect, createMemo, createSignal, on, onMount } from "solid-js";
+import { Match, Switch, createEffect, createMemo, createSignal, on } from "solid-js";
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
@@ -7,7 +7,6 @@ import { usePlayback } from "../../app/PlaybackContext";
 import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "./shared/types";
 import {
   createErrorMessageReader,
-  createLoginStatusText,
   createFeedbackSetter,
   createInitialFeedback
 } from "./shared/feedback";
@@ -27,6 +26,7 @@ import { OnlineArtistDetailRoute } from "./details/OnlineArtistDetailRoute";
 import { OnlineDailySongsRoute } from "./details/OnlineDailySongsRoute";
 import { OnlineStandalonePlaylistDetailRoute } from "./details/OnlineStandalonePlaylistDetailRoute";
 import { OnlineVideoDetailRoute } from "./details/OnlineVideoDetailRoute";
+import type { DiscoverTab } from "../../shared/ui/navigation";
 
 const api = createApiClient();
 
@@ -37,7 +37,7 @@ interface NeteasePageProps {
   onNavigate?: (page: "recommend" | "discover" | "search" | "radio") => void;
   onNavigateToRecommend?: () => void;
   onNavigateToDiscover?: (tab: string) => void;
-  onDiscoverTabChange?: (tab: string) => void;
+  onDiscoverTabChange?: (tab: DiscoverTab) => void;
   onNavigateToDailySongs?: () => void;
   onNavigateToArtistDetail?: (artist: FeedCardItem) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
@@ -48,7 +48,7 @@ interface NeteasePageProps {
   onNavigateToVideoDetail?: (video: FeedCardItem) => void;
   dailySongsRequest?: { version: number };
   videoDetailRequest?: { video: FeedCardItem | null; version: number };
-  discoverTabRequest?: { tab: string; version: number };
+  discoverTabRequest?: { tab: DiscoverTab; version: number };
   likedCollectionTabRequest?: { tab: "playlists" | "albums" | "artists"; version: number };
   onLikedCollectionTabChange?: (tab: "playlists" | "albums" | "artists") => void;
   artistDetailRequest?: { artist: FeedCardItem | null; version: number };
@@ -64,10 +64,8 @@ export function NeteasePage(props: NeteasePageProps) {
   const playbackContext = usePlayback();
   const { query: globalQuery, submitNonce } = useUISearch();
 
-  const [isCheckingLogin, setIsCheckingLogin] = createSignal(false);
-  const [isLoginBusy, setIsLoginBusy] = createSignal(false);
-  const [hasDetailView, setHasDetailView] = createSignal(false);
-  const [feedback, setFeedback] = createSignal<Feedback>(createInitialFeedback(t));
+  const [isLoginBusy] = createSignal<boolean>(false);
+  const [, setFeedback] = createSignal<Feedback>(createInitialFeedback(t));
 
   const loginProfile = createMemo<NcmProfile | null>(() => {
     const acct = accountStore.activeAccount();
@@ -92,53 +90,7 @@ export function NeteasePage(props: NeteasePageProps) {
     readErrorMessage
   });
 
-  const refreshLoginStatus = async () => {
-    setIsCheckingLogin(true);
-    try {
-      const profile = loginProfile();
-      if (profile) {
-        setRawFeedback(
-          "success",
-          t("ncm.feedback.loggedIn", { name: profile.nickname ?? profile.userId })
-        );
-      }
-    } finally {
-      setIsCheckingLogin(false);
-    }
-  };
-
-  onMount(() => {
-    void refreshLoginStatus();
-  });
-
-  const handleLogout = async () => {
-    setIsLoginBusy(true);
-    try {
-      await accountStore.logoutActive();
-      props.onSelectedPlaylistChange?.(null);
-      setRawFeedback("success", t("ncm.feedback.loggedOut"));
-    } catch (error) {
-      setRawFeedback("error", readErrorMessage(error));
-    } finally {
-      setIsLoginBusy(false);
-    }
-  };
-
-  const loginStatusText = createLoginStatusText(t, isCheckingLogin, loginProfile);
-
   const isDiscoverMode = () => props.mode === "discover";
-  const isStandaloneDetailMode = () =>
-    props.mode === "album-detail" ||
-    props.mode === "playlist-detail" ||
-    props.mode === "daily-songs" ||
-    props.mode === "artist-detail" ||
-    props.mode === "video-detail";
-  const shouldShowFeedbackCard = createMemo<boolean>(() =>
-    !isStandaloneDetailMode() &&
-    !hasDetailView() &&
-    Boolean(feedback().message) &&
-    feedback().message !== t("ncm.feedback.initial")
-  );
 
   const handlePlaylistSubscribeChange = (
     playlist: OnlinePlaylistSummary,
@@ -148,11 +100,6 @@ export function NeteasePage(props: NeteasePageProps) {
     if (!profile) return;
     applyNcmPlaylistSubscribeCacheUpdate(profile.userId, playlist, subscribed);
   };
-
-  createEffect(on(
-    () => props.mode,
-    () => setHasDetailView(false)
-  ));
 
   createEffect(
     on(
@@ -183,7 +130,6 @@ export function NeteasePage(props: NeteasePageProps) {
             onNavigateToVideoDetail={props.onNavigateToVideoDetail}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
-            onDetailViewChange={setHasDetailView}
           />
         </Match>
         <Match when={props.mode === "discover"}>
@@ -202,7 +148,6 @@ export function NeteasePage(props: NeteasePageProps) {
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
-            onDetailViewChange={setHasDetailView}
           />
         </Match>
         <Match when={props.mode === "search"}>
@@ -219,7 +164,6 @@ export function NeteasePage(props: NeteasePageProps) {
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
-            onDetailViewChange={setHasDetailView}
           />
         </Match>
         <Match when={props.mode === "daily-songs"}>
@@ -273,23 +217,19 @@ export function NeteasePage(props: NeteasePageProps) {
         <Match when={props.mode === "liked-songs"}>
           <LikedSongsMode
             loginProfile={loginProfile}
-            isCheckingLogin={isCheckingLogin}
             isLoginBusy={isLoginBusy}
             onBeginLogin={props.onRequireNcmLogin}
             onNavigateToSongWiki={props.onNavigateToSongWiki}
             onNavigateToMv={props.onNavigateToMv}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
-            onDetailViewChange={setHasDetailView}
           />
         </Match>
         <Match when={props.mode === "liked"}>
           <LikedCollectionMode
             loginProfile={loginProfile}
-            isCheckingLogin={isCheckingLogin}
             isLoginBusy={isLoginBusy}
             onBeginLogin={props.onRequireNcmLogin}
-            onLogout={handleLogout}
             tabRequest={props.likedCollectionTabRequest}
             onTabChange={props.onLikedCollectionTabChange}
             setFeedback={setRawFeedback}
@@ -308,10 +248,8 @@ export function NeteasePage(props: NeteasePageProps) {
           <UserPlaylistsMode
             kind={props.mode as "created-playlists" | "collected-playlists"}
             loginProfile={loginProfile}
-            isCheckingLogin={isCheckingLogin}
             isLoginBusy={isLoginBusy}
             onBeginLogin={props.onRequireNcmLogin}
-            onLogout={handleLogout}
             selectedPlaylistId={props.selectedPlaylistId ?? null}
             onSelectedPlaylistChange={props.onSelectedPlaylistChange}
             onStaleSelectedPlaylist={() => {
@@ -323,20 +261,9 @@ export function NeteasePage(props: NeteasePageProps) {
             onNavigateToPlaylistDetail={props.onNavigateToPlaylistDetail}
             setFeedback={setRawFeedback}
             playback={onlinePlayback}
-            onDetailViewChange={setHasDetailView}
           />
         </Match>
       </Switch>
-
-      <Show when={shouldShowFeedbackCard()}>
-        <section class="online-login-card">
-          <div class="status-stack">
-            <strong>{t("ncm.login.title")}</strong>
-            <span class="status-line">{loginStatusText()}</span>
-            <span class={feedback().tone === "error" ? "status-error" : "status-line"}>{feedback().message}</span>
-          </div>
-        </section>
-      </Show>
 
     </div>
   );

@@ -5,10 +5,10 @@ import {
   persistNavigationStateSnapshot,
   readNavigationStateSnapshot
 } from "../shared/state/navigationPersistence";
-import { isPlaylistPage, type ActivePage } from "../shared/ui/navigation";
+import { isPlaylistPage, normalizeDiscoverTab, type ActivePage, type DiscoverTab } from "../shared/ui/navigation";
 
 export interface DiscoverTabRequest {
-  tab: string;
+  tab: DiscoverTab;
   version: number;
 }
 
@@ -206,12 +206,12 @@ export function useNavigationController(): NavigationController {
   };
 
   const handleNavigateToDiscover = (tab: string) => {
-    setDiscoverTabRequest((prev) => ({ tab, version: prev.version + 1 }));
+    setDiscoverTabRequest((prev) => ({ tab: normalizeDiscoverTab(tab), version: prev.version + 1 }));
     pushNavigation("discover");
   };
 
   const handleDiscoverTabChange = (tab: string) => {
-    setDiscoverTabRequest((prev) => ({ tab, version: prev.version }));
+    setDiscoverTabRequest((prev) => ({ tab: normalizeDiscoverTab(tab), version: prev.version }));
   };
 
   const handleNavigateToDailySongs = () => {

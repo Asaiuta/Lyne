@@ -1,5 +1,5 @@
-import type { ActivePage } from "../ui/navigation";
-import { ACTIVE_PAGES, isPlaylistPage } from "../ui/navigation";
+import type { ActivePage, DiscoverTab } from "../ui/navigation";
+import { ACTIVE_PAGES, DEFAULT_DISCOVER_TAB, isPlaylistPage, normalizeDiscoverTab } from "../ui/navigation";
 import {
   browserUISettingsRuntime,
   persistUISetting,
@@ -14,7 +14,7 @@ export type PersistedLikedCollectionTab = "playlists" | "albums" | "artists";
 export interface NavigationStateSnapshot {
   readonly activePage: ActivePage;
   readonly selectedPlaylistId: number | null;
-  readonly discoverTab: string;
+  readonly discoverTab: DiscoverTab;
   readonly likedCollectionTab: PersistedLikedCollectionTab;
 }
 
@@ -29,7 +29,7 @@ export interface NavigationPersistenceRuntime {
 const DEFAULT_NAVIGATION_STATE: NavigationStateSnapshot = {
   activePage: "recommend",
   selectedPlaylistId: null,
-  discoverTab: "playlists",
+  discoverTab: DEFAULT_DISCOVER_TAB,
   likedCollectionTab: "playlists"
 };
 
@@ -92,10 +92,7 @@ export const normalizeNavigationStateSnapshot = (
     isPlaylistPage(activePage)
       ? value.selectedPlaylistId
       : null;
-  const discoverTab =
-    typeof value.discoverTab === "string" && value.discoverTab.trim().length > 0
-      ? value.discoverTab
-      : DEFAULT_NAVIGATION_STATE.discoverTab;
+  const discoverTab = normalizeDiscoverTab(value.discoverTab);
   const likedCollectionTab = VALID_LIKED_COLLECTION_TABS.has(
     value.likedCollectionTab as PersistedLikedCollectionTab
   )

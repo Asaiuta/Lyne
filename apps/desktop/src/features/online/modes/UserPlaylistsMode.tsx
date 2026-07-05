@@ -16,7 +16,6 @@ import {
 } from "../ncmPlaylistSummaryCache";
 import {
   createErrorMessageReader,
-  createLoginStatusText,
   type FeedbackSetter
 } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
@@ -30,10 +29,8 @@ const api = createApiClient();
 export interface UserPlaylistsModeProps extends OnlineDetailViewReporterProps {
   kind: UserPlaylistsKind;
   loginProfile: Accessor<NcmProfile | null>;
-  isCheckingLogin: Accessor<boolean>;
   isLoginBusy: Accessor<boolean>;
   onBeginLogin: () => void;
-  onLogout: () => void | Promise<void>;
   selectedPlaylistId: number | null;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   onStaleSelectedPlaylist?: () => void;
@@ -57,8 +54,6 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
       : t("ncm.title.collectedPlaylists");
 
   const pageSubtitle = () => t("ncm.subtitle.playlists");
-
-  const loginStatusText = createLoginStatusText(t, props.isCheckingLogin, props.loginProfile);
 
   const readErrorMessage = createErrorMessageReader(t);
   createEffect(on(props.loginProfile, (profile, prev) => {
@@ -119,13 +114,10 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
       <PageHeader
         title={pageTitle()}
         meta={
-          <>
-            <span class="page-header-meta-line">{pageSubtitle()}</span>
-            <span class="page-header-meta-line">{loginStatusText()}</span>
-          </>
+          <span class="page-header-meta-line">{pageSubtitle()}</span>
         }
         actions={
-          props.loginProfile() === null ? (
+          <Show when={props.loginProfile() === null}>
             <button
               type="button"
               class="primary-button page-action"
@@ -135,16 +127,7 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
               <IconPlayCircle />
               {t("ncm.login.action.qr")}
             </button>
-          ) : (
-            <button
-              type="button"
-              class="ghost-button page-action"
-              onClick={() => void props.onLogout()}
-              disabled={props.isLoginBusy()}
-            >
-              {t("ncm.login.action.logout")}
-            </button>
-          )
+          </Show>
         }
       />
       <Show when={props.loginProfile() !== null} fallback={<NaiveP class="panel-note">{t("ncm.empty.loginRequired")}</NaiveP>}>
