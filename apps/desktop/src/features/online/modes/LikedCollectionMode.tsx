@@ -31,12 +31,9 @@ import {
   type UserPlaylistGroups
 } from "../ncmPlaylistSummary";
 import {
-  applyNcmPlaylistSubscribeCacheUpdate,
   loadNcmUserPlaylistGroupsCached,
   subscribeNcmUserPlaylistGroups
 } from "../ncmPlaylistSummaryCache";
-import { ArtistDetail } from "../details/ArtistDetail";
-import { VideoDetail } from "../details/VideoDetail";
 import {
   createErrorMessageReader,
   createLoginStatusText,
@@ -44,8 +41,6 @@ import {
 } from "../shared/feedback";
 import type { FeedCardItem, NcmProfile, OnlineTrackItem, RadioSubscribeEvent } from "../shared/types";
 import type { PlaybackController } from "../shared/playback";
-import { createDetailViewReporter, type OnlineDetailViewReporterProps } from "../shared/detailViewReporter";
-import { useDetailNavigation } from "../shared/useDetailNavigation";
 
 type CollectionTab = "playlists" | "albums" | "artists" | "videos" | "radios";
 type PlaylistScope = "created" | "collected";
@@ -58,7 +53,7 @@ interface CollectionStat {
   icon: Component<JSX.SvgSVGAttributes<SVGSVGElement>>;
 }
 
-interface LikedCollectionModeProps extends OnlineDetailViewReporterProps {
+interface LikedCollectionModeProps {
   loginProfile: Accessor<NcmProfile | null>;
   isCheckingLogin: Accessor<boolean>;
   isLoginBusy: Accessor<boolean>;
@@ -67,14 +62,15 @@ interface LikedCollectionModeProps extends OnlineDetailViewReporterProps {
   tabRequest?: { tab: "playlists" | "albums" | "artists"; version: number };
   onTabChange?: (tab: "playlists" | "albums" | "artists") => void;
   radioSubscribeEvent?: RadioSubscribeEvent | null;
-  onSelectedPlaylistChange?: (playlistId: number | null) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
+  onNavigateToArtistDetail?: (artist: FeedCardItem) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   onNavigateToMv?: (track: OnlineTrackItem) => void;
   onNavigateToAlbumDetail?: (album: FeedCardItem) => void;
   onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
+  onNavigateToVideoDetail?: (video: FeedCardItem) => void;
 }
 
 const api = createApiClient();
@@ -227,42 +223,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
   const [loadState, setLoadState] =
     createSignal<Record<CollectionTab, CollectionLoadState>>(emptyCollectionLoadState());
 
-  const detailNav = useDetailNavigation({
-    t,
-    loginProfile: props.loginProfile,
-    playback: props.playback,
-    setFeedback: props.setFeedback,
-    onSelectedPlaylistChange: props.onSelectedPlaylistChange,
-    onPlaylistSubscribeChange: (playlist, subscribed) => {
-      const profile = props.loginProfile();
-      if (profile) {
-        applyNcmPlaylistSubscribeCacheUpdate(profile.userId, playlist, subscribed);
-      }
-      setCollectedPlaylists((current) => {
-        if (!subscribed) {
-          return current.filter((item) => item.id !== playlist.id);
-        }
-        return current.some((item) => item.id === playlist.id) ? current : [playlist, ...current];
-      });
-    },
-    onAlbumSubscribeChange: (album, subscribed) => {
-      setCollectionAlbums((current) => {
-        if (!subscribed) {
-          return current.filter((item) => item.id !== album.id);
-        }
-        return current.some((item) => item.id === album.id) ? current : [album, ...current];
-      });
-    },
-    onArtistSubscribeChange: (artist, followed) => {
-      setCollectionArtists((current) => {
-        if (!followed) {
-          return current.filter((item) => item.id !== artist.id);
-        }
-        return current.some((item) => item.id === artist.id) ? current : [artist, ...current];
-      });
-    }
-  });
-
   const readErrorMessage = createErrorMessageReader(t);
 
   const visibleCreatedPlaylists = createMemo(() => createdPlaylists().slice(1));
@@ -330,8 +290,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
       setCollectionRadios([]);
       setSubcount({});
       setLoadState(emptyCollectionLoadState());
-      detailNav.setSelectedPlaylist(null);
-      detailNav.setPlaylistTracksState([]);
     }
   }, { defer: true }));
 
@@ -472,7 +430,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
       if (version === undefined || version === 0) return;
       const tab = props.tabRequest?.tab;
       if (tab) {
-        detailNav.clearAllDetailViews();
         setActiveTab(tab);
       }
     }
@@ -505,13 +462,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
       props.onTabChange?.(tab);
     }
   };
-
-  const hasDetailView = createMemo<boolean>(() =>
-    detailNav.selectedArtist() !== null ||
-    detailNav.selectedVideo() !== null
-  );
-
-  createDetailViewReporter(hasDetailView, props.onDetailViewChange);
 
   const renderCollectionGrid = (
     items: Accessor<FeedCardItem[]>,
@@ -549,8 +499,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
 
   return (
     <>
-      <Show when={!hasDetailView()}>
-        <section class="liked-collection">
+      <section class="liked-collection">
           <header class="liked-collection-head">
             <div class="liked-collection-title">
               <NaiveH1>{t("ncm.collection.title")}</NaiveH1>
@@ -665,7 +614,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
                 {renderCollectionGrid(
                   collectionArtists,
                   "ncm.collection.empty.artists",
-                  (item) => void detailNav.loadArtistTracks(item),
+                  (item) => props.onNavigateToArtistDetail?.(item),
                   { shape: "round" }
                 )}
               </Match>
@@ -673,7 +622,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
                 {renderCollectionGrid(
                   collectionVideos,
                   "ncm.collection.empty.videos",
-                  (item) => detailNav.enterVideo(item),
+                  (item) => props.onNavigateToVideoDetail?.(item),
                   { video: true }
                 )}
               </Match>
@@ -686,46 +635,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
               </Match>
             </Switch>
           </Show>
-        </section>
-      </Show>
-
-      <Show when={detailNav.selectedArtist() !== null}>
-        <ArtistDetail
-          artist={detailNav.selectedArtist()}
-          detail={detailNav.artistDetailInfo()}
-          tracks={detailNav.artistTracksState()}
-          isLoading={detailNav.isLoadingArtistTracks()}
-          trackOrder={detailNav.artistTrackOrder()}
-          hasMoreTracks={detailNav.artistTracksHasMore()}
-          isLoadingDetail={detailNav.isLoadingArtistDetail()}
-          isTogglingSubscribe={detailNav.isTogglingArtistSubscribe()}
-          albums={detailNav.artistAlbumsState()}
-          videos={detailNav.artistVideosState()}
-          isLoadingAlbums={detailNav.isLoadingArtistAlbums()}
-          isLoadingVideos={detailNav.isLoadingArtistVideos()}
-          hasMoreAlbums={detailNav.artistAlbumsHasMore()}
-          hasMoreVideos={detailNav.artistVideosHasMore()}
-          onLoadAlbums={() => detailNav.loadArtistAlbums()}
-          onLoadVideos={() => detailNav.loadArtistVideos()}
-          onChangeTrackOrder={(order) => detailNav.changeArtistTrackOrder(order)}
-          onLoadMoreTracks={() => detailNav.loadArtistTrackPage({ append: true })}
-          onLoadMoreAlbums={() => detailNav.loadArtistAlbums({ append: true })}
-          onLoadMoreVideos={() => detailNav.loadArtistVideos({ append: true })}
-          onSelectAlbum={(album) => props.onNavigateToAlbumDetail?.(album)}
-          onSelectVideo={(video) => detailNav.enterVideo(video)}
-          onToggleSubscribe={detailNav.toggleArtistSubscribe}
-          onBack={detailNav.exitArtist}
-          onNavigateToSongWiki={props.onNavigateToSongWiki}
-          playback={props.playback}
-        />
-      </Show>
-      <Show when={detailNav.selectedVideo() !== null}>
-        <VideoDetail
-          video={detailNav.selectedVideo()}
-          onBack={detailNav.exitVideo}
-          onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
-        />
-      </Show>
+      </section>
     </>
   );
 }

@@ -683,11 +683,15 @@
     border-radius: 25px !important;
   }
 
-  .radio-back-button {
+  .radio-category-back-button,
+  .radio-inline-back-button,
+  .radio-source-button {
     gap: 6px;
   }
 
-  .radio-back-button svg {
+  .radio-category-back-button svg,
+  .radio-inline-back-button svg,
+  .radio-source-button svg {
     width: 18px;
     height: 18px;
   }

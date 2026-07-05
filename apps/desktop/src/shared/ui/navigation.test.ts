@@ -9,7 +9,14 @@ test("online search page is searchable and online-only", () => {
 });
 
 test("detail pages are online-only but not searchable placeholders", () => {
-  for (const page of ["album-detail", "playlist-detail"] as const) {
+  for (const page of [
+    "album-detail",
+    "playlist-detail",
+    "daily-songs",
+    "artist-detail",
+    "video-detail",
+    "radio-detail"
+  ] as const) {
     assert.equal(isOnlineOnlyPage(page), true);
     assert.equal(isSearchEnabledPage(page), false);
     assert.equal(isPlaceholderPage(page), false);

@@ -71,10 +71,12 @@ export interface RadioDetailRequest {
 }
 
 export interface NeteaseRadioPageProps {
+  isDetailRoute?: boolean;
   radioDetailRequest?: RadioDetailRequest;
   loginProfile: NcmProfile | null;
   onRequireNcmLogin: () => void;
   onSubscribeChange?: (radio: FeedCardItem, subscribed: boolean) => void;
+  onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
 }
 
@@ -293,6 +295,14 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
     }
   };
 
+  const openRadioDetail = (radio: FeedCardItem) => {
+    if (props.isDetailRoute === true || !props.onNavigateToRadioDetail) {
+      void loadRadioDetail(radio);
+      return;
+    }
+    props.onNavigateToRadioDetail(radio);
+  };
+
   const toggleRadioSub = async () => {
     const radio = currentRadioDetail();
     if (radio === null || isTogglingRadioSub()) return;
@@ -376,124 +386,137 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
         when={selectedRadio()}
         fallback={
           <Show
-            when={selectedCategory()}
+            when={!props.isDetailRoute}
             fallback={
-              <>
-                <PageHeader title={t("ncm.radio.title")} meta={<span>{t("ncm.radio.meta")}</span>} />
-
-                <section class="radio-type">
-                  <Show
-                    when={categoryItems().length > 0}
-                    fallback={
-                      categories.loading ? (
-                        <RadioCategorySkeleton />
-                      ) : categoryLoadFailed() ? (
-                        <div class="panel-note status-error">{t("common.error.requestFailed")}</div>
-                      ) : (
-                        <div class="panel-note">{emptyText()}</div>
-                      )
-                    }
-                  >
-                    <div
-                      class={`radio-category-grid content-fade-in${
-                        !categoriesExpanded() && hasOverflowCategories() ? " is-collapsed" : ""
-                      }`}
-                    >
-                      <For each={categoryItems()}>
-                        {(item) => (
-                          <button type="button" class="radio-category-card radio-category-card--item" onClick={() => setSelectedCategory(item)}>
-                            <span>{item.name}</span>
-                          </button>
-                        )}
-                      </For>
-                      <Show when={hasOverflowCategories()}>
-                        <button
-                          type="button"
-                          class="radio-category-card radio-category-card--toggle"
-                          onClick={() => setCategoriesExpanded(!categoriesExpanded())}
-                        >
-                          {categoriesExpanded() ? <IconChevronUp /> : <IconChevronDown />}
-                          <span>{categoriesExpanded() ? t("ncm.radio.categories.collapse") : t("ncm.radio.categories.expand")}</span>
-                        </button>
-                      </Show>
-                    </div>
-                  </Show>
-                </section>
-
-                <section class="online-discover-section radio-rec">
-                  <div class="radio-section-title">
-                    <NaiveH2>{t("ncm.radio.section.hot")}</NaiveH2>
-                  </div>
-                  <RadioCardGrid items={hotRadios() ?? []} hiddenCover={uiSettings.hiddenCovers.radio} emptyText={emptyText()} onSelectRadio={(radio) => void loadRadioDetail(radio)} />
-                </section>
-
-                <For each={sections()}>
-                  {(section) => (
-                    <section class="online-discover-section radio-rec">
-                      <button
-                        type="button"
-                        class="radio-section-title radio-section-title--clickable"
-                        onClick={() => setSelectedCategory({ id: section.id, name: section.name })}
-                      >
-                        <NaiveH2>{section.name}</NaiveH2>
-                        <span aria-hidden="true"><IconChevronRight /></span>
-                      </button>
-                      <RadioCardGrid items={section.radios} hiddenCover={uiSettings.hiddenCovers.radio} emptyText={emptyText()} onSelectRadio={(radio) => void loadRadioDetail(radio)} />
-                    </section>
-                  )}
-                </For>
-              </>
+              <div class="panel-note">
+                {isLoadingRadioTracks() || props.radioDetailRequest?.radio
+                  ? t("ncm.radio.loading")
+                  : emptyText()}
+              </div>
             }
           >
-            {(category) => (
-              <>
-                <PageHeader
-                  title={category().name}
-                  actions={
-                    <button type="button" class="ghost-button radio-back-button" onClick={() => setSelectedCategory(null)}>
-                      <IconChevronLeft />
-                      {t("ncm.radio.back")}
-                    </button>
-                  }
-                  tabs={
-                    <div class="radio-category-tabs">
-                      <SegmentedTabs
-                        value={categoryTab()}
-                        onChange={(next) => setCategoryTab(next as RadioTab)}
-                        items={categoryTabs()}
-                        ariaLabel={t("ncm.radio.tabs.aria")}
-                      />
+            <Show
+              when={selectedCategory()}
+              fallback={
+                <>
+                  <PageHeader title={t("ncm.radio.title")} meta={<span>{t("ncm.radio.meta")}</span>} />
+
+                  <section class="radio-type">
+                    <Show
+                      when={categoryItems().length > 0}
+                      fallback={
+                        categories.loading ? (
+                          <RadioCategorySkeleton />
+                        ) : categoryLoadFailed() ? (
+                          <div class="panel-note status-error">{t("common.error.requestFailed")}</div>
+                        ) : (
+                          <div class="panel-note">{emptyText()}</div>
+                        )
+                      }
+                    >
+                      <div
+                        class={`radio-category-grid content-fade-in${
+                          !categoriesExpanded() && hasOverflowCategories() ? " is-collapsed" : ""
+                        }`}
+                      >
+                        <For each={categoryItems()}>
+                          {(item) => (
+                            <button type="button" class="radio-category-card radio-category-card--item" onClick={() => setSelectedCategory(item)}>
+                              <span>{item.name}</span>
+                            </button>
+                          )}
+                        </For>
+                        <Show when={hasOverflowCategories()}>
+                          <button
+                            type="button"
+                            class="radio-category-card radio-category-card--toggle"
+                            onClick={() => setCategoriesExpanded(!categoriesExpanded())}
+                          >
+                            {categoriesExpanded() ? <IconChevronUp /> : <IconChevronDown />}
+                            <span>{categoriesExpanded() ? t("ncm.radio.categories.collapse") : t("ncm.radio.categories.expand")}</span>
+                          </button>
+                        </Show>
+                      </div>
+                    </Show>
+                  </section>
+
+                  <section class="online-discover-section radio-rec">
+                    <div class="radio-section-title">
+                      <NaiveH2>{t("ncm.radio.section.hot")}</NaiveH2>
                     </div>
-                  }
-                />
-                <section class="online-discover-section radio-rec">
-                  <RadioCardGrid
-                    items={activeCategoryItems()}
-                    hiddenCover={uiSettings.hiddenCovers.radio}
-                    emptyText={emptyText()}
-                    onSelectRadio={(radio) => void loadRadioDetail(radio)}
+                    <RadioCardGrid items={hotRadios() ?? []} hiddenCover={uiSettings.hiddenCovers.radio} emptyText={emptyText()} onSelectRadio={openRadioDetail} />
+                  </section>
+
+                  <For each={sections()}>
+                    {(section) => (
+                      <section class="online-discover-section radio-rec">
+                        <button
+                          type="button"
+                          class="radio-section-title radio-section-title--clickable"
+                          onClick={() => setSelectedCategory({ id: section.id, name: section.name })}
+                        >
+                          <NaiveH2>{section.name}</NaiveH2>
+                          <span aria-hidden="true"><IconChevronRight /></span>
+                        </button>
+                        <RadioCardGrid items={section.radios} hiddenCover={uiSettings.hiddenCovers.radio} emptyText={emptyText()} onSelectRadio={openRadioDetail} />
+                      </section>
+                    )}
+                  </For>
+                </>
+              }
+            >
+              {(category) => (
+                <>
+                  <PageHeader
+                    title={category().name}
+                    actions={
+                      <button type="button" class="ghost-button radio-category-back-button" onClick={() => setSelectedCategory(null)}>
+                        <IconChevronLeft />
+                        {t("ncm.radio.back")}
+                      </button>
+                    }
+                    tabs={
+                      <div class="radio-category-tabs">
+                        <SegmentedTabs
+                          value={categoryTab()}
+                          onChange={(next) => setCategoryTab(next as RadioTab)}
+                          items={categoryTabs()}
+                          ariaLabel={t("ncm.radio.tabs.aria")}
+                        />
+                      </div>
+                    }
                   />
-                  <Show when={isLoadingCategory()}>
-                    <div class="panel-note">{t("ncm.radio.loading")}</div>
-                  </Show>
-                </section>
-              </>
-            )}
+                  <section class="online-discover-section radio-rec">
+                    <RadioCardGrid
+                      items={activeCategoryItems()}
+                      hiddenCover={uiSettings.hiddenCovers.radio}
+                      emptyText={emptyText()}
+                      onSelectRadio={openRadioDetail}
+                    />
+                    <Show when={isLoadingCategory()}>
+                      <div class="panel-note">{t("ncm.radio.loading")}</div>
+                    </Show>
+                  </section>
+                </>
+              )}
+            </Show>
           </Show>
         }
       >
         {(radio) => (
           <>
-            <button type="button" class="ghost-button radio-back-button" onClick={() => {
-              setSelectedRadio(null);
-              setRadioDetailInfo(null);
-              setRadioTracks([]);
-              setRadioProgramLoadCount(0);
-              setRadioDetailTabWithReset("programs");
-            }}>
-              <IconChevronLeft />
-              {t("ncm.radio.back")}
-            </button>
+            <Show when={!props.isDetailRoute}>
+              <button type="button" class="ghost-button radio-inline-back-button" onClick={() => {
+                setSelectedRadio(null);
+                setRadioDetailInfo(null);
+                setRadioTracks([]);
+                setRadioProgramLoadCount(0);
+                setRadioDetailTabWithReset("programs");
+              }}>
+                <IconChevronLeft />
+                {t("ncm.radio.back")}
+              </button>
+            </Show>
             <section class="online-discover-section radio-rec">
               <NcmListDetail
                 title={radio().title}
@@ -529,7 +552,7 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
                       </Show>
                       {radioSubLabel()}
                     </button>
-                    <button type="button" class="ghost-button radio-back-button" onClick={() => openRadioSource(radio().id)}>
+                    <button type="button" class="ghost-button radio-source-button" onClick={() => openRadioSource(radio().id)}>
                       <IconList />
                       {t("ncm.playlist.openSource")}
                     </button>

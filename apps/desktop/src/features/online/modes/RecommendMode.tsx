@@ -7,10 +7,7 @@ import { usePlayback } from "../../../app/PlaybackContext";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { NaiveP } from "../../../shared/ui/naive";
 import { NeteaseHomeFeed } from "../NeteaseHomeFeed";
-import { ArtistDetail } from "../details/ArtistDetail";
-import { DailySongsDetail } from "../details/DailySongsDetail";
 import { OnlineLikedPlaylistDetailRoute } from "../details/OnlineLikedPlaylistDetailRoute";
-import { VideoDetail } from "../details/VideoDetail";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
@@ -22,11 +19,14 @@ export interface RecommendModeProps extends OnlineDetailViewReporterProps {
   loginProfile: Accessor<NcmProfile | null>;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   onNavigateToDiscover?: (tab: string) => void;
+  onNavigateToDailySongs?: () => void;
+  onNavigateToArtistDetail?: (artist: FeedCardItem) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   onNavigateToMv?: (track: OnlineTrackItem) => void;
   onNavigateToAlbumDetail?: (album: FeedCardItem) => void;
   onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
+  onNavigateToVideoDetail?: (video: FeedCardItem) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
 }
@@ -66,10 +66,7 @@ export function RecommendMode(props: RecommendModeProps) {
 
   const readErrorMessage = createErrorMessageReader(t);
   const hasDetailView = createMemo<boolean>(() =>
-    detailNav.selectedDailySongs() ||
-    detailNav.selectedLikedSongs() ||
-    detailNav.selectedArtist() !== null ||
-    detailNav.selectedVideo() !== null
+    detailNav.selectedLikedSongs()
   );
 
   createDetailViewReporter(hasDetailView, props.onDetailViewChange);
@@ -80,13 +77,13 @@ export function RecommendMode(props: RecommendModeProps) {
         isLoggedIn={props.loginProfile() !== null}
         userId={props.loginProfile()?.userId ?? null}
         onSelectPlaylist={(playlist) => props.onNavigateToPlaylistDetail?.(playlist)}
-        onSelectDailySongs={detailNav.enterDailySongs}
+        onSelectDailySongs={props.onNavigateToDailySongs}
         onSelectLikedSongs={detailNav.enterLikedSongs}
         onPlayPersonalFm={() => void playPersonalFmRadio()}
         onDislikePersonalFm={(songId) => void dislikePersonalFmTrack(songId)}
         onSelectAlbum={(item) => props.onNavigateToAlbumDetail?.(item)}
-        onSelectArtist={(item) => void detailNav.loadArtistTracks(item)}
-        onSelectVideo={(item) => detailNav.enterVideo(item)}
+        onSelectArtist={(item) => props.onNavigateToArtistDetail?.(item)}
+        onSelectVideo={(item) => props.onNavigateToVideoDetail?.(item)}
         onNavigateToDiscover={(tab) => handleNavigateToDiscover(tab)}
         onSelectRadio={(item) => props.onNavigateToRadioDetail?.(item)}
       />
@@ -139,22 +136,6 @@ export function RecommendMode(props: RecommendModeProps) {
         <NaiveP class="online-recommend-subtitle">{t("ncm.home.welcome")}</NaiveP>
       </Show>
       <Switch fallback={renderHomeFeed()}>
-        <Match when={detailNav.selectedDailySongs()}>
-          <DailySongsDetail
-            loginProfile={props.loginProfile()}
-            tracks={detailNav.dailySongsState()}
-            updatedAt={detailNav.dailySongsUpdatedAt()}
-            isLoading={detailNav.isLoadingDailySongs()}
-            onBack={detailNav.exitDailySongs}
-            onRefresh={detailNav.refreshDailySongs}
-            onPlayAll={detailNav.playAllDailySongs}
-            onDislike={detailNav.dislikeDailySong}
-            onNavigateToSongWiki={props.onNavigateToSongWiki}
-            onNavigateToMv={props.onNavigateToMv}
-            setFeedback={props.setFeedback}
-            playback={props.playback}
-          />
-        </Match>
         <Match when={detailNav.selectedLikedSongs()}>
           <Show
             when={detailNav.selectedPlaylist()}
@@ -169,43 +150,6 @@ export function RecommendMode(props: RecommendModeProps) {
               onNavigateToMv={props.onNavigateToMv}
             />
           </Show>
-        </Match>
-        <Match when={detailNav.selectedArtist() !== null}>
-          <ArtistDetail
-            artist={detailNav.selectedArtist()}
-            detail={detailNav.artistDetailInfo()}
-            tracks={detailNav.artistTracksState()}
-            isLoading={detailNav.isLoadingArtistTracks()}
-            trackOrder={detailNav.artistTrackOrder()}
-            hasMoreTracks={detailNav.artistTracksHasMore()}
-            isLoadingDetail={detailNav.isLoadingArtistDetail()}
-            isTogglingSubscribe={detailNav.isTogglingArtistSubscribe()}
-            albums={detailNav.artistAlbumsState()}
-            videos={detailNav.artistVideosState()}
-            isLoadingAlbums={detailNav.isLoadingArtistAlbums()}
-            isLoadingVideos={detailNav.isLoadingArtistVideos()}
-            hasMoreAlbums={detailNav.artistAlbumsHasMore()}
-            hasMoreVideos={detailNav.artistVideosHasMore()}
-            onLoadAlbums={() => detailNav.loadArtistAlbums()}
-            onLoadVideos={() => detailNav.loadArtistVideos()}
-            onChangeTrackOrder={(order) => detailNav.changeArtistTrackOrder(order)}
-            onLoadMoreTracks={() => detailNav.loadArtistTrackPage({ append: true })}
-            onLoadMoreAlbums={() => detailNav.loadArtistAlbums({ append: true })}
-            onLoadMoreVideos={() => detailNav.loadArtistVideos({ append: true })}
-            onSelectAlbum={(album) => props.onNavigateToAlbumDetail?.(album)}
-            onSelectVideo={(video) => detailNav.enterVideo(video)}
-            onToggleSubscribe={detailNav.toggleArtistSubscribe}
-            onBack={detailNav.exitArtist}
-            onNavigateToSongWiki={props.onNavigateToSongWiki}
-            playback={props.playback}
-          />
-        </Match>
-        <Match when={detailNav.selectedVideo() !== null}>
-          <VideoDetail
-            video={detailNav.selectedVideo()}
-            onBack={detailNav.exitVideo}
-            onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
-          />
         </Match>
       </Switch>
     </>

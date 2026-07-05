@@ -85,35 +85,29 @@ test("normalizeNavigationStateSnapshot restores search without playlist selectio
 });
 
 test("detail pages are not restored without their navigation request payload", () => {
-  assert.deepEqual(
-    normalizeNavigationStateSnapshot({
-      activePage: "album-detail",
-      selectedPlaylistId: 12,
-      discoverTab: "new",
-      likedCollectionTab: "albums"
-    }),
-    {
-      activePage: "recommend",
-      selectedPlaylistId: null,
-      discoverTab: "new",
-      likedCollectionTab: "albums"
-    }
-  );
-
-  assert.deepEqual(
-    normalizeNavigationStateSnapshot({
-      activePage: "playlist-detail",
-      selectedPlaylistId: 12,
-      discoverTab: "playlists",
-      likedCollectionTab: "playlists"
-    }),
-    {
-      activePage: "recommend",
-      selectedPlaylistId: null,
-      discoverTab: "playlists",
-      likedCollectionTab: "playlists"
-    }
-  );
+  for (const activePage of [
+    "album-detail",
+    "playlist-detail",
+    "daily-songs",
+    "artist-detail",
+    "video-detail",
+    "radio-detail"
+  ] as const) {
+    assert.deepEqual(
+      normalizeNavigationStateSnapshot({
+        activePage,
+        selectedPlaylistId: 12,
+        discoverTab: "new",
+        likedCollectionTab: "albums"
+      }),
+      {
+        activePage: "recommend",
+        selectedPlaylistId: null,
+        discoverTab: "new",
+        likedCollectionTab: "albums"
+      }
+    );
+  }
 });
 
 test("playlist id is restored only for playlist pages", () => {

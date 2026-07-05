@@ -17,7 +17,8 @@ import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
 
 export interface VideoDetailProps {
   video: FeedCardItem | null;
-  onBack: () => void;
+  onBack?: () => void;
+  showInlineBack?: boolean;
   onSelectArtist?: (artist: FeedCardItem) => void | Promise<void>;
 }
 
@@ -117,10 +118,12 @@ export function VideoDetail(props: VideoDetailProps) {
   return (
     <PageSurface class="ncm-video-detail" persistKey={`discover:video:${currentVideoId()}`} resetKey={currentVideoId()}>
       <PageHero size="md">
-        <button type="button" class="ghost-button ncm-daily-detail-back" onClick={props.onBack}>
-          <IconChevronLeft />
-          {t("ncm.video.backToFeed")}
-        </button>
+        <Show when={(props.showInlineBack ?? true) && props.onBack}>
+          <button type="button" class="ghost-button ncm-daily-detail-back" onClick={() => props.onBack?.()}>
+            <IconChevronLeft />
+            {t("ncm.video.backToFeed")}
+          </button>
+        </Show>
 
         <header class="ncm-video-detail-head">
           <div class="ncm-video-detail-title">

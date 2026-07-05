@@ -34,7 +34,13 @@ const DEFAULT_NAVIGATION_STATE: NavigationStateSnapshot = {
 };
 
 const RESTORABLE_ACTIVE_PAGES = ACTIVE_PAGES.filter(
-  (page) => page !== "album-detail" && page !== "playlist-detail"
+  (page) =>
+    page !== "album-detail" &&
+    page !== "playlist-detail" &&
+    page !== "daily-songs" &&
+    page !== "artist-detail" &&
+    page !== "video-detail" &&
+    page !== "radio-detail"
 );
 const VALID_ACTIVE_PAGES = new Set<ActivePage>(RESTORABLE_ACTIVE_PAGES);
 const VALID_LIKED_COLLECTION_TABS = new Set<PersistedLikedCollectionTab>([

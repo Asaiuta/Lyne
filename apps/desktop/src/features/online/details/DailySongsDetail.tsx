@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from "solid-js";
+import { Show, createMemo, createSignal } from "solid-js";
 import { IconChevronLeft, IconList, IconPlay, IconRefresh } from "../../../components/icons";
 import type { MediaContextAction } from "../../../components/media/mediaContextActions";
 import { NcmMediaList } from "../NcmMediaList";
@@ -19,7 +19,8 @@ export interface DailySongsDetailProps {
   tracks: OnlineTrackItem[];
   updatedAt: number | null;
   isLoading: boolean;
-  onBack: () => void;
+  onBack?: () => void;
+  showInlineBack?: boolean;
   onRefresh: () => Promise<void>;
   onPlayAll: () => Promise<void>;
   onDislike: (item: OnlineTrackItem) => Promise<void>;
@@ -112,14 +113,16 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
   return (
     <PageSurface class="ncm-daily-detail" persistKey="discover:daily" resetKey={props.updatedAt}>
       <PageHero size="lg">
-        <button
-          type="button"
-          class="ghost-button ncm-daily-detail-back"
-          onClick={props.onBack}
-        >
-          <IconChevronLeft />
-          {t("ncm.daily.backToFeed")}
-        </button>
+        <Show when={(props.showInlineBack ?? true) && props.onBack}>
+          <button
+            type="button"
+            class="ghost-button ncm-daily-detail-back"
+            onClick={() => props.onBack?.()}
+          >
+            <IconChevronLeft />
+            {t("ncm.daily.backToFeed")}
+          </button>
+        </Show>
         <header class="ncm-daily-detail-hero">
           <NaiveH2>{t("ncm.daily.title")}</NaiveH2>
           <NaiveP class="ncm-daily-detail-meta">{tipText()}</NaiveP>

@@ -12,6 +12,10 @@ export interface DiscoverTabRequest {
   version: number;
 }
 
+export interface DailySongsRequest {
+  version: number;
+}
+
 export interface ArtistDetailRequest {
   artist: FeedCardItem | null;
   version: number;
@@ -57,6 +61,7 @@ export interface NavigationController {
   selectedPlaylistId: Accessor<number | null>;
   localPlaylistRequest: Accessor<LocalPlaylistRequest>;
   discoverTabRequest: Accessor<DiscoverTabRequest>;
+  dailySongsRequest: Accessor<DailySongsRequest>;
   artistDetailRequest: Accessor<ArtistDetailRequest>;
   albumDetailRequest: Accessor<AlbumDetailRequest>;
   playlistDetailRequest: Accessor<PlaylistDetailRequest>;
@@ -73,10 +78,12 @@ export interface NavigationController {
   handleSelectedPlaylistChange: (playlistId: number | null) => void;
   handleNavigateToDiscover: (tab: string) => void;
   handleDiscoverTabChange: (tab: string) => void;
+  handleNavigateToDailySongs: () => void;
   handleNavigateToArtistDetail: (artist: FeedCardItem) => void;
   handleNavigateToAlbumDetail: (album: FeedCardItem) => void;
   handleNavigateToPlaylistDetail: (playlist: OnlinePlaylistSummary) => void;
   handleNavigateToRadioDetail: (radio: FeedCardItem) => void;
+  handleNavigateToVideoDetail: (video: FeedCardItem) => void;
   handleNavigateToSongWiki: (track: OnlineTrackItem) => void;
   handleNavigateToMv: (track: OnlineTrackItem) => void;
   handleRadioSubscribeChange: (radio: FeedCardItem, subscribed: boolean) => void;
@@ -105,6 +112,9 @@ export function useNavigationController(): NavigationController {
   const [discoverTabRequest, setDiscoverTabRequest] = createSignal<DiscoverTabRequest>({
     tab: restoredNavigation.discoverTab,
     version: restoredNavigation.discoverTab === "playlists" ? 0 : 1
+  });
+  const [dailySongsRequest, setDailySongsRequest] = createSignal<DailySongsRequest>({
+    version: 0
   });
   const [artistDetailRequest, setArtistDetailRequest] = createSignal<ArtistDetailRequest>({
     artist: null,
@@ -204,9 +214,14 @@ export function useNavigationController(): NavigationController {
     setDiscoverTabRequest((prev) => ({ tab, version: prev.version }));
   };
 
+  const handleNavigateToDailySongs = () => {
+    setDailySongsRequest((prev) => ({ version: prev.version + 1 }));
+    pushNavigation("daily-songs");
+  };
+
   const handleNavigateToArtistDetail = (artist: FeedCardItem) => {
     setArtistDetailRequest((prev) => ({ artist, version: prev.version + 1 }));
-    pushNavigation("discover");
+    pushNavigation("artist-detail");
   };
 
   const handleNavigateToAlbumDetail = (album: FeedCardItem) => {
@@ -222,7 +237,12 @@ export function useNavigationController(): NavigationController {
 
   const handleNavigateToRadioDetail = (radio: FeedCardItem) => {
     setRadioDetailRequest((prev) => ({ radio, version: prev.version + 1 }));
-    pushNavigation("radio");
+    pushNavigation("radio-detail");
+  };
+
+  const handleNavigateToVideoDetail = (video: FeedCardItem) => {
+    setVideoDetailRequest((prev) => ({ video, version: prev.version + 1 }));
+    pushNavigation("video-detail");
   };
 
   const handleNavigateToSongWiki = (track: OnlineTrackItem) => {
@@ -242,9 +262,7 @@ export function useNavigationController(): NavigationController {
       playCount: null,
       description: null
     };
-    setVideoDetailRequest((prev) => ({ video, version: prev.version + 1 }));
-    setDiscoverTabRequest((prev) => ({ tab: "mvs", version: prev.version + 1 }));
-    pushNavigation("discover");
+    handleNavigateToVideoDetail(video);
   };
 
   const handleRadioSubscribeChange = (radio: FeedCardItem, subscribed: boolean) => {
@@ -298,6 +316,7 @@ export function useNavigationController(): NavigationController {
     selectedPlaylistId,
     localPlaylistRequest,
     discoverTabRequest,
+    dailySongsRequest,
     artistDetailRequest,
     albumDetailRequest,
     playlistDetailRequest,
@@ -314,10 +333,12 @@ export function useNavigationController(): NavigationController {
     handleSelectedPlaylistChange,
     handleNavigateToDiscover,
     handleDiscoverTabChange,
+    handleNavigateToDailySongs,
     handleNavigateToArtistDetail,
     handleNavigateToAlbumDetail,
     handleNavigateToPlaylistDetail,
     handleNavigateToRadioDetail,
+    handleNavigateToVideoDetail,
     handleNavigateToSongWiki,
     handleNavigateToMv,
     handleRadioSubscribeChange,

@@ -8,10 +8,7 @@ import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
 import { usePresenceTransition } from "../../../shared/ui/usePresenceTransition";
 import { NaiveP } from "../../../shared/ui/naive";
-import { ArtistDetail } from "../details/ArtistDetail";
-import { DailySongsDetail } from "../details/DailySongsDetail";
 import { OnlineLikedPlaylistDetailRoute } from "../details/OnlineLikedPlaylistDetailRoute";
-import { VideoDetail } from "../details/VideoDetail";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import {
@@ -68,23 +65,21 @@ const toFeedCardItem = (item: DiscoverCardItem): FeedCardItem => ({
 interface CatEntry { name: string; category: number; hot: boolean }
 
 type DiscoverDetailView =
-  | { kind: "daily" }
   | { kind: "liked" }
-  | { kind: "artist" }
-  | { kind: "video" }
   | { kind: "browse" };
 
 export interface DiscoverModeProps extends OnlineDetailViewReporterProps {
   loginProfile: Accessor<NcmProfile | null>;
   discoverTabRequest?: { tab: string; version: number };
   onDiscoverTabChange?: (tab: DiscoverTab) => void;
-  artistDetailRequest?: { artist: FeedCardItem | null; version: number };
-  videoDetailRequest?: { video: FeedCardItem | null; version: number };
+  onNavigateToDailySongs?: () => void;
+  onNavigateToArtistDetail?: (artist: FeedCardItem) => void;
   onNavigateToRadioDetail?: (radio: FeedCardItem) => void;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   onNavigateToMv?: (track: OnlineTrackItem) => void;
   onNavigateToAlbumDetail?: (album: FeedCardItem) => void;
   onNavigateToPlaylistDetail?: (playlist: OnlinePlaylistSummary) => void;
+  onNavigateToVideoDetail?: (video: FeedCardItem) => void;
   onSelectedPlaylistChange?: (playlistId: number | null) => void;
   setFeedback: FeedbackSetter;
   playback: PlaybackController;
@@ -294,32 +289,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
     )
   );
 
-  createEffect(
-    on(
-      () => props.artistDetailRequest?.version,
-      (version) => {
-        if (version === undefined || version === 0) return;
-        const artist = props.artistDetailRequest?.artist;
-        if (!artist) return;
-        setDiscoverTab("artists");
-        void detailNav.loadArtistTracks(artist);
-      }
-    )
-  );
-
-  createEffect(
-    on(
-      () => props.videoDetailRequest?.version,
-      (version) => {
-        if (version === undefined || version === 0) return;
-        const video = props.videoDetailRequest?.video;
-        if (!video) return;
-        setDiscoverTab("mvs");
-        detailNav.enterVideo(video);
-      }
-    )
-  );
-
   const discoverTabs = createMemo(() => [
     { value: "playlists", label: t("ncm.discover.tab.playlists") },
     { value: "toplists", label: t("ncm.discover.tab.toplists") },
@@ -357,10 +326,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
   });
 
   const detailView = createMemo<DiscoverDetailView>(() => {
-    if (detailNav.selectedDailySongs()) return { kind: "daily" };
     if (detailNav.selectedLikedSongs()) return { kind: "liked" };
-    if (detailNav.selectedArtist()) return { kind: "artist" };
-    if (detailNav.selectedVideo()) return { kind: "video" };
     return { kind: "browse" };
   });
   const hasDetailView = createMemo<boolean>(() => detailView().kind !== "browse");
@@ -502,22 +468,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
       </Show>
 
       <Switch>
-        <Match when={detailView().kind === "daily"}>
-          <DailySongsDetail
-            loginProfile={props.loginProfile()}
-            tracks={detailNav.dailySongsState()}
-            updatedAt={detailNav.dailySongsUpdatedAt()}
-            isLoading={detailNav.isLoadingDailySongs()}
-            onBack={detailNav.exitDailySongs}
-            onRefresh={detailNav.refreshDailySongs}
-            onPlayAll={detailNav.playAllDailySongs}
-            onDislike={detailNav.dislikeDailySong}
-            onNavigateToSongWiki={props.onNavigateToSongWiki}
-            onNavigateToMv={props.onNavigateToMv}
-            setFeedback={props.setFeedback}
-            playback={props.playback}
-          />
-        </Match>
         <Match when={detailView().kind === "liked"}>
           <Show
             when={detailNav.selectedPlaylist()}
@@ -532,43 +482,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
               onNavigateToMv={props.onNavigateToMv}
             />
           </Show>
-        </Match>
-        <Match when={detailView().kind === "artist"}>
-          <ArtistDetail
-            artist={detailNav.selectedArtist()}
-            detail={detailNav.artistDetailInfo()}
-            tracks={detailNav.artistTracksState()}
-            isLoading={detailNav.isLoadingArtistTracks()}
-            trackOrder={detailNav.artistTrackOrder()}
-            hasMoreTracks={detailNav.artistTracksHasMore()}
-            isLoadingDetail={detailNav.isLoadingArtistDetail()}
-            isTogglingSubscribe={detailNav.isTogglingArtistSubscribe()}
-            albums={detailNav.artistAlbumsState()}
-            videos={detailNav.artistVideosState()}
-            isLoadingAlbums={detailNav.isLoadingArtistAlbums()}
-            isLoadingVideos={detailNav.isLoadingArtistVideos()}
-            hasMoreAlbums={detailNav.artistAlbumsHasMore()}
-            hasMoreVideos={detailNav.artistVideosHasMore()}
-            onLoadAlbums={() => detailNav.loadArtistAlbums()}
-            onLoadVideos={() => detailNav.loadArtistVideos()}
-            onChangeTrackOrder={(order) => detailNav.changeArtistTrackOrder(order)}
-            onLoadMoreTracks={() => detailNav.loadArtistTrackPage({ append: true })}
-            onLoadMoreAlbums={() => detailNav.loadArtistAlbums({ append: true })}
-            onLoadMoreVideos={() => detailNav.loadArtistVideos({ append: true })}
-            onSelectAlbum={(album) => props.onNavigateToAlbumDetail?.(album)}
-            onSelectVideo={(video) => detailNav.enterVideo(video)}
-            onToggleSubscribe={detailNav.toggleArtistSubscribe}
-            onBack={detailNav.exitArtist}
-            onNavigateToSongWiki={props.onNavigateToSongWiki}
-            playback={props.playback}
-          />
-        </Match>
-        <Match when={detailView().kind === "video"}>
-          <VideoDetail
-            video={detailNav.selectedVideo()}
-            onBack={detailNav.exitVideo}
-            onSelectArtist={(artist) => void detailNav.loadArtistTracks(artist)}
-          />
         </Match>
         <Match when={detailView().kind === "browse"}>
           <div class="online-discover-view">
@@ -610,7 +523,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 allArtists={artistCards.items()}
                 isLoadingArtists={artistCards.isLoading()}
                 hasMoreArtists={artistCards.hasMore()}
-                onLoadArtist={(artist) => void detailNav.loadArtistTracks(toFeedCardItem(artist))}
+                onLoadArtist={(artist) => props.onNavigateToArtistDetail?.(toFeedCardItem(artist))}
                 onLoadMore={() => { void artistCards.loadMore(); }}
               />
             </Show>
@@ -648,7 +561,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 allVideos={mvCards.items().map(toFeedCardItem)}
                 isLoadingVideos={mvCards.isLoading()}
                 hasMoreVideos={mvCards.hasMore()}
-                onLoadVideo={(video) => detailNav.enterVideo(video)}
+                onLoadVideo={(video) => props.onNavigateToVideoDetail?.(video)}
                 onLoadMore={() => { void mvCards.loadMore(); }}
               />
             </Show>

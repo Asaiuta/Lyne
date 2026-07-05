@@ -82,6 +82,9 @@ const NETEASE_PAGES = [
   "search",
   "album-detail",
   "playlist-detail",
+  "daily-songs",
+  "artist-detail",
+  "video-detail",
   "liked-songs",
   "liked",
   "created-playlists",
@@ -306,13 +309,17 @@ function AppContent() {
                           onNavigate={navigation.handleActivePageChange}
                           onNavigateToRecommend={() => navigation.handleActivePageChange("recommend")}
                           onNavigateToDiscover={navigation.handleNavigateToDiscover}
+                          onNavigateToDailySongs={navigation.handleNavigateToDailySongs}
                           onDiscoverTabChange={navigation.handleDiscoverTabChange}
+                          onNavigateToArtistDetail={navigation.handleNavigateToArtistDetail}
                           onNavigateToRadioDetail={navigation.handleNavigateToRadioDetail}
                           onNavigateToSongWiki={navigation.handleNavigateToSongWiki}
                           onNavigateToMv={navigation.handleNavigateToMv}
                           onNavigateToAlbumDetail={navigation.handleNavigateToAlbumDetail}
                           onNavigateToPlaylistDetail={navigation.handleNavigateToPlaylistDetail}
+                          onNavigateToVideoDetail={navigation.handleNavigateToVideoDetail}
                           discoverTabRequest={navigation.discoverTabRequest()}
+                          dailySongsRequest={navigation.dailySongsRequest()}
                           likedCollectionTabRequest={navigation.likedCollectionTabRequest()}
                           onLikedCollectionTabChange={navigation.handleLikedCollectionTabChange}
                           artistDetailRequest={navigation.artistDetailRequest()}
@@ -357,6 +364,16 @@ function AppContent() {
                     </Match>
                     <Match when={displayedPage() === "radio"}>
                       <NeteaseRadioPage
+                        loginProfile={activeWritableNcmProfile()}
+                        onRequireNcmLogin={() => requireNcmLogin({ disableUid: true })}
+                        onSubscribeChange={navigation.handleRadioSubscribeChange}
+                        onNavigateToRadioDetail={navigation.handleNavigateToRadioDetail}
+                        onNavigateToSongWiki={navigation.handleNavigateToSongWiki}
+                      />
+                    </Match>
+                    <Match when={displayedPage() === "radio-detail"}>
+                      <NeteaseRadioPage
+                        isDetailRoute
                         radioDetailRequest={navigation.radioDetailRequest()}
                         loginProfile={activeWritableNcmProfile()}
                         onRequireNcmLogin={() => requireNcmLogin({ disableUid: true })}

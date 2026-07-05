@@ -46,7 +46,8 @@ export interface ArtistDetailProps {
   onSelectAlbum: (album: FeedCardItem) => void | Promise<void>;
   onSelectVideo: (video: FeedCardItem) => void | Promise<void>;
   onToggleSubscribe: () => void | Promise<void>;
-  onBack: () => void;
+  onBack?: () => void;
+  showInlineBack?: boolean;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   playback: PlaybackController;
 }
@@ -108,21 +109,23 @@ export function ArtistDetail(props: ArtistDetailProps) {
       void props.onLoadVideos();
     }
   };
-  if (!artist()) return null;
   return (
-    <PageSurface class="ncm-daily-detail" persistKey={`discover:artist:${artistId()}`} resetKey={artistId()}>
-      <PageStickyHeader threshold={10}>
-        {({ compact }) => (
-          <>
-            <PageHero size="lg" compact={compact()}>
-              <button
-                type="button"
-                class="ghost-button ncm-daily-detail-back"
-                onClick={props.onBack}
-              >
-                <IconChevronLeft />
-                {t("ncm.artist.backToFeed")}
-              </button>
+    <Show when={artist()}>
+      <PageSurface class="ncm-daily-detail" persistKey={`discover:artist:${artistId()}`} resetKey={artistId()}>
+        <PageStickyHeader threshold={10}>
+          {({ compact }) => (
+            <>
+              <PageHero size="lg" compact={compact()}>
+                <Show when={(props.showInlineBack ?? true) && props.onBack}>
+                  <button
+                    type="button"
+                    class="ghost-button ncm-daily-detail-back"
+                    onClick={() => props.onBack?.()}
+                  >
+                    <IconChevronLeft />
+                    {t("ncm.artist.backToFeed")}
+                  </button>
+                </Show>
               <NcmListDetail
                 title={artist()?.title ?? ""}
                 coverUrl={artist()?.coverUrl}
@@ -228,10 +231,11 @@ export function ArtistDetail(props: ArtistDetailProps) {
               </Show>
             </PageBody>
             <BackToTop label={t("media.scroll.top")} />
-          </>
-        )}
-      </PageStickyHeader>
-    </PageSurface>
+            </>
+          )}
+        </PageStickyHeader>
+      </PageSurface>
+    </Show>
   );
 }
 

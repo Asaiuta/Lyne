@@ -103,7 +103,17 @@ const LOGIN_REQUIRED_PAGES = new Set<ActivePage>([
 ]);
 
 type CreatedPlaylistSource = "online" | "local";
-type SidebarPage = Exclude<ActivePage, "song-wiki" | "search" | "album-detail" | "playlist-detail">;
+type SidebarPage = Exclude<
+  ActivePage,
+  | "song-wiki"
+  | "search"
+  | "album-detail"
+  | "playlist-detail"
+  | "daily-songs"
+  | "artist-detail"
+  | "video-detail"
+  | "radio-detail"
+>;
 
 const CREATED_PLAYLIST_SOURCE_OPTIONS: ReadonlyArray<{
   value: CreatedPlaylistSource;
