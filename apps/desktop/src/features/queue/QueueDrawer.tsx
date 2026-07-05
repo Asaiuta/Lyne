@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
-import { IconClose, IconDelete, IconMusic, IconRefresh } from "../../components/icons";
+import { IconClose, IconDelete, IconMusic, IconRefresh, IconSPlayerMenu } from "../../components/icons";
 import type { QueueEntry } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
 import type { MediaListItem } from "../../shared/media/mediaListItem";
@@ -236,6 +236,9 @@ export function QueueDrawer(props: QueueDrawerProps) {
                               onClick={() => void handlePlay(queueItem)}
                               disabled={disabled() || active()}
                             >
+                              <span class="queue-drawer-grip" aria-hidden="true">
+                                <IconSPlayerMenu />
+                              </span>
                               <span class={`queue-drawer-index${index() + 1 > 9999 ? " is-big" : ""}`}>
                                 <Show when={active()} fallback={index() + 1}>
                                   <IconMusic />

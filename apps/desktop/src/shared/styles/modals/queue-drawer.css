@@ -4,7 +4,8 @@
     z-index: var(--z-modal);
     display: flex;
     justify-content: flex-end;
-    background: color-mix(in oklch, var(--overlay) 58%, transparent);
+    background: color-mix(in oklch, var(--overlay) 42%, transparent);
+    backdrop-filter: blur(12px) saturate(0.92);
     animation: queue-drawer-fade-in var(--duration-fast) var(--ease-standard);
   }
 
@@ -16,7 +17,7 @@
     min-height: 0;
     border-left: 1px solid var(--floating-border);
     border-radius: 12px 0 0 12px;
-    background: color-mix(in oklch, var(--floating-surface) 94%, transparent);
+    background: color-mix(in oklch, var(--floating-surface) 97%, transparent);
     box-shadow: var(--floating-shadow);
     animation: queue-drawer-slide-in 0.22s var(--ease-standard);
     overflow: hidden;
@@ -113,7 +114,7 @@
     height: 64px;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--color-primary-tonal-08);
+    background: color-mix(in oklch, var(--surface-3) 92%, var(--text) 8%);
     transition:
       background-color 0.3s var(--ease-standard),
       border-color 0.3s var(--ease-standard),
@@ -121,17 +122,18 @@
   }
 
   .queue-drawer-item:hover {
-    border-color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 42%, var(--border-overlay));
+    background: color-mix(in oklch, var(--surface-3) 88%, var(--text) 12%);
   }
 
   .queue-drawer-item.is-current {
-    border-color: var(--accent);
-    background: var(--color-primary-tonal-28);
+    border-color: color-mix(in oklch, var(--accent) 70%, var(--border-overlay));
+    background: color-mix(in oklch, var(--surface-3) 84%, var(--text) 16%);
   }
 
   .queue-drawer-item-main {
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: 18px 28px minmax(0, 1fr);
     align-items: center;
     gap: 8px;
     min-width: 0;
@@ -153,6 +155,18 @@
     color: var(--muted);
     font-size: 13px;
     font-variant-numeric: tabular-nums;
+  }
+
+  .queue-drawer-grip {
+    display: grid;
+    place-items: center;
+    color: color-mix(in srgb, var(--muted) 86%, transparent);
+    opacity: 0.9;
+  }
+
+  .queue-drawer-grip svg {
+    width: 18px;
+    height: 18px;
   }
 
   .queue-drawer-index.is-big {
@@ -204,8 +218,8 @@
   }
 
   .queue-drawer-footer-button:hover:not(:disabled) {
-    background: var(--color-primary-tonal-20);
-    color: var(--accent);
+    background: color-mix(in oklch, var(--surface-3) 88%, var(--text) 12%);
+    color: var(--text);
   }
 
   .queue-drawer-footer-button:disabled,

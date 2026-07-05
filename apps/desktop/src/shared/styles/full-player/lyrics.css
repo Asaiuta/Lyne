@@ -66,7 +66,7 @@
       transform var(--duration-base) var(--ease-standard),
       opacity var(--duration-base) var(--ease-standard),
       filter var(--duration-base) var(--ease-standard);
-    opacity: 0.3;
+    opacity: 0.42;
     transform: scale(0.95);
     transform-origin: var(--lyric-transform-origin, left center);
     filter: blur(0px);
@@ -121,6 +121,7 @@
     opacity: 1;
     transform: scale(1);
     filter: blur(0px);
+    text-shadow: 0 18px 58px oklch(0 0 0 / 0.34);
   }
 
   .full-player-lyric-line.is-placeholder {

@@ -14,11 +14,11 @@
     --full-player-cover-color-58: color-mix(in srgb, var(--full-player-cover-color) 58%, transparent);
     --full-player-cover-color-82: color-mix(in srgb, var(--full-player-cover-color) 82%, transparent);
     --full-player-cover-color-90: color-mix(in srgb, var(--full-player-cover-color) 90%, transparent);
-    --full-player-ink: var(--full-player-cover-color);
-    --full-player-ink-strong: var(--full-player-cover-color);
-    --full-player-ink-soft: var(--full-player-cover-color-52);
-    --full-player-ink-muted: var(--full-player-cover-color-28);
-    --full-player-ink-active: var(--full-player-cover-color);
+    --full-player-ink: color-mix(in srgb, var(--full-player-cover-color) 34%, white 66%);
+    --full-player-ink-strong: color-mix(in srgb, var(--full-player-cover-color) 24%, white 76%);
+    --full-player-ink-soft: color-mix(in srgb, var(--full-player-ink) 68%, transparent);
+    --full-player-ink-muted: color-mix(in srgb, var(--full-player-ink) 42%, transparent);
+    --full-player-ink-active: color-mix(in srgb, var(--full-player-cover-color) 18%, white 82%);
     --full-player-glass: var(--full-player-cover-color-08);
     --full-player-glass-strong: var(--full-player-cover-color-14);
 
