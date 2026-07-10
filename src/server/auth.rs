@@ -128,6 +128,32 @@ pub fn query_token(query: Option<&str>) -> Option<&str> {
     None
 }
 
+/// Rebuild `path[?query]` for access logging with any `token` query parameter
+/// value redacted. Cover-art `<img>` URLs carry the bearer token as
+/// `?token=<secret>`, so the raw request line must never reach log files.
+pub fn redacted_path_and_query(uri: &actix_web::http::Uri) -> String {
+    match uri.query() {
+        None => uri.path().to_string(),
+        Some(query) => format!("{}?{}", uri.path(), redact_token_query(query)),
+    }
+}
+
+/// Replace the value of every `token` query parameter with `REDACTED`,
+/// preserving all other parameters verbatim.
+fn redact_token_query(query: &str) -> String {
+    query
+        .split('&')
+        .map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            match (parts.next(), parts.next()) {
+                (Some("token"), Some(_)) => "token=REDACTED",
+                _ => pair,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -280,5 +306,37 @@ mod tests {
         assert_eq!(query_token(Some("token=abc&foo=1")), Some("abc"));
         assert_eq!(query_token(Some("foo=token")), None);
         assert_eq!(query_token(None), None);
+    }
+
+    #[test]
+    fn redacted_path_and_query_strips_token_value() {
+        let uri: actix_web::http::Uri = "/cover_art/42?token=SECRET".parse().unwrap();
+        let logged = redacted_path_and_query(&uri);
+        assert_eq!(logged, "/cover_art/42?token=REDACTED");
+        assert!(!logged.contains("SECRET"));
+    }
+
+    #[test]
+    fn redacted_path_and_query_keeps_other_params() {
+        let uri: actix_web::http::Uri = "/tracks?page=2&token=SECRET&sort=title".parse().unwrap();
+        let logged = redacted_path_and_query(&uri);
+        assert_eq!(logged, "/tracks?page=2&token=REDACTED&sort=title");
+        assert!(!logged.contains("SECRET"));
+    }
+
+    #[test]
+    fn redacted_path_and_query_passes_through_without_token() {
+        let no_query: actix_web::http::Uri = "/state".parse().unwrap();
+        assert_eq!(redacted_path_and_query(&no_query), "/state");
+
+        let other_params: actix_web::http::Uri = "/tracks?page=2&sort=title".parse().unwrap();
+        assert_eq!(
+            redacted_path_and_query(&other_params),
+            "/tracks?page=2&sort=title"
+        );
+
+        // `token` as a value (not a key) is untouched.
+        let value_only: actix_web::http::Uri = "/tracks?foo=token".parse().unwrap();
+        assert_eq!(redacted_path_and_query(&value_only), "/tracks?foo=token");
     }
 }

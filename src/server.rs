@@ -532,6 +532,13 @@ pub async fn run_server(
 
     log::info!("Starting Audio Engine on http://127.0.0.1:{}", port);
     log::info!("Allowed UI origins: {}", allowed_origins.join(", "));
+    let cors_wildcard_origin = allowed_origins.iter().any(|origin| origin == "*");
+    if cors_wildcard_origin {
+        log::warn!(
+            "Allowed origins contain \"*\" (match-any); disabling CORS credential support \
+             to avoid credentialed responses for arbitrary origins"
+        );
+    }
     log::info!(
         "Bearer auth enabled (token length={}, env={})",
         api_token.len(),
@@ -554,35 +561,54 @@ pub async fn run_server(
     let auth_token = Arc::clone(&api_token);
     let server = HttpServer::new(move || {
         let allowed_origins = cors_allowed_origins.clone();
+        // Default Logger format, except the raw request line (`%r`) is replaced by a
+        // redacted method + path + version: `?token=<secret>` (used by cover-art
+        // `<img>` URLs) must never be persisted into log files.
+        let access_log = middleware::Logger::new(
+            "%a \"%{request_line}xi\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" %T",
+        )
+        .custom_request_replace("request_line", |req| {
+            format!(
+                "{} {} {:?}",
+                req.method(),
+                auth::redacted_path_and_query(req.uri()),
+                req.version()
+            )
+        });
+        let cors = Cors::default()
+            .allowed_origin_fn(move |origin, _request_head| {
+                origin
+                    .to_str()
+                    .map(|value| {
+                        allowed_origins
+                            .iter()
+                            .any(|allowed| allowed == "*" || allowed.eq_ignore_ascii_case(value))
+                    })
+                    .unwrap_or(false)
+            })
+            .allowed_methods(vec!["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
+            .allowed_headers(vec![
+                header::CONTENT_TYPE,
+                header::AUTHORIZATION,
+                header::COOKIE,
+            ])
+            .expose_headers(vec![header::SET_COOKIE])
+            .max_age(3600);
+        // A "*" allowlist entry matches every origin; combining that with
+        // credential support would hand credentialed responses to any site.
+        let cors = if cors_wildcard_origin {
+            cors
+        } else {
+            cors.supports_credentials()
+        };
         App::new()
             .app_data(web::Data::new(Arc::clone(&server_state)))
             .app_data(web::Data::new(Arc::clone(&server_control_state)))
             // Inner-to-outer wrap order: BearerAuth runs first, then Logger sees the
             // resulting (possibly 401) response, then Cors handles preflight + headers.
             .wrap(auth::BearerAuth::new(Arc::clone(&auth_token)))
-            .wrap(middleware::Logger::default())
-            .wrap(
-                Cors::default()
-                    .allowed_origin_fn(move |origin, _request_head| {
-                        origin
-                            .to_str()
-                            .map(|value| {
-                                allowed_origins.iter().any(|allowed| {
-                                    allowed == "*" || allowed.eq_ignore_ascii_case(value)
-                                })
-                            })
-                            .unwrap_or(false)
-                    })
-                    .supports_credentials()
-                    .allowed_methods(vec!["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
-                    .allowed_headers(vec![
-                        header::CONTENT_TYPE,
-                        header::AUTHORIZATION,
-                        header::COOKIE,
-                    ])
-                    .expose_headers(vec![header::SET_COOKIE])
-                    .max_age(3600),
-            )
+            .wrap(access_log)
+            .wrap(cors)
             // CORS preflight handler - catch all OPTIONS requests
             .default_service(web::route().method(Method::OPTIONS).to(cors_preflight))
             .route("/shutdown", web::post().to(shutdown_server))

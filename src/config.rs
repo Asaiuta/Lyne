@@ -577,7 +577,8 @@ fn configured_allowed_origins_from_env() -> Vec<String> {
             "https://tauri.localhost".to_string(),
             "http://tauri.localhost".to_string(),
             "file://".to_string(),
-            "null".to_string(),
+            // "null" is intentionally NOT allowed by default: any sandboxed iframe
+            // can produce `Origin: null`, which would defeat the origin allowlist.
         ];
     }
 
