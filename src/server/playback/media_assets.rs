@@ -10,7 +10,11 @@ pub(super) async fn get_media_cover_art_by_id(
     data: &web::Data<Arc<AppState>>,
     media_id: &str,
 ) -> HttpResponse {
-    let cached = match data.repo.get_cover_art_for_media(media_id.to_string()).await {
+    let cached = match data
+        .repo
+        .get_cover_art_for_media(media_id.to_string())
+        .await
+    {
         Ok(value) => value,
         Err(e) => return internal_server_error_response(e),
     };
@@ -89,9 +93,11 @@ async fn local_cover_art_for_media(
     let cover_max_bytes = data.analysis.library_scan_cover_max_bytes;
     let resolved = {
         let source_path = source_path.clone();
-        actix_web::rt::task::spawn_blocking(move || resolve_local_cover_bytes(&source_path, cover_max_bytes))
-            .await
-            .map_err(|e| format!("cover art task join failed: {e}"))?
+        actix_web::rt::task::spawn_blocking(move || {
+            resolve_local_cover_bytes(&source_path, cover_max_bytes)
+        })
+        .await
+        .map_err(|e| format!("cover art task join failed: {e}"))?
     };
 
     let Some((mime, bytes, metadata, duration_secs)) = resolved else {
@@ -116,7 +122,11 @@ fn resolve_local_cover_bytes(
     let local_metadata = match crate::metadata::read_local_metadata(source_path) {
         Ok(value) => value,
         Err(e) => {
-            log::warn!("Cover art metadata read failed for '{}': {}", source_path, e);
+            log::warn!(
+                "Cover art metadata read failed for '{}': {}",
+                source_path,
+                e
+            );
             return None;
         }
     };

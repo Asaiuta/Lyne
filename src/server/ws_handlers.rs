@@ -300,13 +300,12 @@ fn persist_current_runtime_metadata(
         let mut metadata = metadata;
         if enrich_lofty {
             let lofty_path = path.clone();
-            let lofty_metadata =
-                actix_web::rt::task::spawn_blocking(move || {
-                    crate::metadata::extract_lofty_metadata(&lofty_path)
-                })
-                .await
-                .ok()
-                .flatten();
+            let lofty_metadata = actix_web::rt::task::spawn_blocking(move || {
+                crate::metadata::extract_lofty_metadata(&lofty_path)
+            })
+            .await
+            .ok()
+            .flatten();
             if let Some(lofty_metadata) = lofty_metadata {
                 crate::metadata::merge_lofty_into(&mut metadata, &lofty_metadata);
             }

@@ -17,9 +17,9 @@
 use std::sync::Arc;
 
 use crate::app_database::{
-    AppDatabase, CoverArtRecord, LibraryFolderSummaryRecord, LibraryTrackGroupsQuery,
-    LibraryTrackGroupsRecord, LibraryTrackSummaryRecord, LibraryTrackViewQuery,
-    LibraryTrackViewRecord, LibrarySummaryStatsRecord, NcmTrackSourceRecord,
+    AppDatabase, CoverArtRecord, LibraryFolderSummaryRecord, LibrarySummaryStatsRecord,
+    LibraryTrackGroupsQuery, LibraryTrackGroupsRecord, LibraryTrackSummaryRecord,
+    LibraryTrackViewQuery, LibraryTrackViewRecord, NcmTrackSourceRecord,
 };
 use crate::decoder::TrackMetadata;
 
@@ -66,10 +66,7 @@ impl AsyncRepo {
             .await
     }
 
-    pub async fn media_id_for_track_key(
-        &self,
-        track_key: i64,
-    ) -> Result<Option<String>, String> {
+    pub async fn media_id_for_track_key(&self, track_key: i64) -> Result<Option<String>, String> {
         self.run_blocking(move |db| db.media_id_for_track_key(track_key))
             .await
     }
@@ -85,7 +82,13 @@ impl AsyncRepo {
         channels: Option<usize>,
     ) -> Result<String, String> {
         self.run_blocking(move |db| {
-            db.record_media_metadata(&source_path, &metadata, duration_secs, sample_rate, channels)
+            db.record_media_metadata(
+                &source_path,
+                &metadata,
+                duration_secs,
+                sample_rate,
+                channels,
+            )
         })
         .await
     }

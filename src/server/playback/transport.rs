@@ -12,23 +12,37 @@ pub(super) async fn load(
     };
 
     let autoplay = body.autoplay.unwrap_or(false);
-    match load_validated_path_for_playback(
-        &data,
-        &path,
-        autoplay,
-        if autoplay { "autoplay" } else { "load" },
-    ) {
-        Ok((state_response, _shared_state)) => {
-            HttpResponse::Ok().json(ApiResponse::success_with_state(
-                if autoplay {
-                    "Track playback requested"
-                } else {
-                    "Track loaded"
-                },
-                state_response,
-            ))
-        }
-        Err(e) => internal_server_error_response(format!("Failed to load: {}", e)),
+    // `load_validated_path_for_playback` is fully synchronous: it acquires the
+    // `parking_lot::Mutex<AudioPlayer>` (a `!Send` guard) and performs a decoder
+    // open plus several blocking SQLite writes. Offload it onto the blocking
+    // pool (same pattern as the NCM handlers in netease/playback_actions.rs) so
+    // it never blocks the async executor. The player lock is acquired and
+    // released entirely inside the closure (no `.await` there), so the `!Send`
+    // guard never crosses an await point.
+    let state_for_task = data.get_ref().clone();
+    let load_result = actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        load_validated_path_for_playback(
+            &data,
+            &path,
+            autoplay,
+            if autoplay { "autoplay" } else { "load" },
+        )
+        .map(|(state_response, _shared_state)| state_response)
+    })
+    .await;
+
+    match load_result {
+        Ok(Ok(state_response)) => HttpResponse::Ok().json(ApiResponse::success_with_state(
+            if autoplay {
+                "Track playback requested"
+            } else {
+                "Track loaded"
+            },
+            state_response,
+        )),
+        Ok(Err(e)) => internal_server_error_response(format!("Failed to load: {}", e)),
+        Err(e) => internal_server_error_response(format!("Failed to load: join error {}", e)),
     }
 }
 

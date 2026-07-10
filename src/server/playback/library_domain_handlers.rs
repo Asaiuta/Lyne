@@ -231,18 +231,38 @@ pub(super) async fn replace_queue_from_media_ids(
         return bad_request_response("media_ids cannot be empty");
     }
     let media_ids = media_ids_with_start(&body.media_ids, body.start_media_id.as_deref());
-    let rows = match data.app_db.source_paths_for_media_ids(&media_ids) {
-        Ok(rows) => rows,
-        Err(e) => return internal_server_error_response(e),
-    };
-    match play_media_queue_rows(
-        &data,
-        &rows,
-        body.start_media_id.as_deref(),
-        "Library tracks not found",
-    ) {
-        Ok(playback) => library_queue_playback_response(playback),
-        Err(error) => error.into_response(),
+    // Resolving media ids is a blocking SQLite read, and `play_media_queue_rows`
+    // replaces the persistent queue (SQLite writes) and runs the decoder-open
+    // load path while holding the `parking_lot::Mutex<AudioPlayer>`. Offload the
+    // whole synchronous sequence onto the blocking pool (same pattern as the NCM
+    // handlers in netease/playback_actions.rs); the player lock is acquired and
+    // released entirely inside the closure, so the `!Send` guard never crosses
+    // an await point. Typed failures (`LibraryQueueFailure`) cross the boundary
+    // intact, so 400/404 mappings are preserved.
+    let state_for_task = data.get_ref().clone();
+    let start_media_id = body.start_media_id.clone();
+    let play_result = actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        let rows = data
+            .app_db
+            .source_paths_for_media_ids(&media_ids)
+            .map_err(LibraryQueueFailure::Internal)?;
+        play_media_queue_rows(
+            &data,
+            &rows,
+            start_media_id.as_deref(),
+            "Library tracks not found",
+        )
+    })
+    .await;
+
+    match play_result {
+        Ok(Ok(playback)) => library_queue_playback_response(playback),
+        Ok(Err(error)) => error.into_response(),
+        Err(e) => internal_server_error_response(format!(
+            "Failed to play library queue from media ids: join error {}",
+            e
+        )),
     }
 }
 
@@ -908,9 +928,7 @@ pub(super) async fn resolve_current_lyrics(
             Ok(Ok(value)) => value,
             Ok(Err(e)) => return internal_server_error_response(e),
             Err(e) => {
-                return internal_server_error_response(format!(
-                    "local lyric task join failed: {e}"
-                ))
+                return internal_server_error_response(format!("local lyric task join failed: {e}"))
             }
         }
     };

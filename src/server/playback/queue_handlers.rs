@@ -1,5 +1,70 @@
 use super::*;
+use crate::app_database::QueueEntryRecord;
 use actix_web::{web, HttpResponse};
+
+/// Typed failure for `play_from_persistent_queue` so the offload boundary
+/// preserves the original response mapping (DB error -> 500 with the raw
+/// message, missing entry -> 404, load error -> 500 with the load prefix).
+enum QueuePlayFailure {
+    Db(String),
+    NotFound,
+    Load(String),
+}
+
+fn select_queue_entry_for_play(
+    entries: Vec<QueueEntryRecord>,
+    entry_id: Option<i64>,
+    source_path: Option<&str>,
+) -> Option<QueueEntryRecord> {
+    if let (Some(entry_id), Some(source_path)) = (entry_id, source_path) {
+        entries
+            .iter()
+            .find(|entry| {
+                entry.entry_id == entry_id && same_media_identity(&entry.source_path, source_path)
+            })
+            .cloned()
+            .or_else(|| {
+                entries
+                    .into_iter()
+                    .find(|entry| same_media_identity(&entry.source_path, source_path))
+            })
+    } else if let Some(entry_id) = entry_id {
+        entries.into_iter().find(|entry| entry.entry_id == entry_id)
+    } else if let Some(source_path) = source_path {
+        entries
+            .into_iter()
+            .find(|entry| same_media_identity(&entry.source_path, source_path))
+    } else {
+        entries
+            .into_iter()
+            .find(|entry| entry.status == "queued" || entry.status == "preloading")
+    }
+}
+
+/// Runs `load_queue_entry_for_playback` on the blocking pool (same pattern as
+/// the NCM handlers in netease/playback_actions.rs): the call acquires the
+/// `parking_lot::Mutex<AudioPlayer>` (a `!Send` guard) and performs a decoder
+/// open plus several blocking SQLite writes, so it must never run inline on
+/// the async executor. The player lock is acquired and released entirely
+/// inside the closure (no `.await` there), so the guard never crosses an
+/// await point.
+async fn load_queue_entry_for_playback_offloaded(
+    data: &web::Data<Arc<AppState>>,
+    entry: QueueEntryRecord,
+    autoplay: bool,
+) -> Result<StateResponse, String> {
+    let state_for_task = data.get_ref().clone();
+    match actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        load_queue_entry_for_playback(&data, entry, autoplay)
+            .map(|(state_response, _shared_state)| state_response)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(e) => Err(format!("join error {}", e)),
+    }
+}
 
 pub(super) async fn queue_next(
     data: web::Data<Arc<AppState>>,
@@ -63,62 +128,67 @@ pub(super) async fn play_from_persistent_queue(
     data: web::Data<Arc<AppState>>,
     body: web::Json<PlayQueueRequest>,
 ) -> HttpResponse {
-    let entry = match data.app_db.list_queue_entries("active") {
-        Ok(entries) => {
-            if let (Some(entry_id), Some(source_path)) =
-                (body.entry_id, body.source_path.as_deref())
-            {
-                entries
-                    .iter()
-                    .find(|entry| {
-                        entry.entry_id == entry_id
-                            && same_media_identity(&entry.source_path, source_path)
-                    })
-                    .cloned()
-                    .or_else(|| {
-                        entries
-                            .into_iter()
-                            .find(|entry| same_media_identity(&entry.source_path, source_path))
-                    })
-            } else if let Some(entry_id) = body.entry_id {
-                entries.into_iter().find(|entry| entry.entry_id == entry_id)
-            } else if let Some(source_path) = body.source_path.as_deref() {
-                entries
-                    .into_iter()
-                    .find(|entry| same_media_identity(&entry.source_path, source_path))
-            } else {
-                entries
-                    .into_iter()
-                    .find(|entry| entry.status == "queued" || entry.status == "preloading")
-            }
-        }
-        Err(e) => return internal_server_error_response(e),
-    };
+    // The queue listing is a blocking SQLite read and the load path opens a
+    // decoder + writes SQLite while holding the player mutex; run the whole
+    // synchronous sequence on the blocking pool (NCM handler pattern).
+    let state_for_task = data.get_ref().clone();
+    let entry_id = body.entry_id;
+    let source_path = body.source_path.clone();
+    let play_result = actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        let entries = data
+            .app_db
+            .list_queue_entries("active")
+            .map_err(QueuePlayFailure::Db)?;
+        let entry = select_queue_entry_for_play(entries, entry_id, source_path.as_deref())
+            .ok_or(QueuePlayFailure::NotFound)?;
+        load_queue_entry_for_playback(&data, entry, true)
+            .map(|(state_response, _shared_state)| state_response)
+            .map_err(QueuePlayFailure::Load)
+    })
+    .await;
 
-    let Some(entry) = entry else {
-        return not_found_response("Queue entry not found");
-    };
-
-    match load_queue_entry_for_playback(&data, entry, true) {
-        Ok((state, _shared_state)) => HttpResponse::Ok().json(ApiResponse::success_with_state(
+    match play_result {
+        Ok(Ok(state)) => HttpResponse::Ok().json(ApiResponse::success_with_state(
             "Queue playback started",
             state,
         )),
-        Err(e) => internal_server_error_response(format!("Failed to play queue entry: {}", e)),
+        Ok(Err(QueuePlayFailure::Db(e))) => internal_server_error_response(e),
+        Ok(Err(QueuePlayFailure::NotFound)) => not_found_response("Queue entry not found"),
+        Ok(Err(QueuePlayFailure::Load(e))) => {
+            internal_server_error_response(format!("Failed to play queue entry: {}", e))
+        }
+        Err(e) => {
+            internal_server_error_response(format!("Failed to play queue entry: join error {}", e))
+        }
     }
 }
 
 pub(super) async fn play_next_queue_entry(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let Some(current_path) = current_queue_cursor_path(&data) else {
-        return not_found_response("Next queue entry not found");
-    };
-    let entry = match data
-        .app_db
-        .peek_next_queue_entry("active", Some(&current_path))
-    {
-        Ok(Some(entry)) => entry,
-        Ok(None) => return not_found_response("Next queue entry not found"),
-        Err(e) => return internal_server_error_response(e),
+    // The cursor read takes the player lock and the peek is a blocking SQLite
+    // read; run both on the blocking pool. A missing cursor and an empty peek
+    // both map to the original 404.
+    let state_for_task = data.get_ref().clone();
+    let peek_result = actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        let Some(current_path) = current_queue_cursor_path(&data) else {
+            return Ok(None);
+        };
+        data.app_db
+            .peek_next_queue_entry("active", Some(&current_path))
+    })
+    .await;
+
+    let entry = match peek_result {
+        Ok(Ok(Some(entry))) => entry,
+        Ok(Ok(None)) => return not_found_response("Next queue entry not found"),
+        Ok(Err(e)) => return internal_server_error_response(e),
+        Err(e) => {
+            return internal_server_error_response(format!(
+                "Failed to play next queue entry: join error {}",
+                e
+            ))
+        }
     };
 
     match promote_pending_queue_entry_for_playback(&data, entry.clone()).await {
@@ -138,8 +208,8 @@ pub(super) async fn play_next_queue_entry(data: web::Data<Arc<AppState>>) -> Htt
         }
     }
 
-    match load_queue_entry_for_playback(&data, entry, true) {
-        Ok((state, _shared_state)) => HttpResponse::Ok().json(ApiResponse::success_with_state(
+    match load_queue_entry_for_playback_offloaded(&data, entry, true).await {
+        Ok(state) => HttpResponse::Ok().json(ApiResponse::success_with_state(
             "Next queue entry started",
             state,
         )),
@@ -148,20 +218,33 @@ pub(super) async fn play_next_queue_entry(data: web::Data<Arc<AppState>>) -> Htt
 }
 
 pub(super) async fn play_previous_queue_entry(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let Some(current_path) = current_queue_cursor_path(&data) else {
-        return not_found_response("Previous queue entry not found");
-    };
-    let entry = match data
-        .app_db
-        .peek_previous_queue_entry("active", Some(&current_path))
-    {
-        Ok(Some(entry)) => entry,
-        Ok(None) => return not_found_response("Previous queue entry not found"),
-        Err(e) => return internal_server_error_response(e),
+    // Same offload as `play_next_queue_entry`: player-lock cursor read plus
+    // blocking SQLite peek run on the blocking pool.
+    let state_for_task = data.get_ref().clone();
+    let peek_result = actix_web::rt::task::spawn_blocking(move || {
+        let data = web::Data::new(state_for_task);
+        let Some(current_path) = current_queue_cursor_path(&data) else {
+            return Ok(None);
+        };
+        data.app_db
+            .peek_previous_queue_entry("active", Some(&current_path))
+    })
+    .await;
+
+    let entry = match peek_result {
+        Ok(Ok(Some(entry))) => entry,
+        Ok(Ok(None)) => return not_found_response("Previous queue entry not found"),
+        Ok(Err(e)) => return internal_server_error_response(e),
+        Err(e) => {
+            return internal_server_error_response(format!(
+                "Failed to play previous queue entry: join error {}",
+                e
+            ))
+        }
     };
 
-    match load_queue_entry_for_playback(&data, entry, true) {
-        Ok((state, _shared_state)) => HttpResponse::Ok().json(ApiResponse::success_with_state(
+    match load_queue_entry_for_playback_offloaded(&data, entry, true).await {
+        Ok(state) => HttpResponse::Ok().json(ApiResponse::success_with_state(
             "Previous queue entry started",
             state,
         )),
