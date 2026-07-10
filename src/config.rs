@@ -280,6 +280,9 @@ impl EngineSettings {
             sat_type: parse_saturation_type(
                 env_string_or("AUDIO_SATURATION_TYPE", "tube").as_str(),
             ),
+            // quality: Direct (no oversampling) — the pre-bump core behavior.
+            // Oversampled modes stay opt-in until Lyne exposes a setting.
+            quality: Default::default(),
             // drive: 0.0 (no saturation) to 2.0 (heavy saturation)
             drive: env_parse_clamped("AUDIO_SATURATION_DRIVE", 0.25, 0.0, 2.0),
             // threshold: 0.0 to 1.0 (normalized signal level)

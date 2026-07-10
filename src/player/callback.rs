@@ -331,6 +331,14 @@ pub struct LockfreeDspContext {
     /// command processing loop (not from the audio callback itself).
     external_ir_kernel: parking_lot::Mutex<Option<(Vec<f64>, usize)>>,
     fir_ir_kernel: parking_lot::Mutex<Option<(Vec<f64>, usize)>>,
+
+    /// Disposal slots of every `ConvolverProcessor` built for this context
+    /// (main chain, WASAPI chain, fallback chains, rebuilds). The audio thread
+    /// parks retired kernels in its chain's slot; per the core contract at most
+    /// two park before further kernel adoptions are deferred, so the publisher
+    /// must drain these before installing a new kernel. Only touched from
+    /// non-realtime paths.
+    convolver_disposal_slots: parking_lot::Mutex<Vec<Arc<ArcSwapOption<FFTConvolver>>>>,
 }
 
 impl LockfreeDspContext {
@@ -348,7 +356,7 @@ impl LockfreeDspContext {
         dynamic_loudness_telemetry: Arc<AtomicDynamicLoudnessTelemetry>,
         convolver_swap: Arc<ArcSwapOption<FFTConvolver>>,
         convolver_enabled: Arc<AtomicBool>,
-    ) -> DspChain {
+    ) -> (DspChain, Arc<ArcSwapOption<FFTConvolver>>) {
         // Stage order follows audio-engine-core's canonical output chain
         // (`canonical_output_stage_descriptors`): Volume → EQ → Saturation →
         // Crossfeed → Convolver → DynamicLoudness → PeakLimiter. NoiseShaper is
@@ -360,7 +368,9 @@ impl LockfreeDspContext {
         chain.add(EqProcessor::new(channels, sample_rate, eq_params));
         chain.add(SaturationProcessor::new(channels, saturation_params));
         chain.add(CrossfeedProcessor::new(sample_rate, crossfeed_params));
-        chain.add(ConvolverProcessor::new(convolver_swap, convolver_enabled));
+        let convolver = ConvolverProcessor::new(convolver_swap, convolver_enabled);
+        let convolver_disposal = convolver.disposal_slot();
+        chain.add(convolver);
         chain.add(DynamicLoudnessProcessor::new(
             channels,
             sample_rate as u32,
@@ -372,7 +382,7 @@ impl LockfreeDspContext {
             sample_rate as u32,
             limiter_params,
         ));
-        chain
+        (chain, convolver_disposal)
     }
 
     /// Create a new lock-free DSP context.
@@ -395,7 +405,7 @@ impl LockfreeDspContext {
     ) -> (Self, DspChain) {
         let merged_convolver = Arc::new(ArcSwapOption::empty());
         let merged_convolver_enabled = Arc::new(AtomicBool::new(false));
-        let chain = Self::build_dsp_chain(
+        let (chain, convolver_disposal) = Self::build_dsp_chain(
             channels,
             sample_rate,
             Arc::clone(&eq_params),
@@ -422,12 +432,34 @@ impl LockfreeDspContext {
             merged_convolver_enabled,
             external_ir_kernel: parking_lot::Mutex::new(None),
             fir_ir_kernel: parking_lot::Mutex::new(None),
+            convolver_disposal_slots: parking_lot::Mutex::new(vec![convolver_disposal]),
         };
 
         (ctx, chain)
     }
 
+    /// Track a chain's convolver disposal slot so retired kernels get drained.
+    /// Every caller of [`Self::build_dsp_chain`] that installs the chain for
+    /// playback must register the returned slot here. Slots whose processor is
+    /// gone and that hold no kernel are pruned on the way in.
+    pub fn register_convolver_disposal_slot(&self, slot: Arc<ArcSwapOption<FFTConvolver>>) {
+        let mut slots = self.convolver_disposal_slots.lock();
+        slots.retain(|s| Arc::strong_count(s) > 1 || s.load().is_some());
+        slots.push(slot);
+    }
+
+    /// Drain retired kernels parked by the audio thread. Called from
+    /// non-realtime paths before publishing a new kernel so the large
+    /// deallocations happen here, and so kernel adoption never stalls on a
+    /// full disposal slot (core parks at most two retirees).
+    fn drain_retired_convolver_kernels(&self) {
+        for slot in self.convolver_disposal_slots.lock().iter() {
+            drop(slot.swap(None));
+        }
+    }
+
     fn rebuild_merged_convolver(&self) -> Result<(), String> {
+        self.drain_retired_convolver_kernels();
         let external = self.external_ir_kernel.lock().clone();
         let fir = self.fir_ir_kernel.lock().clone();
 
@@ -3001,7 +3033,7 @@ mod tests {
         // resampling (at the output rate) rather than inside the source-rate
         // chain. Pinning to the core descriptor list makes any upstream
         // reordering a visible, deliberate change here instead of silent drift.
-        let chain = LockfreeDspContext::build_dsp_chain(
+        let (chain, _disposal) = LockfreeDspContext::build_dsp_chain(
             2,
             48_000.0,
             Arc::new(AtomicEqParams::new()),
@@ -3022,6 +3054,37 @@ mod tests {
             .collect();
 
         assert_eq!(chain.processor_names(), expected);
+    }
+
+    #[test]
+    fn publishing_kernel_drains_parked_retired_convolvers() {
+        let (ctx, _chain) = LockfreeDspContext::new(
+            2,
+            48000.0,
+            Arc::new(AtomicEqParams::new()),
+            Arc::new(AtomicSaturationParams::new()),
+            Arc::new(AtomicCrossfeedParams::new()),
+            Arc::new(AtomicPeakLimiterParams::new()),
+            Arc::new(AtomicVolumeParams::new()),
+            Arc::new(AtomicNoiseShaperParams::new()),
+            Arc::new(AtomicDynamicLoudnessParams::new()),
+            Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+        );
+
+        // Simulate the audio thread having parked a retired kernel in a
+        // registered disposal slot (an extra chain's slot, like WASAPI's).
+        let extra_slot: Arc<ArcSwapOption<FFTConvolver>> = Arc::new(ArcSwapOption::empty());
+        extra_slot.store(Some(Arc::new(FFTConvolver::new(&[1.0, 0.0, 0.0, 0.0], 2))));
+        ctx.register_convolver_disposal_slot(Arc::clone(&extra_slot));
+
+        // Publishing a new kernel must drain every registered slot first, so
+        // adoption never stalls on a full disposal slot (core parks max two).
+        ctx.set_external_ir_convolver(&[0.5, 0.0, 0.0, 0.0], 2)
+            .expect("kernel publish");
+        assert!(
+            extra_slot.load().is_none(),
+            "retired kernel must be drained before a new kernel is published"
+        );
     }
 
     #[test]
@@ -3084,7 +3147,7 @@ mod tests {
     #[test]
     fn test_dsp_rebuild_swaps_prebuilt_chain() {
         let shared = SharedState::new();
-        let initial = LockfreeDspContext::build_dsp_chain(
+        let (initial, _disposal) = LockfreeDspContext::build_dsp_chain(
             2,
             44100.0,
             Arc::new(AtomicEqParams::new()),
@@ -3098,7 +3161,7 @@ mod tests {
             Arc::new(ArcSwapOption::empty()),
             Arc::new(AtomicBool::new(false)),
         );
-        let rebuilt = LockfreeDspContext::build_dsp_chain(
+        let (rebuilt, _disposal) = LockfreeDspContext::build_dsp_chain(
             1,
             48000.0,
             Arc::new(AtomicEqParams::new()),

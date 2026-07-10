@@ -206,7 +206,7 @@ fn build_dsp_chain(
     context: &OutputStreamContext<'_>,
     params: &DspParamRefs<'_>,
 ) -> crate::processor::DspChain {
-    LockfreeDspContext::build_dsp_chain(
+    let (chain, convolver_disposal) = LockfreeDspContext::build_dsp_chain(
         channels,
         sample_rate,
         Arc::clone(params.eq_params),
@@ -219,7 +219,11 @@ fn build_dsp_chain(
         Arc::clone(params.dynamic_loudness_telemetry),
         Arc::clone(&context.dsp_ctx.merged_convolver),
         Arc::clone(&context.dsp_ctx.merged_convolver_enabled),
-    )
+    );
+    context
+        .dsp_ctx
+        .register_convolver_disposal_slot(convolver_disposal);
+    chain
 }
 
 #[allow(clippy::too_many_arguments)]

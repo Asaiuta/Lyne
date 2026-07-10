@@ -732,7 +732,7 @@ fn rebuild_pending_dsp_chain(
     sample_rate: u32,
 ) {
     while shared_state.pending_dsp_chain.pop().is_some() {}
-    let rebuilt_chain = LockfreeDspContext::build_dsp_chain(
+    let (rebuilt_chain, convolver_disposal) = LockfreeDspContext::build_dsp_chain(
         channels,
         sample_rate as f64,
         Arc::clone(dsp_params.eq_params),
@@ -746,6 +746,7 @@ fn rebuild_pending_dsp_chain(
         Arc::clone(&dsp_ctx.merged_convolver),
         Arc::clone(&dsp_ctx.merged_convolver_enabled),
     );
+    dsp_ctx.register_convolver_disposal_slot(convolver_disposal);
     let _ = shared_state.pending_dsp_chain.push(rebuilt_chain);
 }
 

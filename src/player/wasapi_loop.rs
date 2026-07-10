@@ -203,7 +203,7 @@ fn build_wasapi_callback(
 
     let mut callback_scratch = CallbackScratch::new(channels);
 
-    let mut wasapi_dsp_chain = LockfreeDspContext::build_dsp_chain(
+    let (mut wasapi_dsp_chain, convolver_disposal) = LockfreeDspContext::build_dsp_chain(
         channels,
         sample_rate as f64,
         Arc::clone(&dsp_ctx.eq_params),
@@ -217,6 +217,7 @@ fn build_wasapi_callback(
         Arc::clone(&dsp_ctx.merged_convolver),
         Arc::clone(&dsp_ctx.merged_convolver_enabled),
     );
+    dsp_ctx.register_convolver_disposal_slot(convolver_disposal);
 
     let mut unused_resampler = None;
 

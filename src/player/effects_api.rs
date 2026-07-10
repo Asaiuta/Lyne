@@ -74,6 +74,7 @@ impl AudioPlayer {
         let snapshot = self.lockfree_saturation_params.read();
         SaturationSettings {
             sat_type: snapshot.sat_type.into(),
+            quality: snapshot.quality.into(),
             drive: snapshot.drive,
             threshold: snapshot.threshold,
             mix: snapshot.mix,

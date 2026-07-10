@@ -385,7 +385,7 @@ checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
 [[package]]
 name = "audio-engine-core"
 version = "0.1.0"
-source = "git+https://github.com/Asaiuta/audio-engine-core?branch=main#b44f28e63e0cd20ad1bf0e6471b494d4638272b9"
+source = "git+https://github.com/Asaiuta/audio-engine-core?branch=main#5c0e489c8bebea5e71b8e8f8573cc9892e813102"
 dependencies = [
  "arc-swap",
  "atomic_float",
@@ -1368,7 +1368,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -2367,7 +2367,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2404,7 +2404,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
