@@ -197,7 +197,7 @@ impl AudioThreadRuntime {
         let dsp_params = self.dsp_params.refs();
 
         self.shared_state.mark_stream_build_started();
-        match build_requested_output_stream(
+        let requested = build_requested_output_stream(
             &output_plan,
             &mut self.owned_dsp_chain,
             &stream_context,
@@ -206,10 +206,14 @@ impl AudioThreadRuntime {
                 phase_response: self.phase_response,
                 quality: self.resample_quality,
             },
-        ) {
-            Ok(s) => {
-                self.shared_state.mark_stream_build_finished();
-                activate_started_stream(&mut self.stream, s, &self.shared_state);
+        )
+        .and_then(|s| {
+            self.shared_state.mark_stream_build_finished();
+            activate_started_stream(&mut self.stream, s, &self.shared_state)
+        });
+
+        match requested {
+            Ok(()) => {
                 let detected_bits = detect_output_bits(&output_plan.device, self.noise_shaper_bits);
 
                 self.shared_state
@@ -223,11 +227,11 @@ impl AudioThreadRuntime {
             }
             Err(e) => {
                 log::error!(
-                    "Failed to build stream: {}. Trying device default config...",
+                    "Failed to start stream: {}. Trying device default config...",
                     e
                 );
 
-                match build_fallback_output_stream(
+                let fallback = build_fallback_output_stream(
                     &output_plan,
                     &stream_context,
                     &dsp_params,
@@ -235,10 +239,14 @@ impl AudioThreadRuntime {
                         phase_response: self.phase_response,
                         quality: self.resample_quality,
                     },
-                ) {
-                    Ok(s) => {
-                        self.shared_state.mark_stream_build_finished();
-                        activate_started_stream(&mut self.stream, s, &self.shared_state);
+                )
+                .and_then(|s| {
+                    self.shared_state.mark_stream_build_finished();
+                    activate_started_stream(&mut self.stream, s, &self.shared_state)
+                });
+
+                match fallback {
+                    Ok(()) => {
                         let detected_bits =
                             detect_output_bits(&output_plan.device, self.noise_shaper_bits);
                         self.shared_state

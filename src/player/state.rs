@@ -920,6 +920,39 @@ impl SharedState {
         }
     }
 
+    /// Publish a new decoded audio buffer from a **non-realtime** thread.
+    ///
+    /// Swaps the buffer in and routes the displaced `Arc` through the retire
+    /// queue instead of dropping it: a concurrently-running audio callback may
+    /// still hold an ArcSwap guard on the old buffer, and dropping the
+    /// displaced reference here could make that RT-held guard the last owner
+    /// of a potentially huge sample `Vec`, deallocating it on the audio
+    /// thread. The queue keeps the `Arc` alive until
+    /// [`Self::drain_retired_audio_resources`] observes the sole reference.
+    ///
+    /// If the queue stays full past a bounded retry window (drainers run at
+    /// least every 500 ms), the displaced buffer drops here on the writer
+    /// thread as a last resort — never on the RT side by this call.
+    pub fn publish_audio_buffer(&self, samples: Arc<Vec<f64>>) {
+        let mut displaced = self.audio_buffer.swap(samples);
+        for _ in 0..1000 {
+            match self
+                .retired_resources
+                .push(RetiredAudioResource::Buffer(displaced))
+            {
+                Ok(()) => return,
+                Err(RetiredAudioResource::Buffer(rejected)) => {
+                    displaced = rejected;
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(_) => unreachable!("push rejects the pushed Buffer variant"),
+            }
+        }
+        log::warn!(
+            "retired-resource queue full for >1s; dropping displaced audio buffer on writer thread"
+        );
+    }
+
     /// Drain every resource retired by the audio callback. Call only from a
     /// non-realtime thread (the audio command loop).
     ///
@@ -929,6 +962,7 @@ impl SharedState {
     /// — is dropped here off the realtime thread.
     pub fn drain_retired_audio_resources(&self) {
         let current_generation = self.streaming_generation.load(Ordering::Acquire);
+        let mut deferred_buffers: Vec<Arc<Vec<f64>>> = Vec::new();
         while let Some(resource) = self.retired_resources.pop() {
             match resource {
                 RetiredAudioResource::Chunk {
@@ -947,8 +981,30 @@ impl SharedState {
                     }
                     // Stale-generation chunk: `samples` drops here, off the RT thread.
                 }
-                // Buffers and DSP chains drop here, off the RT thread.
-                RetiredAudioResource::Buffer(_) | RetiredAudioResource::Chain(_) => {}
+                RetiredAudioResource::Buffer(buffer) => {
+                    // A callback that overlapped the displacing swap may still
+                    // hold an ArcSwap guard on this buffer; dropping our
+                    // reference now would make that RT-held guard the last
+                    // owner. The buffer is already out of `audio_buffer`, so
+                    // its count can only shrink — defer until we are the sole
+                    // holder, then it drops here off the RT thread.
+                    if Arc::strong_count(&buffer) > 1 {
+                        deferred_buffers.push(buffer);
+                    }
+                }
+                // DSP chains were swapped out by the RT thread itself; no
+                // cross-thread guard can outlive that swap. Drop here.
+                RetiredAudioResource::Chain(_) => {}
+            }
+        }
+        for buffer in deferred_buffers {
+            if self
+                .retired_resources
+                .push(RetiredAudioResource::Buffer(buffer))
+                .is_err()
+            {
+                // Queue refilled behind us; dropping here is still off-RT.
+                log::warn!("retired-resource queue full while re-parking a guarded buffer");
             }
         }
     }
@@ -1962,6 +2018,53 @@ mod tests {
                 .retired_resource_drop_in_rt_count
                 .load(Ordering::Relaxed),
             0
+        );
+    }
+
+    #[test]
+    fn publish_audio_buffer_retires_displaced_buffer_off_writer_thread() {
+        let shared = SharedState::new();
+        shared.audio_buffer.store(Arc::new(vec![0.5; 16]));
+
+        shared.publish_audio_buffer(Arc::new(vec![0.7; 8]));
+
+        // Displaced buffer parked in the retire queue, not dropped inline.
+        assert_eq!(shared.retired_resources.len(), 1);
+        match shared.retired_resources.pop() {
+            Some(RetiredAudioResource::Buffer(buffer)) => assert_eq!(buffer.len(), 16),
+            other => panic!("expected displaced Buffer, got {:?}", other.is_some()),
+        }
+        // The new buffer is live.
+        assert_eq!(shared.audio_buffer.load().len(), 8);
+    }
+
+    #[test]
+    fn drain_defers_buffer_drop_while_callback_guard_outstanding() {
+        let shared = SharedState::new();
+        shared.audio_buffer.store(Arc::new(vec![0.5; 16]));
+
+        // Simulated audio callback holding an ArcSwap guard on the old buffer.
+        let callback_guard = shared.audio_buffer.load();
+
+        // Non-RT writer swaps a new buffer in while the guard is live.
+        shared.publish_audio_buffer(Arc::new(vec![0.7; 8]));
+        assert_eq!(shared.retired_resources.len(), 1);
+
+        // Drain must NOT drop the displaced buffer: the guard would become the
+        // last reference and the samples would deallocate on the RT thread.
+        shared.drain_retired_audio_resources();
+        assert_eq!(
+            shared.retired_resources.len(),
+            1,
+            "guarded buffer must stay parked in the retire queue"
+        );
+
+        drop(callback_guard);
+        shared.drain_retired_audio_resources();
+        assert_eq!(
+            shared.retired_resources.len(),
+            0,
+            "sole-reference buffer drops off-RT once the guard is gone"
         );
     }
 

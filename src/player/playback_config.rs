@@ -301,7 +301,7 @@ fn promote_pending_buffer_if_matching(
         .sample_rate
         .store(pending_sample_rate, Ordering::Relaxed);
     shared.channels.store(pending_channels, Ordering::Relaxed);
-    shared.audio_buffer.store(samples);
+    shared.publish_audio_buffer(samples);
     shared.is_loading.store(false, Ordering::Release);
     shared.load_progress.store(100, Ordering::Relaxed);
     *shared.load_error.write() = None;

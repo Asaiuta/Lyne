@@ -601,7 +601,7 @@ fn handle_streaming_load_finished_command(
 
     if let Some(samples) = samples {
         let samples = Arc::new(samples);
-        shared_state.audio_buffer.store(Arc::clone(&samples));
+        shared_state.publish_audio_buffer(Arc::clone(&samples));
         shared_state
             .streaming_full_buffer_published
             .store(true, Ordering::Release);
@@ -777,7 +777,7 @@ fn apply_loaded_track_state(
         _ => shared_state.state.store(PlayerState::Stopped),
     }
 
-    shared_state.audio_buffer.store(samples);
+    shared_state.publish_audio_buffer(samples);
     *shared_state.file_path.write() = Some(file_path.to_string());
     *shared_state.track_metadata.write() = metadata.clone();
     *shared_state.current_track_path.write() = Some(file_path.to_string());
@@ -822,7 +822,7 @@ fn apply_streaming_track_state(
         .streaming_full_buffer_published
         .store(false, Ordering::Release);
     shared_state.streaming_active.store(true, Ordering::Release);
-    shared_state.audio_buffer.store(Arc::new(Vec::new()));
+    shared_state.publish_audio_buffer(Arc::new(Vec::new()));
 
     match shared_state.state.load() {
         PlayerState::Playing | PlayerState::Paused => {}

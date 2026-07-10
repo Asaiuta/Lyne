@@ -456,14 +456,19 @@ pub(super) fn activate_started_stream(
     stream_slot: &mut Option<Stream>,
     built_stream: BuiltOutputStream,
     shared_state: &SharedState,
-) {
+) -> Result<(), String> {
     let BuiltOutputStream {
         stream: started_stream,
         source_sample_rate,
         output_sample_rate,
         channels,
     } = built_stream;
-    let _ = started_stream.play();
+    if let Err(e) = started_stream.play() {
+        // The stream never started; dropping it here (non-RT thread) is safe.
+        // Do NOT mark Playing — the caller branches to the fallback/rebuild
+        // path immediately instead of waiting for the progress watchdog.
+        return Err(format!("stream.play() failed: {}", e));
+    }
     shared_state.mark_stream_play_returned();
     shared_state.mark_active_output_stream(source_sample_rate, output_sample_rate, channels);
     *stream_slot = Some(started_stream);
@@ -474,13 +479,14 @@ pub(super) fn activate_started_stream(
         if let Some(stream) = stream_slot {
             let _ = stream.pause();
         }
-        return;
+        return Ok(());
     }
 
     shared_state.state.store(PlayerState::Playing);
     shared_state
         .event_flags
         .fetch_or(EVENT_PLAYBACK_STARTED, Ordering::Release);
+    Ok(())
 }
 
 pub(super) fn detect_output_bits(device: &Device, fallback_bits: u32) -> u32 {

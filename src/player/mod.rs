@@ -653,7 +653,7 @@ impl AudioPlayer {
         self.shared_state
             .streaming_full_buffer_published
             .store(false, Ordering::Release);
-        self.shared_state.audio_buffer.store(Arc::new(Vec::new()));
+        self.shared_state.publish_audio_buffer(Arc::new(Vec::new()));
         self.shared_state
             .dsp_reset_pending
             .store(true, Ordering::Release);
