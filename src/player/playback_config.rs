@@ -291,8 +291,9 @@ fn promote_pending_buffer_if_matching(
     shared.needs_preload.store(false, Ordering::Release);
     shared.gapless_swap_pending.store(false, Ordering::Release);
 
-    shared.position_frames.store(0, Ordering::Relaxed);
-    shared.reset_render_clock(0);
+    // Slot-published reset: supersedes any unconsumed seek request from the
+    // outgoing track (M1 protocol; see `SharedState::request_seek_to_frame`).
+    shared.request_seek_to_frame(0);
     shared
         .total_frames
         .store(pending_total_frames, Ordering::Relaxed);

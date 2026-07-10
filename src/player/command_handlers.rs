@@ -268,11 +268,10 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
         }
         AudioCommand::Seek(time) => {
             let frame = seek_frame_for_time(context.shared_state, time);
-            context
-                .shared_state
-                .position_frames
-                .store(frame, Ordering::Relaxed);
-            context.shared_state.reset_render_clock(frame);
+            // M1 fix: route the position change through the seek slot instead
+            // of a bare `position_frames` store the audio callback could
+            // overwrite with a stale callback-derived position.
+            context.shared_state.request_seek_to_frame(frame);
             backend.seek(frame);
             AudioCommandFlow::Continue
         }
@@ -360,11 +359,8 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
         }
         AudioCommand::Stop => {
             context.shared_state.mark_audio_command_stop_received();
-            context
-                .shared_state
-                .position_frames
-                .store(0, Ordering::Relaxed);
-            context.shared_state.reset_render_clock(0);
+            // Slot-published reset: also invalidates any unconsumed seek request.
+            context.shared_state.request_seek_to_frame(0);
             context.shared_state.state.store(PlayerState::Stopped);
             backend.stop(context.shared_state);
             context.shared_state.mark_audio_command_stop_completed();
@@ -374,11 +370,8 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
             context
                 .shared_state
                 .mark_audio_command_stop_for_load_received();
-            context
-                .shared_state
-                .position_frames
-                .store(0, Ordering::Relaxed);
-            context.shared_state.reset_render_clock(0);
+            // Slot-published reset: also invalidates any unconsumed seek request.
+            context.shared_state.request_seek_to_frame(0);
             context.shared_state.state.store(PlayerState::Stopped);
             backend.stop_for_load(context.shared_state);
             context
@@ -620,6 +613,18 @@ fn handle_streaming_load_finished_command(
             .store(false, Ordering::Release);
         while shared_state.streaming_chunks.pop().is_some() {}
 
+        // M2 fix: a seek issued during the streaming-first-buffer window was
+        // deferred (the callback was rendering sequential streaming chunks and
+        // could not move the audio). The full buffer is now published and the
+        // callback switches to the position-addressed render path, so apply
+        // the pending target through the seek slot — playback lands exactly on
+        // the requested frame, not target+Δ. `take_pending_full_buffer_seek`
+        // is generation-tagged: a pending seek from a superseded load is
+        // discarded, never applied to this track.
+        if let Some(target_frame) = shared_state.take_pending_full_buffer_seek(generation) {
+            shared_state.request_seek_to_frame(target_frame.min(total_frames));
+        }
+
         refresh_loaded_loudness(
             shared_state,
             loudness_state,
@@ -762,8 +767,9 @@ fn apply_loaded_track_state(
     shared_state
         .total_frames
         .store(total_frames, Ordering::Relaxed);
-    shared_state.position_frames.store(0, Ordering::Relaxed);
-    shared_state.reset_render_clock(0);
+    // Slot-published reset: supersedes any unconsumed seek request from the
+    // previous track (M1 protocol; see `SharedState::request_seek_to_frame`).
+    shared_state.request_seek_to_frame(0);
 
     match shared_state.state.load() {
         PlayerState::Playing | PlayerState::Paused => {}
@@ -798,10 +804,9 @@ fn apply_streaming_track_state(
     } else {
         track.start_frame
     };
-    shared_state
-        .position_frames
-        .store(start_frame, Ordering::Relaxed);
-    shared_state.reset_render_clock(start_frame);
+    // Slot-published position (M1 protocol): also supersedes any unconsumed
+    // seek request from a previous track/generation.
+    shared_state.request_seek_to_frame(start_frame);
     shared_state
         .streaming_generation
         .store(generation, Ordering::Release);
@@ -2166,6 +2171,115 @@ mod tests {
                 .streaming_finished_ms
                 .load(Ordering::Relaxed)
                 > 0
+        );
+    }
+
+    #[test]
+    fn streaming_finish_applies_pending_first_buffer_seek_exactly_at_target() {
+        let fixture = CommandFixture::new();
+        let shared = &fixture.shared_state;
+        shared.load_generation.store(5, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.streaming_memory_mode.store(false, Ordering::Release);
+        // Deferral window: streaming chunks kept advancing the playhead after
+        // the seek was requested.
+        shared.position_frames.store(700, Ordering::Relaxed);
+        shared.set_pending_full_buffer_seek(5, 1_500);
+        let serial_before = shared.seek_slot_serial.load(Ordering::Acquire);
+
+        let mut backend = TestBackend;
+        handle_audio_command(
+            AudioCommand::StreamingLoadFinished {
+                generation: 5,
+                samples: Some(vec![0.0; 4_000]),
+                total_frames: 2_000,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        // The deferred seek is applied through the seek slot at publish time:
+        // the effective play position equals the seek target (no +Δ skip) and
+        // the slot serial advanced so the callback adopts it.
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 1_500);
+        assert_eq!(
+            shared.seek_slot_serial.load(Ordering::Acquire),
+            serial_before + 1
+        );
+        assert_eq!(
+            shared.seek_slot_target_frames.load(Ordering::Acquire),
+            1_500
+        );
+        assert_eq!(
+            shared
+                .pending_full_buffer_seek_generation
+                .load(Ordering::Acquire),
+            0,
+            "the pending slot must be cleared once applied"
+        );
+        assert!(!shared.streaming_active.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn streaming_finish_clamps_pending_first_buffer_seek_to_total_frames() {
+        let fixture = CommandFixture::new();
+        let shared = &fixture.shared_state;
+        shared.load_generation.store(5, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.set_pending_full_buffer_seek(5, 5_000);
+
+        let mut backend = TestBackend;
+        handle_audio_command(
+            AudioCommand::StreamingLoadFinished {
+                generation: 5,
+                samples: Some(vec![0.0; 4_000]),
+                total_frames: 2_000,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 2_000);
+    }
+
+    #[test]
+    fn streaming_finish_ignores_pending_seek_from_superseded_generation() {
+        let fixture = CommandFixture::new();
+        let shared = &fixture.shared_state;
+        shared.load_generation.store(5, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.position_frames.store(700, Ordering::Relaxed);
+        // Pending seek registered for a superseded load (track switch during
+        // the first-buffer window): must be discarded, never applied.
+        shared.set_pending_full_buffer_seek(4, 1_500);
+        let serial_before = shared.seek_slot_serial.load(Ordering::Acquire);
+
+        let mut backend = TestBackend;
+        handle_audio_command(
+            AudioCommand::StreamingLoadFinished {
+                generation: 5,
+                samples: Some(vec![0.0; 4_000]),
+                total_frames: 2_000,
+            },
+            &mut backend,
+            &fixture.context(),
+        );
+
+        assert_eq!(
+            shared.position_frames.load(Ordering::Relaxed),
+            700,
+            "a stale pending seek must not move the new track"
+        );
+        assert_eq!(
+            shared.seek_slot_serial.load(Ordering::Acquire),
+            serial_before
+        );
+        assert_eq!(
+            shared
+                .pending_full_buffer_seek_generation
+                .load(Ordering::Acquire),
+            0,
+            "the stale pending slot must still be cleared"
         );
     }
 }

@@ -537,10 +537,10 @@ impl AudioPlayer {
 
     fn begin_loading_track(&self, path: &str, autoplay: bool) {
         self.shared_state.reset_load_phase_timestamps();
-        self.shared_state
-            .position_frames
-            .store(0, Ordering::Relaxed);
-        self.shared_state.reset_render_clock(0);
+        // Slot-published reset (not a bare store): supersedes any unconsumed
+        // seek request from the previous track so it cannot be applied to the
+        // newly loading one.
+        self.shared_state.request_seek_to_frame(0);
         self.shared_state.total_frames.store(0, Ordering::Relaxed);
         self.shared_state.state.store(if autoplay {
             PlayerState::Playing
@@ -657,10 +657,11 @@ impl AudioPlayer {
         self.shared_state
             .dsp_reset_pending
             .store(true, Ordering::Release);
-        self.shared_state
-            .position_frames
-            .store(target_frame, Ordering::Relaxed);
-        self.shared_state.reset_render_clock(target_frame);
+        // Publish the seek target through the seek slot (M1 protocol) so the
+        // old-generation callback — if it is still mid-render past the clean
+        // stop — refuses its remaining position publishes and the synchronous
+        // target below sticks immediately.
+        self.shared_state.request_seek_to_frame(target_frame);
         self.shared_state.state.store(PlayerState::Playing);
         self.shared_state
             .streaming_active
@@ -899,10 +900,8 @@ impl AudioPlayer {
     pub fn stop(&mut self) {
         self.cancel_current_load();
         self.shared_state.reset_streaming_state();
-        self.shared_state
-            .position_frames
-            .store(0, Ordering::Relaxed);
-        self.shared_state.reset_render_clock(0);
+        // Slot-published reset: also invalidates any unconsumed seek request.
+        self.shared_state.request_seek_to_frame(0);
         self.shared_state.state.store(PlayerState::Stopped);
         self.shared_state
             .event_flags
@@ -912,22 +911,20 @@ impl AudioPlayer {
 
     fn stop_for_track_load(&self) {
         self.shared_state.reset_streaming_state();
-        self.shared_state
-            .position_frames
-            .store(0, Ordering::Relaxed);
-        self.shared_state.reset_render_clock(0);
+        // Slot-published reset: also invalidates any unconsumed seek request.
+        self.shared_state.request_seek_to_frame(0);
         self.shared_state.state.store(PlayerState::Stopped);
         let _ = self.cmd_tx.send(AudioCommand::StopForLoad);
     }
 
     pub fn seek(&mut self, time_secs: f64) -> Result<(), String> {
         self.shared_state.reset_seek_phase_timestamps();
-        if self
+        let streaming_active = self.shared_state.streaming_active.load(Ordering::Acquire);
+        let memory_mode = self
             .shared_state
             .streaming_memory_mode
-            .load(Ordering::Acquire)
-            && self.shared_state.streaming_active.load(Ordering::Acquire)
-        {
+            .load(Ordering::Acquire);
+        if memory_mode && streaming_active {
             // Try serving the seek from the retained PCM ring with zero decode
             // (backward/at, in-window). On a miss, fall back to the rebuffer path.
             if self.try_restart_memory_streaming_in_window(time_secs)? {
@@ -938,10 +935,33 @@ impl AudioPlayer {
         let sr = self.shared_state.sample_rate.load(Ordering::Relaxed) as f64;
         let total = self.shared_state.total_frames.load(Ordering::Relaxed);
         let new_pos = ((time_secs.max(0.0) * sr) as u64).min(total);
-        self.shared_state
-            .position_frames
-            .store(new_pos, Ordering::Relaxed);
-        self.shared_state.reset_render_clock(new_pos);
+        if streaming_active {
+            // M2 fix: a full-buffer load still inside its streaming-first-buffer
+            // window (`streaming_active && !memory_mode`). The callback is on the
+            // streaming render path playing sequential chunks, so a position
+            // store cannot move the audio. Defer the seek (generation-tagged);
+            // `StreamingLoadFinished` applies it through the seek slot the
+            // moment the full buffer is published, landing playback exactly on
+            // the target instead of target+Δ.
+            let generation = self.shared_state.load_generation.load(Ordering::Acquire);
+            self.shared_state
+                .set_pending_full_buffer_seek(generation, new_pos);
+            // UI hint only: the streaming callback keeps publishing its own
+            // (pre-seek) positions until the full buffer lands; the deferred
+            // slot request then makes the target authoritative.
+            self.shared_state
+                .position_frames
+                .store(new_pos, Ordering::Relaxed);
+            self.shared_state.reset_render_clock(new_pos);
+            self.shared_state
+                .event_flags
+                .fetch_or(EVENT_PLAYBACK_SEEKED, Ordering::Release);
+            self.shared_state.mark_seek_request_returned();
+            return Ok(());
+        }
+        // M1 fix: publish through the seek slot instead of a bare
+        // `position_frames` store the callback could clobber.
+        self.shared_state.request_seek_to_frame(new_pos);
         self.shared_state
             .event_flags
             .fetch_or(EVENT_PLAYBACK_SEEKED, Ordering::Release);
@@ -1231,6 +1251,70 @@ mod tests {
             44_100
         );
         assert!(shared.active_output_stream_matches_current());
+        assert_ne!(
+            shared.event_flags.load(Ordering::Relaxed) & EVENT_PLAYBACK_SEEKED,
+            0
+        );
+    }
+
+    #[test]
+    fn plain_full_buffer_seek_publishes_through_seek_slot() {
+        let mut player = AudioPlayer::new(EngineSettings::default());
+        let shared = player.shared_state();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.total_frames.store(44_100 * 60, Ordering::Relaxed);
+
+        let serial_before = shared.seek_slot_serial.load(Ordering::Acquire);
+        player.seek(2.0).expect("plain seek should succeed");
+
+        assert!(
+            shared.seek_slot_serial.load(Ordering::Acquire) > serial_before,
+            "the plain seek path must publish through the seek slot"
+        );
+        assert_eq!(
+            shared.seek_slot_target_frames.load(Ordering::Acquire),
+            88_200
+        );
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 88_200);
+        assert_ne!(
+            shared.event_flags.load(Ordering::Relaxed) & EVENT_PLAYBACK_SEEKED,
+            0
+        );
+    }
+
+    #[test]
+    fn seek_during_full_buffer_first_window_defers_generation_tagged_target() {
+        let mut player = AudioPlayer::new(EngineSettings::default());
+        let shared = player.shared_state();
+        shared.sample_rate.store(44_100, Ordering::Relaxed);
+        shared.total_frames.store(44_100 * 60, Ordering::Relaxed);
+        shared.load_generation.store(7, Ordering::Release);
+        // Full-buffer load still inside its streaming-first-buffer window.
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.streaming_memory_mode.store(false, Ordering::Release);
+
+        let serial_before = shared.seek_slot_serial.load(Ordering::Acquire);
+        player.seek(10.0).expect("first-window seek should defer");
+
+        assert_eq!(
+            shared
+                .pending_full_buffer_seek_generation
+                .load(Ordering::Acquire),
+            7,
+            "the deferred seek must be tagged with the load generation"
+        );
+        assert_eq!(
+            shared
+                .pending_full_buffer_seek_frames
+                .load(Ordering::Acquire),
+            441_000
+        );
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 441_000);
+        assert_eq!(
+            shared.seek_slot_serial.load(Ordering::Acquire),
+            serial_before,
+            "the deferred seek goes through the slot only when the full buffer is published"
+        );
         assert_ne!(
             shared.event_flags.load(Ordering::Relaxed) & EVENT_PLAYBACK_SEEKED,
             0

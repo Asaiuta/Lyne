@@ -518,6 +518,37 @@ impl AtomicPlayerState {
 pub struct SharedState {
     pub state: AtomicPlayerState,
     pub position_frames: AtomicU64,
+    /// Lock-free seek-request slot (M1 fix). Non-callback writers must not
+    /// bare-store `position_frames` for authoritative position changes (seek,
+    /// stop, track load): a store landing between the audio callback's
+    /// top-of-invocation position load and one of its incremental publishes
+    /// would be silently clobbered. Instead they publish through
+    /// [`SharedState::request_seek_to_frame`]: target first (`Release`), then a
+    /// `seek_slot_serial` bump (`AcqRel`). The callback consumes the slot at
+    /// the top of every invocation and re-checks the serial before each of its
+    /// own `position_frames` publishes, so a requester's store can never be
+    /// overwritten by stale callback-derived positions.
+    pub seek_slot_target_frames: AtomicU64,
+    /// Monotonic serial bumped after each `seek_slot_target_frames` store.
+    /// Two near-simultaneous requesters resolve to whichever target was stored
+    /// last (both were user intents milliseconds apart); the callback applying
+    /// serial N always reads a target at least as new as the older request.
+    pub seek_slot_serial: AtomicU64,
+    /// Last serial the audio callback consumed. Written only by the callback
+    /// (single active consumer); shared so a rebuilt output stream does not
+    /// re-apply an old, already-consumed seek target.
+    pub seek_slot_consumed_serial: AtomicU64,
+    /// Deferred seek for a full-buffer load still inside its
+    /// streaming-first-buffer window (M2 fix): while
+    /// `streaming_active && !streaming_memory_mode` the callback renders
+    /// sequential streaming chunks, so a position store cannot move the audio.
+    /// The target waits here, tagged with the load generation, and
+    /// `StreamingLoadFinished` applies it through the seek slot right after
+    /// publishing the full buffer. Generation 0 means "none pending" (load
+    /// generations start at 1), and a pending seek from a superseded load is
+    /// discarded by the generation check.
+    pub pending_full_buffer_seek_generation: AtomicU64,
+    pub pending_full_buffer_seek_frames: AtomicU64,
     pub render_clock_start_frame: AtomicU64,
     pub render_clock_end_frame: AtomicU64,
     pub render_clock_anchor_ms: AtomicU64,
@@ -718,6 +749,11 @@ impl SharedState {
         Self {
             state: AtomicPlayerState::new(PlayerState::Stopped),
             position_frames: AtomicU64::new(0),
+            seek_slot_target_frames: AtomicU64::new(0),
+            seek_slot_serial: AtomicU64::new(0),
+            seek_slot_consumed_serial: AtomicU64::new(0),
+            pending_full_buffer_seek_generation: AtomicU64::new(0),
+            pending_full_buffer_seek_frames: AtomicU64::new(0),
             render_clock_start_frame: AtomicU64::new(0),
             render_clock_end_frame: AtomicU64::new(0),
             render_clock_anchor_ms: AtomicU64::new(0),
@@ -968,6 +1004,56 @@ impl SharedState {
             .store(end_frame, Ordering::Release);
         self.render_clock_anchor_ms
             .store(playback_phase_time_ms(), Ordering::Release);
+    }
+
+    /// Publish an authoritative position change (seek, stop, track load reset)
+    /// through the lock-free seek slot so the audio callback can never
+    /// clobber it with a stale callback-derived position (M1 fix).
+    ///
+    /// Protocol (see the `seek_slot_*` field docs): the target is stored with
+    /// `Release` *before* the serial bump (`AcqRel`), so a callback whose
+    /// `Acquire` serial load observes the bump is guaranteed to read a target
+    /// at least as new as this request. `position_frames` is also stored
+    /// immediately so UI/state reads reflect the change without waiting for
+    /// the next callback. Callback publishes do a pre-store and post-store
+    /// serial check; if a seek lands in the tiny check/store window the helper
+    /// immediately restores this target. The callback also re-stores the
+    /// target on consumption so rendering starts from the authoritative frame.
+    ///
+    /// Lock-free and allocation-free: safe to call from any thread, including
+    /// the audio callback itself (gapless track swap).
+    pub fn request_seek_to_frame(&self, target_frame: u64) {
+        self.seek_slot_target_frames
+            .store(target_frame, Ordering::Release);
+        self.seek_slot_serial.fetch_add(1, Ordering::AcqRel);
+        self.position_frames.store(target_frame, Ordering::Relaxed);
+        self.reset_render_clock(target_frame);
+    }
+
+    /// Record a seek issued during the streaming-first-buffer window of a
+    /// full-buffer load (M2 fix). Applied by `StreamingLoadFinished` via
+    /// [`Self::take_pending_full_buffer_seek`]; a later registration
+    /// overwrites an earlier one (latest seek wins, matching slot semantics).
+    pub fn set_pending_full_buffer_seek(&self, generation: u64, target_frame: u64) {
+        self.pending_full_buffer_seek_frames
+            .store(target_frame, Ordering::Release);
+        self.pending_full_buffer_seek_generation
+            .store(generation, Ordering::Release);
+    }
+
+    /// Take the deferred first-buffer-window seek if it was registered for
+    /// `generation`. Always clears the pending slot, so a stale target from a
+    /// superseded load can never leak into a later track (generation-tag
+    /// invalidation).
+    pub fn take_pending_full_buffer_seek(&self, generation: u64) -> Option<u64> {
+        let pending_generation = self
+            .pending_full_buffer_seek_generation
+            .swap(0, Ordering::AcqRel);
+        if pending_generation != 0 && pending_generation == generation {
+            Some(self.pending_full_buffer_seek_frames.load(Ordering::Acquire))
+        } else {
+            None
+        }
     }
 
     pub fn reset_load_phase_timestamps(&self) {

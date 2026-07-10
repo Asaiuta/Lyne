@@ -227,21 +227,57 @@ pub fn normalize_channels(samples: Vec<f64>, from: usize, to: usize) -> Vec<f64>
             out.push((samples[i * 2] + samples[i * 2 + 1]) * 0.5);
         }
         out
-    } else {
-        // Other cases: truncate or zero-pad to 'to' channels
-        let frames = samples.len() / from;
-        let mut out = Vec::with_capacity(frames * to);
-        for i in 0..frames {
-            for ch in 0..to {
-                out.push(if ch < from {
-                    samples[i * from + ch]
-                } else {
-                    0.0
-                });
-            }
+    } else if from > 2 && (to == 1 || to == 2) {
+        // Multichannel (5.1/7.1/…) → mono/stereo. The naive truncate path below
+        // would silently drop the center, LFE, and surround channels. Use
+        // audio-engine-core's layout-aware `Downmixer` (ITU-R BS.775 fold) so
+        // those channels are mixed into L/R instead of discarded. The 1↔2 paths
+        // above are intentionally left untouched (BS.775 would shift their
+        // gain). On any error we fall back to the legacy truncate/pad below.
+        match downmix_multichannel(&samples, from, to) {
+            Some(out) => out,
+            None => truncate_or_pad_channels(&samples, from, to),
         }
-        out
+    } else {
+        truncate_or_pad_channels(&samples, from, to)
     }
+}
+
+/// Legacy channel fit: copy the first `to` source channels per frame, zero-pad
+/// when `to > from`. Used for layouts the layout-aware downmixer does not cover
+/// (e.g. upmix beyond stereo) and as a fallback if the downmixer fails to build.
+fn truncate_or_pad_channels(samples: &[f64], from: usize, to: usize) -> Vec<f64> {
+    let frames = samples.len() / from;
+    let mut out = Vec::with_capacity(frames * to);
+    for i in 0..frames {
+        for ch in 0..to {
+            out.push(if ch < from {
+                samples[i * from + ch]
+            } else {
+                0.0
+            });
+        }
+    }
+    out
+}
+
+/// Layout-aware multichannel downmix to mono/stereo via core's `Downmixer`.
+/// Returns `None` (so the caller can fall back) if the downmixer cannot be
+/// built or the buffer is not frame-aligned.
+fn downmix_multichannel(samples: &[f64], from: usize, to: usize) -> Option<Vec<f64>> {
+    use crate::processor::{DownmixCoefficients, Downmixer};
+    use audio_engine_core::ChannelLayout;
+
+    let downmixer = Downmixer::new(
+        ChannelLayout::from_count(from),
+        ChannelLayout::from_count(to),
+        DownmixCoefficients::default(),
+    )
+    .ok()?;
+
+    let mut out = vec![0.0; downmixer.output_len(samples.len())];
+    downmixer.process_into(samples, &mut out).ok()?;
+    Some(out)
 }
 
 // ============================================================================
@@ -270,7 +306,7 @@ pub fn normalize_channels(samples: Vec<f64>, from: usize, to: usize) -> Vec<f64>
 /// AtomicParams ───> DspChain.process() (owned &mut, no Mutex)
 /// (non-blocking)     |
 ///                    v
-///               [EQ → Saturation → Crossfeed → Convolver → Volume → DynamicLoudness → PeakLimiter]
+///               [Volume → EQ → Saturation → Crossfeed → Convolver → DynamicLoudness → PeakLimiter]
 ///                    |
 ///                    v
 ///               resampler → NoiseShaper → output
@@ -313,12 +349,18 @@ impl LockfreeDspContext {
         convolver_swap: Arc<ArcSwapOption<FFTConvolver>>,
         convolver_enabled: Arc<AtomicBool>,
     ) -> DspChain {
-        let mut chain = DspChain::new(sample_rate);
+        // Stage order follows audio-engine-core's canonical output chain
+        // (`canonical_output_stage_descriptors`): Volume → EQ → Saturation →
+        // Crossfeed → Convolver → DynamicLoudness → PeakLimiter. NoiseShaper is
+        // intentionally NOT added here: the realtime path applies it separately
+        // after resampling (at the output rate) via `final_noise_shaper`, so it
+        // must not also live inside the source-rate DSP chain.
+        let mut chain = DspChain::with_capacity(7, sample_rate);
+        chain.add(VolumeProcessor::new(volume_params));
         chain.add(EqProcessor::new(channels, sample_rate, eq_params));
         chain.add(SaturationProcessor::new(channels, saturation_params));
         chain.add(CrossfeedProcessor::new(sample_rate, crossfeed_params));
         chain.add(ConvolverProcessor::new(convolver_swap, convolver_enabled));
-        chain.add(VolumeProcessor::new(volume_params));
         chain.add(DynamicLoudnessProcessor::new(
             channels,
             sample_rate as u32,
@@ -545,6 +587,76 @@ fn convolve_interleaved_ir(a: &[f64], b: &[f64], channels: usize) -> Result<Vec<
 // AUDIO CALLBACK
 // ============================================================================
 
+/// Consume the lock-free seek-request slot at the top of a callback
+/// invocation (M1 fix).
+///
+/// Requesters ([`SharedState::request_seek_to_frame`]) store the target frame
+/// (`Release`) and then bump `seek_slot_serial` (`AcqRel`); the `Acquire`
+/// serial load here therefore guarantees the target read below is at least as
+/// new as the request that bumped the observed serial. Consumption re-stores
+/// the target into `position_frames` so this invocation starts from the
+/// authoritative frame even if a non-slot legacy writer or an older build's
+/// stale callback publish disturbed the requester's immediate UI store.
+///
+/// Setting `dsp_reset_pending` makes the DSP/resampler state reset part of
+/// seek consumption itself (m3 fix): `reset_dsp_state_if_requested` runs
+/// right after this in the same invocation and resets the chain, noise
+/// shaper, and resampler, and clears `scratch.resample_leftover`, so no
+/// pre-seek audio leaks across the discontinuity.
+///
+/// Returns the serial observed for this invocation; every later
+/// `position_frames` publish in the same invocation must re-check it via
+/// [`publish_callback_position`]. Atomics only: no lock, no allocation.
+fn consume_pending_seek_slot(shared: &SharedState) -> u64 {
+    let serial = shared.seek_slot_serial.load(Ordering::Acquire);
+    if serial != shared.seek_slot_consumed_serial.load(Ordering::Acquire) {
+        let target = shared.seek_slot_target_frames.load(Ordering::Acquire);
+        shared
+            .seek_slot_consumed_serial
+            .store(serial, Ordering::Release);
+        shared.position_frames.store(target, Ordering::Relaxed);
+        shared.dsp_reset_pending.store(true, Ordering::Release);
+    }
+    serial
+}
+
+/// Publish a callback-derived `position_frames` value unless a fresh seek
+/// request landed after `observed_serial` was read at the top of this
+/// invocation (M1 fix). On a serial mismatch the publish is refused: the
+/// seek target must remain authoritative, and the callback picks the new
+/// target up at its next invocation via [`consume_pending_seek_slot`]. A
+/// second post-store check closes the tiny check/store window by immediately
+/// restoring the seek target if the serial changed after the pre-store check.
+///
+/// Returns whether the position was published; callers must also skip their
+/// render-clock span publication when this returns `false` so the
+/// interpolated position display cannot run past a refused publish.
+#[inline]
+fn publish_callback_position(shared: &SharedState, new_pos: u64, observed_serial: u64) -> bool {
+    publish_callback_position_after_precheck(shared, new_pos, observed_serial, || {})
+}
+
+#[inline]
+fn publish_callback_position_after_precheck(
+    shared: &SharedState,
+    new_pos: u64,
+    observed_serial: u64,
+    after_precheck: impl FnOnce(),
+) -> bool {
+    if shared.seek_slot_serial.load(Ordering::Relaxed) != observed_serial {
+        return false;
+    }
+    after_precheck();
+    shared.position_frames.store(new_pos, Ordering::Relaxed);
+    if shared.seek_slot_serial.load(Ordering::Acquire) != observed_serial {
+        let target = shared.seek_slot_target_frames.load(Ordering::Acquire);
+        shared.position_frames.store(target, Ordering::Relaxed);
+        return false;
+    }
+    shared.mark_first_position_advanced_after_play();
+    true
+}
+
 fn rebuild_dsp_chain_if_requested(
     shared: &SharedState,
     dsp_chain: &mut DspChain,
@@ -703,8 +815,11 @@ fn try_activate_pending_gapless(
     shared.total_frames.store(next_frames, Ordering::Relaxed);
     shared.sample_rate.store(next_sr, Ordering::Relaxed);
     shared.channels.store(next_ch, Ordering::Relaxed);
-    shared.position_frames.store(0, Ordering::Relaxed);
-    shared.reset_render_clock(0);
+    // Route the track-boundary position reset through the seek slot: this
+    // supersedes any not-yet-consumed seek request that targeted the outgoing
+    // track, so it can never be applied to the new one. Atomics only — safe on
+    // the audio thread.
+    shared.request_seek_to_frame(0);
 
     shared.pending_ready.store(false, Ordering::Release);
     shared.needs_preload.store(false, Ordering::Relaxed);
@@ -795,6 +910,7 @@ fn render_audio_output(
     output_path: OutputPath,
     total: usize,
     current_pos: &mut usize,
+    observed_seek_serial: u64,
 ) -> usize {
     let output_len = data.len();
     let mut samples_written = 0;
@@ -884,10 +1000,8 @@ fn render_audio_output(
 
         let rendered_start_frame = *current_pos as u64;
         *current_pos += frames_to_read;
-        shared
-            .position_frames
-            .store(*current_pos as u64, Ordering::Relaxed);
-        shared.mark_first_position_advanced_after_play();
+        let position_published =
+            publish_callback_position(shared, *current_pos as u64, observed_seek_serial);
 
         let frames_in_chunk = scratch.process_buffer.len() / channels;
         let linear_gain = loudness_state.process_gain(frames_in_chunk);
@@ -912,7 +1026,7 @@ fn render_audio_output(
             }
 
             let rendered_output_frames = chunk_idx / channels;
-            if rendered_output_frames > 0 && samples_written > 0 {
+            if position_published && rendered_output_frames > 0 && samples_written > 0 {
                 let source_frames_rendered =
                     frames_to_read.saturating_mul(rendered_output_frames) / frames_needed_out;
                 shared.mark_render_clock_span(
@@ -933,8 +1047,7 @@ fn render_audio_output(
                 // on the real-time audio thread.
                 let added = resampled_samples.len() - chunk_idx;
                 debug_assert!(
-                    scratch.resample_leftover.len() + added
-                        <= scratch.resample_leftover.capacity(),
+                    scratch.resample_leftover.len() + added <= scratch.resample_leftover.capacity(),
                     "resample_leftover would realloc in the audio callback: len {} + {} > cap {} \
                      (attach-time reserve_resample_leftover was skipped or undersized)",
                     scratch.resample_leftover.len(),
@@ -967,7 +1080,7 @@ fn render_audio_output(
                 }
             }
             let rendered_output_frames = take / channels;
-            if rendered_output_frames > 0 {
+            if position_published && rendered_output_frames > 0 {
                 shared.mark_render_clock_span(
                     rendered_start_frame,
                     rendered_start_frame.saturating_add(rendered_output_frames as u64),
@@ -1072,6 +1185,7 @@ fn render_streaming_audio_output(
     scratch: &mut CallbackScratch,
     output_path: OutputPath,
     current_pos: &mut usize,
+    observed_seek_serial: u64,
 ) -> usize {
     let output_len = data.len();
     let mut samples_written = 0;
@@ -1146,10 +1260,8 @@ fn render_streaming_audio_output(
 
         let rendered_start_frame = *current_pos as u64;
         *current_pos += frames_read;
-        shared
-            .position_frames
-            .store(*current_pos as u64, Ordering::Relaxed);
-        shared.mark_first_position_advanced_after_play();
+        let position_published =
+            publish_callback_position(shared, *current_pos as u64, observed_seek_serial);
 
         let linear_gain = loudness_state.process_gain(frames_read);
         for sample in scratch.process_buffer.iter_mut() {
@@ -1173,7 +1285,7 @@ fn render_streaming_audio_output(
             }
 
             let rendered_output_frames = chunk_idx / channels;
-            if rendered_output_frames > 0 && samples_written > 0 {
+            if position_published && rendered_output_frames > 0 && samples_written > 0 {
                 let source_frames_rendered =
                     frames_read.saturating_mul(rendered_output_frames) / frames_needed_out;
                 shared.mark_render_clock_span(
@@ -1194,8 +1306,7 @@ fn render_streaming_audio_output(
                 // on the real-time audio thread.
                 let added = resampled_samples.len() - chunk_idx;
                 debug_assert!(
-                    scratch.resample_leftover.len() + added
-                        <= scratch.resample_leftover.capacity(),
+                    scratch.resample_leftover.len() + added <= scratch.resample_leftover.capacity(),
                     "resample_leftover would realloc in the audio callback: len {} + {} > cap {} \
                      (attach-time reserve_resample_leftover was skipped or undersized)",
                     scratch.resample_leftover.len(),
@@ -1228,7 +1339,7 @@ fn render_streaming_audio_output(
                 }
             }
             let rendered_output_frames = take / channels;
-            if rendered_output_frames > 0 {
+            if position_published && rendered_output_frames > 0 {
                 shared.mark_render_clock_span(
                     rendered_start_frame,
                     rendered_start_frame.saturating_add(rendered_output_frames as u64),
@@ -1304,6 +1415,10 @@ pub fn audio_callback_lockfree(
     resampler: &mut Option<StreamingResampler>,
     scratch: &mut CallbackScratch,
 ) {
+    // Consume any pending seek request BEFORE the DSP reset check: consumption
+    // sets `dsp_reset_pending`, so the reset (including the resample-leftover
+    // clear) is applied in this same invocation, ahead of any rendering.
+    let observed_seek_serial = consume_pending_seek_slot(shared);
     rebuild_dsp_chain_if_requested(
         shared,
         dsp_chain,
@@ -1383,6 +1498,7 @@ pub fn audio_callback_lockfree(
             scratch,
             output_path,
             &mut current_pos,
+            observed_seek_serial,
         )
     } else {
         render_audio_output(
@@ -1396,6 +1512,7 @@ pub fn audio_callback_lockfree(
             output_path,
             total,
             &mut current_pos,
+            observed_seek_serial,
         )
     };
 
@@ -1587,6 +1704,37 @@ mod tests {
     }
 
     #[test]
+    fn normalize_channels_5_1_to_stereo_folds_center_and_surround() {
+        // 5.1 layout order (from_count(6)): FL, FR, FC, LFE, RL, RR.
+        // One frame with energy only in the center channel must reach BOTH
+        // L and R (the old truncate path dropped FC/LFE/surround entirely).
+        const INV_SQRT2: f64 = std::f64::consts::FRAC_1_SQRT_2;
+        let frame = vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0]; // FC = 1.0
+        let stereo = normalize_channels(frame, 6, 2);
+        assert_eq!(stereo.len(), 2);
+        // BS.775: center contributes INV_SQRT2 to each of L and R.
+        assert!((stereo[0] - INV_SQRT2).abs() < 1e-9, "L = {}", stereo[0]);
+        assert!((stereo[1] - INV_SQRT2).abs() < 1e-9, "R = {}", stereo[1]);
+    }
+
+    #[test]
+    fn normalize_channels_5_1_surround_reaches_output() {
+        // Surround channels (RL/RR) must not be discarded. Put energy only in
+        // RL and confirm it lands in the left output.
+        let frame = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0]; // RL = 1.0
+        let stereo = normalize_channels(frame, 6, 2);
+        assert!(stereo[0].abs() > 1e-6, "rear-left should reach L output");
+    }
+
+    #[test]
+    fn normalize_channels_multichannel_to_mono_frame_count() {
+        // Two 5.1 frames → two mono samples (no dropped/extra frames).
+        let two_frames = vec![0.1; 12];
+        let mono = normalize_channels(two_frames, 6, 1);
+        assert_eq!(mono.len(), 2);
+    }
+
+    #[test]
     fn callback_scratch_preallocates_hot_path_buffers() {
         let scratch = CallbackScratch::new(2);
 
@@ -1637,6 +1785,204 @@ mod tests {
         shared.position_frames.store(99_999, Ordering::Relaxed);
         refresh_streaming_scratch_generation(&shared, &mut scratch, &mut resampler, 2);
         assert_eq!(scratch.streaming_consumed_output_frames, 44_100);
+    }
+
+    #[test]
+    fn seek_slot_request_wins_over_concurrent_callback_position_publish() {
+        // Deterministic M1 interleaving: the callback read the slot serial at
+        // the top of its invocation, a seek request lands mid-render, and the
+        // callback then tries to publish an incremented position derived from
+        // its stale pre-seek read. The serial re-check must refuse the publish
+        // so the seek's `position_frames` store survives.
+        let shared = SharedState::new();
+        shared.position_frames.store(1_000, Ordering::Relaxed);
+        let observed_serial = consume_pending_seek_slot(&shared);
+
+        // Seek from another thread, after the callback's top-of-invocation read.
+        shared.request_seek_to_frame(44_100);
+
+        // Callback-derived publish computed from the stale pre-seek position.
+        let published = publish_callback_position(&shared, 1_000 + 512, observed_serial);
+
+        assert!(
+            !published,
+            "a publish after a fresh seek request must be refused"
+        );
+        assert_eq!(
+            shared.position_frames.load(Ordering::Relaxed),
+            44_100,
+            "the seek target must never be overwritten by a stale callback position"
+        );
+
+        // The next invocation consumes the seek and publishes from the target.
+        let next_serial = consume_pending_seek_slot(&shared);
+        assert_ne!(next_serial, observed_serial);
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 44_100);
+        assert!(publish_callback_position(
+            &shared,
+            44_100 + 512,
+            next_serial
+        ));
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 44_100 + 512);
+    }
+
+    #[test]
+    fn seek_slot_request_wins_if_it_lands_between_publish_check_and_store() {
+        // Even after the pre-store serial check passes, a requester can land in
+        // the tiny window before the callback stores its stale position. The
+        // post-store check must repair that overwrite immediately.
+        let shared = SharedState::new();
+        shared.position_frames.store(1_000, Ordering::Relaxed);
+        let observed_serial = consume_pending_seek_slot(&shared);
+
+        let published =
+            publish_callback_position_after_precheck(&shared, 1_000 + 512, observed_serial, || {
+                shared.request_seek_to_frame(44_100)
+            });
+
+        assert!(
+            !published,
+            "a publish raced by a fresh seek request must be refused"
+        );
+        assert_eq!(
+            shared.position_frames.load(Ordering::Relaxed),
+            44_100,
+            "the post-store serial check must immediately restore the seek target"
+        );
+    }
+
+    #[test]
+    fn seek_slot_consumption_requests_dsp_reset_and_repairs_position() {
+        let shared = SharedState::new();
+        shared.request_seek_to_frame(22_050);
+        // Simulate the residual tail window: a previous callback's publish
+        // passed the guard just before the request and its store landed on top
+        // of the requester's position store.
+        shared.position_frames.store(9_999, Ordering::Relaxed);
+
+        let serial = consume_pending_seek_slot(&shared);
+
+        assert_eq!(
+            serial,
+            shared.seek_slot_consumed_serial.load(Ordering::Acquire)
+        );
+        assert_eq!(
+            shared.position_frames.load(Ordering::Relaxed),
+            22_050,
+            "consumption must repair a clobbered requester position store"
+        );
+        assert!(
+            shared.dsp_reset_pending.load(Ordering::Acquire),
+            "m3: seek consumption must schedule a DSP/resampler state reset"
+        );
+
+        // Same serial again is a no-op (no repeated reset or position rewrite).
+        shared.dsp_reset_pending.store(false, Ordering::Release);
+        shared.position_frames.store(23_000, Ordering::Relaxed);
+        let repeat_serial = consume_pending_seek_slot(&shared);
+        assert_eq!(repeat_serial, serial);
+        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 23_000);
+        assert!(!shared.dsp_reset_pending.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn callback_renders_from_seek_slot_target_after_request() {
+        let shared = prepare_playing_shared(TEST_FRAMES, TEST_CHANNELS);
+        let mut chain = DspChain::new(TEST_SAMPLE_RATE as f64);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        loudness.set_enabled(false);
+        let (tx, _rx) = crossbeam::channel::bounded(16);
+        let mut resampler: Option<StreamingResampler> = None;
+        let mut scratch = CallbackScratch::new(TEST_CHANNELS);
+        let out_frames = 256;
+        let mut out = vec![0.0f32; out_frames * TEST_CHANNELS];
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            TEST_CHANNELS,
+            &mut resampler,
+            &mut scratch,
+        );
+        assert_eq!(
+            shared.position_frames.load(Ordering::Relaxed),
+            out_frames as u64
+        );
+
+        // Seek backward through the slot; the next callback must adopt the
+        // target at its top and render audio from exactly that frame.
+        let target_frame = 64u64;
+        shared.request_seek_to_frame(target_frame);
+
+        audio_callback_lockfree(
+            &mut out,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &tx,
+            TEST_CHANNELS,
+            &mut resampler,
+            &mut scratch,
+        );
+
+        assert_eq!(
+            shared.position_frames.load(Ordering::Relaxed),
+            target_frame + out_frames as u64,
+            "the callback must resume rendering from the seek target"
+        );
+        let buffer = shared.audio_buffer.load();
+        let expected = buffer[target_frame as usize * TEST_CHANNELS] as f32;
+        assert_eq!(
+            out[0], expected,
+            "the first rendered sample must come from the seek target frame"
+        );
+        assert!(
+            !shared.dsp_reset_pending.load(Ordering::Acquire),
+            "the reset scheduled by consumption is applied within the same invocation"
+        );
+    }
+
+    #[test]
+    fn seek_slot_stress_interleaved_requests_converge_to_last_target() {
+        // Bounded secondary stress: a writer thread issues slot seeks while a
+        // simulated callback follows the consume/publish protocol. The final
+        // consume must land on the last requested target — under the old
+        // bare-store protocol a request could be silently lost to a stale
+        // callback store instead.
+        const ITERS: u64 = 5_000;
+        const STEP: u64 = 1_000;
+        let shared = Arc::new(SharedState::new());
+        let writer_shared = Arc::clone(&shared);
+        let writer = std::thread::spawn(move || {
+            for i in 1..=ITERS {
+                writer_shared.request_seek_to_frame(i * STEP);
+            }
+        });
+
+        let mut done = false;
+        while !done {
+            done = writer.is_finished();
+            let serial = consume_pending_seek_slot(&shared);
+            let pos = shared.position_frames.load(Ordering::Relaxed);
+            let _ = publish_callback_position(&shared, pos + 128, serial);
+        }
+        writer.join().expect("writer thread must not panic");
+
+        consume_pending_seek_slot(&shared);
+        let final_target = ITERS * STEP;
+        assert_eq!(
+            shared.seek_slot_target_frames.load(Ordering::Acquire),
+            final_target
+        );
+        assert!(
+            shared.position_frames.load(Ordering::Relaxed) >= final_target,
+            "the last seek must never be lost to a stale callback position store"
+        );
     }
 
     #[test]
@@ -2009,6 +2355,7 @@ mod tests {
             &mut scratch,
             OutputPath::ResamplerOnly,
             &mut current_pos,
+            shared.seek_slot_serial.load(Ordering::Acquire),
         );
 
         assert_eq!(written, 4);
@@ -2068,6 +2415,7 @@ mod tests {
             &mut scratch,
             OutputPath::Direct,
             &mut current_pos,
+            shared.seek_slot_serial.load(Ordering::Acquire),
         );
         assert_eq!(written, 8); // 8 interleaved samples = 4 stereo frames
 
@@ -2644,6 +2992,36 @@ mod tests {
         chain.process(&mut buffer, 2);
 
         // Should not panic
+    }
+
+    #[test]
+    fn dsp_chain_order_matches_core_canonical_callback_order() {
+        // The realtime chain must follow audio-engine-core's canonical callback
+        // stage order, except that NoiseShaper is applied separately after
+        // resampling (at the output rate) rather than inside the source-rate
+        // chain. Pinning to the core descriptor list makes any upstream
+        // reordering a visible, deliberate change here instead of silent drift.
+        let chain = LockfreeDspContext::build_dsp_chain(
+            2,
+            48_000.0,
+            Arc::new(AtomicEqParams::new()),
+            Arc::new(AtomicSaturationParams::new()),
+            Arc::new(AtomicCrossfeedParams::new()),
+            Arc::new(AtomicPeakLimiterParams::new()),
+            Arc::new(AtomicVolumeParams::new()),
+            Arc::new(AtomicNoiseShaperParams::new()),
+            Arc::new(AtomicDynamicLoudnessParams::new()),
+            Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+            Arc::new(ArcSwapOption::empty()),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        let expected: Vec<&'static str> = crate::processor::callback_stage_names()
+            .into_iter()
+            .filter(|name| *name != "NoiseShaper")
+            .collect();
+
+        assert_eq!(chain.processor_names(), expected);
     }
 
     #[test]
