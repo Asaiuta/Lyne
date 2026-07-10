@@ -22,7 +22,6 @@ pub use audio_engine_core::{decoder, pipeline, processor};
 // Re-exports for convenience
 pub use config::{LoudnessConfig, NormalizationMode};
 pub use decoder::StreamingDecoder;
-pub use pipeline::AudioPipeline;
 pub use player::{AudioDeviceInfo, AudioPlayer, PlayerState, SharedState};
 pub use processor::{
     analyze_automix, AtomicLoudnessState, AutomixAnalysis, AutomixAnalysisMode,
