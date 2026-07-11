@@ -5,12 +5,13 @@
 use crate::processor::{DspChain, NoiseShaperCurve};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use crossbeam::queue::ArrayQueue;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
+
+use super::streaming::memory::DecodedMemoryLease;
 
 // ============ Event Flag Constants (Task E) ============
 
@@ -26,7 +27,6 @@ pub const EVENT_PLAYBACK_STARTED: u32 = 1 << 8;
 pub const EVENT_PLAYBACK_PAUSED: u32 = 1 << 9;
 pub const EVENT_PLAYBACK_STOPPED: u32 = 1 << 10;
 
-const STREAMING_QUEUE_MIN_UNOBSERVED: u64 = u64::MAX;
 pub const EVENT_PLAYBACK_SEEKED: u32 = 1 << 11;
 pub const EVENT_PLAYBACK_HISTORY_UPDATED: u32 = 1 << 12;
 
@@ -36,7 +36,6 @@ pub const AUDIO_COMMAND_CODE_STREAMING_LOAD_READY: u64 = 3;
 pub const AUDIO_COMMAND_CODE_ENSURE_PLAYBACK_PROGRESS: u64 = 4;
 pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 300;
 pub(crate) const PLAYBACK_PROGRESS_REPLAY_GRACE_MS: u64 = 150;
-pub(crate) const PLAYBACK_PROGRESS_REPLAY_COMMAND_GRACE_MS: u64 = 250;
 
 // ============ Commands & State ============
 
@@ -90,6 +89,7 @@ impl CachedLoudness {
 #[derive(Debug, Clone)]
 pub struct LoadResult {
     pub samples: Vec<f64>,
+    pub(crate) reservation: Option<Arc<DecodedMemoryLease>>,
     pub sample_rate: u32,
     pub channels: usize,
     pub total_frames: u64,
@@ -99,22 +99,121 @@ pub struct LoadResult {
     pub metadata: crate::decoder::TrackMetadata,
 }
 
-#[derive(Debug, Clone)]
-pub struct StreamingTrackStart {
-    pub sample_rate: u32,
-    pub channels: usize,
-    pub total_frames: u64,
-    pub start_frame: u64,
-    pub file_path: String,
-    pub cached_loudness: Option<CachedLoudness>,
-    pub metadata: crate::decoder::TrackMetadata,
-    pub memory_mode: bool,
+#[repr(C, align(64))]
+pub(crate) struct RequestedClock {
+    pub(crate) seek_slot_target_frames: AtomicU64,
+    pub(crate) seek_slot_serial: AtomicU64,
 }
 
-#[derive(Debug)]
-pub struct StreamingAudioChunk {
-    pub generation: u64,
-    pub samples: Arc<Vec<f64>>,
+#[repr(C, align(64))]
+pub(crate) struct CallbackClock {
+    pub(crate) position_frames: AtomicU64,
+    pub(crate) seek_slot_consumed_serial: AtomicU64,
+}
+
+#[repr(C, align(64))]
+pub(crate) struct RenderClock {
+    pub(crate) render_clock_start_frame: AtomicU64,
+    pub(crate) render_clock_end_frame: AtomicU64,
+    pub(crate) render_clock_anchor_ms: AtomicU64,
+    render_clock_sequence: AtomicU64,
+    render_clock_valid: AtomicBool,
+}
+
+pub(crate) struct PlaybackClock {
+    pub(crate) requested: RequestedClock,
+    pub(crate) callback: CallbackClock,
+    pub(crate) render: RenderClock,
+}
+
+impl PlaybackClock {
+    fn new() -> Self {
+        Self {
+            requested: RequestedClock {
+                seek_slot_target_frames: AtomicU64::new(0),
+                seek_slot_serial: AtomicU64::new(0),
+            },
+            callback: CallbackClock {
+                position_frames: AtomicU64::new(0),
+                seek_slot_consumed_serial: AtomicU64::new(0),
+            },
+            render: RenderClock {
+                render_clock_start_frame: AtomicU64::new(0),
+                render_clock_end_frame: AtomicU64::new(0),
+                render_clock_anchor_ms: AtomicU64::new(0),
+                render_clock_sequence: AtomicU64::new(0),
+                render_clock_valid: AtomicBool::new(false),
+            },
+        }
+    }
+
+    #[inline]
+    pub(crate) fn position(&self) -> u64 {
+        self.callback.position_frames.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn request_seek(&self, target_frame: u64) {
+        self.requested
+            .seek_slot_target_frames
+            .store(target_frame, Ordering::Release);
+        self.requested
+            .seek_slot_serial
+            .fetch_add(1, Ordering::AcqRel);
+        self.callback
+            .position_frames
+            .store(target_frame, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn consume_pending_seek(&self) -> (u64, bool) {
+        let serial = self.requested.seek_slot_serial.load(Ordering::Acquire);
+        if serial
+            == self
+                .callback
+                .seek_slot_consumed_serial
+                .load(Ordering::Acquire)
+        {
+            return (serial, false);
+        }
+        let target = self
+            .requested
+            .seek_slot_target_frames
+            .load(Ordering::Acquire);
+        self.callback
+            .seek_slot_consumed_serial
+            .store(serial, Ordering::Release);
+        self.callback
+            .position_frames
+            .store(target, Ordering::Relaxed);
+        (serial, true)
+    }
+
+    #[inline]
+    pub(crate) fn publish_callback_position_after_precheck(
+        &self,
+        new_pos: u64,
+        observed_serial: u64,
+        after_precheck: impl FnOnce(),
+    ) -> bool {
+        if self.requested.seek_slot_serial.load(Ordering::Relaxed) != observed_serial {
+            return false;
+        }
+        after_precheck();
+        self.callback
+            .position_frames
+            .store(new_pos, Ordering::Relaxed);
+        if self.requested.seek_slot_serial.load(Ordering::Acquire) != observed_serial {
+            let target = self
+                .requested
+                .seek_slot_target_frames
+                .load(Ordering::Acquire);
+            self.callback
+                .position_frames
+                .store(target, Ordering::Relaxed);
+            return false;
+        }
+        true
+    }
 }
 
 /// A heap-backed resource retired by the realtime audio callback.
@@ -124,215 +223,23 @@ pub struct StreamingAudioChunk {
 /// guidelines). The callback hands these here via
 /// [`SharedState::retire_audio_resource`] and the audio command loop drops them
 /// off the realtime thread.
-pub enum RetiredAudioResource {
+pub(crate) enum RetiredAudioResource {
     /// A decoded playback buffer swapped out (e.g. at a gapless track change).
-    Buffer(Arc<Vec<f64>>),
+    Buffer {
+        samples: Arc<Vec<f64>>,
+        reservation: Option<Arc<DecodedMemoryLease>>,
+    },
     /// A DSP chain replaced on a format change.
     Chain(DspChain),
-    /// A streaming chunk fully consumed (or discarded as stale) by the callback.
-    ///
-    /// Carries the playback metadata the off-realtime drainer needs to route the
-    /// chunk into the [`StreamingRetentionRing`] (so an in-window seek can replay
-    /// it with zero decode) instead of dropping it. The callback fills these
-    /// fields from stack-resident integers; it never inspects the ring itself.
-    Chunk {
-        samples: Arc<Vec<f64>>,
-        generation: u64,
-        /// Output-frame index of the first frame this chunk contributed to the
-        /// playhead, as observed by the consuming callback.
-        start_frame: u64,
-        /// Number of output frames this chunk covers (`samples.len() / channels`).
-        frames: u32,
-    },
-}
-
-/// A streaming chunk retained behind the playhead for potential in-window replay.
-///
-/// Lives only off the realtime thread (inside [`StreamingRetentionRing`]). The
-/// audio callback never reads or mutates this; PR2 will consult the ring from the
-/// seek thread.
-#[derive(Clone)]
-pub struct RetainedChunk {
-    pub samples: Arc<Vec<f64>>,
-    pub generation: u64,
-    pub start_frame: u64,
-    pub frames: u32,
-}
-
-impl RetainedChunk {
-    fn byte_len(&self) -> usize {
-        self.samples.len() * std::mem::size_of::<f64>()
-    }
-}
-
-/// A contiguous run of retained PCM extracted from the [`StreamingRetentionRing`]
-/// to serve an in-window memory-streaming seek with zero decode.
-///
-/// Produced off the realtime thread by
-/// [`StreamingRetentionRing::take_replay_prefix`]; consumed by the in-window seek
-/// producer, which re-pushes `samples` (re-tagged with the new generation) into
-/// the forward streaming queue and resumes decode-ahead from
-/// `continuation_start_frame`.
-#[derive(Clone)]
-pub struct ReplayPrefix {
-    /// Absolute output frame where replay resumes. This is the requested target
-    /// frame; when the target lands inside a retained chunk, the first prefix
-    /// chunk is trimmed off the realtime thread so playback does not snap back
-    /// to the retained chunk boundary.
-    pub audible_start_frame: u64,
-    /// Absolute output frame one past the newest retained chunk; where the
-    /// continuation decode must seek to so it picks up exactly after the prefix.
-    pub continuation_start_frame: u64,
-    /// Total output frames covered by the prefix (`continuation - audible`).
-    pub prefix_frames: u64,
-    /// Zero-copy clones of the retained PCM chunks, in playback order.
-    pub samples: Vec<Arc<Vec<f64>>>,
-}
-
-/// Total decoded PCM (f64) retained behind the playhead, in bytes.
-///
-/// ~64 MiB is roughly ±45 s @ 44.1 kHz stereo / ±20 s @ 96 kHz stereo. The ring
-/// evicts the oldest retained chunks once it would exceed this cap.
-pub const STREAMING_RETENTION_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
-
-/// Bounded, off-realtime ring of recently-played streaming chunks.
-///
-/// # Realtime safety
-///
-/// This structure is **never** touched by the audio callback. The callback hands
-/// consumed chunks to the lock-free `retired_resources` queue (see
-/// [`SharedState::retire_audio_resource`]); the non-realtime drainer
-/// ([`SharedState::drain_retired_audio_resources`]) is the only writer, so the
-/// `parking_lot::Mutex` here is only ever locked off the realtime thread.
-///
-/// # Contract
-///
-/// - Chunks are pushed in playback order; `bytes` tracks total retained `f64`
-///   PCM bytes.
-/// - When pushing would exceed [`STREAMING_RETENTION_BUDGET_BYTES`], the oldest
-///   chunks are evicted (dropped off the realtime thread) until back under cap.
-/// - The ring is cleared on the same lifecycle events that reset streaming state
-///   (track change, stop, stop-for-load) via [`SharedState::reset_streaming_state`].
-pub struct StreamingRetentionRing {
-    chunks: Mutex<VecDeque<RetainedChunk>>,
-    bytes: AtomicU64,
-}
-
-impl Default for StreamingRetentionRing {
-    fn default() -> Self {
-        Self {
-            chunks: Mutex::new(VecDeque::new()),
-            bytes: AtomicU64::new(0),
-        }
-    }
-}
-
-impl StreamingRetentionRing {
-    /// Retain a consumed streaming chunk, evicting the oldest chunks if the
-    /// retained byte total would exceed the budget. Off-realtime only.
-    pub fn push(&self, chunk: RetainedChunk) {
-        let added = chunk.byte_len() as u64;
-        let mut chunks = self.chunks.lock();
-        chunks.push_back(chunk);
-        let mut total = self.bytes.load(Ordering::Relaxed) + added;
-        while total > STREAMING_RETENTION_BUDGET_BYTES {
-            match chunks.pop_front() {
-                Some(evicted) => {
-                    total = total.saturating_sub(evicted.byte_len() as u64);
-                    // `evicted` drops here, off the realtime thread.
-                }
-                None => break,
-            }
-        }
-        self.bytes.store(total, Ordering::Relaxed);
-    }
-
-    /// Drop every retained chunk and reset the byte total. Off-realtime only.
-    pub fn clear(&self) {
-        let mut chunks = self.chunks.lock();
-        chunks.clear();
-        self.bytes.store(0, Ordering::Relaxed);
-    }
-
-    /// Current retained byte total.
-    pub fn retained_bytes(&self) -> u64 {
-        self.bytes.load(Ordering::Relaxed)
-    }
-
-    /// Absolute output-frame start of the oldest retained chunk, or `None` if
-    /// the ring is empty. Off-realtime only.
-    pub fn oldest_start_frame(&self) -> Option<u64> {
-        self.chunks.lock().front().map(|c| c.start_frame)
-    }
-
-    /// Extract the contiguous suffix of retained PCM beginning at the chunk that
-    /// contains `target_frame`, in playback order, for an in-window seek replay.
-    ///
-    /// Returns `None` (a miss) when the ring is empty or `target_frame` lies
-    /// before the oldest retained chunk. On a hit, returns [`ReplayPrefix`]
-    /// describing the exact audible start frame, the one-past-the-newest
-    /// continuation frame, and the retained PCM from the target frame to the
-    /// newest chunk. Chunks after the first are zero-copy `Arc` clones; the first
-    /// chunk is cloned only when the target lands inside that chunk. The ring is
-    /// left untouched (the caller clears it after extraction). Off-realtime only.
-    pub fn take_replay_prefix(&self, target_frame: u64) -> Option<ReplayPrefix> {
-        let chunks = self.chunks.lock();
-        // Find the retained chunk that contains `target_frame`.
-        let start_idx = chunks.iter().position(|c| {
-            target_frame >= c.start_frame && target_frame < c.start_frame + u64::from(c.frames)
-        })?;
-
-        let audible_start_frame = target_frame;
-        let mut samples = Vec::with_capacity(chunks.len() - start_idx);
-        let mut total_frames = 0_u64;
-        for (idx, chunk) in chunks.iter().enumerate().skip(start_idx) {
-            if idx == start_idx {
-                let frame_offset = target_frame.saturating_sub(chunk.start_frame);
-                if frame_offset == 0 {
-                    total_frames += u64::from(chunk.frames);
-                    samples.push(Arc::clone(&chunk.samples));
-                    continue;
-                }
-
-                let channels = (chunk.samples.len() / chunk.frames.max(1) as usize).max(1);
-                let start_sample = frame_offset as usize * channels;
-                if start_sample >= chunk.samples.len() {
-                    continue;
-                }
-                let trimmed = Arc::new(chunk.samples[start_sample..].to_vec());
-                total_frames += (trimmed.len() / channels) as u64;
-                samples.push(trimmed);
-            } else {
-                total_frames += u64::from(chunk.frames);
-                samples.push(Arc::clone(&chunk.samples));
-            }
-        }
-        if total_frames == 0 {
-            return None;
-        }
-        let continuation_start_frame = audible_start_frame + total_frames;
-
-        Some(ReplayPrefix {
-            audible_start_frame,
-            continuation_start_frame,
-            prefix_frames: total_frames,
-            samples,
-        })
-    }
-
-    #[cfg(test)]
-    pub fn len(&self) -> usize {
-        self.chunks.lock().len()
-    }
-
-    #[cfg(test)]
-    pub fn snapshot(&self) -> Vec<RetainedChunk> {
-        self.chunks.lock().iter().cloned().collect()
-    }
+    /// A PCM window displaced from the callback's generation-local cache.
+    #[allow(dead_code)]
+    Window(Arc<super::streaming::pcm_window::PcmWindow>),
+    /// A session realtime view displaced from the shared publication slot.
+    StreamingRtView(Arc<super::streaming::rt_view::StreamingRtView>),
 }
 
 /// Commands sent to the audio thread
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum AudioCommand {
     Play,
     Pause,
@@ -363,15 +270,10 @@ pub enum AudioCommand {
         generation: u64,
         result: LoadResult,
     },
-    StreamingLoadReady {
+    InstallStreamingV2Session {
         generation: u64,
-        track: StreamingTrackStart,
         autoplay: bool,
-    },
-    StreamingLoadFinished {
-        generation: u64,
-        samples: Option<Vec<f64>>,
-        total_frames: u64,
+        session: Box<super::streaming::session::PersistentStreamingSession>,
     },
     LoadError {
         generation: u64,
@@ -517,7 +419,7 @@ impl AtomicPlayerState {
 /// Shared state between audio thread and main thread
 pub struct SharedState {
     pub state: AtomicPlayerState,
-    pub position_frames: AtomicU64,
+    pub(crate) playback_clock: PlaybackClock,
     /// Lock-free seek-request slot (M1 fix). Non-callback writers must not
     /// bare-store `position_frames` for authoritative position changes (seek,
     /// stop, track load): a store landing between the audio callback's
@@ -528,30 +430,13 @@ pub struct SharedState {
     /// the top of every invocation and re-checks the serial before each of its
     /// own `position_frames` publishes, so a requester's store can never be
     /// overwritten by stale callback-derived positions.
-    pub seek_slot_target_frames: AtomicU64,
     /// Monotonic serial bumped after each `seek_slot_target_frames` store.
     /// Two near-simultaneous requesters resolve to whichever target was stored
     /// last (both were user intents milliseconds apart); the callback applying
     /// serial N always reads a target at least as new as the older request.
-    pub seek_slot_serial: AtomicU64,
     /// Last serial the audio callback consumed. Written only by the callback
     /// (single active consumer); shared so a rebuilt output stream does not
     /// re-apply an old, already-consumed seek target.
-    pub seek_slot_consumed_serial: AtomicU64,
-    /// Deferred seek for a full-buffer load still inside its
-    /// streaming-first-buffer window (M2 fix): while
-    /// `streaming_active && !streaming_memory_mode` the callback renders
-    /// sequential streaming chunks, so a position store cannot move the audio.
-    /// The target waits here, tagged with the load generation, and
-    /// `StreamingLoadFinished` applies it through the seek slot right after
-    /// publishing the full buffer. Generation 0 means "none pending" (load
-    /// generations start at 1), and a pending seek from a superseded load is
-    /// discarded by the generation check.
-    pub pending_full_buffer_seek_generation: AtomicU64,
-    pub pending_full_buffer_seek_frames: AtomicU64,
-    pub render_clock_start_frame: AtomicU64,
-    pub render_clock_end_frame: AtomicU64,
-    pub render_clock_anchor_ms: AtomicU64,
     pub sample_rate: AtomicU64,
     pub channels: AtomicU64,
     pub total_frames: AtomicU64,
@@ -560,26 +445,18 @@ pub struct SharedState {
     /// from the audio callback. Writers (load, gapless swap) call .store()
     /// which is an atomic pointer swap; readers call .load() which never blocks.
     pub audio_buffer: ArcSwap<Vec<f64>>,
-    pub streaming_chunks: ArrayQueue<StreamingAudioChunk>,
+    pub(crate) audio_buffer_reservation: ArcSwapOption<DecodedMemoryLease>,
+    #[allow(dead_code)]
+    pub(crate) streaming_v2_rt: ArcSwapOption<super::streaming::rt_view::StreamingRtView>,
+    #[allow(dead_code)]
+    pub(crate) streaming_v2_enabled: AtomicBool,
     pub streaming_active: AtomicBool,
     pub streaming_decode_finished: AtomicBool,
-    pub streaming_memory_mode: AtomicBool,
-    pub streaming_full_buffer_published: AtomicBool,
     pub streaming_generation: AtomicU64,
     pub streaming_first_chunk_ms: AtomicU64,
     pub streaming_ready_sent_ms: AtomicU64,
     pub streaming_ready_ms: AtomicU64,
     pub streaming_finished_ms: AtomicU64,
-    pub streaming_queue_window_generation: AtomicU64,
-    pub streaming_queue_min_len: AtomicU64,
-    pub streaming_queue_max_len: AtomicU64,
-    pub streaming_queue_chunks_pushed_count: AtomicU64,
-    pub streaming_queue_chunks_popped_count: AtomicU64,
-    pub streaming_queue_empty_during_decode_count: AtomicU64,
-    pub streaming_queue_empty_during_decode_frames: AtomicU64,
-    pub streaming_queue_producer_full_count: AtomicU64,
-    pub streaming_queue_producer_backpressure_count: AtomicU64,
-    pub streaming_queue_dropped_count: AtomicU64,
     pub exclusive_mode: AtomicBool,
     pub prefer_default_output_config: AtomicBool,
     pub device_id: std::sync::atomic::AtomicI64,
@@ -593,6 +470,7 @@ pub struct SharedState {
     /// The preload thread stores the decoded next-track samples here;
     /// the audio callback atomically swaps it into audio_buffer at track boundary.
     pub pending_buffer: ArcSwapOption<Vec<f64>>,
+    pub(crate) pending_buffer_reservation: ArcSwapOption<DecodedMemoryLease>,
     pub pending_total_frames: AtomicU64,
     pub pending_sample_rate: AtomicU64,
     pub pending_channels: AtomicU64,
@@ -669,6 +547,7 @@ pub struct SharedState {
     pub audio_command_last_completed_code: AtomicU64,
     pub active_stream_source_sample_rate: AtomicU64,
     pub active_stream_output_sample_rate: AtomicU64,
+    pub active_stream_source_channels: AtomicU64,
     pub active_stream_channels: AtomicU64,
     pub active_stream_device_id: std::sync::atomic::AtomicI64,
     pub active_stream_exclusive_mode: AtomicBool,
@@ -725,18 +604,13 @@ pub struct SharedState {
     pub pending_dsp_chain: ArrayQueue<DspChain>,
 
     // Realtime drop offload: the audio callback pushes heap-backed resources here
-    // (swapped-out buffers, replaced DSP chains, consumed streaming chunks) instead
+    // (swapped-out buffers and replaced DSP chains) instead
     // of dropping them inline; the audio command loop drains and drops them off the
     // realtime thread. See `RetiredAudioResource`.
-    pub retired_resources: ArrayQueue<RetiredAudioResource>,
+    pub(crate) retired_resources: ArrayQueue<RetiredAudioResource>,
     /// Diagnostics: times the graveyard was full and a resource had to be dropped
     /// on the realtime thread as a last resort.
     pub retired_resource_drop_in_rt_count: AtomicU64,
-
-    /// Bounded ring of recently-played streaming chunks retained behind the
-    /// playhead so an in-window memory-streaming seek (PR2) can replay them with
-    /// zero decode. Written only off the realtime thread by the resource drainer.
-    pub streaming_retention_ring: StreamingRetentionRing,
 }
 
 impl SharedState {
@@ -748,40 +622,22 @@ impl SharedState {
 
         Self {
             state: AtomicPlayerState::new(PlayerState::Stopped),
-            position_frames: AtomicU64::new(0),
-            seek_slot_target_frames: AtomicU64::new(0),
-            seek_slot_serial: AtomicU64::new(0),
-            seek_slot_consumed_serial: AtomicU64::new(0),
-            pending_full_buffer_seek_generation: AtomicU64::new(0),
-            pending_full_buffer_seek_frames: AtomicU64::new(0),
-            render_clock_start_frame: AtomicU64::new(0),
-            render_clock_end_frame: AtomicU64::new(0),
-            render_clock_anchor_ms: AtomicU64::new(0),
+            playback_clock: PlaybackClock::new(),
             sample_rate: AtomicU64::new(44100),
             channels: AtomicU64::new(2),
             total_frames: AtomicU64::new(0),
             spectrum_data: ArcSwap::new(Arc::new(vec![0.0; 64])),
             audio_buffer: ArcSwap::new(Arc::new(Vec::new())),
-            streaming_chunks: ArrayQueue::new(128),
+            audio_buffer_reservation: ArcSwapOption::empty(),
+            streaming_v2_rt: ArcSwapOption::empty(),
+            streaming_v2_enabled: AtomicBool::new(false),
             streaming_active: AtomicBool::new(false),
             streaming_decode_finished: AtomicBool::new(false),
-            streaming_memory_mode: AtomicBool::new(false),
-            streaming_full_buffer_published: AtomicBool::new(false),
             streaming_generation: AtomicU64::new(0),
             streaming_first_chunk_ms: AtomicU64::new(0),
             streaming_ready_sent_ms: AtomicU64::new(0),
             streaming_ready_ms: AtomicU64::new(0),
             streaming_finished_ms: AtomicU64::new(0),
-            streaming_queue_window_generation: AtomicU64::new(0),
-            streaming_queue_min_len: AtomicU64::new(STREAMING_QUEUE_MIN_UNOBSERVED),
-            streaming_queue_max_len: AtomicU64::new(0),
-            streaming_queue_chunks_pushed_count: AtomicU64::new(0),
-            streaming_queue_chunks_popped_count: AtomicU64::new(0),
-            streaming_queue_empty_during_decode_count: AtomicU64::new(0),
-            streaming_queue_empty_during_decode_frames: AtomicU64::new(0),
-            streaming_queue_producer_full_count: AtomicU64::new(0),
-            streaming_queue_producer_backpressure_count: AtomicU64::new(0),
-            streaming_queue_dropped_count: AtomicU64::new(0),
             exclusive_mode: AtomicBool::new(false),
             prefer_default_output_config: AtomicBool::new(false),
             device_id: std::sync::atomic::AtomicI64::new(-1),
@@ -791,6 +647,7 @@ impl SharedState {
             noise_shaper_curve: RwLock::new(NoiseShaperCurve::Lipshitz5),
 
             pending_buffer: ArcSwapOption::empty(),
+            pending_buffer_reservation: ArcSwapOption::empty(),
             pending_total_frames: AtomicU64::new(0),
             pending_sample_rate: AtomicU64::new(44100),
             pending_channels: AtomicU64::new(2),
@@ -860,6 +717,7 @@ impl SharedState {
             audio_command_last_completed_code: AtomicU64::new(0),
             active_stream_source_sample_rate: AtomicU64::new(0),
             active_stream_output_sample_rate: AtomicU64::new(0),
+            active_stream_source_channels: AtomicU64::new(0),
             active_stream_channels: AtomicU64::new(0),
             active_stream_device_id: std::sync::atomic::AtomicI64::new(-1),
             active_stream_exclusive_mode: AtomicBool::new(false),
@@ -902,7 +760,6 @@ impl SharedState {
             pending_dsp_chain: ArrayQueue::new(1),
             retired_resources: ArrayQueue::new(256),
             retired_resource_drop_in_rt_count: AtomicU64::new(0),
-            streaming_retention_ring: StreamingRetentionRing::default(),
         }
     }
 
@@ -911,12 +768,34 @@ impl SharedState {
     /// Safe to call from the audio callback: pushing is wait-free and never
     /// allocates. If the queue is momentarily full the resource is dropped in
     /// place as a last resort and counted via `retired_resource_drop_in_rt_count`.
-    pub fn retire_audio_resource(&self, resource: RetiredAudioResource) {
+    pub(crate) fn retire_audio_resource(&self, resource: RetiredAudioResource) {
         if self.retired_resources.push(resource).is_err() {
             // The rejected resource drops here (on the realtime thread) as the
             // `Err` payload of `push` goes out of scope — last-resort fallback.
             self.retired_resource_drop_in_rt_count
                 .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn publish_streaming_v2_rt(
+        &self,
+        rt: Option<Arc<super::streaming::rt_view::StreamingRtView>>,
+    ) {
+        if let Some(displaced) = self.streaming_v2_rt.swap(rt) {
+            let mut resource = RetiredAudioResource::StreamingRtView(displaced);
+            for _ in 0..1000 {
+                match self.retired_resources.push(resource) {
+                    Ok(()) => return,
+                    Err(returned) => {
+                        resource = returned;
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                }
+            }
+            log::warn!(
+                "retired-resource queue full for >1s; dropping displaced streaming RT view on writer thread"
+            );
         }
     }
 
@@ -934,15 +813,28 @@ impl SharedState {
     /// least every 500 ms), the displaced buffer drops here on the writer
     /// thread as a last resort — never on the RT side by this call.
     pub fn publish_audio_buffer(&self, samples: Arc<Vec<f64>>) {
+        self.publish_audio_buffer_with_reservation(samples, None);
+    }
+
+    pub(crate) fn publish_audio_buffer_with_reservation(
+        &self,
+        samples: Arc<Vec<f64>>,
+        reservation: Option<Arc<DecodedMemoryLease>>,
+    ) {
         let mut displaced = self.audio_buffer.swap(samples);
+        let mut displaced_reservation = self.audio_buffer_reservation.swap(reservation);
         for _ in 0..1000 {
-            match self
-                .retired_resources
-                .push(RetiredAudioResource::Buffer(displaced))
-            {
+            match self.retired_resources.push(RetiredAudioResource::Buffer {
+                samples: displaced,
+                reservation: displaced_reservation,
+            }) {
                 Ok(()) => return,
-                Err(RetiredAudioResource::Buffer(rejected)) => {
-                    displaced = rejected;
+                Err(RetiredAudioResource::Buffer {
+                    samples,
+                    reservation,
+                }) => {
+                    displaced = samples;
+                    displaced_reservation = reservation;
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
                 Err(_) => unreachable!("push rejects the pushed Buffer variant"),
@@ -956,61 +848,65 @@ impl SharedState {
     /// Drain every resource retired by the audio callback. Call only from a
     /// non-realtime thread (the audio command loop).
     ///
-    /// Consumed current-generation streaming chunks are routed into the
-    /// [`StreamingRetentionRing`] (so an in-window seek can replay them); every
-    /// other retired resource — buffers, DSP chains, and stale-generation chunks
-    /// — is dropped here off the realtime thread.
+    /// Buffers, DSP chains, windows, and realtime views are dropped here off the
+    /// realtime thread.
     pub fn drain_retired_audio_resources(&self) {
-        let current_generation = self.streaming_generation.load(Ordering::Acquire);
-        let mut deferred_buffers: Vec<Arc<Vec<f64>>> = Vec::new();
+        let mut deferred_buffers: Vec<(Arc<Vec<f64>>, Option<Arc<DecodedMemoryLease>>)> =
+            Vec::new();
+        let mut deferred_rt_views = Vec::new();
         while let Some(resource) = self.retired_resources.pop() {
             match resource {
-                RetiredAudioResource::Chunk {
+                RetiredAudioResource::Buffer {
                     samples,
-                    generation,
-                    start_frame,
-                    frames,
+                    reservation,
                 } => {
-                    if generation == current_generation {
-                        self.streaming_retention_ring.push(RetainedChunk {
-                            samples,
-                            generation,
-                            start_frame,
-                            frames,
-                        });
-                    }
-                    // Stale-generation chunk: `samples` drops here, off the RT thread.
-                }
-                RetiredAudioResource::Buffer(buffer) => {
                     // A callback that overlapped the displacing swap may still
                     // hold an ArcSwap guard on this buffer; dropping our
                     // reference now would make that RT-held guard the last
                     // owner. The buffer is already out of `audio_buffer`, so
                     // its count can only shrink — defer until we are the sole
                     // holder, then it drops here off the RT thread.
-                    if Arc::strong_count(&buffer) > 1 {
-                        deferred_buffers.push(buffer);
+                    if Arc::strong_count(&samples) > 1 {
+                        deferred_buffers.push((samples, reservation));
                     }
                 }
                 // DSP chains were swapped out by the RT thread itself; no
                 // cross-thread guard can outlive that swap. Drop here.
-                RetiredAudioResource::Chain(_) => {}
+                RetiredAudioResource::Chain(chain) => drop(chain),
+                RetiredAudioResource::Window(window) => drop(window),
+                RetiredAudioResource::StreamingRtView(rt) => {
+                    if Arc::strong_count(&rt) > 1 {
+                        deferred_rt_views.push(rt);
+                    }
+                }
             }
         }
-        for buffer in deferred_buffers {
+        for (samples, reservation) in deferred_buffers {
             if self
                 .retired_resources
-                .push(RetiredAudioResource::Buffer(buffer))
+                .push(RetiredAudioResource::Buffer {
+                    samples,
+                    reservation,
+                })
                 .is_err()
             {
                 // Queue refilled behind us; dropping here is still off-RT.
                 log::warn!("retired-resource queue full while re-parking a guarded buffer");
             }
         }
+        for rt in deferred_rt_views {
+            if self
+                .retired_resources
+                .push(RetiredAudioResource::StreamingRtView(rt))
+                .is_err()
+            {
+                log::warn!("retired-resource queue full while re-parking a guarded RT view");
+            }
+        }
     }
 
     pub fn current_time_secs(&self) -> f64 {
-        let pos = self.position_frames.load(Ordering::Relaxed);
+        let pos = self.playback_clock.position();
         let sr = self.sample_rate.load(Ordering::Relaxed).max(1);
         if self.state.load() != PlayerState::Playing
             || (self.is_loading.load(Ordering::Acquire)
@@ -1019,12 +915,11 @@ impl SharedState {
             return pos as f64 / sr as f64;
         }
 
-        let anchor_ms = self.render_clock_anchor_ms.load(Ordering::Acquire);
-        let start_frame = self.render_clock_start_frame.load(Ordering::Acquire);
-        let end_frame = self.render_clock_end_frame.load(Ordering::Acquire);
+        let Some((start_frame, end_frame, anchor_ms)) = self.render_clock_snapshot() else {
+            return pos as f64 / sr as f64;
+        };
         let generation = self.load_generation.load(Ordering::Acquire);
         if !self.is_seek_phase_generation(generation)
-            || anchor_ms == 0
             || end_frame <= start_frame
             || pos < start_frame
         {
@@ -1037,6 +932,11 @@ impl SharedState {
         display_frame as f64 / sr as f64
     }
 
+    #[inline]
+    pub fn position_frames(&self) -> u64 {
+        self.playback_clock.position()
+    }
+
     pub fn duration_secs(&self) -> f64 {
         let total = self.total_frames.load(Ordering::Relaxed);
         let sr = self.sample_rate.load(Ordering::Relaxed).max(1);
@@ -1044,22 +944,84 @@ impl SharedState {
     }
 
     pub fn reset_render_clock(&self, frame: u64) {
-        self.render_clock_start_frame
-            .store(frame, Ordering::Release);
-        self.render_clock_end_frame.store(frame, Ordering::Release);
-        self.render_clock_anchor_ms.store(0, Ordering::Release);
+        self.publish_render_clock(frame, frame, 0, false);
     }
 
     pub fn mark_render_clock_span(&self, start_frame: u64, end_frame: u64) {
         if end_frame <= start_frame {
             return;
         }
-        self.render_clock_start_frame
-            .store(start_frame, Ordering::Release);
-        self.render_clock_end_frame
-            .store(end_frame, Ordering::Release);
-        self.render_clock_anchor_ms
-            .store(playback_phase_time_ms(), Ordering::Release);
+        self.publish_render_clock(start_frame, end_frame, playback_phase_time_ms(), true);
+    }
+
+    fn publish_render_clock(&self, start_frame: u64, end_frame: u64, anchor_ms: u64, valid: bool) {
+        self.playback_clock
+            .render
+            .render_clock_sequence
+            .fetch_add(1, Ordering::AcqRel);
+        self.playback_clock
+            .render
+            .render_clock_start_frame
+            .store(start_frame, Ordering::Relaxed);
+        self.playback_clock
+            .render
+            .render_clock_end_frame
+            .store(end_frame, Ordering::Relaxed);
+        self.playback_clock
+            .render
+            .render_clock_anchor_ms
+            .store(anchor_ms, Ordering::Relaxed);
+        self.playback_clock
+            .render
+            .render_clock_valid
+            .store(valid, Ordering::Relaxed);
+        self.playback_clock
+            .render
+            .render_clock_sequence
+            .fetch_add(1, Ordering::Release);
+    }
+
+    fn render_clock_snapshot(&self) -> Option<(u64, u64, u64)> {
+        for _ in 0..4 {
+            let before = self
+                .playback_clock
+                .render
+                .render_clock_sequence
+                .load(Ordering::Acquire);
+            if before & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+            let start_frame = self
+                .playback_clock
+                .render
+                .render_clock_start_frame
+                .load(Ordering::Relaxed);
+            let end_frame = self
+                .playback_clock
+                .render
+                .render_clock_end_frame
+                .load(Ordering::Relaxed);
+            let anchor_ms = self
+                .playback_clock
+                .render
+                .render_clock_anchor_ms
+                .load(Ordering::Relaxed);
+            let valid = self
+                .playback_clock
+                .render
+                .render_clock_valid
+                .load(Ordering::Relaxed);
+            let after = self
+                .playback_clock
+                .render
+                .render_clock_sequence
+                .load(Ordering::Acquire);
+            if before == after {
+                return valid.then_some((start_frame, end_frame, anchor_ms));
+            }
+        }
+        None
     }
 
     /// Publish an authoritative position change (seek, stop, track load reset)
@@ -1079,37 +1041,8 @@ impl SharedState {
     /// Lock-free and allocation-free: safe to call from any thread, including
     /// the audio callback itself (gapless track swap).
     pub fn request_seek_to_frame(&self, target_frame: u64) {
-        self.seek_slot_target_frames
-            .store(target_frame, Ordering::Release);
-        self.seek_slot_serial.fetch_add(1, Ordering::AcqRel);
-        self.position_frames.store(target_frame, Ordering::Relaxed);
+        self.playback_clock.request_seek(target_frame);
         self.reset_render_clock(target_frame);
-    }
-
-    /// Record a seek issued during the streaming-first-buffer window of a
-    /// full-buffer load (M2 fix). Applied by `StreamingLoadFinished` via
-    /// [`Self::take_pending_full_buffer_seek`]; a later registration
-    /// overwrites an earlier one (latest seek wins, matching slot semantics).
-    pub fn set_pending_full_buffer_seek(&self, generation: u64, target_frame: u64) {
-        self.pending_full_buffer_seek_frames
-            .store(target_frame, Ordering::Release);
-        self.pending_full_buffer_seek_generation
-            .store(generation, Ordering::Release);
-    }
-
-    /// Take the deferred first-buffer-window seek if it was registered for
-    /// `generation`. Always clears the pending slot, so a stale target from a
-    /// superseded load can never leak into a later track (generation-tag
-    /// invalidation).
-    pub fn take_pending_full_buffer_seek(&self, generation: u64) -> Option<u64> {
-        let pending_generation = self
-            .pending_full_buffer_seek_generation
-            .swap(0, Ordering::AcqRel);
-        if pending_generation != 0 && pending_generation == generation {
-            Some(self.pending_full_buffer_seek_frames.load(Ordering::Acquire))
-        } else {
-            None
-        }
     }
 
     pub fn reset_load_phase_timestamps(&self) {
@@ -1190,74 +1123,19 @@ impl SharedState {
     }
 
     pub fn reset_streaming_state(&self) {
-        self.reset_render_clock(self.position_frames.load(Ordering::Relaxed));
+        self.reset_render_clock(
+            self.playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
+        );
         self.streaming_active.store(false, Ordering::Release);
         self.streaming_decode_finished
             .store(false, Ordering::Release);
-        self.streaming_memory_mode.store(false, Ordering::Release);
-        self.streaming_full_buffer_published
-            .store(false, Ordering::Release);
-        while self.streaming_chunks.pop().is_some() {}
-        self.streaming_retention_ring.clear();
-        self.clear_streaming_queue_window();
         self.streaming_first_chunk_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_sent_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_ms.store(0, Ordering::Relaxed);
         self.streaming_finished_ms.store(0, Ordering::Relaxed);
-    }
-
-    pub fn reset_streaming_queue_window_for_generation(&self, generation: u64) {
-        let previous = self
-            .streaming_queue_window_generation
-            .swap(generation, Ordering::AcqRel);
-        if previous != generation {
-            self.streaming_queue_min_len
-                .store(STREAMING_QUEUE_MIN_UNOBSERVED, Ordering::Relaxed);
-            self.streaming_queue_max_len.store(0, Ordering::Relaxed);
-        }
-    }
-
-    fn clear_streaming_queue_window(&self) {
-        self.streaming_queue_window_generation
-            .store(0, Ordering::Release);
-        self.streaming_queue_min_len
-            .store(STREAMING_QUEUE_MIN_UNOBSERVED, Ordering::Relaxed);
-        self.streaming_queue_max_len.store(0, Ordering::Relaxed);
-    }
-
-    pub fn observe_streaming_queue_len(&self, len: usize) {
-        let len = len as u64;
-        self.streaming_queue_min_len
-            .fetch_min(len, Ordering::Relaxed);
-        self.streaming_queue_max_len
-            .fetch_max(len, Ordering::Relaxed);
-    }
-
-    pub fn streaming_queue_min_len(&self) -> Option<u64> {
-        match self.streaming_queue_min_len.load(Ordering::Relaxed) {
-            STREAMING_QUEUE_MIN_UNOBSERVED => None,
-            len => Some(len),
-        }
-    }
-
-    pub fn mark_streaming_queue_chunk_pushed(&self, len_after_push: usize) {
-        self.streaming_queue_chunks_pushed_count
-            .fetch_add(1, Ordering::Relaxed);
-        self.observe_streaming_queue_len(len_after_push);
-    }
-
-    pub fn mark_streaming_queue_chunk_popped(&self, len_after_pop: usize) {
-        self.streaming_queue_chunks_popped_count
-            .fetch_add(1, Ordering::Relaxed);
-        self.observe_streaming_queue_len(len_after_pop);
-    }
-
-    pub fn mark_streaming_queue_empty_during_decode(&self, silence_frames: u64) {
-        self.streaming_queue_empty_during_decode_count
-            .fetch_add(1, Ordering::Relaxed);
-        self.streaming_queue_empty_during_decode_frames
-            .fetch_add(silence_frames, Ordering::Relaxed);
-        self.observe_streaming_queue_len(0);
     }
 
     pub fn mark_audio_buffer_output_shortfall(&self, silence_frames: u64) {
@@ -1272,22 +1150,6 @@ impl SharedState {
             .fetch_add(1, Ordering::Relaxed);
         self.streaming_output_shortfall_frames
             .fetch_add(silence_frames, Ordering::Relaxed);
-    }
-
-    pub fn mark_streaming_queue_producer_full(&self, len_at_full: usize) {
-        self.streaming_queue_producer_full_count
-            .fetch_add(1, Ordering::Relaxed);
-        self.observe_streaming_queue_len(len_at_full);
-    }
-
-    pub fn mark_streaming_queue_producer_backpressure(&self) {
-        self.streaming_queue_producer_backpressure_count
-            .fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn mark_streaming_queue_dropped(&self) {
-        self.streaming_queue_dropped_count
-            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn mark_load_request_returned(&self) {
@@ -1560,14 +1422,17 @@ impl SharedState {
         &self,
         source_sample_rate: u32,
         output_sample_rate: u32,
-        channels: usize,
+        source_channels: usize,
+        output_channels: usize,
     ) {
         self.active_stream_source_sample_rate
             .store(u64::from(source_sample_rate), Ordering::Release);
         self.active_stream_output_sample_rate
             .store(u64::from(output_sample_rate), Ordering::Release);
+        self.active_stream_source_channels
+            .store(source_channels as u64, Ordering::Release);
         self.active_stream_channels
-            .store(channels as u64, Ordering::Release);
+            .store(output_channels as u64, Ordering::Release);
         self.active_stream_device_id
             .store(self.device_id.load(Ordering::Relaxed), Ordering::Release);
         self.active_stream_exclusive_mode.store(
@@ -1585,6 +1450,8 @@ impl SharedState {
         self.active_stream_source_sample_rate
             .store(0, Ordering::Release);
         self.active_stream_output_sample_rate
+            .store(0, Ordering::Release);
+        self.active_stream_source_channels
             .store(0, Ordering::Release);
         self.active_stream_channels.store(0, Ordering::Release);
         self.active_stream_device_id.store(-1, Ordering::Release);
@@ -1618,7 +1485,7 @@ impl SharedState {
         self.active_stream_source_sample_rate
             .load(Ordering::Acquire)
             == self.sample_rate.load(Ordering::Relaxed)
-            && self.active_stream_channels.load(Ordering::Acquire)
+            && self.active_stream_source_channels.load(Ordering::Acquire)
                 == self.channels.load(Ordering::Relaxed)
             && self.active_stream_device_id.load(Ordering::Acquire)
                 == self.device_id.load(Ordering::Relaxed)
@@ -1761,18 +1628,6 @@ impl Default for SharedState {
 mod tests {
     use super::*;
 
-    /// Advance the process-start monotonic playback clock past `floor_ms` so
-    /// the render-clock anchor (`mark_render_clock_span`) is stored non-zero
-    /// even in a fresh test process. Without this, `playback_phase_time_ms()`
-    /// can return 0 within the first ~1ms after epoch init, which sets
-    /// `anchor_ms == 0` and makes `current_time_secs()` fall back to
-    /// `position_frames / sr` instead of exercising the interpolation branch.
-    fn advance_playback_clock_past(floor_ms: u64) {
-        while playback_phase_time_ms() <= floor_ms {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-    }
-
     #[test]
     fn repeat_mode_parses_and_round_trips_atomic_value() {
         assert_eq!(RepeatMode::parse("off"), Some(RepeatMode::Off));
@@ -1894,349 +1749,6 @@ mod tests {
     }
 
     #[test]
-    fn reset_streaming_state_drains_queue_and_clears_flags() {
-        let shared = SharedState::new();
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(true, Ordering::Relaxed);
-        shared.mark_streaming_first_chunk();
-        shared.mark_streaming_ready();
-        shared
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 1,
-                samples: Arc::new(vec![0.0; 4]),
-            })
-            .expect("queue should have capacity");
-
-        shared.reset_streaming_state();
-
-        assert!(!shared.streaming_active.load(Ordering::Relaxed));
-        assert!(!shared.streaming_decode_finished.load(Ordering::Relaxed));
-        assert!(shared.streaming_chunks.pop().is_none());
-        assert_eq!(shared.streaming_first_chunk_ms.load(Ordering::Relaxed), 0);
-        assert_eq!(shared.streaming_ready_ms.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            shared
-                .streaming_queue_window_generation
-                .load(Ordering::Relaxed),
-            0
-        );
-        assert_eq!(shared.streaming_queue_min_len(), None);
-        assert_eq!(shared.streaming_queue_max_len.load(Ordering::Relaxed), 0);
-    }
-
-    fn retained_chunk(generation: u64, start_frame: u64, samples: usize) -> RetainedChunk {
-        RetainedChunk {
-            samples: Arc::new(vec![0.0; samples]),
-            generation,
-            start_frame,
-            frames: (samples / 2) as u32,
-        }
-    }
-
-    #[test]
-    fn retention_ring_keeps_chunks_in_playback_order_with_metadata() {
-        let ring = StreamingRetentionRing::default();
-        ring.push(retained_chunk(5, 0, 8));
-        ring.push(retained_chunk(5, 4, 8));
-        ring.push(retained_chunk(5, 8, 8));
-
-        let snapshot = ring.snapshot();
-        assert_eq!(snapshot.len(), 3);
-        assert_eq!(
-            snapshot
-                .iter()
-                .map(|c| (c.generation, c.start_frame, c.frames))
-                .collect::<Vec<_>>(),
-            vec![(5, 0, 4), (5, 4, 4), (5, 8, 4)]
-        );
-        let expected_bytes = 3 * 8 * std::mem::size_of::<f64>() as u64;
-        assert_eq!(ring.retained_bytes(), expected_bytes);
-    }
-
-    #[test]
-    fn retention_ring_evicts_oldest_first_and_stays_under_budget() {
-        let ring = StreamingRetentionRing::default();
-        // One full-budget chunk's worth of samples (f64) per push.
-        let chunk_samples =
-            (STREAMING_RETENTION_BUDGET_BYTES as usize / std::mem::size_of::<f64>()) / 2;
-
-        // Three pushes total 1.5x the budget, forcing eviction of the oldest.
-        ring.push(retained_chunk(1, 0, chunk_samples));
-        ring.push(retained_chunk(1, 1, chunk_samples));
-        ring.push(retained_chunk(1, 2, chunk_samples));
-
-        assert!(
-            ring.retained_bytes() <= STREAMING_RETENTION_BUDGET_BYTES,
-            "retained bytes {} must never exceed the budget {}",
-            ring.retained_bytes(),
-            STREAMING_RETENTION_BUDGET_BYTES
-        );
-        // Oldest (start_frame 0) evicted first; newest two retained.
-        let starts = ring
-            .snapshot()
-            .iter()
-            .map(|c| c.start_frame)
-            .collect::<Vec<_>>();
-        assert!(!starts.contains(&0), "oldest chunk should be evicted");
-        assert_eq!(starts.last().copied(), Some(2));
-    }
-
-    #[test]
-    fn drain_routes_current_generation_chunks_into_ring_and_drops_stale() {
-        let shared = SharedState::new();
-        shared.streaming_generation.store(9, Ordering::Release);
-
-        // Current-generation consumed chunk -> retained.
-        shared.retire_audio_resource(RetiredAudioResource::Chunk {
-            samples: Arc::new(vec![0.1; 8]),
-            generation: 9,
-            start_frame: 0,
-            frames: 4,
-        });
-        // Stale-generation chunk -> dropped, not retained.
-        shared.retire_audio_resource(RetiredAudioResource::Chunk {
-            samples: Arc::new(vec![0.2; 8]),
-            generation: 8,
-            start_frame: 99,
-            frames: 4,
-        });
-        // Non-chunk resources are dropped off-thread, never retained.
-        shared.retire_audio_resource(RetiredAudioResource::Buffer(Arc::new(vec![0.0; 4])));
-
-        shared.drain_retired_audio_resources();
-
-        let snapshot = shared.streaming_retention_ring.snapshot();
-        assert_eq!(snapshot.len(), 1);
-        assert_eq!(snapshot[0].generation, 9);
-        assert_eq!(snapshot[0].start_frame, 0);
-        assert_eq!(snapshot[0].frames, 4);
-        assert_eq!(
-            shared
-                .retired_resource_drop_in_rt_count
-                .load(Ordering::Relaxed),
-            0
-        );
-    }
-
-    #[test]
-    fn publish_audio_buffer_retires_displaced_buffer_off_writer_thread() {
-        let shared = SharedState::new();
-        shared.audio_buffer.store(Arc::new(vec![0.5; 16]));
-
-        shared.publish_audio_buffer(Arc::new(vec![0.7; 8]));
-
-        // Displaced buffer parked in the retire queue, not dropped inline.
-        assert_eq!(shared.retired_resources.len(), 1);
-        match shared.retired_resources.pop() {
-            Some(RetiredAudioResource::Buffer(buffer)) => assert_eq!(buffer.len(), 16),
-            other => panic!("expected displaced Buffer, got {:?}", other.is_some()),
-        }
-        // The new buffer is live.
-        assert_eq!(shared.audio_buffer.load().len(), 8);
-    }
-
-    #[test]
-    fn drain_defers_buffer_drop_while_callback_guard_outstanding() {
-        let shared = SharedState::new();
-        shared.audio_buffer.store(Arc::new(vec![0.5; 16]));
-
-        // Simulated audio callback holding an ArcSwap guard on the old buffer.
-        let callback_guard = shared.audio_buffer.load();
-
-        // Non-RT writer swaps a new buffer in while the guard is live.
-        shared.publish_audio_buffer(Arc::new(vec![0.7; 8]));
-        assert_eq!(shared.retired_resources.len(), 1);
-
-        // Drain must NOT drop the displaced buffer: the guard would become the
-        // last reference and the samples would deallocate on the RT thread.
-        shared.drain_retired_audio_resources();
-        assert_eq!(
-            shared.retired_resources.len(),
-            1,
-            "guarded buffer must stay parked in the retire queue"
-        );
-
-        drop(callback_guard);
-        shared.drain_retired_audio_resources();
-        assert_eq!(
-            shared.retired_resources.len(),
-            0,
-            "sole-reference buffer drops off-RT once the guard is gone"
-        );
-    }
-
-    #[test]
-    fn reset_streaming_state_clears_retention_ring() {
-        let shared = SharedState::new();
-        shared
-            .streaming_retention_ring
-            .push(retained_chunk(1, 0, 8));
-        assert_eq!(shared.streaming_retention_ring.len(), 1);
-
-        shared.reset_streaming_state();
-
-        assert_eq!(shared.streaming_retention_ring.len(), 0);
-        assert_eq!(shared.streaming_retention_ring.retained_bytes(), 0);
-    }
-
-    #[test]
-    fn retention_ring_reports_oldest_start_frame() {
-        let ring = StreamingRetentionRing::default();
-        assert_eq!(ring.oldest_start_frame(), None);
-
-        ring.push(retained_chunk(1, 100, 8)); // frames = 4
-        ring.push(retained_chunk(1, 104, 8));
-        assert_eq!(ring.oldest_start_frame(), Some(100));
-    }
-
-    #[test]
-    fn take_replay_prefix_returns_suffix_from_target_chunk() {
-        let ring = StreamingRetentionRing::default();
-        // start_frame, frames(=4 each): [100..104), [104..108), [108..112)
-        ring.push(retained_chunk(3, 100, 8));
-        ring.push(retained_chunk(3, 104, 8));
-        ring.push(retained_chunk(3, 108, 8));
-
-        // Target lands inside the middle chunk -> first chunk is trimmed to the
-        // exact target frame, then the newer chunks remain zero-copy clones.
-        let prefix = ring
-            .take_replay_prefix(106)
-            .expect("target inside ring should hit");
-        assert_eq!(prefix.audible_start_frame, 106);
-        assert_eq!(prefix.continuation_start_frame, 112);
-        assert_eq!(prefix.prefix_frames, 6); // 2 frames from middle + 4 newest
-        assert_eq!(prefix.samples.len(), 2);
-        assert_eq!(prefix.samples[0].len(), 4); // 2 stereo frames
-
-        // Target inside the oldest chunk -> whole ring.
-        let prefix = ring
-            .take_replay_prefix(100)
-            .expect("oldest-chunk target should hit");
-        assert_eq!(prefix.audible_start_frame, 100);
-        assert_eq!(prefix.continuation_start_frame, 112);
-        assert_eq!(prefix.prefix_frames, 12);
-        assert_eq!(prefix.samples.len(), 3);
-    }
-
-    #[test]
-    fn take_replay_prefix_misses_before_oldest_and_when_empty() {
-        let ring = StreamingRetentionRing::default();
-        // Empty ring is a miss.
-        assert!(ring.take_replay_prefix(0).is_none());
-
-        ring.push(retained_chunk(2, 100, 8)); // [100..104)
-        ring.push(retained_chunk(2, 104, 8)); // [104..108)
-
-        // Before the oldest retained frame -> miss.
-        assert!(ring.take_replay_prefix(50).is_none());
-        // Past the newest retained frame (forward in-window) -> miss for MVP.
-        assert!(ring.take_replay_prefix(108).is_none());
-    }
-
-    #[test]
-    fn take_replay_prefix_leaves_ring_intact() {
-        let ring = StreamingRetentionRing::default();
-        ring.push(retained_chunk(4, 0, 8));
-        ring.push(retained_chunk(4, 4, 8));
-
-        let _ = ring.take_replay_prefix(0).expect("hit");
-        // Caller is responsible for clearing; the accessor itself does not mutate.
-        assert_eq!(ring.len(), 2);
-    }
-
-    #[test]
-    fn streaming_queue_diagnostics_track_window_and_counters() {
-        let shared = SharedState::new();
-        shared.reset_streaming_queue_window_for_generation(7);
-
-        shared.mark_streaming_queue_chunk_pushed(1);
-        shared.mark_streaming_queue_chunk_pushed(3);
-        shared.mark_streaming_queue_chunk_popped(2);
-        shared.mark_streaming_queue_producer_full(128);
-        shared.mark_streaming_queue_producer_backpressure();
-        shared.mark_streaming_queue_dropped();
-        shared.mark_streaming_queue_empty_during_decode(512);
-        shared.mark_audio_buffer_output_shortfall(64);
-        shared.mark_streaming_output_shortfall(32);
-
-        assert_eq!(
-            shared
-                .streaming_queue_window_generation
-                .load(Ordering::Relaxed),
-            7
-        );
-        assert_eq!(shared.streaming_queue_min_len(), Some(0));
-        assert_eq!(shared.streaming_queue_max_len.load(Ordering::Relaxed), 128);
-        assert_eq!(
-            shared
-                .streaming_queue_chunks_pushed_count
-                .load(Ordering::Relaxed),
-            2
-        );
-        assert_eq!(
-            shared
-                .streaming_queue_chunks_popped_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .streaming_queue_empty_during_decode_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .streaming_queue_empty_during_decode_frames
-                .load(Ordering::Relaxed),
-            512
-        );
-        assert_eq!(
-            shared
-                .streaming_queue_producer_full_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .streaming_queue_producer_backpressure_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared.streaming_queue_dropped_count.load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .audio_buffer_output_shortfall_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .audio_buffer_output_shortfall_frames
-                .load(Ordering::Relaxed),
-            64
-        );
-        assert_eq!(
-            shared
-                .streaming_output_shortfall_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .streaming_output_shortfall_frames
-                .load(Ordering::Relaxed),
-            32
-        );
-    }
-
-    #[test]
     fn first_callback_phase_requires_stream_play_marker() {
         let shared = SharedState::new();
         shared.load_generation.store(3, Ordering::Release);
@@ -2325,23 +1837,18 @@ mod tests {
     #[test]
     fn seek_phase_current_time_interpolates_within_render_span() {
         let shared = SharedState::new();
-        // Ensure the monotonic anchor is non-zero so the interpolation branch is
-        // actually taken instead of falling back to position_frames / sr.
-        advance_playback_clock_past(10);
         shared.sample_rate.store(1_000, Ordering::Relaxed);
         // Park position_frames at the span start so an interpolated read is
         // distinguishable from the authoritative fallback (0.100).
-        shared.position_frames.store(100, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(100, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
         shared.load_generation.store(9, Ordering::Release);
         shared.mark_seek_generation_applied(9);
         shared.mark_render_clock_span(100, 110);
-        assert_ne!(
-            shared.render_clock_anchor_ms.load(Ordering::Acquire),
-            0,
-            "anchor must be non-zero for the interpolation branch to engage"
-        );
-
         std::thread::sleep(std::time::Duration::from_millis(3));
 
         let current = shared.current_time_secs();
@@ -2358,25 +1865,21 @@ mod tests {
     #[test]
     fn render_clock_display_time_is_monotonic_non_decreasing() {
         let shared = SharedState::new();
-        // Ensure the monotonic anchor is non-zero so interpolation engages.
-        advance_playback_clock_past(10);
         let sample_rate = 1_000u64;
         let start_frame = 100u64;
         let end_frame = 200u64;
         shared.sample_rate.store(sample_rate, Ordering::Relaxed);
         // Park position_frames at the span start so the display value is driven
         // by interpolation, not by the authoritative position fallback.
-        shared.position_frames.store(start_frame, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(start_frame, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
         shared.load_generation.store(9, Ordering::Release);
         shared.mark_seek_generation_applied(9);
         shared.mark_render_clock_span(start_frame, end_frame);
-        assert_ne!(
-            shared.render_clock_anchor_ms.load(Ordering::Acquire),
-            0,
-            "anchor must be non-zero for the interpolation branch to engage"
-        );
-
         let lower = start_frame as f64 / sample_rate as f64;
         let upper = end_frame as f64 / sample_rate as f64;
 
@@ -2415,7 +1918,11 @@ mod tests {
     fn non_seek_current_time_uses_authoritative_position_frames() {
         let shared = SharedState::new();
         shared.sample_rate.store(1_000, Ordering::Relaxed);
-        shared.position_frames.store(110, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(110, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
         shared.load_generation.store(9, Ordering::Release);
         shared.mark_render_clock_span(100, 110);
@@ -2423,6 +1930,70 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(3));
 
         assert_eq!(shared.current_time_secs(), 0.110);
+    }
+
+    #[test]
+    fn render_clock_accepts_zero_as_a_valid_monotonic_anchor() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(1_000, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(100, Ordering::Relaxed);
+        shared.state.store(PlayerState::Playing);
+        shared.load_generation.store(9, Ordering::Release);
+        shared.mark_seek_generation_applied(9);
+        shared.publish_render_clock(100, 110, 0, true);
+
+        assert_eq!(shared.render_clock_snapshot(), Some((100, 110, 0)));
+        assert!((0.100..=0.110).contains(&shared.current_time_secs()));
+    }
+
+    #[test]
+    fn render_clock_reset_has_explicit_invalid_state() {
+        let shared = SharedState::new();
+        shared.publish_render_clock(100, 110, 0, true);
+        assert!(shared.render_clock_snapshot().is_some());
+
+        shared.reset_render_clock(105);
+
+        assert_eq!(shared.render_clock_snapshot(), None);
+        assert_eq!(
+            shared
+                .playback_clock
+                .render
+                .render_clock_start_frame
+                .load(Ordering::Relaxed),
+            105
+        );
+        assert_eq!(
+            shared
+                .playback_clock
+                .render
+                .render_clock_end_frame
+                .load(Ordering::Relaxed),
+            105
+        );
+    }
+
+    #[test]
+    fn playback_clock_write_domains_are_cache_line_isolated() {
+        assert_eq!(std::mem::align_of::<RequestedClock>(), 64);
+        assert_eq!(std::mem::align_of::<CallbackClock>(), 64);
+        assert_eq!(std::mem::align_of::<RenderClock>(), 64);
+
+        let clock = PlaybackClock::new();
+        let base = &clock as *const PlaybackClock as usize;
+        let requested = &clock.requested as *const RequestedClock as usize - base;
+        let callback = &clock.callback as *const CallbackClock as usize - base;
+        let render = &clock.render as *const RenderClock as usize - base;
+
+        assert_eq!(requested % 64, 0);
+        assert_eq!(callback % 64, 0);
+        assert_eq!(render % 64, 0);
+        assert!(callback >= requested + 64);
+        assert!(render >= callback + 64);
     }
 
     #[test]
@@ -2436,7 +2007,7 @@ mod tests {
             .prefer_default_output_config
             .store(false, Ordering::Relaxed);
 
-        shared.mark_active_output_stream(44_100, 44_100, 2);
+        shared.mark_active_output_stream(44_100, 44_100, 2, 2);
         assert!(shared.active_output_stream_matches_current());
 
         shared.sample_rate.store(48_000, Ordering::Relaxed);
@@ -2461,6 +2032,24 @@ mod tests {
                 .load(Ordering::Acquire),
             0
         );
+    }
+
+    #[test]
+    fn active_output_stream_matches_source_identity_after_channel_fallback() {
+        let shared = SharedState::new();
+        shared.sample_rate.store(48_000, Ordering::Relaxed);
+        shared.channels.store(6, Ordering::Relaxed);
+        shared.mark_active_output_stream(48_000, 48_000, 6, 2);
+
+        assert!(shared.active_output_stream_matches_current());
+        assert_eq!(
+            shared.active_stream_source_channels.load(Ordering::Relaxed),
+            6
+        );
+        assert_eq!(shared.active_stream_channels.load(Ordering::Relaxed), 2);
+
+        shared.channels.store(8, Ordering::Relaxed);
+        assert!(!shared.active_output_stream_matches_current());
     }
 }
 

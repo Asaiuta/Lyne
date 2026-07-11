@@ -29,7 +29,11 @@ const result = spawnSync(
   [...cargoArgs, "--manifest-path", manifestPath, "--bin", "audio_server"],
   {
     cwd: repoRoot,
-    env: process.env,
+    env: {
+      ...process.env,
+      // Share the repo-root target dir with Tauri / root crate builds.
+      CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || path.join(repoRoot, "target")
+    },
     stdio: "inherit"
   }
 );

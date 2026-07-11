@@ -41,7 +41,7 @@ const persistentSettingsFixture = (overrides: Partial<PersistentSettings> = {}):
   use_cache: true,
   preemptive_resample: false,
   streaming_first_buffer: true,
-  streaming_full_buffer_limit_mib: 128,
+  streaming_pcm_window_limit_mib: 128,
   use_next_prefetch: false,
   ...overrides
 });
@@ -58,7 +58,7 @@ test("audio engine form defaults come from one descriptor table", () => {
   assert.equal(form.targetSamplerate, "");
   assert.equal(form.preemptiveResample, true);
   assert.equal(form.streamingFirstBuffer, false);
-  assert.equal(form.streamingFullBufferLimitMib, "256");
+  assert.equal(form.streamingPcmWindowLimitMib, "256");
   assert.deepEqual(Object.keys(form.eqBands), [...EQ_BAND_KEYS]);
   assert.equal(Object.values(form.eqBands).every((value) => value === 0), true);
 });
@@ -77,7 +77,7 @@ test("audio engine form maps persistent settings through descriptors", () => {
   assert.equal(form.saturationMix, "0.6");
   assert.equal(form.preemptiveResample, false);
   assert.equal(form.streamingFirstBuffer, true);
-  assert.equal(form.streamingFullBufferLimitMib, "128");
+  assert.equal(form.streamingPcmWindowLimitMib, "128");
   assert.equal(form.eqBands["31"], 1.5);
   assert.equal(form.eqBands["62"], -2);
   assert.equal(form.eqBands["125"], 0);
@@ -96,7 +96,7 @@ test("audio engine rollback reads the same descriptor defaults and settings valu
   assert.equal(readAudioEngineFormScalarValue(settings, "targetSamplerate"), "");
   assert.equal(readAudioEngineFormScalarValue(null, "volume"), "0.7");
   assert.equal(readAudioEngineFormScalarValue(undefined, "preemptiveResample"), true);
-  assert.equal(readAudioEngineFormScalarValue(undefined, "streamingFullBufferLimitMib"), "256");
+  assert.equal(readAudioEngineFormScalarValue(undefined, "streamingPcmWindowLimitMib"), "256");
 });
 
 test("audio engine item descriptors keep rendered ids tied to form and patch fields", () => {
@@ -123,14 +123,14 @@ test("audio engine item descriptors keep rendered ids tied to form and patch fie
     formField: "streamingFirstBuffer",
     settingsField: "streaming_first_buffer"
   });
-  assert.deepEqual(AUDIO_ENGINE_TEXT_ITEMS.streamingFullBufferLimitMib, {
-    id: "streamingFullBufferLimitMib",
-    labelKey: "settings.streamingFullBufferLimitMib",
-    formField: "streamingFullBufferLimitMib",
-    settingsField: "streaming_full_buffer_limit_mib",
+  assert.deepEqual(AUDIO_ENGINE_TEXT_ITEMS.streamingPcmWindowLimitMib, {
+    id: "streamingPcmWindowLimitMib",
+    labelKey: "settings.streamingPcmWindowLimitMib",
+    formField: "streamingPcmWindowLimitMib",
+    settingsField: "streaming_pcm_window_limit_mib",
     parser: {
       kind: "rangedInteger",
-      fieldLabelKey: "settings.field.streamingFullBufferLimitMib",
+      fieldLabelKey: "settings.field.streamingPcmWindowLimitMib",
       min: 0,
       max: 4096
     }

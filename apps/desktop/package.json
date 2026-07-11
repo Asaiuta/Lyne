@@ -18,6 +18,8 @@
     "perf:electron-webaudio": "electron ./scripts/electron-webaudio-baseline.cjs",
     "perf:electron-realtime-playback": "node ./scripts/electron-realtime-playback-baseline.cjs",
     "perf:electron-real-file-playback": "node ./scripts/electron-real-file-playback-baseline.cjs",
+    "perf:generate-pipeline-v2-fixtures": "node ./scripts/generate-pipeline-v2-audio-fixtures.cjs",
+    "perf:pipeline-v2-playback-matrix": "node ./scripts/pipeline-v2-playback-matrix.cjs",
     "perf:lyne-control-probe": "node ./scripts/lyne-active-playback-control-probe.cjs",
     "perf:lyne-playback-latency": "node ./scripts/lyne-playback-latency-benchmark.cjs",
     "perf:lyne-playback-stability": "node ./scripts/lyne-playback-stability-benchmark.cjs",

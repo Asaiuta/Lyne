@@ -23,6 +23,8 @@ use super::output_stream::{
 };
 use super::spectrum::SpectrumBatch;
 use super::state::{AudioCommand, PlayerState, SharedState};
+use super::streaming::producer::{PersistentProducerHandle, ProducerReaper};
+use super::streaming::session::PersistentStreamingSession;
 #[cfg(windows)]
 use super::wasapi_loop::{handle_wasapi_exclusive, WasapiPlaybackOutcome};
 use crate::config::{PhaseResponse, ResampleQuality};
@@ -33,6 +35,7 @@ use crate::processor::{
 };
 
 const PARKED_STREAM_IDLE_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
+const STREAMING_SESSION_STATE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 struct AudioThreadDspParams {
     eq_params: Arc<AtomicEqParams>,
@@ -100,15 +103,22 @@ struct AudioThreadRuntime {
     resample_quality: ResampleQuality,
     target_lufs: f64,
     replaygain_reference_lufs: f64,
+    streaming_session: Option<PersistentStreamingSession>,
+    streaming_reaper: ProducerReaper,
+    pending_streaming_retire: Vec<PersistentProducerHandle>,
+    streaming_autoplay_pending: bool,
+    streaming_ready_generation: u64,
 }
 
 impl AudioThreadRuntime {
     fn run(&mut self) {
         loop {
-            match self
-                .cmd_rx
-                .recv_timeout(PARKED_STREAM_IDLE_RELEASE_INTERVAL)
-            {
+            let timeout = if self.streaming_session.is_some() {
+                STREAMING_SESSION_STATE_POLL_INTERVAL
+            } else {
+                PARKED_STREAM_IDLE_RELEASE_INTERVAL
+            };
+            match self.cmd_rx.recv_timeout(timeout) {
                 Ok(command) => {
                     if matches!(self.handle_audio_command(command), ThreadControl::Shutdown) {
                         break;
@@ -120,13 +130,47 @@ impl AudioThreadRuntime {
             // Free resources the audio callback retired (old buffers, replaced DSP
             // chains, consumed streaming chunks) here on the non-realtime audio thread.
             self.shared_state.drain_retired_audio_resources();
+            self.retry_streaming_retire();
+            if self.maintain_streaming_session()
+                && matches!(self.start_playback(), ThreadControl::Shutdown)
+            {
+                break;
+            }
         }
 
+        self.shared_state
+            .streaming_v2_enabled
+            .store(false, Ordering::Release);
+        self.shared_state.publish_streaming_v2_rt(None);
+        if let Some(session) = self.streaming_session.take() {
+            self.retire_streaming_session(session);
+        }
+        self.retry_streaming_retire();
         self.shared_state.drain_retired_audio_resources();
         self.release_parked_streams();
     }
 
     fn handle_audio_command(&mut self, command: AudioCommand) -> ThreadControl {
+        let command = match command {
+            AudioCommand::InstallStreamingV2Session {
+                generation,
+                autoplay,
+                session,
+            } => {
+                self.install_streaming_session(generation, autoplay, *session);
+                return ThreadControl::Continue;
+            }
+            AudioCommand::Seek(time) => {
+                if let Some(session) = self.streaming_session.as_ref() {
+                    if request_resident_window_seek(&self.shared_state, session, time).is_none() {
+                        request_persistent_source_seek(session, time);
+                    }
+                    return ThreadControl::Continue;
+                }
+                AudioCommand::Seek(time)
+            }
+            command => command,
+        };
         if matches!(command, AudioCommand::Play) {
             log::info!("Received Play command");
         }
@@ -151,6 +195,81 @@ impl AudioThreadRuntime {
             AudioCommandFlow::Continue | AudioCommandFlow::StopPlayback => ThreadControl::Continue,
             AudioCommandFlow::StartPlayback => self.start_playback(),
             AudioCommandFlow::ShutdownThread => ThreadControl::Shutdown,
+        }
+    }
+
+    fn install_streaming_session(
+        &mut self,
+        generation: u64,
+        autoplay: bool,
+        session: PersistentStreamingSession,
+    ) {
+        if self.shared_state.load_generation.load(Ordering::Acquire) != generation {
+            self.retire_streaming_session(session);
+            return;
+        }
+        if let Some(previous) = self.streaming_session.replace(session) {
+            self.retire_streaming_session(previous);
+        }
+        let active = self
+            .streaming_session
+            .as_ref()
+            .expect("session was just installed");
+        self.shared_state
+            .sample_rate
+            .store(u64::from(active.output_sample_rate), Ordering::Release);
+        self.shared_state
+            .channels
+            .store(active.channels as u64, Ordering::Release);
+        self.shared_state
+            .total_frames
+            .store(active.total_frames, Ordering::Release);
+        self.streaming_autoplay_pending = autoplay;
+        self.streaming_ready_generation = 0;
+        self.shared_state
+            .publish_streaming_v2_rt(Some(Arc::clone(&active.rt)));
+        self.shared_state
+            .streaming_v2_enabled
+            .store(true, Ordering::Release);
+        self.shared_state
+            .streaming_active
+            .store(true, Ordering::Release);
+    }
+
+    fn maintain_streaming_session(&mut self) -> bool {
+        let Some(session) = self.streaming_session.as_ref() else {
+            return false;
+        };
+        apply_streaming_session_state(
+            &self.shared_state,
+            session,
+            &mut self.streaming_ready_generation,
+            &mut self.streaming_autoplay_pending,
+        )
+    }
+
+    fn retire_streaming_session(&mut self, session: PersistentStreamingSession) {
+        let PersistentStreamingSession { producer, .. } = session;
+        let handle = self
+            .streaming_reaper
+            .handle()
+            .expect("streaming reaper handle remains available");
+        if let Err(producer) = producer.retire(&handle) {
+            self.pending_streaming_retire.push(producer);
+        }
+    }
+
+    fn retry_streaming_retire(&mut self) {
+        let Some(handle) = self.streaming_reaper.handle() else {
+            return;
+        };
+        let index = 0;
+        while index < self.pending_streaming_retire.len() {
+            let producer = self.pending_streaming_retire.swap_remove(index);
+            if let Err(producer) = producer.retire(&handle) {
+                self.pending_streaming_retire.push(producer);
+                break;
+            }
         }
     }
 
@@ -298,6 +417,84 @@ impl AudioThreadRuntime {
     }
 }
 
+pub(crate) fn apply_streaming_session_state(
+    shared_state: &SharedState,
+    session: &PersistentStreamingSession,
+    ready_generation: &mut u64,
+    autoplay_pending: &mut bool,
+) -> bool {
+    let generation = session.producer.generation();
+    let producer = session.rt.producer();
+    if producer.decode_state == super::streaming::rt_view::StreamingDecodeState::Failed {
+        shared_state.is_loading.store(false, Ordering::Release);
+        shared_state.state.store(PlayerState::Stopped);
+        *autoplay_pending = false;
+        return false;
+    }
+    let ready = matches!(
+        producer.decode_state,
+        super::streaming::rt_view::StreamingDecodeState::Ready
+            | super::streaming::rt_view::StreamingDecodeState::EndOfStream
+    );
+    shared_state.streaming_decode_finished.store(
+        producer.decode_state == super::streaming::rt_view::StreamingDecodeState::EndOfStream,
+        Ordering::Release,
+    );
+    if !ready || *ready_generation == generation {
+        return false;
+    }
+    *ready_generation = generation;
+    shared_state.is_loading.store(false, Ordering::Release);
+    std::mem::take(autoplay_pending)
+}
+
+pub(crate) fn request_resident_window_seek(
+    shared_state: &SharedState,
+    session: &PersistentStreamingSession,
+    time_secs: f64,
+) -> Option<u64> {
+    let identity = session.rt.identity();
+    if !identity.active || identity.generation != session.producer.generation() {
+        return None;
+    }
+    let target_frame = (time_secs.max(0.0) * f64::from(session.output_sample_rate)) as u64;
+    let producer = session.rt.producer();
+    if target_frame < producer.retained_start_frame || target_frame >= producer.produced_end_frame {
+        return None;
+    }
+    let current_frame = shared_state
+        .playback_clock
+        .callback
+        .position_frames
+        .load(Ordering::Acquire);
+    let kind = if target_frame < current_frame {
+        super::streaming::rt_view::WindowSeekKind::Backward
+    } else {
+        super::streaming::rt_view::WindowSeekKind::Forward
+    };
+    Some(
+        session
+            .rt
+            .request_seek(target_frame, identity.generation, identity.epoch, kind),
+    )
+}
+
+pub(crate) fn request_persistent_source_seek(
+    session: &PersistentStreamingSession,
+    time_secs: f64,
+) -> u64 {
+    let identity = session.rt.identity();
+    let target_frame = (time_secs.max(0.0) * f64::from(session.output_sample_rate)) as u64;
+    session
+        .rt
+        .publish_identity(super::streaming::rt_view::WindowIdentitySnapshot {
+            active: false,
+            ..identity
+        });
+    session.rt.record_source_seek_request();
+    session.producer.request_source_seek(target_frame)
+}
+
 /// Main audio thread entry point
 ///
 /// Handles:
@@ -377,6 +574,11 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
         resample_quality,
         target_lufs,
         replaygain_reference_lufs,
+        streaming_session: None,
+        streaming_reaper: ProducerReaper::new().expect("start streaming producer reaper"),
+        pending_streaming_retire: Vec::new(),
+        streaming_autoplay_pending: false,
+        streaming_ready_generation: 0,
     };
     runtime.run();
 }

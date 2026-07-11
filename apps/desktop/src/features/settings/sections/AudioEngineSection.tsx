@@ -691,7 +691,7 @@ export function AudioEngineSection(props: AudioEngineSectionProps) {
 
       <SettingGroup title={t("settings.streamingBuffering")}>
         {booleanField(AUDIO_ENGINE_BOOLEAN_ITEMS.streamingFirstBuffer, t("settings.streamingFirstBuffer"))}
-        {textField(AUDIO_ENGINE_TEXT_ITEMS.streamingFullBufferLimitMib)}
+        {textField(AUDIO_ENGINE_TEXT_ITEMS.streamingPcmWindowLimitMib)}
       </SettingGroup>
 
       <ButtonSettingItem

@@ -1,14 +1,18 @@
 use std::hint::black_box;
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use audio_engine::player::bench_support::{spectrum_channel_for_bench, SpectrumBenchSender};
+use audio_engine::player::bench_support::{
+    spectrum_channel_for_bench, SpectrumBenchSender, AUDIO_PROCESS_BUFFER_FRAMES,
+};
 use audio_engine::player::{audio_callback_lockfree, CallbackScratch, PlayerState, SharedState};
 use audio_engine::processor::{
     AtomicLoudnessState, AtomicNoiseShaperParams, DspChain, NoiseShaperCurve, NoiseShaperProcessor,
     StreamingResampler,
 };
+use serde::Serialize;
 
 const CHANNELS: usize = 2;
 const SOURCE_SAMPLE_RATE: u32 = 44_100;
@@ -63,17 +67,58 @@ struct BenchFixture {
     output: Vec<f32>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Serialize)]
 struct Report {
     ns_per_output_sample: f64,
     ns_per_output_buffer: f64,
-    elapsed: Duration,
+    elapsed_ns: u64,
+    callback_latency_ns: LatencySummary,
 }
 
 struct ReportStats {
     best: Report,
     median: Report,
     worst: Report,
+    aggregate_callback_latency_ns: LatencySummary,
+}
+
+#[derive(Clone, Serialize)]
+struct LatencySummary {
+    count: usize,
+    deadline_miss_count: usize,
+    deadline_miss_rate: f64,
+    p50: u64,
+    p95: u64,
+    p99: u64,
+    p99_9: u64,
+    p99_99: u64,
+    max: u64,
+}
+
+#[derive(Serialize)]
+struct BenchmarkRow {
+    scenario: &'static str,
+    frames: usize,
+    samples: usize,
+    fixture_source_frames: usize,
+    callback_period_ms: f64,
+    aggregate_callback_latency_ns: LatencySummary,
+    best: Report,
+    median: Report,
+    worst: Report,
+}
+
+#[derive(Serialize)]
+struct BenchmarkReport {
+    schema_version: u32,
+    benchmark: &'static str,
+    mode: &'static str,
+    channels: usize,
+    source_sample_rate: u32,
+    output_sample_rate: u32,
+    iterations_per_trial: usize,
+    trials: usize,
+    rows: Vec<BenchmarkRow>,
 }
 
 fn main() {
@@ -81,6 +126,10 @@ fn main() {
     let quick = args.iter().any(|arg| arg == "--quick");
     let heavy = args.iter().any(|arg| arg == "--heavy");
     let enforce = args.iter().any(|arg| arg == "--enforce");
+    let report_path = args
+        .windows(2)
+        .find(|pair| pair[0] == "--report")
+        .map(|pair| PathBuf::from(&pair[1]));
 
     let (iterations, trials) = if quick {
         (500, 3)
@@ -89,16 +138,17 @@ fn main() {
     } else {
         (2_000, 5)
     };
+    let mode = if quick {
+        "quick"
+    } else if heavy {
+        "heavy"
+    } else {
+        "full"
+    };
 
     println!(
         "audio_callback_output_path_perf mode={} channels={} source_sample_rate={} output_sample_rate={} coverage=audio_callback_final_output_path",
-        if quick {
-            "quick"
-        } else if heavy {
-            "heavy"
-        } else {
-            "full"
-        },
+        mode,
         CHANNELS,
         SOURCE_SAMPLE_RATE,
         OUTPUT_SAMPLE_RATE
@@ -107,11 +157,13 @@ fn main() {
         "audio_callback_output_path_note includes=callback_state,loudness_gain_disabled,dsp_chain_empty,optional_resampler,optional_final_noise_shaper,spectrum_pack excludes=decoder,cpal_device_write"
     );
 
+    let mut rows = Vec::with_capacity(Scenario::all().len() * BUFFER_FRAMES.len());
     for &scenario in Scenario::all() {
         for &frames in &BUFFER_FRAMES {
             let stats = benchmark_scenario(scenario, frames, iterations, trials);
+            let latency = &stats.aggregate_callback_latency_ns;
             println!(
-                "callback_output_path scenario={} frames={} samples={} iterations={} trials={} ns_per_output_sample={:.3} ns_per_output_buffer={:.3} elapsed_ms={:.3} median_ns_per_output_sample={:.3} median_ns_per_output_buffer={:.3} worst_ns_per_output_sample={:.3} worst_ns_per_output_buffer={:.3}",
+                "callback_output_path scenario={} frames={} samples={} iterations={} trials={} ns_per_output_sample={:.3} ns_per_output_buffer={:.3} elapsed_ms={:.3} median_ns_per_output_sample={:.3} median_ns_per_output_buffer={:.3} worst_ns_per_output_sample={:.3} worst_ns_per_output_buffer={:.3} callback_p50_ns={} callback_p95_ns={} callback_p99_ns={} callback_p99_9_ns={} callback_p99_99_ns={} callback_max_ns={} deadline_misses={} deadline_miss_rate={:.9}",
                 scenario.name(),
                 frames,
                 frames * CHANNELS,
@@ -119,11 +171,19 @@ fn main() {
                 trials,
                 stats.best.ns_per_output_sample,
                 stats.best.ns_per_output_buffer,
-                stats.best.elapsed.as_secs_f64() * 1_000.0,
+                stats.best.elapsed_ns as f64 / 1_000_000.0,
                 stats.median.ns_per_output_sample,
                 stats.median.ns_per_output_buffer,
                 stats.worst.ns_per_output_sample,
-                stats.worst.ns_per_output_buffer
+                stats.worst.ns_per_output_buffer,
+                latency.p50,
+                latency.p95,
+                latency.p99,
+                latency.p99_9,
+                latency.p99_99,
+                latency.max,
+                latency.deadline_miss_count,
+                latency.deadline_miss_rate
             );
 
             if enforce && frames == 512 {
@@ -135,7 +195,41 @@ fn main() {
                     "callback output path benchmark produced invalid timing"
                 );
             }
+
+            rows.push(BenchmarkRow {
+                scenario: scenario.name(),
+                frames,
+                samples: frames * CHANNELS,
+                fixture_source_frames: source_frames_for_bench(
+                    scenario,
+                    frames,
+                    iterations + WARMUP_BUFFERS,
+                ),
+                callback_period_ms: frames as f64 * 1_000.0
+                    / f64::from(output_sample_rate(scenario)),
+                aggregate_callback_latency_ns: stats.aggregate_callback_latency_ns,
+                best: stats.best,
+                median: stats.median,
+                worst: stats.worst,
+            });
         }
+    }
+
+    if let Some(path) = report_path {
+        write_report(
+            path,
+            BenchmarkReport {
+                schema_version: 2,
+                benchmark: "audio_callback_output_path_perf",
+                mode,
+                channels: CHANNELS,
+                source_sample_rate: SOURCE_SAMPLE_RATE,
+                output_sample_rate: OUTPUT_SAMPLE_RATE,
+                iterations_per_trial: iterations,
+                trials,
+                rows,
+            },
+        );
     }
 }
 
@@ -146,11 +240,29 @@ fn benchmark_scenario(
     trials: usize,
 ) -> ReportStats {
     let mut reports = Vec::with_capacity(trials);
+    let mut aggregate_latency_samples = Vec::with_capacity(iterations * trials);
 
     for _ in 0..trials {
         let mut fixture = build_fixture(scenario, frames, iterations + WARMUP_BUFFERS);
         warm_callback(&mut fixture, frames);
-        let report = measure_callback(&mut fixture, frames, iterations);
+        let (ns_per_output_sample, ns_per_output_buffer, elapsed_ns) =
+            measure_callback_throughput(&mut fixture, frames, iterations);
+        assert_source_headroom(&fixture);
+        drop(fixture);
+
+        let mut latency_fixture = build_fixture(scenario, frames, iterations + WARMUP_BUFFERS);
+        warm_callback(&mut latency_fixture, frames);
+        let latency_samples = measure_callback_latency(&mut latency_fixture, frames, iterations);
+        assert_source_headroom(&latency_fixture);
+        aggregate_latency_samples.extend_from_slice(&latency_samples);
+        let callback_latency_ns =
+            summarize_latency(latency_samples, frames, output_sample_rate(scenario));
+        let report = Report {
+            ns_per_output_sample,
+            ns_per_output_buffer,
+            elapsed_ns,
+            callback_latency_ns,
+        };
         reports.push(report);
     }
 
@@ -160,9 +272,14 @@ fn benchmark_scenario(
     });
 
     ReportStats {
-        best: reports[0],
-        median: reports[reports.len() / 2],
-        worst: reports[reports.len() - 1],
+        best: reports[0].clone(),
+        median: reports[reports.len() / 2].clone(),
+        worst: reports[reports.len() - 1].clone(),
+        aggregate_callback_latency_ns: summarize_latency(
+            aggregate_latency_samples,
+            frames,
+            output_sample_rate(scenario),
+        ),
     }
 }
 
@@ -225,10 +342,31 @@ fn output_sample_rate(scenario: Scenario) -> u32 {
 
 fn source_frames_for_bench(scenario: Scenario, frames: usize, callback_count: usize) -> usize {
     if scenario.uses_resampler() {
-        callback_count * 4_096 + 8_192
+        let output_frames = callback_count
+            .checked_mul(frames)
+            .expect("benchmark output frame count must fit usize");
+        let scaled_input_frames = output_frames
+            .checked_mul(SOURCE_SAMPLE_RATE as usize)
+            .expect("benchmark resampler input estimate must fit usize")
+            .div_ceil(OUTPUT_SAMPLE_RATE as usize);
+        scaled_input_frames
+            .checked_add(AUDIO_PROCESS_BUFFER_FRAMES * 2)
+            .expect("benchmark resampler headroom must fit usize")
     } else {
-        callback_count * frames + 8_192
+        callback_count
+            .checked_mul(frames)
+            .and_then(|source_frames| source_frames.checked_add(AUDIO_PROCESS_BUFFER_FRAMES))
+            .expect("benchmark source frame count must fit usize")
     }
+}
+
+fn assert_source_headroom(fixture: &BenchFixture) {
+    let consumed_frames = fixture.shared.position_frames() as usize;
+    let total_frames = fixture.shared.total_frames.load(Ordering::Relaxed) as usize;
+    assert!(
+        consumed_frames < total_frames,
+        "callback benchmark exhausted its synthetic input ({consumed_frames}/{total_frames} frames)"
+    );
 }
 
 fn warm_callback(fixture: &mut BenchFixture, frames: usize) {
@@ -237,7 +375,11 @@ fn warm_callback(fixture: &mut BenchFixture, frames: usize) {
     }
 }
 
-fn measure_callback(fixture: &mut BenchFixture, frames: usize, iterations: usize) -> Report {
+fn measure_callback_throughput(
+    fixture: &mut BenchFixture,
+    frames: usize,
+    iterations: usize,
+) -> (f64, f64, u64) {
     let start = Instant::now();
 
     for _ in 0..iterations {
@@ -248,11 +390,84 @@ fn measure_callback(fixture: &mut BenchFixture, frames: usize, iterations: usize
     let ns_per_output_buffer = elapsed.as_nanos() as f64 / iterations as f64;
     let ns_per_output_sample = ns_per_output_buffer / (frames * CHANNELS) as f64;
 
-    Report {
+    (
         ns_per_output_sample,
         ns_per_output_buffer,
-        elapsed,
+        elapsed.as_nanos().min(u128::from(u64::MAX)) as u64,
+    )
+}
+
+fn measure_callback_latency(
+    fixture: &mut BenchFixture,
+    frames: usize,
+    iterations: usize,
+) -> Vec<u64> {
+    let mut samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let started_at = Instant::now();
+        run_callback_once(fixture, frames);
+        samples.push(started_at.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64);
     }
+    samples
+}
+
+fn summarize_latency(
+    mut samples: Vec<u64>,
+    callback_frames: usize,
+    sample_rate: u32,
+) -> LatencySummary {
+    let deadline_miss_count = samples
+        .iter()
+        .filter(|&&latency_ns| {
+            u128::from(latency_ns) * u128::from(sample_rate)
+                > callback_frames as u128 * 1_000_000_000_u128
+        })
+        .count();
+    let deadline_miss_rate = if samples.is_empty() {
+        0.0
+    } else {
+        deadline_miss_count as f64 / samples.len() as f64
+    };
+    samples.sort_unstable();
+    LatencySummary {
+        count: samples.len(),
+        deadline_miss_count,
+        deadline_miss_rate,
+        p50: nearest_rank(&samples, 0.50),
+        p95: nearest_rank(&samples, 0.95),
+        p99: nearest_rank(&samples, 0.99),
+        p99_9: nearest_rank(&samples, 0.999),
+        p99_99: nearest_rank(&samples, 0.9999),
+        max: samples.last().copied().unwrap_or(0),
+    }
+}
+
+fn nearest_rank(sorted: &[u64], percentile: f64) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let rank = (percentile * sorted.len() as f64).ceil() as usize;
+    sorted[rank.saturating_sub(1).min(sorted.len() - 1)]
+}
+
+fn write_report(path: PathBuf, report: BenchmarkReport) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+            panic!(
+                "failed to create callback benchmark report directory '{}': {error}",
+                parent.display()
+            )
+        });
+    }
+    let json = serde_json::to_vec_pretty(&report)
+        .expect("callback benchmark report must serialize as JSON");
+    std::fs::write(&path, json).unwrap_or_else(|error| {
+        panic!(
+            "failed to write callback benchmark report '{}': {error}",
+            path.display()
+        )
+    });
+    println!("callback_output_path_report path={}", path.display());
 }
 
 fn run_callback_once(fixture: &mut BenchFixture, frames: usize) {

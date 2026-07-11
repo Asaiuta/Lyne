@@ -53,7 +53,7 @@ export interface PersistentSettings {
   use_cache: boolean;
   preemptive_resample: boolean;
   streaming_first_buffer: boolean;
-  streaming_full_buffer_limit_mib: number;
+  streaming_pcm_window_limit_mib: number;
   use_next_prefetch: boolean;
 }
 
@@ -83,7 +83,7 @@ export interface PersistentSettingsUpdate {
   use_cache?: boolean;
   preemptive_resample?: boolean;
   streaming_first_buffer?: boolean;
-  streaming_full_buffer_limit_mib?: number;
+  streaming_pcm_window_limit_mib?: number;
   use_next_prefetch?: boolean;
 }
 

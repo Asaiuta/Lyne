@@ -11,8 +11,14 @@ use std::sync::Arc;
 
 use super::spectrum::{SpectrumBatch, SPECTRUM_BATCH_CAPACITY};
 use super::state::{
-    PlayerState, RetiredAudioResource, SharedState, StreamingAudioChunk, EVENT_NEEDS_PRELOAD_RESET,
-    EVENT_TRACK_CHANGED, EVENT_TRACK_EOF,
+    PlayerState, RetiredAudioResource, SharedState, EVENT_NEEDS_PRELOAD_RESET, EVENT_TRACK_CHANGED,
+    EVENT_TRACK_EOF,
+};
+use super::streaming::callback_window::{
+    render_window_frames, CallbackWindowCache, WindowRenderProgress,
+};
+use super::streaming::rt_view::{
+    AppliedWindowSeek, StreamingRtView, WindowSeekKind, WindowSeekResult,
 };
 use crate::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
@@ -32,19 +38,8 @@ pub struct CallbackScratch {
     resample_leftover: Vec<f64>,
     resample_leftover_pos: usize,
     streaming_local_generation: u64,
-    streaming_chunk: Option<StreamingAudioChunk>,
-    streaming_chunk_pos: usize,
-    /// Channels of the interleaved streaming chunk samples; used only to derive a
-    /// chunk's output-frame count when retiring it (no allocation).
-    streaming_channels: usize,
-    /// Running output-frame playhead of consumed streaming chunks for the current
-    /// generation. Advances by each retired chunk's frame count; reset whenever
-    /// the streaming generation changes. Used to stamp `start_frame` on retained
-    /// chunks so an in-window seek (PR2) can locate them.
-    streaming_consumed_output_frames: u64,
-    /// Output-frame index at which the currently-held `streaming_chunk` began,
-    /// captured when it was installed into the slot.
-    streaming_chunk_start_frame: u64,
+    callback_window: CallbackWindowCache,
+    window_seek_serial: u64,
     final_output: Vec<f64>,
     spectrum_batch: SpectrumBatch,
 }
@@ -101,11 +96,8 @@ impl CallbackScratch {
             resample_leftover: Vec::with_capacity(resample_samples),
             resample_leftover_pos: 0,
             streaming_local_generation: 0,
-            streaming_chunk: None,
-            streaming_chunk_pos: 0,
-            streaming_channels: channels.max(1),
-            streaming_consumed_output_frames: 0,
-            streaming_chunk_start_frame: 0,
+            callback_window: CallbackWindowCache::default(),
+            window_seek_serial: 0,
             final_output: Vec::with_capacity(resample_samples),
             spectrum_batch: SpectrumBatch::new(),
         }
@@ -127,39 +119,8 @@ impl CallbackScratch {
         }
     }
 
-    /// Release the currently held streaming chunk to the non-realtime retire
-    /// queue instead of freeing its `Arc<Vec<f64>>` on the audio thread.
-    ///
-    /// The retired chunk carries its `(generation, start_frame, frames)` so the
-    /// off-realtime drainer can route a current-generation chunk into the
-    /// retention ring. Only stack-resident integers and a moved `Arc` are touched
-    /// here — no allocation, no lock, no drop on the audio thread.
-    fn release_streaming_chunk(&mut self, shared: &SharedState) {
-        if let Some(chunk) = self.streaming_chunk.take() {
-            let frames = (chunk.samples.len() / self.streaming_channels.max(1)) as u32;
-            let start_frame = self.streaming_chunk_start_frame;
-            shared.retire_audio_resource(RetiredAudioResource::Chunk {
-                samples: chunk.samples,
-                generation: chunk.generation,
-                start_frame,
-                frames,
-            });
-            // Advance the consumed playhead so the next installed chunk's
-            // `start_frame` follows this one in output frames.
-            self.streaming_consumed_output_frames = start_frame + frames as u64;
-            self.streaming_chunk_start_frame = self.streaming_consumed_output_frames;
-        }
-        self.streaming_chunk_pos = 0;
-    }
-
     /// Install a freshly popped chunk into the active slot, stamping its
     /// output-frame start position from the running consumed playhead.
-    fn install_streaming_chunk(&mut self, chunk: StreamingAudioChunk) {
-        self.streaming_chunk_start_frame = self.streaming_consumed_output_frames;
-        self.streaming_chunk = Some(chunk);
-        self.streaming_chunk_pos = 0;
-    }
-
     #[cfg(test)]
     fn capacities(&self) -> CallbackScratchCapacities {
         CallbackScratchCapacities {
@@ -170,10 +131,242 @@ impl CallbackScratch {
     }
 }
 
+#[allow(dead_code)]
+fn render_callback_window_output(
+    output: &mut [f64],
+    shared: &SharedState,
+    rt: &StreamingRtView,
+    scratch: &mut CallbackScratch,
+    start_frame: u64,
+) -> WindowRenderProgress {
+    let identity = scratch.callback_window.refresh(rt, |window| {
+        shared.retire_audio_resource(RetiredAudioResource::Window(window));
+    });
+    if !identity.active {
+        return WindowRenderProgress {
+            rendered_frames: 0,
+            next_frame: start_frame,
+            shortfall: None,
+        };
+    }
+    let Some(reader) = scratch.callback_window.reader_mut() else {
+        return WindowRenderProgress {
+            rendered_frames: 0,
+            next_frame: start_frame,
+            shortfall: None,
+        };
+    };
+    render_window_frames(reader, identity.epoch, start_frame, output)
+}
+
+fn fill_callback_window_process_buffer(
+    shared: &SharedState,
+    rt: &StreamingRtView,
+    scratch: &mut CallbackScratch,
+    start_frame: u64,
+    channels: usize,
+    frames_to_read: usize,
+) -> WindowRenderProgress {
+    let requested_samples = frames_to_read * channels;
+    scratch.process_buffer.clear();
+    scratch.process_buffer.resize(requested_samples, 0.0);
+    let identity = scratch.callback_window.refresh(rt, |window| {
+        shared.retire_audio_resource(RetiredAudioResource::Window(window));
+    });
+    let progress = if identity.active {
+        match scratch.callback_window.reader_mut() {
+            Some(reader) => render_window_frames(
+                reader,
+                identity.epoch,
+                start_frame,
+                &mut scratch.process_buffer,
+            ),
+            None => WindowRenderProgress {
+                rendered_frames: 0,
+                next_frame: start_frame,
+                shortfall: None,
+            },
+        }
+    } else {
+        WindowRenderProgress {
+            rendered_frames: 0,
+            next_frame: start_frame,
+            shortfall: None,
+        }
+    };
+    scratch
+        .process_buffer
+        .truncate(progress.rendered_frames * channels);
+    progress
+}
+
+fn consume_window_seek(
+    shared: &SharedState,
+    rt: &StreamingRtView,
+    scratch: &mut CallbackScratch,
+    current_pos: &mut usize,
+) -> bool {
+    consume_window_seek_with_before_publish(shared, rt, scratch, current_pos, || {})
+}
+
+fn consume_window_seek_with_before_publish(
+    shared: &SharedState,
+    rt: &StreamingRtView,
+    scratch: &mut CallbackScratch,
+    current_pos: &mut usize,
+    before_publish: impl FnOnce(),
+) -> bool {
+    let Some(request) = rt.seek_request() else {
+        return false;
+    };
+    if request.serial == scratch.window_seek_serial {
+        return false;
+    }
+    let identity = scratch.callback_window.refresh(rt, |window| {
+        shared.retire_audio_resource(RetiredAudioResource::Window(window));
+    });
+    let producer = rt.producer();
+    let _direction = match request.kind {
+        WindowSeekKind::Forward => WindowSeekKind::Forward,
+        WindowSeekKind::Backward => WindowSeekKind::Backward,
+    };
+    let mut result = if !identity.active
+        || request.generation != identity.generation
+        || request.epoch != identity.epoch
+    {
+        WindowSeekResult::StaleIdentity
+    } else if request.target_frame < producer.retained_start_frame
+        || request.target_frame >= producer.produced_end_frame
+    {
+        WindowSeekResult::OutsideResidentRange
+    } else {
+        match scratch.callback_window.reader_mut().and_then(|reader| {
+            reader
+                .try_claim_frame(identity.epoch, request.target_frame)
+                .ok()
+        }) {
+            Some(slot) => {
+                slot.release();
+                WindowSeekResult::Applied
+            }
+            None => WindowSeekResult::SlotUnavailable,
+        }
+    };
+    before_publish();
+    if !rt.is_latest_seek_serial(request.serial) {
+        result = WindowSeekResult::Superseded;
+    }
+    scratch.window_seek_serial = request.serial;
+    rt.publish_applied_seek(AppliedWindowSeek {
+        serial: request.serial,
+        result,
+        audible_frame: if result == WindowSeekResult::Applied {
+            request.target_frame
+        } else {
+            *current_pos as u64
+        },
+        observed_generation: identity.generation,
+        observed_epoch: identity.epoch,
+    });
+    if result != WindowSeekResult::Applied {
+        return false;
+    }
+    *current_pos = request.target_frame.min(usize::MAX as u64) as usize;
+    shared
+        .playback_clock
+        .callback
+        .position_frames
+        .store(request.target_frame, Ordering::Release);
+    true
+}
+
+pub(crate) fn benchmark_resident_window_seeks(iterations: usize) -> Vec<(&'static str, Vec<u64>)> {
+    use crate::player::streaming::pcm_window::{PcmWindow, PcmWindowGeometry};
+    use crate::player::streaming::rt_view::{
+        ProducerSnapshot, StreamingDecodeState, WindowIdentitySnapshot,
+    };
+    use std::time::Instant;
+
+    const SAMPLE_RATE: u64 = 48_000;
+    const GENERATION: u64 = 1;
+    const EPOCH: u64 = 1;
+
+    let geometry = PcmWindowGeometry::for_slot_count(2, 2_048).expect("seek bench geometry");
+    let parts = PcmWindow::create(geometry, EPOCH, 0).expect("seek bench window");
+    let mut writer = parts.writer;
+    let base = SAMPLE_RATE * 60;
+    let scenarios = [
+        ("forward_100ms", base + SAMPLE_RATE / 10),
+        ("forward_5s", base + SAMPLE_RATE * 5),
+        ("forward_60s", base + SAMPLE_RATE * 60),
+        ("backward_100ms", base - SAMPLE_RATE / 10),
+        ("backward_5s", base - SAMPLE_RATE * 5),
+        ("backward_60s", 0),
+    ];
+    let mut published_sequences = Vec::with_capacity(scenarios.len());
+    for (_, target) in scenarios {
+        let sequence = target / geometry.slot_frames() as u64;
+        if published_sequences.contains(&sequence) {
+            continue;
+        }
+        let mut slot = writer
+            .try_claim_owned(EPOCH, sequence, 0)
+            .expect("claim seek bench slot");
+        slot.append_interleaved(&vec![0.0; geometry.slot_samples()])
+            .expect("fill seek bench slot");
+        slot.publish().expect("publish seek bench slot");
+        published_sequences.push(sequence);
+    }
+
+    let rt = StreamingRtView::new();
+    rt.install_window(Some(parts.window));
+    rt.publish_identity(WindowIdentitySnapshot {
+        generation: GENERATION,
+        epoch: EPOCH,
+        active: true,
+    });
+    rt.publish_producer(ProducerSnapshot {
+        retained_start_frame: 0,
+        produced_end_frame: base + SAMPLE_RATE * 60 + geometry.slot_frames() as u64,
+        decode_state: StreamingDecodeState::Ready,
+    });
+    let shared = SharedState::new();
+    let mut scratch = CallbackScratch::new(2);
+    let mut current_pos = base as usize;
+    let mut rows = Vec::with_capacity(scenarios.len());
+
+    for (name, target) in scenarios {
+        let mut samples = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            let kind = if target >= current_pos as u64 {
+                WindowSeekKind::Forward
+            } else {
+                WindowSeekKind::Backward
+            };
+            let started = Instant::now();
+            let serial = rt.request_seek(target, GENERATION, EPOCH, kind);
+            assert!(consume_window_seek(
+                &shared,
+                &rt,
+                &mut scratch,
+                &mut current_pos,
+            ));
+            samples.push(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+            let applied = rt.applied_seek().expect("applied resident seek");
+            assert_eq!(applied.serial, serial);
+            assert_eq!(applied.result, WindowSeekResult::Applied);
+            assert_eq!(applied.audible_frame, target);
+            assert_eq!(current_pos as u64, target);
+        }
+        rows.push((name, samples));
+    }
+    rows
+}
+
 fn clear_streaming_scratch(shared: &SharedState, scratch: &mut CallbackScratch) {
     scratch.resample_leftover.clear();
     scratch.resample_leftover_pos = 0;
-    scratch.release_streaming_chunk(shared);
+    let _ = shared;
 }
 
 fn refresh_streaming_scratch_generation(
@@ -195,9 +388,6 @@ fn refresh_streaming_scratch_generation(
     // track-output-frame — directly comparable to an in-window seek target. This
     // is the only callback-path change for PR2: a single atomic load plus integer
     // assignment, with no allocation, lock, or drop on the audio thread.
-    let resume_frame = shared.position_frames.load(Ordering::Acquire);
-    scratch.streaming_consumed_output_frames = resume_frame;
-    scratch.streaming_chunk_start_frame = resume_frame;
     scratch.streaming_local_generation = generation;
 }
 
@@ -640,13 +830,8 @@ fn convolve_interleaved_ir(a: &[f64], b: &[f64], channels: usize) -> Result<Vec<
 /// `position_frames` publish in the same invocation must re-check it via
 /// [`publish_callback_position`]. Atomics only: no lock, no allocation.
 fn consume_pending_seek_slot(shared: &SharedState) -> u64 {
-    let serial = shared.seek_slot_serial.load(Ordering::Acquire);
-    if serial != shared.seek_slot_consumed_serial.load(Ordering::Acquire) {
-        let target = shared.seek_slot_target_frames.load(Ordering::Acquire);
-        shared
-            .seek_slot_consumed_serial
-            .store(serial, Ordering::Release);
-        shared.position_frames.store(target, Ordering::Relaxed);
+    let (serial, consumed) = shared.playback_clock.consume_pending_seek();
+    if consumed {
         shared.dsp_reset_pending.store(true, Ordering::Release);
     }
     serial
@@ -675,14 +860,10 @@ fn publish_callback_position_after_precheck(
     observed_serial: u64,
     after_precheck: impl FnOnce(),
 ) -> bool {
-    if shared.seek_slot_serial.load(Ordering::Relaxed) != observed_serial {
-        return false;
-    }
-    after_precheck();
-    shared.position_frames.store(new_pos, Ordering::Relaxed);
-    if shared.seek_slot_serial.load(Ordering::Acquire) != observed_serial {
-        let target = shared.seek_slot_target_frames.load(Ordering::Acquire);
-        shared.position_frames.store(target, Ordering::Relaxed);
+    if !shared
+        .playback_clock
+        .publish_callback_position_after_precheck(new_pos, observed_serial, after_precheck)
+    {
         return false;
     }
     shared.mark_first_position_advanced_after_play();
@@ -759,66 +940,6 @@ fn request_gapless_preload_if_needed(shared: &SharedState, total: usize, current
     }
 }
 
-fn streaming_has_buffered_samples(
-    shared: &SharedState,
-    scratch: &mut CallbackScratch,
-    generation: u64,
-) -> bool {
-    let stale_current = scratch
-        .streaming_chunk
-        .as_ref()
-        .is_some_and(|chunk| chunk.generation != generation);
-    if stale_current {
-        scratch.release_streaming_chunk(shared);
-    }
-
-    let current_chunk_has_samples = scratch
-        .streaming_chunk
-        .as_ref()
-        .is_some_and(|chunk| scratch.streaming_chunk_pos < chunk.samples.len());
-    if current_chunk_has_samples {
-        return true;
-    }
-
-    while let Some(chunk) = shared.streaming_chunks.pop() {
-        shared.mark_streaming_queue_chunk_popped(shared.streaming_chunks.len());
-        if chunk.generation == generation {
-            // Offload any exhausted/empty chunk still in the slot before replacing it,
-            // so no `Arc<Vec<f64>>` is ever freed on the audio thread.
-            scratch.release_streaming_chunk(shared);
-            scratch.install_streaming_chunk(chunk);
-            return true;
-        }
-        // Stale chunk from a superseded generation: offload its drop. `frames`/
-        // `start_frame` are irrelevant because the drainer discards stale chunks.
-        shared.retire_audio_resource(RetiredAudioResource::Chunk {
-            samples: chunk.samples,
-            generation: chunk.generation,
-            start_frame: 0,
-            frames: 0,
-        });
-    }
-
-    false
-}
-
-fn finish_streaming_if_drained(shared: &SharedState, scratch: &mut CallbackScratch) -> bool {
-    if !shared.streaming_active.load(Ordering::Acquire) {
-        return false;
-    }
-    if !shared.streaming_decode_finished.load(Ordering::Acquire) {
-        return true;
-    }
-
-    let generation = shared.streaming_generation.load(Ordering::Acquire);
-    if streaming_has_buffered_samples(shared, scratch, generation) {
-        return true;
-    }
-
-    shared.streaming_active.store(false, Ordering::Release);
-    false
-}
-
 #[allow(clippy::too_many_arguments)]
 fn try_activate_pending_gapless(
     shared: &SharedState,
@@ -835,6 +956,7 @@ fn try_activate_pending_gapless(
     let Some(next) = shared.pending_buffer.swap(None) else {
         return false;
     };
+    let next_reservation = shared.pending_buffer_reservation.swap(None);
 
     let next_frames = shared.pending_total_frames.load(Ordering::Relaxed);
     let next_sr = shared.pending_sample_rate.load(Ordering::Relaxed);
@@ -843,7 +965,11 @@ fn try_activate_pending_gapless(
     // Offload the outgoing buffer's drop to the command loop; freeing a large
     // decoded `Vec<f64>` on the audio thread would hit the allocator.
     let retired_buffer = shared.audio_buffer.swap(next);
-    shared.retire_audio_resource(RetiredAudioResource::Buffer(retired_buffer));
+    let retired_reservation = shared.audio_buffer_reservation.swap(next_reservation);
+    shared.retire_audio_resource(RetiredAudioResource::Buffer {
+        samples: retired_buffer,
+        reservation: retired_reservation,
+    });
     shared.total_frames.store(next_frames, Ordering::Relaxed);
     shared.sample_rate.store(next_sr, Ordering::Relaxed);
     shared.channels.store(next_ch, Ordering::Relaxed);
@@ -1139,73 +1265,6 @@ fn render_audio_output(
     samples_written
 }
 
-fn fill_streaming_process_buffer(
-    shared: &SharedState,
-    scratch: &mut CallbackScratch,
-    generation: u64,
-    channels: usize,
-    frames_to_read: usize,
-) -> usize {
-    scratch.process_buffer.clear();
-    let target_samples = frames_to_read * channels;
-
-    while scratch.process_buffer.len() < target_samples {
-        let stale_current = scratch
-            .streaming_chunk
-            .as_ref()
-            .is_some_and(|chunk| chunk.generation != generation);
-        if stale_current {
-            scratch.release_streaming_chunk(shared);
-        }
-
-        if let Some(chunk) = scratch.streaming_chunk.as_ref() {
-            let chunk_len = chunk.samples.len();
-            let available = chunk_len.saturating_sub(scratch.streaming_chunk_pos);
-            if available > 0 {
-                let take = available.min(target_samples - scratch.process_buffer.len());
-                let start = scratch.streaming_chunk_pos;
-                let end = start + take;
-                scratch
-                    .process_buffer
-                    .extend_from_slice(&chunk.samples[start..end]);
-                scratch.streaming_chunk_pos += take;
-                // `chunk` is no longer used past this point, so the borrow ends and
-                // `release_streaming_chunk` (which takes `&mut scratch`) is allowed.
-                if scratch.streaming_chunk_pos >= chunk_len {
-                    scratch.release_streaming_chunk(shared);
-                }
-                continue;
-            }
-        }
-
-        match shared.streaming_chunks.pop() {
-            Some(chunk) if chunk.generation == generation => {
-                shared.mark_streaming_queue_chunk_popped(shared.streaming_chunks.len());
-                // Offload any exhausted/empty chunk still in the slot before
-                // replacing it, so no `Arc<Vec<f64>>` is freed on the audio thread.
-                scratch.release_streaming_chunk(shared);
-                scratch.install_streaming_chunk(chunk);
-            }
-            Some(stale) => {
-                shared.mark_streaming_queue_chunk_popped(shared.streaming_chunks.len());
-                // Stale chunk from a superseded generation: offload its drop.
-                // `frames`/`start_frame` are irrelevant because the drainer
-                // discards stale-generation chunks.
-                shared.retire_audio_resource(RetiredAudioResource::Chunk {
-                    samples: stale.samples,
-                    generation: stale.generation,
-                    start_frame: 0,
-                    frames: 0,
-                });
-                continue;
-            }
-            None => break,
-        }
-    }
-
-    scratch.process_buffer.len() / channels
-}
-
 #[allow(clippy::too_many_arguments)]
 fn render_streaming_audio_output(
     data: &mut [f32],
@@ -1223,6 +1282,20 @@ fn render_streaming_audio_output(
     let mut samples_written = 0;
     let generation = shared.streaming_generation.load(Ordering::Acquire);
     refresh_streaming_scratch_generation(shared, scratch, resampler, generation);
+    let v2_rt = shared
+        .streaming_v2_enabled
+        .load(Ordering::Acquire)
+        .then(|| shared.streaming_v2_rt.load());
+    if let Some(rt) = v2_rt.as_ref().and_then(|guard| guard.as_ref()) {
+        if consume_window_seek(shared, rt, scratch, current_pos) {
+            dsp_chain.reset();
+            if let Some(resampler) = resampler.as_mut() {
+                resampler.reset();
+            }
+            scratch.resample_leftover.clear();
+            scratch.resample_leftover_pos = 0;
+        }
+    }
 
     if output_path.uses_final_buffer() && scratch.final_output.len() < output_len {
         scratch.final_output.resize(output_len, 0.0);
@@ -1273,25 +1346,65 @@ fn render_streaming_audio_output(
         };
         let max_frames_from_capacity = scratch.process_buffer.capacity() / channels;
         let frames_to_read = source_frames_needed.min(max_frames_from_capacity);
-        let frames_read =
-            fill_streaming_process_buffer(shared, scratch, generation, channels, frames_to_read);
+        let frames_read = if let Some(rt) = v2_rt.as_ref().and_then(|guard| guard.as_ref()) {
+            let producer = rt.producer();
+            let available_frames = producer
+                .produced_end_frame
+                .saturating_sub(*current_pos as u64)
+                .min(usize::MAX as u64) as usize;
+            let bounded_frames = frames_to_read.min(available_frames);
+            if bounded_frames == 0 {
+                scratch.process_buffer.clear();
+                0
+            } else {
+                fill_callback_window_process_buffer(
+                    shared,
+                    rt,
+                    scratch,
+                    *current_pos as u64,
+                    channels,
+                    bounded_frames,
+                )
+                .rendered_frames
+            }
+        } else {
+            scratch.process_buffer.clear();
+            0
+        };
 
         if frames_read == 0 {
-            if shared.streaming_decode_finished.load(Ordering::Acquire) {
-                shared.streaming_active.store(false, Ordering::Release);
+            let v2_producer = v2_rt
+                .as_ref()
+                .and_then(|guard| guard.as_ref())
+                .map(|rt| rt.producer());
+            let v2_at_eof = v2_producer.is_some_and(|producer| {
+                producer.decode_state
+                    == super::streaming::rt_view::StreamingDecodeState::EndOfStream
+                    && (*current_pos as u64) >= producer.produced_end_frame
+            });
+            if v2_at_eof {
+                if shared.state.load() == PlayerState::Playing {
+                    shared.state.store(PlayerState::Stopped);
+                    shared.playback_end_count.fetch_add(1, Ordering::AcqRel);
+                    shared
+                        .event_flags
+                        .fetch_or(EVENT_TRACK_EOF, Ordering::Release);
+                }
             } else if !shared.is_loading.load(Ordering::Acquire) {
                 let silence_frames = ((output_len - samples_written) / channels) as u64;
                 shared.audio_underrun_count.fetch_add(1, Ordering::Relaxed);
                 shared
                     .audio_underrun_silence_frames
                     .fetch_add(silence_frames, Ordering::Relaxed);
-                shared.mark_streaming_queue_empty_during_decode(silence_frames);
             }
             break;
         }
 
         let rendered_start_frame = *current_pos as u64;
         *current_pos += frames_read;
+        if let Some(rt) = v2_rt.as_ref().and_then(|guard| guard.as_ref()) {
+            rt.publish_render_cursor(*current_pos as u64);
+        }
         let position_published =
             publish_callback_position(shared, *current_pos as u64, observed_seek_serial);
 
@@ -1496,8 +1609,12 @@ pub fn audio_callback_lockfree(
     shared.mark_first_callback_after_play();
 
     let total = shared.total_frames.load(Ordering::Relaxed) as usize;
-    let mut current_pos = shared.position_frames.load(Ordering::Relaxed) as usize;
-    let streaming_active = finish_streaming_if_drained(shared, scratch);
+    let mut current_pos = shared
+        .playback_clock
+        .callback
+        .position_frames
+        .load(Ordering::Relaxed) as usize;
+    let streaming_active = shared.streaming_active.load(Ordering::Acquire);
     if !streaming_active {
         request_gapless_preload_if_needed(shared, total, current_pos);
     }
@@ -1641,82 +1758,10 @@ mod tests {
         scratch.capacities()
     }
 
-    fn run_streaming_capacity_probe(
-        scratch: &mut CallbackScratch,
-        use_resampler: bool,
-        use_shaper: bool,
-        generation: u64,
-    ) -> CallbackScratchCapacities {
-        let shared = SharedState::new();
-        shared.total_frames.store(10_000, Ordering::Relaxed);
-        shared
-            .sample_rate
-            .store(TEST_SAMPLE_RATE as u64, Ordering::Relaxed);
-        shared
-            .channels
-            .store(TEST_CHANNELS as u64, Ordering::Relaxed);
-        shared
-            .streaming_generation
-            .store(generation, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(false, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-        shared
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation,
-                samples: Arc::new(build_test_buffer(TEST_FRAMES, TEST_CHANNELS)),
-            })
-            .expect("streaming queue should have capacity");
-
-        let mut chain = DspChain::new(TEST_SAMPLE_RATE as f64);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut out = vec![0.0f32; 256 * TEST_CHANNELS];
-        let mut resampler = use_resampler
-            .then(|| StreamingResampler::new(TEST_CHANNELS, TEST_SAMPLE_RATE, 48_000).unwrap());
-        let noise_shaper_params = Arc::new(AtomicNoiseShaperParams::new());
-        noise_shaper_params.set_enabled(use_shaper);
-        let mut final_noise_shaper = NoiseShaperProcessor::new(
-            TEST_CHANNELS,
-            if use_resampler {
-                48_000
-            } else {
-                TEST_SAMPLE_RATE
-            },
-            Arc::clone(&noise_shaper_params),
-        );
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            Some(&mut final_noise_shaper),
-            &loudness,
-            &tx,
-            TEST_CHANNELS,
-            &mut resampler,
-            scratch,
-        );
-
-        scratch.capacities()
-    }
-
     fn assert_capacity_stable_after_warmup(use_resampler: bool, use_shaper: bool) {
         let mut scratch = CallbackScratch::new(TEST_CHANNELS);
         let warmed = run_capacity_probe(&mut scratch, use_resampler, use_shaper);
         let steady = run_capacity_probe(&mut scratch, use_resampler, use_shaper);
-
-        assert_eq!(steady, warmed);
-    }
-
-    fn assert_streaming_capacity_stable_after_warmup(use_resampler: bool, use_shaper: bool) {
-        let mut scratch = CallbackScratch::new(TEST_CHANNELS);
-        let warmed = run_streaming_capacity_probe(&mut scratch, use_resampler, use_shaper, 21);
-        let steady = run_streaming_capacity_probe(&mut scratch, use_resampler, use_shaper, 22);
 
         assert_eq!(steady, warmed);
     }
@@ -1790,36 +1835,6 @@ mod tests {
     }
 
     #[test]
-    fn refresh_streaming_scratch_generation_seeds_absolute_resume_frame() {
-        // Initial load resumes at position 0, so the consumed playhead and the
-        // first chunk's start_frame both stay 0 (keeps the PR1 start_frame
-        // expectation green).
-        let shared = SharedState::new();
-        shared.position_frames.store(0, Ordering::Relaxed);
-        let mut scratch = CallbackScratch::new(TEST_CHANNELS);
-        let mut resampler: Option<StreamingResampler> = None;
-
-        refresh_streaming_scratch_generation(&shared, &mut scratch, &mut resampler, 1);
-        assert_eq!(scratch.streaming_consumed_output_frames, 0);
-        assert_eq!(scratch.streaming_chunk_start_frame, 0);
-        assert_eq!(scratch.streaming_local_generation, 1);
-
-        // A seek to an absolute output frame bumps the generation and sets
-        // position_frames; the consumed playhead must seed from that absolute
-        // frame so retained chunks carry absolute start_frames.
-        shared.position_frames.store(44_100, Ordering::Relaxed);
-        refresh_streaming_scratch_generation(&shared, &mut scratch, &mut resampler, 2);
-        assert_eq!(scratch.streaming_consumed_output_frames, 44_100);
-        assert_eq!(scratch.streaming_chunk_start_frame, 44_100);
-        assert_eq!(scratch.streaming_local_generation, 2);
-
-        // Same generation is a no-op (does not re-seed mid-playback).
-        shared.position_frames.store(99_999, Ordering::Relaxed);
-        refresh_streaming_scratch_generation(&shared, &mut scratch, &mut resampler, 2);
-        assert_eq!(scratch.streaming_consumed_output_frames, 44_100);
-    }
-
-    #[test]
     fn seek_slot_request_wins_over_concurrent_callback_position_publish() {
         // Deterministic M1 interleaving: the callback read the slot serial at
         // the top of its invocation, a seek request lands mid-render, and the
@@ -1827,7 +1842,11 @@ mod tests {
         // its stale pre-seek read. The serial re-check must refuse the publish
         // so the seek's `position_frames` store survives.
         let shared = SharedState::new();
-        shared.position_frames.store(1_000, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(1_000, Ordering::Relaxed);
         let observed_serial = consume_pending_seek_slot(&shared);
 
         // Seek from another thread, after the callback's top-of-invocation read.
@@ -1841,7 +1860,11 @@ mod tests {
             "a publish after a fresh seek request must be refused"
         );
         assert_eq!(
-            shared.position_frames.load(Ordering::Relaxed),
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
             44_100,
             "the seek target must never be overwritten by a stale callback position"
         );
@@ -1849,13 +1872,27 @@ mod tests {
         // The next invocation consumes the seek and publishes from the target.
         let next_serial = consume_pending_seek_slot(&shared);
         assert_ne!(next_serial, observed_serial);
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 44_100);
+        assert_eq!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
+            44_100
+        );
         assert!(publish_callback_position(
             &shared,
             44_100 + 512,
             next_serial
         ));
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 44_100 + 512);
+        assert_eq!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
+            44_100 + 512
+        );
     }
 
     #[test]
@@ -1864,7 +1901,11 @@ mod tests {
         // the tiny window before the callback stores its stale position. The
         // post-store check must repair that overwrite immediately.
         let shared = SharedState::new();
-        shared.position_frames.store(1_000, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(1_000, Ordering::Relaxed);
         let observed_serial = consume_pending_seek_slot(&shared);
 
         let published =
@@ -1877,7 +1918,11 @@ mod tests {
             "a publish raced by a fresh seek request must be refused"
         );
         assert_eq!(
-            shared.position_frames.load(Ordering::Relaxed),
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
             44_100,
             "the post-store serial check must immediately restore the seek target"
         );
@@ -1890,16 +1935,28 @@ mod tests {
         // Simulate the residual tail window: a previous callback's publish
         // passed the guard just before the request and its store landed on top
         // of the requester's position store.
-        shared.position_frames.store(9_999, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(9_999, Ordering::Relaxed);
 
         let serial = consume_pending_seek_slot(&shared);
 
         assert_eq!(
             serial,
-            shared.seek_slot_consumed_serial.load(Ordering::Acquire)
+            shared
+                .playback_clock
+                .callback
+                .seek_slot_consumed_serial
+                .load(Ordering::Acquire)
         );
         assert_eq!(
-            shared.position_frames.load(Ordering::Relaxed),
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
             22_050,
             "consumption must repair a clobbered requester position store"
         );
@@ -1910,10 +1967,21 @@ mod tests {
 
         // Same serial again is a no-op (no repeated reset or position rewrite).
         shared.dsp_reset_pending.store(false, Ordering::Release);
-        shared.position_frames.store(23_000, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(23_000, Ordering::Relaxed);
         let repeat_serial = consume_pending_seek_slot(&shared);
         assert_eq!(repeat_serial, serial);
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 23_000);
+        assert_eq!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
+            23_000
+        );
         assert!(!shared.dsp_reset_pending.load(Ordering::Acquire));
     }
 
@@ -1941,7 +2009,11 @@ mod tests {
             &mut scratch,
         );
         assert_eq!(
-            shared.position_frames.load(Ordering::Relaxed),
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
             out_frames as u64
         );
 
@@ -1963,7 +2035,11 @@ mod tests {
         );
 
         assert_eq!(
-            shared.position_frames.load(Ordering::Relaxed),
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
             target_frame + out_frames as u64,
             "the callback must resume rendering from the seek target"
         );
@@ -2000,7 +2076,11 @@ mod tests {
         while !done {
             done = writer.is_finished();
             let serial = consume_pending_seek_slot(&shared);
-            let pos = shared.position_frames.load(Ordering::Relaxed);
+            let pos = shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed);
             let _ = publish_callback_position(&shared, pos + 128, serial);
         }
         writer.join().expect("writer thread must not panic");
@@ -2008,11 +2088,20 @@ mod tests {
         consume_pending_seek_slot(&shared);
         let final_target = ITERS * STEP;
         assert_eq!(
-            shared.seek_slot_target_frames.load(Ordering::Acquire),
+            shared
+                .playback_clock
+                .requested
+                .seek_slot_target_frames
+                .load(Ordering::Acquire),
             final_target
         );
         assert!(
-            shared.position_frames.load(Ordering::Relaxed) >= final_target,
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed)
+                >= final_target,
             "the last seek must never be lost to a stale callback position store"
         );
     }
@@ -2035,11 +2124,6 @@ mod tests {
     #[test]
     fn callback_full_output_path_reuses_scratch_capacity_after_warmup() {
         assert_capacity_stable_after_warmup(true, true);
-    }
-
-    #[test]
-    fn callback_streaming_full_output_path_reuses_scratch_capacity_after_warmup() {
-        assert_streaming_capacity_stable_after_warmup(true, true);
     }
 
     #[test]
@@ -2076,7 +2160,14 @@ mod tests {
             &mut scratch,
         );
 
-        assert!(shared.position_frames.load(Ordering::Relaxed) > 0);
+        assert!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed)
+                > 0
+        );
         assert!(scratch.resample_leftover_pos <= scratch.resample_leftover.len());
 
         let leftover_len = scratch.resample_leftover.len();
@@ -2132,7 +2223,11 @@ mod tests {
             &mut scratch,
         );
 
-        let position = shared.position_frames.load(Ordering::Relaxed) as usize;
+        let position = shared
+            .playback_clock
+            .callback
+            .position_frames
+            .load(Ordering::Relaxed) as usize;
         assert!(position >= MIN_RESAMPLE_SOURCE_FRAMES);
         assert!(
             position < 4096,
@@ -2219,563 +2314,6 @@ mod tests {
     }
 
     #[test]
-    fn callback_streaming_chunk_advances_position_without_full_audio_buffer() {
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(2, Ordering::Relaxed);
-        shared.streaming_generation.store(7, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-        shared
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 7,
-                samples: Arc::new(vec![0.25, -0.25, 0.5, -0.5]),
-            })
-            .expect("streaming queue should have capacity");
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut out = vec![0.0f32; 4];
-        let mut scratch = CallbackScratch::new(2);
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.25, -0.25, 0.5, -0.5]);
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 2);
-        assert!(shared.audio_buffer.load().is_empty());
-    }
-
-    #[test]
-    fn callback_loading_without_streaming_outputs_silence_without_eof() {
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(0, Ordering::Relaxed);
-        shared.position_frames.store(0, Ordering::Relaxed);
-        shared.is_loading.store(true, Ordering::Release);
-        shared.streaming_active.store(false, Ordering::Release);
-        shared.state.store(PlayerState::Playing);
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut out = vec![1.0f32; 8];
-        let mut scratch = CallbackScratch::new(2);
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.0; 8]);
-        assert_eq!(shared.state.load(), PlayerState::Playing);
-        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 0);
-        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            shared.first_callback_after_play_ms.load(Ordering::Relaxed),
-            0
-        );
-    }
-
-    #[test]
-    fn callback_warm_stream_format_mismatch_outputs_silence_without_progress() {
-        let shared = SharedState::new();
-        shared
-            .audio_buffer
-            .store(Arc::new(vec![0.5, -0.5, 0.25, -0.25]));
-        shared.sample_rate.store(48_000, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(2, Ordering::Relaxed);
-        shared.position_frames.store(0, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-        shared.mark_stream_play_returned();
-        shared.mark_active_output_stream(44_100, 44_100, 2);
-
-        let mut chain = DspChain::new(48_000.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut out = vec![1.0f32; 4];
-        let mut scratch = CallbackScratch::new(2);
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.0; 4]);
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            shared.first_callback_after_play_ms.load(Ordering::Relaxed),
-            0
-        );
-        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn callback_streaming_generation_change_discards_resampler_leftover() {
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(200, Ordering::Relaxed);
-        shared.streaming_generation.store(2, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-        shared
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 2,
-                samples: Arc::new(vec![0.25, -0.25, 0.5, -0.5]),
-            })
-            .expect("streaming queue should have capacity");
-
-        let mut scratch = CallbackScratch::new(2);
-        scratch.streaming_local_generation = 1;
-        scratch
-            .resample_leftover
-            .extend_from_slice(&[0.9, 0.9, 0.9, 0.9]);
-        scratch.resample_leftover_pos = 0;
-        scratch.streaming_chunk = Some(StreamingAudioChunk {
-            generation: 1,
-            samples: Arc::new(vec![0.8, 0.8, 0.8, 0.8]),
-        });
-        scratch.streaming_chunk_pos = 0;
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let mut resampler = Some(StreamingResampler::new(2, 44_100, 44_100).unwrap());
-        let mut out = vec![0.0f32; 4];
-        let mut current_pos = 100;
-
-        let written = render_streaming_audio_output(
-            &mut out,
-            &shared,
-            &mut chain,
-            &loudness,
-            2,
-            &mut resampler,
-            &mut scratch,
-            OutputPath::ResamplerOnly,
-            &mut current_pos,
-            shared.seek_slot_serial.load(Ordering::Acquire),
-        );
-
-        assert_eq!(written, 4);
-        assert_eq!(out, vec![0.25, -0.25, 0.5, -0.5]);
-        assert_eq!(current_pos, 102);
-        assert_eq!(scratch.streaming_local_generation, 2);
-        assert!(scratch.resample_leftover.is_empty());
-        assert!(scratch.streaming_chunk.is_none());
-    }
-
-    #[test]
-    fn callback_consumed_streaming_chunks_retained_off_realtime_thread() {
-        // When the callback fully consumes a streaming chunk it must hand the
-        // chunk's memory to the off-realtime retire queue (never free it inline)
-        // with correct (generation, start_frame, frames) metadata, so the drainer
-        // can build the behind-playhead retention ring for an in-window seek.
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(200, Ordering::Relaxed);
-        shared.streaming_generation.store(3, Ordering::Release);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-
-        // Two current-generation chunks, each 2 frames (stereo).
-        shared
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 3,
-                samples: Arc::new(vec![0.1, -0.1, 0.2, -0.2]),
-            })
-            .expect("streaming queue should have capacity");
-        shared
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 3,
-                samples: Arc::new(vec![0.3, -0.3, 0.4, -0.4]),
-            })
-            .expect("streaming queue should have capacity");
-
-        let mut scratch = CallbackScratch::new(2);
-        scratch.streaming_local_generation = 3;
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let mut out = vec![0.0f32; 8]; // 4 frames -> consumes both 2-frame chunks
-        let mut current_pos = 0;
-
-        let written = render_streaming_audio_output(
-            &mut out,
-            &shared,
-            &mut chain,
-            &loudness,
-            2,
-            &mut None,
-            &mut scratch,
-            OutputPath::Direct,
-            &mut current_pos,
-            shared.seek_slot_serial.load(Ordering::Acquire),
-        );
-        assert_eq!(written, 8); // 8 interleaved samples = 4 stereo frames
-
-        // No chunk memory was freed on the realtime thread.
-        assert_eq!(
-            shared
-                .retired_resource_drop_in_rt_count
-                .load(Ordering::Relaxed),
-            0
-        );
-        // The ring is empty until the off-realtime drainer runs.
-        assert_eq!(shared.streaming_retention_ring.len(), 0);
-
-        // Drain off the realtime thread (as the command loop does): consumed
-        // chunks land in the retention ring in playback order with sequential
-        // output-frame start positions.
-        shared.drain_retired_audio_resources();
-
-        let snapshot = shared.streaming_retention_ring.snapshot();
-        assert_eq!(snapshot.len(), 2);
-        assert_eq!(
-            snapshot
-                .iter()
-                .map(|c| (c.generation, c.start_frame, c.frames))
-                .collect::<Vec<_>>(),
-            vec![(3, 0, 2), (3, 2, 2)]
-        );
-    }
-
-    #[test]
-    fn callback_streaming_empty_queue_records_underrun_before_decode_finishes() {
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(100, Ordering::Relaxed);
-        shared.streaming_generation.store(9, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(false, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut out = vec![1.0f32; 8];
-        let mut scratch = CallbackScratch::new(2);
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.0; 8]);
-        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 1);
-        assert_eq!(
-            shared.audio_underrun_silence_frames.load(Ordering::Relaxed),
-            4
-        );
-        assert_eq!(
-            shared
-                .streaming_queue_empty_during_decode_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .streaming_queue_empty_during_decode_frames
-                .load(Ordering::Relaxed),
-            4
-        );
-        assert_eq!(
-            shared
-                .streaming_output_shortfall_count
-                .load(Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            shared
-                .streaming_output_shortfall_frames
-                .load(Ordering::Relaxed),
-            4
-        );
-        assert_eq!(shared.streaming_queue_min_len(), Some(0));
-        assert!(shared.streaming_active.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn callback_streaming_loading_empty_queue_silence_is_not_output_shortfall() {
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(100, Ordering::Relaxed);
-        shared.streaming_generation.store(9, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(false, Ordering::Relaxed);
-        shared.is_loading.store(true, Ordering::Release);
-        shared.state.store(PlayerState::Playing);
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut out = vec![1.0f32; 8];
-        let mut scratch = CallbackScratch::new(2);
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.0; 8]);
-        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            shared
-                .streaming_queue_empty_during_decode_count
-                .load(Ordering::Relaxed),
-            0
-        );
-        assert_eq!(
-            shared
-                .streaming_output_shortfall_count
-                .load(Ordering::Relaxed),
-            0
-        );
-        assert_eq!(
-            shared
-                .streaming_output_shortfall_frames
-                .load(Ordering::Relaxed),
-            0
-        );
-        assert!(shared.streaming_active.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn callback_streaming_finished_empty_queue_switches_back_to_full_buffer() {
-        let shared = SharedState::new();
-        shared
-            .audio_buffer
-            .store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(2, Ordering::Relaxed);
-        shared.streaming_generation.store(11, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(true, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut scratch = CallbackScratch::new(2);
-        let mut first = vec![1.0f32; 4];
-
-        audio_callback_lockfree(
-            &mut first,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(first, vec![0.1, 0.2, 0.3, 0.4]);
-        assert!(!shared.streaming_active.load(Ordering::Relaxed));
-        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 2);
-    }
-
-    #[test]
-    fn callback_streaming_finished_discards_stale_chunks_before_full_buffer_fallback() {
-        let shared = SharedState::new();
-        shared
-            .audio_buffer
-            .store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(2, Ordering::Relaxed);
-        shared.streaming_generation.store(12, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(true, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-        shared
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 11,
-                samples: Arc::new(vec![0.9, 0.9, 0.9, 0.9]),
-            })
-            .expect("streaming queue should have capacity");
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut scratch = CallbackScratch::new(2);
-        let mut out = vec![1.0f32; 4];
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.1, 0.2, 0.3, 0.4]);
-        assert!(!shared.streaming_active.load(Ordering::Relaxed));
-        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
-        assert!(shared.streaming_chunks.is_empty());
-    }
-
-    #[test]
-    fn callback_memory_streaming_finished_empty_queue_stops_at_eof() {
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        shared.total_frames.store(2, Ordering::Relaxed);
-        shared.position_frames.store(2, Ordering::Relaxed);
-        shared.streaming_generation.store(13, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(true, Ordering::Relaxed);
-        shared.streaming_memory_mode.store(true, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut scratch = CallbackScratch::new(2);
-        let mut out = vec![1.0f32; 4];
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.0; 4]);
-        assert_eq!(shared.state.load(), PlayerState::Stopped);
-        assert!(!shared.streaming_active.load(Ordering::Relaxed));
-        assert_eq!(shared.audio_underrun_count.load(Ordering::Relaxed), 0);
-        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn callback_memory_streaming_drained_with_estimate_total_stops_without_spinning() {
-        // Regression for the audio-thread hang: in memory streaming mode the full
-        // buffer is never published (it stays empty) yet `total_frames` is a ceil
-        // *estimate* that can exceed any real frame count. Once the chunk queue
-        // drains, the render loop must stop at EOF instead of spinning forever trying
-        // to read frames that were never decoded. If the bug regresses this test hangs.
-        let shared = SharedState::new();
-        shared.sample_rate.store(44_100, Ordering::Relaxed);
-        shared.channels.store(2, Ordering::Relaxed);
-        // Estimate far beyond the (empty) buffer, with playback not yet at `total`.
-        shared.total_frames.store(100, Ordering::Relaxed);
-        shared.position_frames.store(0, Ordering::Relaxed);
-        shared.streaming_generation.store(21, Ordering::Relaxed);
-        shared.streaming_active.store(true, Ordering::Relaxed);
-        shared
-            .streaming_decode_finished
-            .store(true, Ordering::Relaxed);
-        shared.streaming_memory_mode.store(true, Ordering::Relaxed);
-        shared.state.store(PlayerState::Playing);
-
-        let mut chain = DspChain::new(44_100.0);
-        let loudness = Arc::new(AtomicLoudnessState::default());
-        loudness.set_enabled(false);
-        let (tx, _rx) = crossbeam::channel::bounded(16);
-        let mut scratch = CallbackScratch::new(2);
-        let mut out = vec![1.0f32; 4];
-
-        audio_callback_lockfree(
-            &mut out,
-            &shared,
-            &mut chain,
-            None,
-            &loudness,
-            &tx,
-            2,
-            &mut None,
-            &mut scratch,
-        );
-
-        assert_eq!(out, vec![0.0; 4]);
-        assert_eq!(shared.state.load(), PlayerState::Stopped);
-        assert!(!shared.streaming_active.load(Ordering::Relaxed));
-        assert_eq!(shared.playback_end_count.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
     fn callback_full_buffer_estimate_exceeds_decoded_stops_at_eof() {
         // Regression for the audio-thread hang in full-buffer mode: when the decoded
         // buffer is shorter than the advertised `total_frames` estimate, reaching the
@@ -2789,7 +2327,11 @@ mod tests {
         // ...but the advertised length is a larger estimate, and we are already at
         // the end of the real data.
         shared.total_frames.store(10, Ordering::Relaxed);
-        shared.position_frames.store(2, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(2, Ordering::Relaxed);
         shared.sample_rate.store(44_100, Ordering::Relaxed);
         shared.channels.store(2, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
@@ -2828,7 +2370,11 @@ mod tests {
             .audio_buffer
             .store(Arc::new(vec![0.1, 0.2, 0.3, 0.4]));
         shared.total_frames.store(2, Ordering::Relaxed);
-        shared.position_frames.store(2, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(2, Ordering::Relaxed);
         shared.sample_rate.store(44_100, Ordering::Relaxed);
         shared.channels.store(2, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
@@ -2872,7 +2418,7 @@ mod tests {
         assert!(
             matches!(
                 shared.retired_resources.pop(),
-                Some(RetiredAudioResource::Buffer(_))
+                Some(RetiredAudioResource::Buffer { .. })
             ),
             "expected the previous buffer to be retired for off-thread drop"
         );
@@ -3098,7 +2644,11 @@ mod tests {
         shared.pending_channels.store(2, Ordering::Relaxed);
         shared.pending_ready.store(true, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
-        shared.position_frames.store(2, Ordering::Relaxed);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(2, Ordering::Relaxed);
 
         let eq_params = Arc::new(AtomicEqParams::new());
         let sat_params = Arc::new(AtomicSaturationParams::new());
@@ -3201,5 +2751,367 @@ mod tests {
         assert_eq!(chain.len(), 7);
         assert!(!shared.dsp_needs_rebuild.load(Ordering::Relaxed));
         assert!(shared.pending_dsp_chain.is_empty());
+    }
+
+    #[test]
+    fn callback_window_helper_renders_and_retires_displaced_generation() {
+        use crate::player::streaming::pcm_window::{PcmWindow, PcmWindowGeometry};
+        use crate::player::streaming::rt_view::WindowIdentitySnapshot;
+
+        let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
+        let first = PcmWindow::create(geometry, 1, 100).expect("first window");
+        let mut writer = first.writer;
+        let mut slot = writer.try_claim_owned(1, 0, 0).expect("claim slot");
+        let samples = vec![0.25; geometry.slot_samples()];
+        slot.append_interleaved(&samples).expect("append samples");
+        slot.publish().expect("publish slot");
+
+        let rt = StreamingRtView::new();
+        rt.install_window(Some(Arc::clone(&first.window)));
+        rt.publish_identity(WindowIdentitySnapshot {
+            generation: 1,
+            epoch: 1,
+            active: true,
+        });
+        let shared = SharedState::new();
+        let mut scratch = CallbackScratch::new(2);
+        let mut output = [0.0; 8];
+        let progress = render_callback_window_output(&mut output, &shared, &rt, &mut scratch, 100);
+        assert_eq!(progress.rendered_frames, 4);
+        assert_eq!(output, [0.25; 8]);
+
+        let second = PcmWindow::create(geometry, 2, 200).expect("second window");
+        rt.install_window(Some(Arc::clone(&second.window)));
+        rt.publish_identity(WindowIdentitySnapshot {
+            generation: 2,
+            epoch: 2,
+            active: true,
+        });
+        let _ = render_callback_window_output(&mut output, &shared, &rt, &mut scratch, 200);
+
+        assert!(matches!(
+            shared.retired_resources.pop(),
+            Some(RetiredAudioResource::Window(_))
+        ));
+    }
+
+    #[test]
+    fn streaming_render_selects_v2_window_and_advances_position() {
+        use crate::player::streaming::pcm_window::{PcmWindow, PcmWindowGeometry};
+        use crate::player::streaming::rt_view::{
+            ProducerSnapshot, StreamingDecodeState, WindowIdentitySnapshot,
+        };
+
+        let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
+        let parts = PcmWindow::create(geometry, 1, 100).expect("window");
+        let mut writer = parts.writer;
+        let mut slot = writer.try_claim_owned(1, 0, 0).expect("claim slot");
+        slot.append_interleaved(&vec![0.5; geometry.slot_samples()])
+            .expect("append samples");
+        slot.publish().expect("publish slot");
+
+        let rt = Arc::new(StreamingRtView::new());
+        rt.install_window(Some(parts.window));
+        rt.publish_identity(WindowIdentitySnapshot {
+            generation: 1,
+            epoch: 1,
+            active: true,
+        });
+        rt.publish_producer(ProducerSnapshot {
+            retained_start_frame: 100,
+            produced_end_frame: 100 + geometry.slot_frames() as u64,
+            decode_state: StreamingDecodeState::Ready,
+        });
+
+        let shared = SharedState::new();
+        shared.streaming_generation.store(1, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.streaming_v2_enabled.store(true, Ordering::Release);
+        shared.publish_streaming_v2_rt(Some(Arc::clone(&rt)));
+        let mut scratch = CallbackScratch::new(2);
+        let mut chain = DspChain::with_capacity(0, 44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        let (spectrum_tx, _spectrum_rx) = crossbeam::channel::bounded(4);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(100, Ordering::Release);
+        shared.state.store(PlayerState::Paused);
+        let mut paused_output = [1.0; 8];
+        audio_callback_lockfree(
+            &mut paused_output,
+            &shared,
+            &mut chain,
+            None,
+            &loudness,
+            &spectrum_tx,
+            2,
+            &mut None,
+            &mut scratch,
+        );
+        assert_eq!(paused_output, [0.0; 8]);
+        assert_eq!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Acquire),
+            100
+        );
+        shared.state.store(PlayerState::Playing);
+        let seek_serial = rt.request_seek(102, 1, 1, WindowSeekKind::Forward);
+        let mut output = [0.0; 8];
+        let mut current_pos = 100;
+
+        let written = render_streaming_audio_output(
+            &mut output,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut None,
+            &mut scratch,
+            OutputPath::Direct,
+            &mut current_pos,
+            0,
+        );
+
+        assert_eq!(written, 8);
+        assert!(output.iter().all(|sample| (*sample - 0.5).abs() < 0.000_1));
+        assert_eq!(current_pos, 106);
+        assert_eq!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Acquire),
+            106
+        );
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: seek_serial,
+                result: WindowSeekResult::Applied,
+                audible_frame: 102,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+
+        let backward_serial = rt.request_seek(101, 1, 1, WindowSeekKind::Backward);
+        let mut backward_output = [0.0; 8];
+        let backward_written = render_streaming_audio_output(
+            &mut backward_output,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut None,
+            &mut scratch,
+            OutputPath::Direct,
+            &mut current_pos,
+            0,
+        );
+        assert_eq!(backward_written, 8);
+        assert_eq!(current_pos, 105);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: backward_serial,
+                result: WindowSeekResult::Applied,
+                audible_frame: 101,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+
+        let superseded_serial = rt.request_seek(104, 1, 1, WindowSeekKind::Backward);
+        let latest_serial = rt.request_seek(103, 1, 1, WindowSeekKind::Backward);
+        assert!(latest_serial > superseded_serial);
+        let mut latest_output = [0.0; 8];
+        assert_eq!(
+            render_streaming_audio_output(
+                &mut latest_output,
+                &shared,
+                &mut chain,
+                &loudness,
+                2,
+                &mut None,
+                &mut scratch,
+                OutputPath::Direct,
+                &mut current_pos,
+                0,
+            ),
+            8
+        );
+        assert_eq!(current_pos, 107);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: latest_serial,
+                result: WindowSeekResult::Applied,
+                audible_frame: 103,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+
+        let stale_serial = rt.request_seek(102, 99, 1, WindowSeekKind::Backward);
+        assert!(!consume_window_seek(
+            &shared,
+            &rt,
+            &mut scratch,
+            &mut current_pos,
+        ));
+        assert_eq!(current_pos, 107);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: stale_serial,
+                result: WindowSeekResult::StaleIdentity,
+                audible_frame: 107,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+
+        let epoch_stale_serial = rt.request_seek(102, 1, 99, WindowSeekKind::Backward);
+        assert!(!consume_window_seek(
+            &shared,
+            &rt,
+            &mut scratch,
+            &mut current_pos,
+        ));
+        assert_eq!(current_pos, 107);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: epoch_stale_serial,
+                result: WindowSeekResult::StaleIdentity,
+                audible_frame: 107,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+
+        let before_retained_serial = rt.request_seek(99, 1, 1, WindowSeekKind::Backward);
+        assert!(!consume_window_seek(
+            &shared,
+            &rt,
+            &mut scratch,
+            &mut current_pos,
+        ));
+        assert_eq!(current_pos, 107);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: before_retained_serial,
+                result: WindowSeekResult::OutsideResidentRange,
+                audible_frame: 107,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+
+        let at_produced_end_serial = rt.request_seek(
+            100 + geometry.slot_frames() as u64,
+            1,
+            1,
+            WindowSeekKind::Forward,
+        );
+        assert!(!consume_window_seek(
+            &shared,
+            &rt,
+            &mut scratch,
+            &mut current_pos,
+        ));
+        assert_eq!(current_pos, 107);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: at_produced_end_serial,
+                result: WindowSeekResult::OutsideResidentRange,
+                audible_frame: 107,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+
+        let superseded_during_apply_serial = rt.request_seek(102, 1, 1, WindowSeekKind::Backward);
+        let mut newer_serial = 0;
+        assert!(!consume_window_seek_with_before_publish(
+            &shared,
+            &rt,
+            &mut scratch,
+            &mut current_pos,
+            || {
+                newer_serial = rt.request_seek(103, 1, 1, WindowSeekKind::Backward);
+            },
+        ));
+        assert!(newer_serial > superseded_during_apply_serial);
+        assert_eq!(current_pos, 107);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: superseded_during_apply_serial,
+                result: WindowSeekResult::Superseded,
+                audible_frame: 107,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+        assert!(consume_window_seek(
+            &shared,
+            &rt,
+            &mut scratch,
+            &mut current_pos,
+        ));
+        assert_eq!(current_pos, 103);
+        assert_eq!(
+            rt.applied_seek(),
+            Some(AppliedWindowSeek {
+                serial: newer_serial,
+                result: WindowSeekResult::Applied,
+                audible_frame: 103,
+                observed_generation: 1,
+                observed_epoch: 1,
+            })
+        );
+        current_pos = 107;
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(107, Ordering::Release);
+
+        rt.publish_producer(ProducerSnapshot {
+            retained_start_frame: 100,
+            produced_end_frame: 107,
+            decode_state: StreamingDecodeState::EndOfStream,
+        });
+        shared.state.store(PlayerState::Playing);
+        let mut eof_output = [1.0; 8];
+        let eof_written = render_streaming_audio_output(
+            &mut eof_output,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut None,
+            &mut scratch,
+            OutputPath::Direct,
+            &mut current_pos,
+            0,
+        );
+        assert_eq!(eof_written, 0);
+        assert_eq!(eof_output, [0.0; 8]);
+        assert_eq!(shared.state.load(), PlayerState::Stopped);
+        assert_eq!(shared.playback_end_count.load(Ordering::Acquire), 1);
+        assert_ne!(
+            shared.event_flags.load(Ordering::Acquire) & EVENT_TRACK_EOF,
+            0
+        );
+        assert!(shared.streaming_active.load(Ordering::Acquire));
     }
 }

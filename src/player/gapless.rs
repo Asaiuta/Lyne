@@ -9,7 +9,8 @@ use std::thread;
 
 use super::buffer_budget::{
     decoded_buffer_estimate, ensure_decoded_samples_fit_budget, published_decoded_samples,
-    record_budget_rejection, reserve_decoded_buffer_capacity, DecodedBufferKind,
+    record_budget_rejection, reserve_decoded_buffer_bytes, reserve_decoded_buffer_capacity,
+    DecodedBufferKind,
 };
 use super::callback::normalize_channels;
 use super::loading::cached_loudness_from_db;
@@ -88,7 +89,7 @@ impl GaplessManager {
                 &shared_clone,
                 &shared_clone.cancel_preload_signal,
             ) {
-                Ok((samples, sr, channels, metadata)) => {
+                Ok((samples, reservation, sr, channels, metadata)) => {
                     // Check for cancellation after decode (Defect 31 fix)
                     if shared_clone.cancel_preload_signal.load(Ordering::Acquire)
                         || shared_clone.preload_generation.load(Ordering::Acquire) != generation
@@ -139,6 +140,9 @@ impl GaplessManager {
 
                     // Move samples into pending buffer (lock-free atomic swap)
                     shared_clone.pending_buffer.store(Some(Arc::new(samples)));
+                    shared_clone
+                        .pending_buffer_reservation
+                        .store(Some(reservation));
 
                     // Signal ready (Release ordering ensures buffer is visible)
                     shared_clone.pending_ready.store(true, Ordering::Release);
@@ -177,6 +181,7 @@ impl GaplessManager {
         shared.cancel_preload_signal.store(true, Ordering::Release);
         // Clear pending buffer (lock-free atomic swap)
         shared.pending_buffer.store(None);
+        shared.pending_buffer_reservation.store(None);
         shared.pending_total_frames.store(0, Ordering::Relaxed);
         shared.pending_sample_rate.store(44100, Ordering::Relaxed);
         shared.pending_channels.store(2, Ordering::Relaxed);
@@ -239,7 +244,16 @@ fn decode_to_buffer_with_cancel(
     config: &EngineSettings,
     shared: &SharedState,
     cancel_signal: &std::sync::atomic::AtomicBool,
-) -> Result<(Vec<f64>, u32, usize, crate::decoder::TrackMetadata), String> {
+) -> Result<
+    (
+        Vec<f64>,
+        Arc<super::streaming::memory::DecodedMemoryLease>,
+        u32,
+        usize,
+        crate::decoder::TrackMetadata,
+    ),
+    String,
+> {
     let mut decoder =
         StreamingDecoder::open_with_credentials(path, credentials).map_err(|e| e.to_string())?;
 
@@ -262,6 +276,19 @@ fn decode_to_buffer_with_cancel(
             decoded_channels,
             need_resample,
             existing_decoded_samples,
+        ),
+    )?;
+    let reservation_samples = output_sample_capacity
+        .checked_div(decoded_channels.max(1))
+        .and_then(|frames| frames.checked_mul(decoded_channels.max(target_channels)))
+        .ok_or_else(|| "gapless decoded reservation size overflowed".to_string())?;
+    let reservation = record_budget_rejection(
+        shared,
+        reserve_decoded_buffer_bytes(
+            DecodedBufferKind::GaplessPreload,
+            reservation_samples
+                .checked_mul(std::mem::size_of::<f64>())
+                .ok_or_else(|| "gapless decoded reservation byte size overflowed".to_string())?,
         ),
     )?;
     let mut samples: Vec<f64> = Vec::with_capacity(output_sample_capacity);
@@ -390,7 +417,7 @@ fn decode_to_buffer_with_cancel(
         ),
     )?;
 
-    Ok((samples, target_sr, target_channels, metadata))
+    Ok((samples, reservation, target_sr, target_channels, metadata))
 }
 
 #[cfg(test)]

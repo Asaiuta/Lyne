@@ -37,10 +37,9 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "appearance", itemId: "customCss", labelKey: "settings.appearance.customCss", descriptionKey: "settings.appearance.customCss.desc", keywords: ["css", "style", "样式"] },
   { category: "appearance", itemId: "customJs", labelKey: "settings.appearance.customJs", descriptionKey: "settings.appearance.customJs.desc", keywords: ["javascript", "js", "script", "脚本"] },
   { category: "appearance", itemId: "routeAnimation", labelKey: "settings.appearance.routeAnimation", keywords: ["animation", "transition", "动画"] },
-  { category: "appearance", itemId: "bgEnabled", labelKey: "settings.general.background.enabled", keywords: ["background", "wallpaper", "背景"] },
+  { category: "appearance", itemId: "bgEnabled", labelKey: "settings.general.background.enabled", descriptionKey: "settings.general.background.enabled.desc", keywords: ["background", "wallpaper", "blur", "背景", "模糊"] },
   { category: "appearance", itemId: "bgBlur", labelKey: "settings.general.background.blur", keywords: ["blur", "模糊"] },
   { category: "appearance", itemId: "bgMask", labelKey: "settings.general.background.mask", keywords: ["mask", "opacity", "遮罩"] },
-  { category: "appearance", itemId: "customChrome", labelKey: "settings.general.window.customChrome", keywords: ["window", "frame", "边框", "标题栏"] },
   { category: "appearance", itemId: "sidebarHiddenItems", labelKey: "settings.appearance.sidebarManager", descriptionKey: "settings.appearance.sidebarManager.desc", keywords: ["sidebar", "menu", "侧边栏"] },
   { category: "appearance", itemId: "homeSections", labelKey: "settings.general.homeSections.title", descriptionKey: "settings.general.homeSections.desc", keywords: ["home", "section", "板块"] },
   { category: "appearance", itemId: "playlistPageElements", labelKey: "settings.appearance.playlistPageManager", descriptionKey: "settings.appearance.playlistPageManager.desc", keywords: ["playlist", "detail", "歌单"] },
@@ -194,7 +193,7 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "audio-engine", itemId: "useCache", labelKey: "settings.useCache", keywords: ["cache", "缓存"] },
   { category: "audio-engine", itemId: "preemptiveResample", labelKey: "settings.preemptiveResample", keywords: ["preemptive", "resample", "预先"] },
   { category: "audio-engine", itemId: "streamingFirstBuffer", labelKey: "settings.streamingFirstBuffer", keywords: ["streaming", "first", "buffer", "startup", "流式", "首缓冲", "起播"] },
-  { category: "audio-engine", itemId: "streamingFullBufferLimitMib", labelKey: "settings.streamingFullBufferLimitMib", keywords: ["streaming", "buffer", "limit", "memory", "MiB", "流式", "缓存", "上限"] },
+  { category: "audio-engine", itemId: "streamingPcmWindowLimitMib", labelKey: "settings.streamingPcmWindowLimitMib", keywords: ["streaming", "PCM", "window", "limit", "memory", "MiB", "流式", "窗口", "内存", "上限"] },
 
   // ── local ────────────────────────────────────────────
   { category: "local", itemId: "localMusicDirectory", labelKey: "settings.local.localMusicDirectory", descriptionKey: "settings.local.localMusicDirectory.desc", keywords: ["local", "music", "folder", "directory", "本地", "音乐", "目录"] },

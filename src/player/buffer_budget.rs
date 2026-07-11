@@ -5,6 +5,8 @@ use std::sync::atomic::Ordering;
 use crate::diagnostics::{decode_memory_budget, DecodeMemoryBudget};
 
 use super::state::SharedState;
+use super::streaming::memory::{reserve_decoded_memory, DecodedMemoryLease, DecodedMemoryOwner};
+use std::sync::Arc;
 
 const BYTES_PER_MIB: usize = 1024 * 1024;
 const F64_SAMPLE_BYTES: usize = std::mem::size_of::<f64>();
@@ -23,6 +25,14 @@ impl DecodedBufferKind {
             Self::CurrentTrack => "current track",
             Self::GaplessPreload => "gapless preload",
             Self::ResampleCache => "resample cache",
+        }
+    }
+
+    fn owner(self) -> DecodedMemoryOwner {
+        match self {
+            Self::CurrentTrack => DecodedMemoryOwner::LegacyCurrentBuffer,
+            Self::GaplessPreload => DecodedMemoryOwner::LegacyPendingBuffer,
+            Self::ResampleCache => DecodedMemoryOwner::LoadedResampleCache,
         }
     }
 }
@@ -149,6 +159,13 @@ pub(super) fn record_budget_rejection<T>(
             .fetch_add(1, Ordering::Relaxed);
     }
     result
+}
+
+pub(super) fn reserve_decoded_buffer_bytes(
+    kind: DecodedBufferKind,
+    bytes: usize,
+) -> Result<Arc<DecodedMemoryLease>, String> {
+    reserve_decoded_memory(kind.owner(), bytes).map_err(|error| error.to_string())
 }
 
 fn current_decoded_samples(shared: &SharedState) -> usize {

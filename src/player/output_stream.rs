@@ -38,6 +38,7 @@ pub(super) struct BuiltOutputStream {
     pub stream: Stream,
     pub source_sample_rate: u32,
     pub output_sample_rate: u32,
+    pub source_channels: usize,
     pub channels: usize,
 }
 
@@ -157,6 +158,7 @@ pub(super) fn build_requested_output_stream(
         stream,
         source_sample_rate: output_plan.requested_sample_rate,
         output_sample_rate: output_plan.actual_sample_rate,
+        source_channels: output_plan.channels as usize,
         channels: output_plan.channels as usize,
     })
 }
@@ -196,6 +198,7 @@ pub(super) fn build_fallback_output_stream(
         stream,
         source_sample_rate: output_plan.requested_sample_rate,
         output_sample_rate: fallback_sample_rate,
+        source_channels: output_plan.channels as usize,
         channels: fallback_channels,
     })
 }
@@ -461,6 +464,7 @@ pub(super) fn activate_started_stream(
         stream: started_stream,
         source_sample_rate,
         output_sample_rate,
+        source_channels,
         channels,
     } = built_stream;
     if let Err(e) = started_stream.play() {
@@ -470,7 +474,12 @@ pub(super) fn activate_started_stream(
         return Err(format!("stream.play() failed: {}", e));
     }
     shared_state.mark_stream_play_returned();
-    shared_state.mark_active_output_stream(source_sample_rate, output_sample_rate, channels);
+    shared_state.mark_active_output_stream(
+        source_sample_rate,
+        output_sample_rate,
+        source_channels,
+        channels,
+    );
     *stream_slot = Some(started_stream);
 
     // Only transition to Playing if the user has not paused during stream

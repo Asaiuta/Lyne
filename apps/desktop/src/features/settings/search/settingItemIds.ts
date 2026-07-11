@@ -40,7 +40,6 @@ const APPEARANCE_ITEM_IDS = [
   "bgEnabled",
   "bgBlur",
   "bgMask",
-  "customChrome",
   ...managerIds(LAYOUT_MANAGER_ITEMS),
   ...managerIds(SIDEBAR_VISIBILITY_ITEMS),
   "showHomeGreeting",
@@ -149,7 +148,7 @@ const AUDIO_ENGINE_ITEM_IDS = [
   "useCache",
   "preemptiveResample",
   "streamingFirstBuffer",
-  "streamingFullBufferLimitMib",
+  "streamingPcmWindowLimitMib",
   "engineReload"
 ] as const;
 

@@ -45,6 +45,17 @@ const cappedAppend = (current, chunk, maxLength = 60000) => {
   return next.length > maxLength ? next.slice(next.length - maxLength) : next;
 };
 
+const IMPORTANT_AUDIO_LOG_PATTERN =
+  /\b(?:error|warn)\b|wasapi|failed to (?:create|start|initialize)|no supported exclusive format/i;
+
+const appendImportantLogLines = (current, chunk, maxLength = 20000) => {
+  const important = chunk
+    .split(/\r?\n/)
+    .filter((line) => IMPORTANT_AUDIO_LOG_PATTERN.test(line))
+    .join("\n");
+  return important ? cappedAppend(current, `${important}\n`, maxLength) : current;
+};
+
 const requestJson = async (options, method, route, body) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
@@ -299,6 +310,10 @@ const startAudioServer = async (options) => {
     LOUDNESS_DB_PATH: path.join(runtimeDir, "loudness_cache.db"),
     AUDIO_APP_DB_PATH: path.join(runtimeDir, "app_state.db"),
     AUDIO_ALLOWED_ORIGINS: "*",
+    AUDIO_STREAMING_FIRST_BUFFER:
+      options.streamingFirstBuffer === true
+        ? "true"
+        : process.env.AUDIO_STREAMING_FIRST_BUFFER || "false",
     ANALYSIS_MAX_CONCURRENCY: String(options.analysisConcurrency || 1),
     ANALYSIS_MAX_BLOCKING_THREADS: String(options.analysisBlockingThreads || 2),
     LIBRARY_SCAN_MAX_WORKERS: String(options.scanWorkers || 2)
@@ -311,12 +326,14 @@ const startAudioServer = async (options) => {
     stdio: ["ignore", "pipe", "pipe"]
   });
 
-  const logs = { stdout: "", stderr: "" };
+  const logs = { stdout: "", stderr: "", stderrHighlights: "" };
   child.stdout.on("data", (chunk) => {
     logs.stdout = cappedAppend(logs.stdout, chunk.toString("utf8"));
   });
   child.stderr.on("data", (chunk) => {
-    logs.stderr = cappedAppend(logs.stderr, chunk.toString("utf8"));
+    const text = chunk.toString("utf8");
+    logs.stderr = cappedAppend(logs.stderr, text);
+    logs.stderrHighlights = appendImportantLogLines(logs.stderrHighlights, text);
   });
 
   return {

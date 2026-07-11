@@ -15,8 +15,8 @@ use super::callback::LockfreeDspContext;
 use super::output_stream::DspParamRefs;
 use super::state::{
     playback_phase_time_ms, AudioCommand, LoadResult, PlayerState, SharedState,
-    StreamingTrackStart, EVENT_LOAD_COMPLETE, EVENT_LOAD_ERROR, EVENT_PLAYBACK_STARTED,
-    EVENT_TRACK_CHANGED, PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS, PLAYBACK_PROGRESS_REPLAY_GRACE_MS,
+    EVENT_LOAD_COMPLETE, EVENT_LOAD_ERROR, EVENT_PLAYBACK_STARTED, EVENT_TRACK_CHANGED,
+    PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS, PLAYBACK_PROGRESS_REPLAY_GRACE_MS,
 };
 use super::track_loudness::{apply_loaded_track_loudness, refresh_loaded_loudness};
 use crate::processor::AtomicLoudnessState;
@@ -260,6 +260,10 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
     context: &SharedAudioCommandContext<'_>,
 ) -> AudioCommandFlow {
     match command {
+        AudioCommand::InstallStreamingV2Session { .. } => {
+            log::error!("streaming v2 session install bypassed the audio runtime owner");
+            AudioCommandFlow::Continue
+        }
         AudioCommand::Play => backend.play(context.shared_state),
         AudioCommand::Pause => {
             context.shared_state.state.store(PlayerState::Paused);
@@ -435,71 +439,6 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
             );
             AudioCommandFlow::Continue
         }
-        AudioCommand::StreamingLoadReady {
-            generation,
-            track,
-            autoplay,
-        } => {
-            context
-                .shared_state
-                .mark_audio_command_streaming_ready_received();
-            let applied = handle_streaming_load_ready_command(
-                context.shared_state,
-                context.dsp_ctx,
-                context.loudness_state,
-                context.dsp_params,
-                context.target_lufs.get(),
-                context.replaygain_reference_lufs,
-                generation,
-                track,
-            );
-            if !applied {
-                context
-                    .shared_state
-                    .mark_audio_command_streaming_ready_completed();
-                return AudioCommandFlow::Continue;
-            }
-            if !autoplay || context.shared_state.state.load() == PlayerState::Paused {
-                context.shared_state.mark_streaming_ready_play_skipped();
-                context
-                    .shared_state
-                    .mark_audio_command_streaming_ready_completed();
-                return AudioCommandFlow::Continue;
-            }
-            context.shared_state.mark_streaming_ready_play_requested();
-            let flow = backend.play(context.shared_state);
-            match flow {
-                AudioCommandFlow::Continue => {
-                    context.shared_state.mark_streaming_ready_play_completed();
-                }
-                AudioCommandFlow::StartPlayback => {
-                    context
-                        .shared_state
-                        .mark_streaming_ready_play_start_playback();
-                }
-                AudioCommandFlow::StopPlayback | AudioCommandFlow::ShutdownThread => {}
-            }
-            context
-                .shared_state
-                .mark_audio_command_streaming_ready_completed();
-            flow
-        }
-        AudioCommand::StreamingLoadFinished {
-            generation,
-            samples,
-            total_frames,
-        } => {
-            handle_streaming_load_finished_command(
-                context.shared_state,
-                context.loudness_state,
-                context.target_lufs.get(),
-                context.replaygain_reference_lufs,
-                generation,
-                samples,
-                total_frames,
-            );
-            AudioCommandFlow::Continue
-        }
         AudioCommand::LoadError {
             generation,
             message,
@@ -511,126 +450,6 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
             backend.shutdown(context.shared_state);
             AudioCommandFlow::ShutdownThread
         }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn handle_streaming_load_ready_command(
-    shared_state: &Arc<SharedState>,
-    dsp_ctx: &Arc<LockfreeDspContext>,
-    loudness_state: &Arc<AtomicLoudnessState>,
-    dsp_params: DspParamRefs<'_>,
-    target_lufs: f64,
-    replaygain_reference_lufs: f64,
-    generation: u64,
-    track: StreamingTrackStart,
-) -> bool {
-    if shared_state.load_generation.load(Ordering::Acquire) != generation {
-        log::info!(
-            "Ignoring stale streaming load ready for '{}' (generation {})",
-            track.file_path,
-            generation
-        );
-        return false;
-    }
-
-    log::info!(
-        "Streaming load ready: {} frames @ {} Hz",
-        track.total_frames,
-        track.sample_rate
-    );
-    rebuild_pending_dsp_chain(
-        shared_state,
-        dsp_ctx,
-        dsp_params,
-        track.channels,
-        track.sample_rate,
-    );
-    apply_streaming_track_state(shared_state, generation, &track);
-    *shared_state.current_cached_loudness.write() = track.cached_loudness.clone();
-
-    let empty_samples = Arc::new(Vec::new());
-    apply_loaded_track_loudness(
-        shared_state,
-        loudness_state,
-        &track.metadata,
-        track.cached_loudness.as_ref(),
-        &empty_samples,
-        track.channels,
-        track.sample_rate,
-        target_lufs,
-        replaygain_reference_lufs,
-    );
-
-    shared_state.mark_load_complete_applied();
-    shared_state.mark_streaming_ready();
-    shared_state.mark_seek_ready(generation);
-    shared_state.load_progress.store(100, Ordering::Relaxed);
-    shared_state.is_loading.store(false, Ordering::Release);
-    shared_state
-        .event_flags
-        .fetch_or(EVENT_LOAD_COMPLETE | EVENT_TRACK_CHANGED, Ordering::Release);
-    true
-}
-
-#[allow(clippy::too_many_arguments)]
-fn handle_streaming_load_finished_command(
-    shared_state: &Arc<SharedState>,
-    loudness_state: &Arc<AtomicLoudnessState>,
-    target_lufs: f64,
-    replaygain_reference_lufs: f64,
-    generation: u64,
-    samples: Option<Vec<f64>>,
-    total_frames: u64,
-) {
-    if shared_state.load_generation.load(Ordering::Acquire) != generation {
-        log::info!(
-            "Ignoring stale streaming load finish for generation {}",
-            generation
-        );
-        return;
-    }
-
-    shared_state
-        .total_frames
-        .store(total_frames, Ordering::Relaxed);
-    shared_state
-        .streaming_decode_finished
-        .store(true, Ordering::Release);
-    shared_state.mark_streaming_finished();
-
-    if let Some(samples) = samples {
-        let samples = Arc::new(samples);
-        shared_state.publish_audio_buffer(Arc::clone(&samples));
-        shared_state
-            .streaming_full_buffer_published
-            .store(true, Ordering::Release);
-        shared_state
-            .streaming_memory_mode
-            .store(false, Ordering::Release);
-        shared_state
-            .streaming_active
-            .store(false, Ordering::Release);
-        while shared_state.streaming_chunks.pop().is_some() {}
-
-        // M2 fix: a seek issued during the streaming-first-buffer window was
-        // deferred (the callback was rendering sequential streaming chunks and
-        // could not move the audio). The full buffer is now published and the
-        // callback switches to the position-addressed render path, so apply
-        // the pending target through the seek slot — playback lands exactly on
-        // the requested frame, not target+Δ. `take_pending_full_buffer_seek`
-        // is generation-tagged: a pending seek from a superseded load is
-        // discarded, never applied to this track.
-        if let Some(target_frame) = shared_state.take_pending_full_buffer_seek(generation) {
-            shared_state.request_seek_to_frame(target_frame.min(total_frames));
-        }
-
-        refresh_loaded_loudness(
-            shared_state,
-            loudness_state,
-            target_lufs,
-            replaygain_reference_lufs,
-        );
     }
 }
 
@@ -758,6 +577,7 @@ fn apply_loaded_track_state(
     file_path: &str,
     metadata: &crate::decoder::TrackMetadata,
     samples: Arc<Vec<f64>>,
+    reservation: Option<Arc<super::streaming::memory::DecodedMemoryLease>>,
 ) {
     shared_state
         .sample_rate
@@ -777,61 +597,10 @@ fn apply_loaded_track_state(
         _ => shared_state.state.store(PlayerState::Stopped),
     }
 
-    shared_state.publish_audio_buffer(samples);
+    shared_state.publish_audio_buffer_with_reservation(samples, reservation);
     *shared_state.file_path.write() = Some(file_path.to_string());
     *shared_state.track_metadata.write() = metadata.clone();
     *shared_state.current_track_path.write() = Some(file_path.to_string());
-    shared_state
-        .dsp_needs_rebuild
-        .store(true, Ordering::Release);
-}
-
-fn apply_streaming_track_state(
-    shared_state: &SharedState,
-    generation: u64,
-    track: &StreamingTrackStart,
-) {
-    shared_state
-        .sample_rate
-        .store(track.sample_rate as u64, Ordering::Relaxed);
-    shared_state
-        .channels
-        .store(track.channels as u64, Ordering::Relaxed);
-    shared_state
-        .total_frames
-        .store(track.total_frames, Ordering::Relaxed);
-    let start_frame = if track.total_frames > 0 {
-        track.start_frame.min(track.total_frames)
-    } else {
-        track.start_frame
-    };
-    // Slot-published position (M1 protocol): also supersedes any unconsumed
-    // seek request from a previous track/generation.
-    shared_state.request_seek_to_frame(start_frame);
-    shared_state
-        .streaming_generation
-        .store(generation, Ordering::Release);
-    shared_state.reset_streaming_queue_window_for_generation(generation);
-    shared_state
-        .streaming_decode_finished
-        .store(false, Ordering::Release);
-    shared_state
-        .streaming_memory_mode
-        .store(track.memory_mode, Ordering::Release);
-    shared_state
-        .streaming_full_buffer_published
-        .store(false, Ordering::Release);
-    shared_state.streaming_active.store(true, Ordering::Release);
-    shared_state.publish_audio_buffer(Arc::new(Vec::new()));
-
-    match shared_state.state.load() {
-        PlayerState::Playing | PlayerState::Paused => {}
-        _ => shared_state.state.store(PlayerState::Stopped),
-    }
-
-    *shared_state.file_path.write() = Some(track.file_path.clone());
-    *shared_state.track_metadata.write() = track.metadata.clone();
-    *shared_state.current_track_path.write() = Some(track.file_path.clone());
     shared_state
         .dsp_needs_rebuild
         .store(true, Ordering::Release);
@@ -854,6 +623,7 @@ fn apply_loaded_track_result(
         file_path,
         cached_loudness,
         metadata,
+        reservation,
     } = result;
     let samples_arc = Arc::new(samples);
     rebuild_pending_dsp_chain(shared_state, dsp_ctx, dsp_params, channels, sample_rate);
@@ -865,6 +635,7 @@ fn apply_loaded_track_result(
         &file_path,
         &metadata,
         Arc::clone(&samples_arc),
+        reservation,
     );
     *shared_state.current_cached_loudness.write() = cached_loudness.clone();
     apply_loaded_track_loudness(
@@ -890,7 +661,6 @@ fn apply_loaded_track_result(
 
 #[cfg(test)]
 mod tests {
-    use super::super::state::StreamingAudioChunk;
     use super::*;
     use crate::decoder::TrackMetadata;
     use crate::processor::{
@@ -1020,45 +790,6 @@ mod tests {
         }
     }
 
-    struct RecordingBackend {
-        play_calls: usize,
-        play_flow: AudioCommandFlow,
-    }
-
-    impl AudioCommandBackend for RecordingBackend {
-        fn play(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
-            self.play_calls += 1;
-            match self.play_flow {
-                AudioCommandFlow::Continue => AudioCommandFlow::Continue,
-                AudioCommandFlow::StartPlayback => AudioCommandFlow::StartPlayback,
-                AudioCommandFlow::StopPlayback => AudioCommandFlow::StopPlayback,
-                AudioCommandFlow::ShutdownThread => AudioCommandFlow::ShutdownThread,
-            }
-        }
-
-        fn pause(&mut self, _shared_state: &SharedState) {}
-
-        fn seek(&mut self, _frame: u64) {}
-
-        fn stop(&mut self, _shared_state: &SharedState) {}
-
-        fn stop_for_load(&mut self, _shared_state: &SharedState) {}
-
-        fn replay_playback_progress(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
-            self.play(_shared_state)
-        }
-
-        fn recover_playback(&mut self, _shared_state: &SharedState) -> AudioCommandFlow {
-            AudioCommandFlow::StartPlayback
-        }
-
-        fn shutdown(&mut self, _shared_state: &SharedState) {}
-
-        fn output_label(&self) -> &'static str {
-            "recording"
-        }
-    }
-
     struct RecoveryRecordingBackend {
         replay_calls: usize,
         recover_calls: usize,
@@ -1113,6 +844,7 @@ mod tests {
     fn test_load_result(file_path: &str) -> LoadResult {
         LoadResult {
             samples: vec![0.1, -0.1, 0.2, -0.2],
+            reservation: None,
             sample_rate: 44_100,
             channels: 2,
             total_frames: 2,
@@ -1132,7 +864,7 @@ mod tests {
         shared
             .prefer_default_output_config
             .store(false, Ordering::Relaxed);
-        shared.mark_active_output_stream(96_000, 96_000, 2);
+        shared.mark_active_output_stream(96_000, 96_000, 2, 2);
 
         assert!(should_keep_shared_mode_stream_warm(&shared));
     }
@@ -1142,7 +874,7 @@ mod tests {
         let shared = SharedState::new();
         shared.sample_rate.store(96_000, Ordering::Relaxed);
         shared.channels.store(2, Ordering::Relaxed);
-        shared.mark_active_output_stream(96_000, 96_000, 2);
+        shared.mark_active_output_stream(96_000, 96_000, 2, 2);
 
         shared.exclusive_mode.store(true, Ordering::Relaxed);
         assert!(!should_keep_shared_mode_stream_warm(&shared));
@@ -1150,54 +882,6 @@ mod tests {
         shared.exclusive_mode.store(false, Ordering::Relaxed);
         shared.sample_rate.store(44_100, Ordering::Relaxed);
         assert!(!should_keep_shared_mode_stream_warm(&shared));
-    }
-
-    #[test]
-    fn stale_streaming_ready_does_not_replace_current_track_state() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(2, Ordering::Release);
-        fixture
-            .shared_state
-            .sample_rate
-            .store(48_000, Ordering::Relaxed);
-        *fixture.shared_state.file_path.write() = Some("current.flac".to_string());
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadReady {
-                generation: 1,
-                track: StreamingTrackStart {
-                    sample_rate: 44_100,
-                    channels: 2,
-                    total_frames: 128,
-                    start_frame: 0,
-                    file_path: "stale.mp3".to_string(),
-                    cached_loudness: None,
-                    metadata: TrackMetadata::default(),
-                    memory_mode: false,
-                },
-                autoplay: true,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(
-            fixture.shared_state.sample_rate.load(Ordering::Relaxed),
-            48_000
-        );
-        assert_eq!(
-            fixture.shared_state.file_path.read().as_deref(),
-            Some("current.flac")
-        );
-        assert!(!fixture
-            .shared_state
-            .streaming_active
-            .load(Ordering::Relaxed));
-        assert_eq!(fixture.shared_state.event_flags.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -1295,273 +979,6 @@ mod tests {
         assert_ne!(
             fixture.shared_state.event_flags.load(Ordering::Relaxed) & EVENT_LOAD_ERROR,
             0
-        );
-    }
-
-    #[test]
-    fn stale_streaming_finish_does_not_publish_full_buffer() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(2, Ordering::Release);
-        fixture
-            .shared_state
-            .audio_buffer
-            .store(Arc::new(vec![0.9, 0.8]));
-        fixture
-            .shared_state
-            .total_frames
-            .store(1, Ordering::Relaxed);
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadFinished {
-                generation: 1,
-                samples: Some(vec![0.1, 0.2, 0.3, 0.4]),
-                total_frames: 2,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(
-            fixture.shared_state.audio_buffer.load().as_slice(),
-            &[0.9, 0.8]
-        );
-        assert_eq!(fixture.shared_state.total_frames.load(Ordering::Relaxed), 1);
-        assert!(!fixture
-            .shared_state
-            .streaming_decode_finished
-            .load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn streaming_ready_applies_seek_start_frame() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(5, Ordering::Release);
-        fixture
-            .shared_state
-            .is_loading
-            .store(true, Ordering::Release);
-        fixture
-            .shared_state
-            .load_progress
-            .store(42, Ordering::Relaxed);
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadReady {
-                generation: 5,
-                track: StreamingTrackStart {
-                    sample_rate: 44_100,
-                    channels: 2,
-                    total_frames: 44_100 * 60,
-                    start_frame: 44_100 * 10,
-                    file_path: "large.flac".to_string(),
-                    cached_loudness: None,
-                    metadata: TrackMetadata::default(),
-                    memory_mode: true,
-                },
-                autoplay: false,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(
-            fixture.shared_state.position_frames.load(Ordering::Relaxed),
-            44_100 * 10
-        );
-        assert_eq!(
-            fixture
-                .shared_state
-                .streaming_generation
-                .load(Ordering::Acquire),
-            5
-        );
-        assert!(fixture
-            .shared_state
-            .streaming_active
-            .load(Ordering::Acquire));
-        assert!(fixture
-            .shared_state
-            .streaming_memory_mode
-            .load(Ordering::Acquire));
-        assert!(
-            fixture
-                .shared_state
-                .streaming_ready_ms
-                .load(Ordering::Acquire)
-                > 0
-        );
-        assert!(!fixture.shared_state.is_loading.load(Ordering::Acquire));
-        assert_eq!(
-            fixture.shared_state.load_progress.load(Ordering::Relaxed),
-            100
-        );
-    }
-
-    #[test]
-    fn streaming_ready_triggers_playback_start_when_track_is_playing() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(9, Ordering::Release);
-        fixture.shared_state.state.store(PlayerState::Playing);
-        fixture
-            .shared_state
-            .is_loading
-            .store(true, Ordering::Release);
-
-        let mut backend = RecordingBackend {
-            play_calls: 0,
-            play_flow: AudioCommandFlow::StartPlayback,
-        };
-        let flow = handle_audio_command(
-            AudioCommand::StreamingLoadReady {
-                generation: 9,
-                track: StreamingTrackStart {
-                    sample_rate: 44_100,
-                    channels: 2,
-                    total_frames: 44_100 * 60,
-                    start_frame: 0,
-                    file_path: "playing.flac".to_string(),
-                    cached_loudness: None,
-                    metadata: TrackMetadata::default(),
-                    memory_mode: true,
-                },
-                autoplay: true,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(backend.play_calls, 1);
-        assert!(matches!(flow, AudioCommandFlow::StartPlayback));
-        assert!(!fixture.shared_state.is_loading.load(Ordering::Acquire));
-        assert!(fixture
-            .shared_state
-            .streaming_active
-            .load(Ordering::Acquire));
-        assert!(
-            fixture
-                .shared_state
-                .streaming_ready_play_requested_ms
-                .load(Ordering::Relaxed)
-                > 0
-        );
-        assert!(
-            fixture
-                .shared_state
-                .streaming_ready_play_start_playback_ms
-                .load(Ordering::Relaxed)
-                > 0
-        );
-    }
-
-    #[test]
-    fn streaming_ready_autoplay_starts_after_stop_for_load_state() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(10, Ordering::Release);
-        fixture.shared_state.state.store(PlayerState::Stopped);
-        fixture
-            .shared_state
-            .is_loading
-            .store(true, Ordering::Release);
-
-        let mut backend = RecordingBackend {
-            play_calls: 0,
-            play_flow: AudioCommandFlow::StartPlayback,
-        };
-        let flow = handle_audio_command(
-            AudioCommand::StreamingLoadReady {
-                generation: 10,
-                track: StreamingTrackStart {
-                    sample_rate: 44_100,
-                    channels: 2,
-                    total_frames: 44_100 * 60,
-                    start_frame: 0,
-                    file_path: "autoplay.flac".to_string(),
-                    cached_loudness: None,
-                    metadata: TrackMetadata::default(),
-                    memory_mode: true,
-                },
-                autoplay: true,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(backend.play_calls, 1);
-        assert!(matches!(flow, AudioCommandFlow::StartPlayback));
-        assert!(
-            fixture
-                .shared_state
-                .streaming_ready_play_requested_ms
-                .load(Ordering::Relaxed)
-                > 0
-        );
-        assert_eq!(
-            fixture
-                .shared_state
-                .streaming_ready_play_skipped_ms
-                .load(Ordering::Relaxed),
-            0
-        );
-    }
-
-    #[test]
-    fn streaming_ready_autoplay_respects_paused_state() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(11, Ordering::Release);
-        fixture.shared_state.state.store(PlayerState::Paused);
-        fixture
-            .shared_state
-            .is_loading
-            .store(true, Ordering::Release);
-
-        let mut backend = RecordingBackend {
-            play_calls: 0,
-            play_flow: AudioCommandFlow::StartPlayback,
-        };
-        let flow = handle_audio_command(
-            AudioCommand::StreamingLoadReady {
-                generation: 11,
-                track: StreamingTrackStart {
-                    sample_rate: 44_100,
-                    channels: 2,
-                    total_frames: 44_100 * 60,
-                    start_frame: 0,
-                    file_path: "paused.flac".to_string(),
-                    cached_loudness: None,
-                    metadata: TrackMetadata::default(),
-                    memory_mode: true,
-                },
-                autoplay: true,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(backend.play_calls, 0);
-        assert!(matches!(flow, AudioCommandFlow::Continue));
-        assert!(
-            fixture
-                .shared_state
-                .streaming_ready_play_skipped_ms
-                .load(Ordering::Relaxed)
-                > 0
         );
     }
 
@@ -2029,258 +1446,6 @@ mod tests {
                 .playback_recovery_count
                 .load(Ordering::Relaxed),
             1
-        );
-    }
-
-    #[test]
-    fn streaming_finish_publishes_full_buffer_without_resetting_position() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(3, Ordering::Release);
-        fixture
-            .shared_state
-            .position_frames
-            .store(7, Ordering::Relaxed);
-        fixture
-            .shared_state
-            .streaming_active
-            .store(true, Ordering::Release);
-        fixture
-            .shared_state
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 3,
-                samples: Arc::new(vec![0.5, 0.5]),
-            })
-            .expect("streaming queue should have capacity");
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadFinished {
-                generation: 3,
-                samples: Some(vec![0.1, 0.2, 0.3, 0.4]),
-                total_frames: 2,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(
-            fixture.shared_state.audio_buffer.load().as_slice(),
-            &[0.1, 0.2, 0.3, 0.4]
-        );
-        assert_eq!(fixture.shared_state.total_frames.load(Ordering::Relaxed), 2);
-        assert_eq!(
-            fixture.shared_state.position_frames.load(Ordering::Relaxed),
-            7
-        );
-        assert!(!fixture
-            .shared_state
-            .streaming_active
-            .load(Ordering::Relaxed));
-        assert!(fixture
-            .shared_state
-            .streaming_decode_finished
-            .load(Ordering::Relaxed));
-        assert!(fixture.shared_state.streaming_chunks.is_empty());
-        assert!(
-            fixture
-                .shared_state
-                .streaming_finished_ms
-                .load(Ordering::Relaxed)
-                > 0
-        );
-    }
-
-    #[test]
-    fn streaming_finish_without_samples_keeps_queue_for_memory_mode() {
-        let fixture = CommandFixture::new();
-        fixture
-            .shared_state
-            .load_generation
-            .store(4, Ordering::Release);
-        fixture
-            .shared_state
-            .audio_buffer
-            .store(Arc::new(vec![0.9, 0.8]));
-        fixture
-            .shared_state
-            .position_frames
-            .store(5, Ordering::Relaxed);
-        fixture
-            .shared_state
-            .streaming_active
-            .store(true, Ordering::Release);
-        fixture
-            .shared_state
-            .streaming_memory_mode
-            .store(true, Ordering::Release);
-        fixture
-            .shared_state
-            .streaming_chunks
-            .push(StreamingAudioChunk {
-                generation: 4,
-                samples: Arc::new(vec![0.5, 0.5]),
-            })
-            .expect("streaming queue should have capacity");
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadFinished {
-                generation: 4,
-                samples: None,
-                total_frames: 100,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(
-            fixture.shared_state.audio_buffer.load().as_slice(),
-            &[0.9, 0.8]
-        );
-        assert_eq!(
-            fixture.shared_state.total_frames.load(Ordering::Relaxed),
-            100
-        );
-        assert_eq!(
-            fixture.shared_state.position_frames.load(Ordering::Relaxed),
-            5
-        );
-        assert!(fixture
-            .shared_state
-            .streaming_active
-            .load(Ordering::Relaxed));
-        assert!(fixture
-            .shared_state
-            .streaming_decode_finished
-            .load(Ordering::Relaxed));
-        assert!(fixture
-            .shared_state
-            .streaming_memory_mode
-            .load(Ordering::Relaxed));
-        assert!(!fixture
-            .shared_state
-            .streaming_full_buffer_published
-            .load(Ordering::Relaxed));
-        assert_eq!(fixture.shared_state.streaming_chunks.len(), 1);
-        assert!(
-            fixture
-                .shared_state
-                .streaming_finished_ms
-                .load(Ordering::Relaxed)
-                > 0
-        );
-    }
-
-    #[test]
-    fn streaming_finish_applies_pending_first_buffer_seek_exactly_at_target() {
-        let fixture = CommandFixture::new();
-        let shared = &fixture.shared_state;
-        shared.load_generation.store(5, Ordering::Release);
-        shared.streaming_active.store(true, Ordering::Release);
-        shared.streaming_memory_mode.store(false, Ordering::Release);
-        // Deferral window: streaming chunks kept advancing the playhead after
-        // the seek was requested.
-        shared.position_frames.store(700, Ordering::Relaxed);
-        shared.set_pending_full_buffer_seek(5, 1_500);
-        let serial_before = shared.seek_slot_serial.load(Ordering::Acquire);
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadFinished {
-                generation: 5,
-                samples: Some(vec![0.0; 4_000]),
-                total_frames: 2_000,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        // The deferred seek is applied through the seek slot at publish time:
-        // the effective play position equals the seek target (no +Δ skip) and
-        // the slot serial advanced so the callback adopts it.
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 1_500);
-        assert_eq!(
-            shared.seek_slot_serial.load(Ordering::Acquire),
-            serial_before + 1
-        );
-        assert_eq!(
-            shared.seek_slot_target_frames.load(Ordering::Acquire),
-            1_500
-        );
-        assert_eq!(
-            shared
-                .pending_full_buffer_seek_generation
-                .load(Ordering::Acquire),
-            0,
-            "the pending slot must be cleared once applied"
-        );
-        assert!(!shared.streaming_active.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn streaming_finish_clamps_pending_first_buffer_seek_to_total_frames() {
-        let fixture = CommandFixture::new();
-        let shared = &fixture.shared_state;
-        shared.load_generation.store(5, Ordering::Release);
-        shared.streaming_active.store(true, Ordering::Release);
-        shared.set_pending_full_buffer_seek(5, 5_000);
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadFinished {
-                generation: 5,
-                samples: Some(vec![0.0; 4_000]),
-                total_frames: 2_000,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 2_000);
-    }
-
-    #[test]
-    fn streaming_finish_ignores_pending_seek_from_superseded_generation() {
-        let fixture = CommandFixture::new();
-        let shared = &fixture.shared_state;
-        shared.load_generation.store(5, Ordering::Release);
-        shared.streaming_active.store(true, Ordering::Release);
-        shared.position_frames.store(700, Ordering::Relaxed);
-        // Pending seek registered for a superseded load (track switch during
-        // the first-buffer window): must be discarded, never applied.
-        shared.set_pending_full_buffer_seek(4, 1_500);
-        let serial_before = shared.seek_slot_serial.load(Ordering::Acquire);
-
-        let mut backend = TestBackend;
-        handle_audio_command(
-            AudioCommand::StreamingLoadFinished {
-                generation: 5,
-                samples: Some(vec![0.0; 4_000]),
-                total_frames: 2_000,
-            },
-            &mut backend,
-            &fixture.context(),
-        );
-
-        assert_eq!(
-            shared.position_frames.load(Ordering::Relaxed),
-            700,
-            "a stale pending seek must not move the new track"
-        );
-        assert_eq!(
-            shared.seek_slot_serial.load(Ordering::Acquire),
-            serial_before
-        );
-        assert_eq!(
-            shared
-                .pending_full_buffer_seek_generation
-                .load(Ordering::Acquire),
-            0,
-            "the stale pending slot must still be cleared"
         );
     }
 }

@@ -45,8 +45,10 @@ const parseArgs = (argv) => {
     useCompressor: true,
     loopDuringStability: true,
     inWindowSeek: false,
+    inWindowForwardSeek: false,
     inWindowPrerollMs: 10000,
     inWindowBackSecs: 6,
+    inWindowForwardSecs: 5,
     inWindowTrials: null
   };
 
@@ -119,11 +121,17 @@ const parseArgs = (argv) => {
       case "--in-window-seek":
         options.inWindowSeek = true;
         break;
+      case "--in-window-forward-seek":
+        options.inWindowForwardSeek = true;
+        break;
       case "--in-window-preroll-ms":
         options.inWindowPrerollMs = readInteger(arg);
         break;
       case "--in-window-back-secs":
         options.inWindowBackSecs = readNumber(arg);
+        break;
+      case "--in-window-forward-secs":
+        options.inWindowForwardSecs = readNumber(arg);
         break;
       case "--in-window-trials":
         options.inWindowTrials = readInteger(arg);
@@ -181,8 +189,10 @@ Options:
   --sample-ms <ms>               Main-process CPU/RSS sample interval (default: 500)
   --settle-ms <ms>               Delay between operations (default: 350)
   --in-window-seek               Add a backward seek after a playback preroll
-  --in-window-preroll-ms <ms>    Playback time before the backward seek (default: 10000)
+  --in-window-forward-seek       Add a decoded-ahead forward seek after preroll
+  --in-window-preroll-ms <ms>    Playback time before an in-window seek (default: 10000)
   --in-window-back-secs <s>      Backward hop distance from live playhead (default: 6)
+  --in-window-forward-secs <s>   Forward hop distance from live playhead (default: 5)
   --in-window-trials <n>         In-window scenario trial count (default: --trials value)
   --no-webaudio                  Measure plain HTMLAudioElement playback only
   --no-compressor                Keep WebAudio EQ/gain/analyser but skip DynamicsCompressor
@@ -779,6 +789,7 @@ const rendererHarnessSource = (options) => `
       graph: { source, gain, filters, compressor, analyser },
       details: {
         enabled: true,
+        sample_rate: context.sampleRate,
         filter_count: filters.length,
         compressor_enabled: Boolean(compressor),
         base_latency_seconds: typeof context.baseLatency === "number" ? context.baseLatency : null,
@@ -902,7 +913,10 @@ const rendererHarnessSource = (options) => `
     return lastTime;
   };
 
-  const measureInWindowBackwardSeek = async ({ audio, context, trial, duration }) => {
+  const measureInWindowDirectionalSeek = async ({ audio, context, trial, duration, direction }) => {
+    const isBackward = direction === "backward";
+    const operation = isBackward ? "in_window_backward_seek" : "in_window_forward_seek";
+    const distanceSecs = isBackward ? options.inWindowBackSecs : options.inWindowForwardSecs;
     const baseSecs = Math.max(0.5, Math.min(duration - 1, duration * 0.5));
     audio.currentTime = baseSecs;
     await waitFor({
@@ -928,14 +942,15 @@ const rendererHarnessSource = (options) => `
       audio,
       context,
       prerollMs: options.inWindowPrerollMs,
-      label: "in-window preroll trial " + trial
+      label: "in-window " + direction + " preroll trial " + trial
     });
 
-    const targetSecs = Math.max(0.5, Math.min(duration - 1, playheadSecs - options.inWindowBackSecs));
+    const signedDistanceSecs = isBackward ? -distanceSecs : distanceSecs;
+    const targetSecs = Math.max(0.5, Math.min(duration - 1, playheadSecs + signedDistanceSecs));
     const startedAt = performance.now();
     audio.currentTime = targetSecs;
     const convergence = await waitFor({
-      label: "in-window backward seek " + targetSecs.toFixed(3) + "s convergence trial " + trial,
+      label: "in-window " + direction + " seek " + targetSecs.toFixed(3) + "s convergence trial " + trial,
       timeoutMs: options.seekTimeoutMs,
       audio,
       context,
@@ -950,14 +965,16 @@ const rendererHarnessSource = (options) => `
       audio,
       context,
       audio.currentTime,
-      "in-window backward seek progress trial " + trial,
+      "in-window " + direction + " seek progress trial " + trial,
       options.seekTimeoutMs
     );
 
     return {
       trial,
-      operation: "in_window_backward_seek",
-      back_secs: Number(options.inWindowBackSecs.toFixed(3)),
+      operation,
+      direction,
+      distance_secs: Number(distanceSecs.toFixed(3)),
+      ...(isBackward ? { back_secs: Number(distanceSecs.toFixed(3)) } : {}),
       playhead_before_seek_secs: Number(playheadSecs.toFixed(3)),
       target_secs: Number(targetSecs.toFixed(3)),
       convergence_ms: convergence.elapsed_ms,
@@ -968,6 +985,12 @@ const rendererHarnessSource = (options) => `
       state_at_progress: progress.state
     };
   };
+
+  const measureInWindowBackwardSeek = (args) =>
+    measureInWindowDirectionalSeek({ ...args, direction: "backward" });
+
+  const measureInWindowForwardSeek = (args) =>
+    measureInWindowDirectionalSeek({ ...args, direction: "forward" });
 
   const measureNextTrack = async ({ audio, context }) => {
     if (!options.nextTrackUrl) return null;
@@ -1133,7 +1156,7 @@ const rendererHarnessSource = (options) => `
       }
     }
 
-    if (options.inWindowSeek) {
+    if (options.inWindowSeek || options.inWindowForwardSeek) {
       await startTrackAndWait({
         audio,
         context,
@@ -1144,8 +1167,15 @@ const rendererHarnessSource = (options) => `
       if (!Number.isFinite(duration) || duration <= 2) {
         throw new Error("Track duration is too short or unknown for in-window seek benchmark: " + duration);
       }
-      for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
-        measurements.push(await measureInWindowBackwardSeek({ audio, context, trial, duration }));
+      if (options.inWindowSeek) {
+        for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
+          measurements.push(await measureInWindowBackwardSeek({ audio, context, trial, duration }));
+        }
+      }
+      if (options.inWindowForwardSeek) {
+        for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
+          measurements.push(await measureInWindowForwardSeek({ audio, context, trial, duration }));
+        }
       }
     }
 
@@ -1183,8 +1213,10 @@ const rendererHarnessSource = (options) => `
         settle_ms: options.settleMs,
         seek_fractions: options.seekFractions,
         in_window_seek: options.inWindowSeek,
+        in_window_forward_seek: options.inWindowForwardSeek,
         in_window_preroll_ms: options.inWindowPrerollMs,
         in_window_back_secs: options.inWindowBackSecs,
+        in_window_forward_secs: options.inWindowForwardSecs,
         in_window_trials: options.inWindowTrials,
         use_webaudio: options.useWebAudio,
         use_compressor: options.useCompressor,
@@ -1237,6 +1269,65 @@ const rendererHarnessSource = (options) => `
   return run();
 })()
 `;
+
+const buildPipelineV2ReferenceEvidence = (report) => {
+  const outputSampleRate =
+    report.audio_graph && typeof report.audio_graph.sample_rate === "number"
+      ? report.audio_graph.sample_rate
+      : null;
+  const processSummary = report.process_metrics && report.process_metrics.summary;
+  const seekSamples = (report.measurements || [])
+    .filter((measurement) =>
+      ["seek_convergence", "in_window_backward_seek", "in_window_forward_seek"].includes(
+        measurement.operation
+      )
+    )
+    .map((measurement) => ({
+      operation: measurement.operation,
+      trial: measurement.trial ?? null,
+      direction: measurement.direction ?? null,
+      distance_secs: measurement.distance_secs ?? null,
+      target_secs: measurement.target_secs ?? null,
+      target_output_frame:
+        typeof measurement.target_secs === "number" && outputSampleRate !== null
+          ? Math.round(measurement.target_secs * outputSampleRate)
+          : null,
+      seek_request_serial: null,
+      seek_applied_serial: null,
+      first_audible_target_frame: null,
+      decoder_open_count_delta: null,
+      decoder_seek_count_delta: null,
+      network_request_count_delta: 0
+    }));
+  return {
+    schema_version: 1,
+    transport: "chromium_html_media_reference",
+    source_kind: "local_file",
+    pipeline_instrumentation_applicable: false,
+    callback_period_frames: null,
+    callback_period_ms: null,
+    allocation_count: null,
+    allocation_bytes: null,
+    reservation_bytes: null,
+    decoder_open_count: null,
+    decoder_seek_count: null,
+    network_request_count: 0,
+    producer_thread_count: null,
+    peak_process_private_bytes: processSummary ? processSummary.peak_private_memory_bytes ?? null : null,
+    peak_process_threads: processSummary ? processSummary.peak_threads ?? null : null,
+    seek_samples: seekSamples,
+    availability: {
+      callback_period: "not_exposed_by_chromium",
+      seek_serial: "not_exposed_by_chromium",
+      first_audible_target: "media_current_time_proxy_only",
+      decoder_counts: "not_exposed_by_chromium",
+      network_requests: "known_zero_for_local_file_fixture",
+      allocations: "not_exposed_by_chromium",
+      reservations: "not_applicable_to_reference_transport",
+      producer_threads: "process_peak_only"
+    }
+  };
+};
 
 const createHiddenWindow = () =>
   new BrowserWindow({
@@ -1310,8 +1401,10 @@ const run = async () => {
       Math.round(
         (options.stabilitySeconds +
           options.trials * (options.seekFractions.length + 2) +
-          (options.inWindowSeek
-            ? options.inWindowTrials * (options.inWindowPrerollMs / 1000 + 2)
+          (options.inWindowSeek || options.inWindowForwardSeek
+            ? options.inWindowTrials *
+              (Number(options.inWindowSeek) + Number(options.inWindowForwardSeek)) *
+              (options.inWindowPrerollMs / 1000 + 2)
             : 0)) *
           6000
       )
@@ -1390,11 +1483,14 @@ const run = async () => {
       report.summary && report.summary.operations ? report.summary.operations.seek_convergence?.convergence_ms : null,
     in_window_backward_seek_ms:
       report.summary && report.summary.operations ? report.summary.operations.in_window_backward_seek?.convergence_ms : null,
+    in_window_forward_seek_ms:
+      report.summary && report.summary.operations ? report.summary.operations.in_window_forward_seek?.convergence_ms : null,
     next_track_to_progress_ms:
       report.summary && report.summary.operations ? report.summary.operations.next_track_to_progress?.switch_to_progress_ms : null,
     control_update_latency_ms: report.control_updates ? report.control_updates.latency_ms : null,
     stability: report.stability ? report.stability.summary : report.summary ? report.summary.stability : null
   };
+  report.pipeline_v2_evidence = buildPipelineV2ReferenceEvidence(report);
 
   const outputPath = await writeJsonReport(options.outputDir, outputFileName, report);
   console.log(`[electron-real-file] wrote ${path.relative(appRoot, outputPath)}`);

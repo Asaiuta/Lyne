@@ -1,2 +1,7 @@
+[build]
+# Single shared artifact dir for the whole monorepo (root crate + apps/desktop/src-tauri).
+# Path is relative to the directory that owns .cargo/ (repo root).
+target-dir = "target"
+
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]

@@ -94,12 +94,28 @@ struct StorageDiagnostics {
 #[derive(Debug, Serialize)]
 struct DecodeDiagnostics {
     memory_budget: crate::diagnostics::DecodeMemoryBudget,
+    memory_ledger: DecodedMemoryLedgerDiagnostics,
     last_duration_ms: Option<u64>,
     last_input_frames: Option<u64>,
     last_output_samples: Option<u64>,
     last_chunk_count: Option<u64>,
     last_throughput_frames_per_sec: Option<u64>,
     budget_rejection_count: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct DecodedMemoryLedgerDiagnostics {
+    limit_bytes: usize,
+    reserved_bytes: usize,
+    peak_reserved_bytes: usize,
+    rejection_count: u64,
+    reserved_by_owner: Vec<DecodedMemoryOwnerDiagnostics>,
+}
+
+#[derive(Debug, Serialize)]
+struct DecodedMemoryOwnerDiagnostics {
+    owner: &'static str,
+    reserved_bytes: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,21 +140,10 @@ struct PlaybackDiagnostics {
     position_frames: u64,
     streaming_active: bool,
     streaming_decode_finished: bool,
-    streaming_memory_mode: bool,
-    streaming_full_buffer_published: bool,
-    streaming_queue_len: usize,
-    streaming_queue_window_generation: u64,
-    streaming_queue_min_len: Option<u64>,
-    streaming_queue_max_len: u64,
-    streaming_queue_chunks_pushed_count: u64,
-    streaming_queue_chunks_popped_count: u64,
-    streaming_queue_empty_during_decode_count: u64,
-    streaming_queue_empty_during_decode_frames: u64,
-    streaming_queue_producer_full_count: u64,
-    streaming_queue_producer_backpressure_count: u64,
-    streaming_queue_dropped_count: u64,
+    streaming_v2: Option<StreamingV2Diagnostics>,
     active_stream_source_sample_rate: u64,
     active_stream_output_sample_rate: u64,
+    active_stream_source_channels: u64,
     active_stream_channels: u64,
     active_stream_device_id: i64,
     active_stream_exclusive_mode: bool,
@@ -158,6 +163,43 @@ struct PlaybackDiagnostics {
     output_callback_silenced_inactive_count: u64,
     output_callback_silenced_loading_count: u64,
     output_callback_silenced_stream_mismatch_count: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct StreamingV2Diagnostics {
+    generation: u64,
+    epoch: u64,
+    active: bool,
+    decode_state: String,
+    origin_frame: u64,
+    retained_start_frame: u64,
+    produced_end_frame: u64,
+    render_cursor_frame: u64,
+    resident_frames: u64,
+    ahead_frames: u64,
+    retained_frames: u64,
+    channels: usize,
+    slot_frames: usize,
+    slot_count: usize,
+    capacity_frames: usize,
+    payload_bytes: usize,
+    latest_seek_serial: Option<u64>,
+    latest_seek_target_frame: Option<u64>,
+    latest_seek_kind: Option<String>,
+    applied_seek_serial: Option<u64>,
+    applied_seek_result: Option<String>,
+    applied_seek_audible_frame: Option<u64>,
+    seek_requests: u64,
+    seek_applied: u64,
+    seek_misses: u64,
+    seek_superseded: u64,
+    seek_latency_buckets_ms: [u64; 5],
+    source_seek_requests: u64,
+    source_seek_applied: u64,
+    workers_spawned: u64,
+    workers_live: u64,
+    workers_cancelled: u64,
+    workers_failed: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -348,8 +390,25 @@ fn build_decode_diagnostics(data: &AppState) -> DecodeDiagnostics {
         player.shared_state()
     };
 
+    let ledger = crate::player::streaming::memory::process_decoded_memory_ledger();
+    let ledger_snapshot = ledger.snapshot();
+    let reserved_by_owner = crate::player::streaming::memory::DecodedMemoryOwner::ALL
+        .into_iter()
+        .map(|owner| DecodedMemoryOwnerDiagnostics {
+            owner: owner.label(),
+            reserved_bytes: ledger_snapshot.reserved_by_owner[owner as usize],
+        })
+        .collect();
+
     DecodeDiagnostics {
         memory_budget: crate::diagnostics::decode_memory_budget(),
+        memory_ledger: DecodedMemoryLedgerDiagnostics {
+            limit_bytes: ledger_snapshot.limit_bytes,
+            reserved_bytes: ledger_snapshot.reserved_bytes,
+            peak_reserved_bytes: ledger_snapshot.peak_reserved_bytes,
+            rejection_count: ledger_snapshot.rejection_count,
+            reserved_by_owner,
+        },
         last_duration_ms: non_zero_u64(
             shared_state.last_decode_duration_ms.load(Ordering::Relaxed),
         ),
@@ -741,6 +800,53 @@ fn build_playback_diagnostics(data: &AppState) -> PlaybackDiagnostics {
     };
     let state = shared_state.state.load();
     let has_load_error = shared_state.load_error.read().is_some();
+    let streaming_v2 = shared_state.streaming_v2_rt.load_full().and_then(|rt| {
+        let identity = rt.identity();
+        let producer = rt.producer();
+        let window = rt.window_snapshot()?;
+        let geometry = window.geometry();
+        let render_cursor = rt.render_cursor();
+        let request = rt.seek_request();
+        let applied = rt.applied_seek();
+        let telemetry = rt.seek_telemetry();
+        Some(StreamingV2Diagnostics {
+            generation: identity.generation,
+            epoch: identity.epoch,
+            active: identity.active,
+            decode_state: format!("{:?}", producer.decode_state),
+            origin_frame: window.origin_frame(),
+            retained_start_frame: producer.retained_start_frame,
+            produced_end_frame: producer.produced_end_frame,
+            render_cursor_frame: render_cursor,
+            resident_frames: producer
+                .produced_end_frame
+                .saturating_sub(producer.retained_start_frame),
+            ahead_frames: producer.produced_end_frame.saturating_sub(render_cursor),
+            retained_frames: render_cursor.saturating_sub(producer.retained_start_frame),
+            channels: geometry.channels(),
+            slot_frames: geometry.slot_frames(),
+            slot_count: geometry.slot_count(),
+            capacity_frames: geometry.capacity_frames(),
+            payload_bytes: geometry.payload_bytes(),
+            latest_seek_serial: request.map(|value| value.serial),
+            latest_seek_target_frame: request.map(|value| value.target_frame),
+            latest_seek_kind: request.map(|value| format!("{:?}", value.kind)),
+            applied_seek_serial: applied.map(|value| value.serial),
+            applied_seek_result: applied.map(|value| format!("{:?}", value.result)),
+            applied_seek_audible_frame: applied.map(|value| value.audible_frame),
+            seek_requests: telemetry.requests,
+            seek_applied: telemetry.applied,
+            seek_misses: telemetry.misses,
+            seek_superseded: telemetry.superseded,
+            seek_latency_buckets_ms: telemetry.latency_buckets,
+            source_seek_requests: telemetry.source_seek_requests,
+            source_seek_applied: telemetry.source_seek_applied,
+            workers_spawned: telemetry.workers_spawned,
+            workers_live: telemetry.workers_live,
+            workers_cancelled: telemetry.workers_cancelled,
+            workers_failed: telemetry.workers_failed,
+        })
+    });
 
     PlaybackDiagnostics {
         is_playing: state == PlayerState::Playing,
@@ -770,47 +876,24 @@ fn build_playback_diagnostics(data: &AppState) -> PlaybackDiagnostics {
         sample_rate: shared_state.sample_rate.load(Ordering::Relaxed),
         channels: shared_state.channels.load(Ordering::Relaxed),
         total_frames: shared_state.total_frames.load(Ordering::Relaxed),
-        position_frames: shared_state.position_frames.load(Ordering::Relaxed),
+        position_frames: shared_state
+            .playback_clock
+            .callback
+            .position_frames
+            .load(Ordering::Relaxed),
         streaming_active: shared_state.streaming_active.load(Ordering::Relaxed),
         streaming_decode_finished: shared_state
             .streaming_decode_finished
             .load(Ordering::Relaxed),
-        streaming_memory_mode: shared_state.streaming_memory_mode.load(Ordering::Relaxed),
-        streaming_full_buffer_published: shared_state
-            .streaming_full_buffer_published
-            .load(Ordering::Relaxed),
-        streaming_queue_len: shared_state.streaming_chunks.len(),
-        streaming_queue_window_generation: shared_state
-            .streaming_queue_window_generation
-            .load(Ordering::Relaxed),
-        streaming_queue_min_len: shared_state.streaming_queue_min_len(),
-        streaming_queue_max_len: shared_state.streaming_queue_max_len.load(Ordering::Relaxed),
-        streaming_queue_chunks_pushed_count: shared_state
-            .streaming_queue_chunks_pushed_count
-            .load(Ordering::Relaxed),
-        streaming_queue_chunks_popped_count: shared_state
-            .streaming_queue_chunks_popped_count
-            .load(Ordering::Relaxed),
-        streaming_queue_empty_during_decode_count: shared_state
-            .streaming_queue_empty_during_decode_count
-            .load(Ordering::Relaxed),
-        streaming_queue_empty_during_decode_frames: shared_state
-            .streaming_queue_empty_during_decode_frames
-            .load(Ordering::Relaxed),
-        streaming_queue_producer_full_count: shared_state
-            .streaming_queue_producer_full_count
-            .load(Ordering::Relaxed),
-        streaming_queue_producer_backpressure_count: shared_state
-            .streaming_queue_producer_backpressure_count
-            .load(Ordering::Relaxed),
-        streaming_queue_dropped_count: shared_state
-            .streaming_queue_dropped_count
-            .load(Ordering::Relaxed),
+        streaming_v2,
         active_stream_source_sample_rate: shared_state
             .active_stream_source_sample_rate
             .load(Ordering::Relaxed),
         active_stream_output_sample_rate: shared_state
             .active_stream_output_sample_rate
+            .load(Ordering::Relaxed),
+        active_stream_source_channels: shared_state
+            .active_stream_source_channels
             .load(Ordering::Relaxed),
         active_stream_channels: shared_state.active_stream_channels.load(Ordering::Relaxed),
         active_stream_device_id: shared_state.active_stream_device_id.load(Ordering::Relaxed),
@@ -943,11 +1026,7 @@ mod tests {
         assert!(json.contains("\"streaming_ready_sent\""));
         assert!(json.contains("\"streaming_ready_play_requested\""));
         assert!(json.contains("\"streaming_ready_play_start_playback\""));
-        assert!(json.contains("\"streaming_queue_window_generation\""));
-        assert!(json.contains("\"streaming_queue_min_len\""));
-        assert!(json.contains("\"streaming_queue_max_len\""));
-        assert!(json.contains("\"streaming_queue_empty_during_decode_count\""));
-        assert!(json.contains("\"streaming_queue_producer_backpressure_count\""));
+        assert!(json.contains("\"streaming_v2\":null"));
         assert!(json.contains("\"audio_command_streaming_ready_received\""));
         assert!(json.contains("\"audio_command_ensure_progress_received\""));
         assert!(json.contains("\"playback_recovery_count\""));

@@ -52,7 +52,7 @@ export interface SettingsFormState {
   useCache: boolean;
   preemptiveResample: boolean;
   streamingFirstBuffer: boolean;
-  streamingFullBufferLimitMib: string;
+  streamingPcmWindowLimitMib: string;
   eqBands: Record<EqBandKey, number>;
 }
 
@@ -194,9 +194,9 @@ const FORM_FIELD_DESCRIPTORS = [
     read: (settings) => settings.streaming_first_buffer
   }),
   field({
-    field: "streamingFullBufferLimitMib",
+    field: "streamingPcmWindowLimitMib",
     defaultValue: String(STREAMING_FULL_BUFFER_LIMIT_MIB_DEFAULT),
-    read: (settings) => String(settings.streaming_full_buffer_limit_mib)
+    read: (settings) => String(settings.streaming_pcm_window_limit_mib)
   })
 ] as const;
 
@@ -358,7 +358,7 @@ type AudioEngineTextSettingField =
     | "crossfeed_mix"
     | "dynamic_loudness_strength"
     | "target_samplerate"
-    | "streaming_full_buffer_limit_mib"
+    | "streaming_pcm_window_limit_mib"
   >;
 
 type AudioEngineTextParser =
@@ -506,14 +506,14 @@ export const AUDIO_ENGINE_TEXT_ITEMS = {
     },
     disabledWhen: "dynamicLoudnessDisabled"
   },
-  streamingFullBufferLimitMib: {
-    id: "streamingFullBufferLimitMib",
-    labelKey: "settings.streamingFullBufferLimitMib",
-    formField: "streamingFullBufferLimitMib",
-    settingsField: "streaming_full_buffer_limit_mib",
+  streamingPcmWindowLimitMib: {
+    id: "streamingPcmWindowLimitMib",
+    labelKey: "settings.streamingPcmWindowLimitMib",
+    formField: "streamingPcmWindowLimitMib",
+    settingsField: "streaming_pcm_window_limit_mib",
     parser: {
       kind: "rangedInteger",
-      fieldLabelKey: "settings.field.streamingFullBufferLimitMib",
+      fieldLabelKey: "settings.field.streamingPcmWindowLimitMib",
       min: 0,
       max: STREAMING_FULL_BUFFER_LIMIT_MIB_MAX
     }

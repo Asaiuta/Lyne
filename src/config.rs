@@ -11,8 +11,8 @@ pub use audio_engine_core::config::{
 
 pub const ENV_AUDIO_CACHE_MAX_BYTES: &str = "AUDIO_CACHE_MAX_BYTES";
 pub const DEFAULT_CACHE_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
-pub const DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB: u64 = 256;
-pub const MAX_STREAMING_FULL_BUFFER_LIMIT_MIB: u64 = 4096;
+pub const DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB: u64 = 256;
+pub const MAX_STREAMING_PCM_WINDOW_LIMIT_MIB: u64 = 4096;
 
 fn env_flag(name: &str, default: bool) -> bool {
     env::var(name)
@@ -104,8 +104,11 @@ pub struct EngineSettings {
     pub preemptive_resample: bool,
     #[serde(default)]
     pub streaming_first_buffer: bool,
-    #[serde(default = "default_streaming_full_buffer_limit_mib")]
-    pub streaming_full_buffer_limit_mib: u64,
+    #[serde(
+        default = "default_streaming_pcm_window_limit_mib",
+        alias = "streaming_full_buffer_limit_mib"
+    )]
+    pub streaming_pcm_window_limit_mib: u64,
     #[serde(default = "default_use_next_prefetch")]
     pub use_next_prefetch: bool,
     pub eq_type: String,
@@ -160,7 +163,7 @@ impl Default for EngineSettings {
             use_cache: false,
             preemptive_resample: true,
             streaming_first_buffer: false,
-            streaming_full_buffer_limit_mib: DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB,
+            streaming_pcm_window_limit_mib: DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB,
             use_next_prefetch: true,
             eq_type: "IIR".to_string(),
             volume: 0.7,
@@ -235,11 +238,14 @@ impl EngineSettings {
 
         let preemptive_resample = env_flag("AUDIO_PREEMPTIVE_RESAMPLE", true);
         let streaming_first_buffer = env_flag("AUDIO_STREAMING_FIRST_BUFFER", false);
-        let streaming_full_buffer_limit_mib = env_parse_clamped(
-            "AUDIO_STREAMING_FULL_BUFFER_LIMIT_MIB",
-            DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB,
+        let streaming_pcm_window_limit_mib = env_parse_clamped(
+            "AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB",
+            std::env::var("AUDIO_STREAMING_FULL_BUFFER_LIMIT_MIB")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB),
             0,
-            MAX_STREAMING_FULL_BUFFER_LIMIT_MIB,
+            MAX_STREAMING_PCM_WINDOW_LIMIT_MIB,
         );
 
         let use_next_prefetch = env_flag("AUDIO_USE_NEXT_PREFETCH", true);
@@ -317,8 +323,8 @@ impl EngineSettings {
         // Load output bit depth for noise shaper (M-1 fix)
         let output_bits = env_parse_clamped("AUDIO_OUTPUT_BITS", 24_u32, 8_u32, 32_u32);
 
-        log::info!("Loaded config: Quality={:?}, Phase={:?}, Cache={}, Preemptive={}, StreamingFirstBuffer={}, StreamingFullBufferLimitMiB={}, EQ={}, Loudness={} LUFS, DynamicLoudness={} (ref={}dB), Saturation={}",
-            resample_quality, phase_response, use_cache, preemptive_resample, streaming_first_buffer, streaming_full_buffer_limit_mib, eq_type, loudness.target_lufs,
+        log::info!("Loaded config: Quality={:?}, Phase={:?}, Cache={}, Preemptive={}, StreamingFirstBuffer={}, StreamingPcmWindowLimitMiB={}, EQ={}, Loudness={} LUFS, DynamicLoudness={} (ref={}dB), Saturation={}",
+            resample_quality, phase_response, use_cache, preemptive_resample, streaming_first_buffer, streaming_pcm_window_limit_mib, eq_type, loudness.target_lufs,
             dynamic_loudness.enabled, dynamic_loudness.ref_volume_db, saturation.enabled);
 
         Self {
@@ -328,7 +334,7 @@ impl EngineSettings {
             use_cache,
             preemptive_resample,
             streaming_first_buffer,
-            streaming_full_buffer_limit_mib,
+            streaming_pcm_window_limit_mib,
             use_next_prefetch,
             eq_type,
             volume: 0.7,
@@ -353,9 +359,8 @@ impl EngineSettings {
         self.loudness.smoothing_time_ms = self.loudness.smoothing_time_ms.clamp(10.0, 2000.0);
         self.loudness.replaygain_reference_lufs =
             self.loudness.replaygain_reference_lufs.clamp(-23.0, -12.0);
-        self.streaming_full_buffer_limit_mib = self
-            .streaming_full_buffer_limit_mib
-            .min(MAX_STREAMING_FULL_BUFFER_LIMIT_MIB);
+        self.streaming_pcm_window_limit_mib =
+            clamp_streaming_pcm_window_limit_mib(self.streaming_pcm_window_limit_mib);
         self.saturation.drive = self.saturation.drive.clamp(0.0, 2.0);
         self.saturation.threshold = self.saturation.threshold.clamp(0.0, 1.0);
         self.saturation.mix = self.saturation.mix.clamp(0.0, 1.0);
@@ -448,9 +453,9 @@ impl EngineSettings {
         if let Some(streaming_first_buffer) = update.streaming_first_buffer {
             self.streaming_first_buffer = streaming_first_buffer;
         }
-        if let Some(streaming_full_buffer_limit_mib) = update.streaming_full_buffer_limit_mib {
-            self.streaming_full_buffer_limit_mib =
-                streaming_full_buffer_limit_mib.min(MAX_STREAMING_FULL_BUFFER_LIMIT_MIB);
+        if let Some(streaming_pcm_window_limit_mib) = update.streaming_pcm_window_limit_mib {
+            self.streaming_pcm_window_limit_mib =
+                clamp_streaming_pcm_window_limit_mib(streaming_pcm_window_limit_mib);
         }
         if let Some(use_next_prefetch) = update.use_next_prefetch {
             self.use_next_prefetch = use_next_prefetch;
@@ -493,12 +498,20 @@ pub struct EngineSettingsUpdate {
     pub use_cache: Option<bool>,
     pub preemptive_resample: Option<bool>,
     pub streaming_first_buffer: Option<bool>,
-    pub streaming_full_buffer_limit_mib: Option<u64>,
+    #[serde(alias = "streaming_full_buffer_limit_mib")]
+    pub streaming_pcm_window_limit_mib: Option<u64>,
     pub use_next_prefetch: Option<bool>,
 }
 
-fn default_streaming_full_buffer_limit_mib() -> u64 {
-    DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB
+fn default_streaming_pcm_window_limit_mib() -> u64 {
+    DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB
+}
+
+fn clamp_streaming_pcm_window_limit_mib(value: u64) -> u64 {
+    let process_limit_mib = crate::diagnostics::decode_memory_budget().limit_bytes / (1024 * 1024);
+    value
+        .min(MAX_STREAMING_PCM_WINDOW_LIMIT_MIB)
+        .min(process_limit_mib as u64)
 }
 
 fn default_use_next_prefetch() -> bool {
@@ -703,24 +716,28 @@ mod tests {
         assert!(!settings.dynamic_loudness.enabled);
         assert!(settings.use_next_prefetch);
         assert_eq!(
-            settings.streaming_full_buffer_limit_mib,
-            DEFAULT_STREAMING_FULL_BUFFER_LIMIT_MIB
+            settings.streaming_pcm_window_limit_mib,
+            DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB.min(
+                (crate::diagnostics::decode_memory_budget().limit_bytes / (1024 * 1024)) as u64
+            )
         );
         assert_eq!(settings.fir_taps, Some(1023));
         assert_eq!(settings.resample_quality, ResampleQuality::High);
     }
 
     #[test]
-    fn engine_settings_normalized_clamps_streaming_full_buffer_limit() {
+    fn engine_settings_normalized_clamps_streaming_pcm_window_limit() {
         let settings = EngineSettings {
-            streaming_full_buffer_limit_mib: MAX_STREAMING_FULL_BUFFER_LIMIT_MIB + 1,
+            streaming_pcm_window_limit_mib: MAX_STREAMING_PCM_WINDOW_LIMIT_MIB + 1,
             ..EngineSettings::default()
         }
         .normalized();
 
         assert_eq!(
-            settings.streaming_full_buffer_limit_mib,
-            MAX_STREAMING_FULL_BUFFER_LIMIT_MIB
+            settings.streaming_pcm_window_limit_mib,
+            MAX_STREAMING_PCM_WINDOW_LIMIT_MIB.min(
+                (crate::diagnostics::decode_memory_budget().limit_bytes / (1024 * 1024)) as u64
+            )
         );
     }
 

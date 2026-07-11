@@ -72,7 +72,7 @@ const persistentSettingsNumberFields = [
   "dynamic_loudness_strength"
 ] as const;
 
-const persistentSettingsIntegerFields = ["output_bits", "streaming_full_buffer_limit_mib"] as const;
+const persistentSettingsIntegerFields = ["output_bits", "streaming_pcm_window_limit_mib"] as const;
 
 const persistentSettingsNullableIntegerFields = [
   "device_id",
@@ -133,7 +133,7 @@ const parsePersistentSettings = (value: unknown): PersistentSettings | null => {
     use_cache: value.use_cache as boolean,
     preemptive_resample: value.preemptive_resample as boolean,
     streaming_first_buffer: value.streaming_first_buffer as boolean,
-    streaming_full_buffer_limit_mib: value.streaming_full_buffer_limit_mib as number,
+    streaming_pcm_window_limit_mib: value.streaming_pcm_window_limit_mib as number,
     use_next_prefetch: value.use_next_prefetch as boolean
   };
 };

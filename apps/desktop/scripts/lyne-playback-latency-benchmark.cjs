@@ -48,9 +48,12 @@ const parseArgs = (argv) => {
     seekFractions: [0.25, 0.5, 0.75],
     skipSeek: false,
     inWindowSeek: false,
+    inWindowForwardSeek: false,
     inWindowPrerollMs: 10000,
     inWindowBackSecs: 6,
+    inWindowForwardSecs: 5,
     inWindowTrials: null,
+    outputMode: "shared",
     playbackProfile: "default",
     controlToggles: 0,
     stabilitySeconds: 0,
@@ -140,6 +143,9 @@ const parseArgs = (argv) => {
       case "--in-window-seek":
         options.inWindowSeek = true;
         break;
+      case "--in-window-forward-seek":
+        options.inWindowForwardSeek = true;
+        break;
       case "--in-window-preroll-ms":
         options.inWindowPrerollMs = readInteger(arg);
         break;
@@ -148,8 +154,18 @@ const parseArgs = (argv) => {
         index += 1;
         options.inWindowBackSecs = positiveNumber(next.trim(), arg);
         break;
+      case "--in-window-forward-secs":
+        if (!next) throw new Error("--in-window-forward-secs requires a value");
+        index += 1;
+        options.inWindowForwardSecs = positiveNumber(next.trim(), arg);
+        break;
       case "--in-window-trials":
         options.inWindowTrials = readInteger(arg);
+        break;
+      case "--output-mode":
+        if (!next) throw new Error("--output-mode requires a value");
+        index += 1;
+        options.outputMode = next.trim().toLowerCase();
         break;
       case "--playback-profile":
         if (!next) throw new Error("--playback-profile requires a value");
@@ -188,6 +204,9 @@ const parseArgs = (argv) => {
   if (options.inWindowTrials === null) {
     options.inWindowTrials = options.trials;
   }
+  if (!["shared", "exclusive"].includes(options.outputMode)) {
+    throw new Error("--output-mode must be one of: shared, exclusive");
+  }
   if (!["default", "bare", "light-dsp"].includes(options.playbackProfile)) {
     throw new Error("--playback-profile must be one of: default, bare, light-dsp");
   }
@@ -217,13 +236,18 @@ Options:
                                  Plays long enough to fill the behind-playhead retention
                                  ring, then seeks backward into the retained window and
                                  measures that seek's progress_after_convergence_ms.
-  --in-window-preroll-ms <ms>    Playback time before the backward seek so the ring fills
+  --in-window-forward-seek       Add the decoded-ahead forward-seek scenario (default off).
+                                 On the current pipeline this records the source-seek
+                                 fallback baseline; v2 must turn it into a window hit.
+  --in-window-preroll-ms <ms>    Playback time before a window seek so PCM becomes resident
                                  (default: 10000)
   --in-window-back-secs <s>      Backward hop distance from the live playhead. Must exceed
                                  the engine prefix gate (~0.26s @96k / ~0.56s @44.1k) and
                                  stay inside the retained behind-window (~40s @96k / ~95s
                                  @44.1k stereo for the 64 MiB ring) (default: 6)
+  --in-window-forward-secs <s>   Forward hop into decoded-ahead PCM (default: 5)
   --in-window-trials <n>         In-window scenario trial count (default: --trials value)
+  --output-mode <mode>           Audio backend mode: shared or exclusive (default: shared)
   --playback-profile <name>      Benchmark profile: default, bare, light-dsp (default: default)
   --control-toggles <n>          Toggle native DSP controls while playing and record latency
   --stability-seconds <seconds>  Sample playback diagnostics after latency trials
@@ -368,6 +392,42 @@ const waitForTrackSwitch = async (options, expectedPath) =>
 const playbackPhasesFromSnapshot = (snapshot) =>
   snapshot && snapshot.playback_phases ? snapshot.playback_phases : null;
 
+const firstNumericField = (sources, fields) => {
+  for (const source of sources) {
+    if (!source) continue;
+    for (const field of fields) {
+      if (typeof source[field] === "number" && Number.isFinite(source[field])) {
+        return source[field];
+      }
+    }
+  }
+  return null;
+};
+
+const pipelineV2FieldsFromSnapshot = (snapshot) => {
+  const playback = snapshot && snapshot.playback ? snapshot.playback : null;
+  const streaming = snapshot && snapshot.streaming_v2 ? snapshot.streaming_v2 : null;
+  const sources = [streaming, playback];
+  return {
+    output_sample_rate: firstNumericField(sources, ["output_sample_rate", "sample_rate"]),
+    callback_period_frames: firstNumericField(sources, ["callback_period_frames"]),
+    callback_period_ms: firstNumericField(sources, ["callback_period_ms"]),
+    seek_request_serial: firstNumericField(sources, ["seek_request_serial", "window_seek_request_serial"]),
+    seek_applied_serial: firstNumericField(sources, ["seek_applied_serial", "window_seek_applied_serial"]),
+    first_audible_target_frame: firstNumericField(sources, [
+      "first_audible_target_frame",
+      "window_seek_first_audible_frame"
+    ]),
+    decoder_open_count: firstNumericField(sources, ["decoder_open_count"]),
+    decoder_seek_count: firstNumericField(sources, ["decoder_seek_count"]),
+    network_request_count: firstNumericField(sources, ["network_request_count"]),
+    allocation_count: firstNumericField(sources, ["allocation_count", "pipeline_allocation_count"]),
+    allocation_bytes: firstNumericField(sources, ["allocation_bytes", "pipeline_allocation_bytes"]),
+    reservation_bytes: firstNumericField(sources, ["reservation_bytes", "decoded_reservation_bytes"]),
+    producer_thread_count: firstNumericField(sources, ["producer_thread_count"])
+  };
+};
+
 const playbackCountersFromSnapshot = (snapshot) => {
   const playback = snapshot && snapshot.playback ? snapshot.playback : {};
   const fields = [
@@ -434,7 +494,8 @@ const readPlaybackPhaseDiagnostics = async (options) => {
     latency_ms: Number(diagnostics.latencyMs.toFixed(3)),
     playback: playbackCountersFromSnapshot(diagnostics.snapshot),
     playback_queue: playbackQueueFromSnapshot(diagnostics.snapshot),
-    playback_phases: playbackPhasesFromSnapshot(diagnostics.snapshot)
+    playback_phases: playbackPhasesFromSnapshot(diagnostics.snapshot),
+    pipeline_v2: pipelineV2FieldsFromSnapshot(diagnostics.snapshot)
   };
 };
 
@@ -455,6 +516,7 @@ const firstPositionAdvanceMs = (operation, durations) => {
       return durations.stream_play_to_first_position_advanced_ms ?? null;
     case "seek_convergence":
     case "in_window_backward_seek":
+    case "in_window_forward_seek":
       return (
         durations.seek_request_returned_to_first_position_advanced_ms ??
         durations.seek_request_started_to_first_position_advanced_ms ??
@@ -614,40 +676,46 @@ const playUntilRingFills = async (options, prerollMs, label) => {
   return lastTime;
 };
 
-const measureInWindowBackwardSeek = async (options, trial, duration) => {
-  // Seek to a base position so there is room to hop backward and decoded audio
-  // ahead of the playhead, then play long enough to fill the retention ring.
+const measureInWindowDirectionalSeek = async (options, trial, duration, direction) => {
+  const isBackward = direction === "backward";
+  const operation = isBackward ? "in_window_backward_seek" : "in_window_forward_seek";
+  const distanceSecs = isBackward ? options.inWindowBackSecs : options.inWindowForwardSecs;
+
+  // Seek to a base position with room on both sides, then let the producer fill
+  // retained and decoded-ahead PCM before issuing the measured request.
   const baseSecs = Math.max(0.5, Math.min(duration - 1, duration * 0.5));
   await requestStateCommand(options, "/seek", { position: baseSecs });
   await waitForSeekConvergence(options, baseSecs);
   const playheadSecs = await playUntilRingFills(
     options,
     options.inWindowPrerollMs,
-    `trial ${trial} in-window preroll`
+    `trial ${trial} ${direction} in-window preroll`
   );
 
-  // Hop backward into the retained behind-playhead window.
-  const targetSecs = Math.max(0.5, playheadSecs - options.inWindowBackSecs);
+  const signedDistanceSecs = isBackward ? -distanceSecs : distanceSecs;
+  const targetSecs = Math.max(0.5, Math.min(duration - 1, playheadSecs + signedDistanceSecs));
   const phaseDiagnosticsBeforeCommand = await readPlaybackPhaseDiagnostics(options);
   const command = await requestStateCommand(options, "/seek", { position: targetSecs });
   const convergence = await waitForSeekConvergence(options, targetSecs);
   const progress = await waitForProgressAdvance(
     options,
     convergence.value.state.current_time,
-    `trial ${trial} in-window backward seek progress`,
+    `trial ${trial} in-window ${direction} seek progress`,
     options.seekTimeoutMs
   );
   const phaseDiagnosticsAtSuccess = await readPlaybackPhaseDiagnostics(options);
   const durations = phaseDurations(phaseDiagnosticsAtSuccess);
-  const firstPositionMs = firstPositionAdvanceMs("in_window_backward_seek", durations);
+  const firstPositionMs = firstPositionAdvanceMs(operation, durations);
   const progressProxyFromRequestReturnedMs = seekProgressProxyFromRequestReturnedMs(
     convergence.elapsed_ms,
     progress.elapsed_ms
   );
   return {
     trial,
-    operation: "in_window_backward_seek",
-    back_secs: Number(options.inWindowBackSecs.toFixed(3)),
+    operation,
+    direction,
+    distance_secs: Number(distanceSecs.toFixed(3)),
+    ...(isBackward ? { back_secs: Number(distanceSecs.toFixed(3)) } : {}),
     playhead_before_seek_secs: Number(playheadSecs.toFixed(3)),
     target_secs: Number(targetSecs.toFixed(3)),
     request_latency_ms: Number(command.response.latencyMs.toFixed(3)),
@@ -676,6 +744,12 @@ const measureInWindowBackwardSeek = async (options, trial, duration) => {
     phase_diagnostics_at_success: phaseDiagnosticsAtSuccess
   };
 };
+
+const measureInWindowBackwardSeek = (options, trial, duration) =>
+  measureInWindowDirectionalSeek(options, trial, duration, "backward");
+
+const measureInWindowForwardSeek = (options, trial, duration) =>
+  measureInWindowDirectionalSeek(options, trial, duration, "forward");
 
 const measureNextTrack = async (options) => {
   if (!options.nextTrack) return null;
@@ -949,6 +1023,76 @@ const summarizeOperationDiagnosticDeltas = (measurements) => {
   return summary;
 };
 
+const buildPipelineV2Evidence = (report) => {
+  const latest = pipelineV2FieldsFromSnapshot(report.diagnostics && report.diagnostics.after);
+  const seekSamples = (report.measurements || [])
+    .filter((measurement) =>
+      ["seek_convergence", "in_window_backward_seek", "in_window_forward_seek"].includes(
+        measurement.operation
+      )
+    )
+    .map((measurement) => {
+      const phaseDiagnostics = measurement.phase_diagnostics_at_success || {};
+      const phaseTimestamps =
+        phaseDiagnostics.playback_phases && phaseDiagnostics.playback_phases.timestamps_ms
+          ? phaseDiagnostics.playback_phases.timestamps_ms
+          : {};
+      const v2 = phaseDiagnostics.pipeline_v2 || {};
+      const outputSampleRate =
+        typeof v2.output_sample_rate === "number" ? v2.output_sample_rate : null;
+      return {
+        operation: measurement.operation,
+        trial: measurement.trial ?? null,
+        direction: measurement.direction ?? null,
+        distance_secs: measurement.distance_secs ?? null,
+        target_secs: measurement.target_secs ?? null,
+        target_output_frame:
+          typeof measurement.target_secs === "number" && typeof outputSampleRate === "number"
+            ? Math.round(measurement.target_secs * outputSampleRate)
+            : null,
+        seek_request_serial: v2.seek_request_serial ?? null,
+        seek_applied_serial: v2.seek_applied_serial ?? null,
+        first_audible_target_frame: v2.first_audible_target_frame ?? null,
+        first_position_advance_ms: measurement.first_position_advance_ms ?? null,
+        decoder_open_count_delta:
+          typeof phaseTimestamps.seek_decoder_open_started === "number" ? 1 : 0,
+        decoder_seek_count_delta:
+          typeof phaseTimestamps.seek_decoder_seek_started === "number" ? 1 : 0,
+        network_request_count_delta: 0
+      };
+    });
+  const processSummary = report.process_metrics && report.process_metrics.summary;
+  return {
+    schema_version: 2,
+    transport: "lyne_native_playback",
+    source_kind: "local_file",
+    output_mode: report.parameters.output_mode,
+    callback_period_frames: latest.callback_period_frames,
+    callback_period_ms: latest.callback_period_ms,
+    allocation_count: latest.allocation_count,
+    allocation_bytes: latest.allocation_bytes,
+    reservation_bytes: latest.reservation_bytes,
+    decoder_open_count: latest.decoder_open_count,
+    decoder_seek_count: latest.decoder_seek_count,
+    network_request_count: latest.network_request_count ?? 0,
+    producer_thread_count: latest.producer_thread_count,
+    peak_process_private_bytes: processSummary ? processSummary.peak_private_memory_bytes ?? null : null,
+    peak_process_threads: processSummary ? processSummary.peak_threads ?? null : null,
+    seek_samples: seekSamples,
+    availability: {
+      callback_period: latest.callback_period_ms === null ? "not_exposed_by_current_runtime" : "measured",
+      seek_serial: latest.seek_applied_serial === null ? "not_exposed_by_current_runtime" : "measured",
+      first_audible_target:
+        latest.first_audible_target_frame === null ? "position_progress_proxy_only" : "measured",
+      decoder_counts: "derived_per_seek_from_phase_markers",
+      network_requests: "known_zero_for_local_file_fixture",
+      allocations: latest.allocation_bytes === null ? "measured_by_pcm_window_microbenchmark" : "measured",
+      reservations: latest.reservation_bytes === null ? "ledger_not_implemented" : "measured",
+      producer_threads: latest.producer_thread_count === null ? "process_peak_only" : "measured"
+    }
+  };
+};
+
 const runBenchmark = async (options) => {
   const report = {
     probe: "lyne-playback-latency-benchmark",
@@ -968,9 +1112,12 @@ const runBenchmark = async (options) => {
       seek_fractions: options.seekFractions,
       skip_seek: options.skipSeek,
       in_window_seek: options.inWindowSeek,
+      in_window_forward_seek: options.inWindowForwardSeek,
       in_window_preroll_ms: options.inWindowPrerollMs,
       in_window_back_secs: options.inWindowBackSecs,
+      in_window_forward_secs: options.inWindowForwardSecs,
       in_window_trials: options.inWindowTrials,
+      output_mode: options.outputMode,
       playback_profile: options.playbackProfile,
       control_toggles: options.controlToggles,
       stability_seconds: options.stabilitySeconds,
@@ -985,6 +1132,7 @@ const runBenchmark = async (options) => {
     control_updates: null,
     stability: null,
     process_metrics: null,
+    output_setup: null,
     limitations: [
       `This benchmark uses /state progress beyond ${options.progressDeltaSecs}s as an audible-playback proxy; it does not capture analog output.`,
       "Latency includes HTTP, server handler, decode/load, and state polling resolution.",
@@ -1012,13 +1160,17 @@ const runBenchmark = async (options) => {
       report.server = { mode: "external" };
     }
 
+    report.output_setup = await requestStateCommand(options, "/configure_output", {
+      device_id: null,
+      exclusive: options.outputMode === "exclusive"
+    });
     report.profile_setup = await applyPlaybackProfile(options);
     report.diagnostics.before = (await readRuntimeDiagnostics(options)).snapshot;
     const firstLoad = await requestStateCommand(options, "/load", { path: options.track, autoplay: true });
     await waitForProgressAdvance(options, 0, "initial playback warmup");
     const warmState = await readState(options);
     const duration = Number(warmState.state.duration || firstLoad.state?.duration || 0);
-    const needsDuration = !options.skipSeek || options.inWindowSeek;
+    const needsDuration = !options.skipSeek || options.inWindowSeek || options.inWindowForwardSeek;
     if (needsDuration && (!Number.isFinite(duration) || duration <= 2)) {
       throw new Error(`Track duration is too short or unknown for seek benchmark: ${duration}`);
     }
@@ -1033,13 +1185,20 @@ const runBenchmark = async (options) => {
       }
     }
 
-    if (options.inWindowSeek) {
+    if (options.inWindowSeek || options.inWindowForwardSeek) {
       // Ensure the track is loaded and playing before the in-window scenario;
       // earlier trials may have left it stopped/paused.
       await requestStateCommand(options, "/load", { path: options.track, autoplay: true });
       await waitForProgressAdvance(options, 0, "in-window scenario warmup");
-      for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
-        report.measurements.push(await measureInWindowBackwardSeek(options, trial, duration));
+      if (options.inWindowSeek) {
+        for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
+          report.measurements.push(await measureInWindowBackwardSeek(options, trial, duration));
+        }
+      }
+      if (options.inWindowForwardSeek) {
+        for (let trial = 1; trial <= options.inWindowTrials; trial += 1) {
+          report.measurements.push(await measureInWindowForwardSeek(options, trial, duration));
+        }
       }
     }
 
@@ -1120,16 +1279,20 @@ const runBenchmark = async (options) => {
         exit_code: server.child.exitCode,
         kept_running: options.keepServer,
         stdout_tail: server.logs.stdout,
-        stderr_tail: server.logs.stderr
+        stderr_tail: server.logs.stderr,
+        stderr_highlights: server.logs.stderrHighlights
       };
     }
   }
+
+  report.pipeline_v2_evidence = buildPipelineV2Evidence(report);
 
   return report;
 };
 
 const main = async () => {
   const options = parseArgs(process.argv.slice(2));
+  options.streamingFirstBuffer = options.inWindowSeek || options.inWindowForwardSeek;
   options.baseUrlExplicit = process.argv.includes("--base-url") || Boolean(process.env.LYNE_AUDIO_SERVER_URL);
   await ensureAudioFile(options.track, "track");
   if (options.nextTrack) {

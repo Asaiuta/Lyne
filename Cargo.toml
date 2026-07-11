@@ -93,6 +93,18 @@ harness = false
 name = "backend_library_scan_perf"
 harness = false
 
+[[bench]]
+name = "pcm_window_perf"
+harness = false
+
+[[bench]]
+name = "window_seek_perf"
+harness = false
+
+[[bench]]
+name = "source_seek_perf"
+harness = false
+
 [dependencies]
 audio-engine-core = { git = "https://github.com/Asaiuta/audio-engine-core", branch = "main" }
 audio-runtime-paths = { path = "crates/audio-runtime-paths" }
@@ -151,10 +163,12 @@ numpy = { version = "0.23", optional = true }
 image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
 rustfft = "6.2"
 ebur128 = "0.1"
+loom = "0.7"
 
 [features]
 default = []
 python = ["pyo3", "numpy"]
+loom-tests = []
 
 [profile.audio-dev]
 inherits = "dev"

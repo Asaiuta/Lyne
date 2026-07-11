@@ -279,6 +279,7 @@ fn promote_pending_buffer_if_matching(
         clear_pending_after_manual_promote(shared);
         return Ok(false);
     };
+    let reservation = shared.pending_buffer_reservation.swap(None);
 
     let pending_total_frames = shared.pending_total_frames.load(Ordering::Relaxed);
     let pending_metadata = shared.pending_metadata.write().take().unwrap_or_default();
@@ -301,7 +302,7 @@ fn promote_pending_buffer_if_matching(
         .sample_rate
         .store(pending_sample_rate, Ordering::Relaxed);
     shared.channels.store(pending_channels, Ordering::Relaxed);
-    shared.publish_audio_buffer(samples);
+    shared.publish_audio_buffer_with_reservation(samples, reservation);
     shared.is_loading.store(false, Ordering::Release);
     shared.load_progress.store(100, Ordering::Relaxed);
     *shared.load_error.write() = None;
@@ -328,6 +329,7 @@ fn promote_pending_buffer_if_matching(
 
 fn clear_pending_after_manual_promote(shared: &SharedState) {
     shared.pending_buffer.store(None);
+    shared.pending_buffer_reservation.store(None);
     shared.pending_total_frames.store(0, Ordering::Relaxed);
     shared.pending_sample_rate.store(44100, Ordering::Relaxed);
     shared.pending_channels.store(2, Ordering::Relaxed);
@@ -372,7 +374,14 @@ mod tests {
         assert!(promoted);
         let current = shared.audio_buffer.load_full();
         assert_eq!(Arc::as_ptr(&current), pending_ptr);
-        assert_eq!(shared.position_frames.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Relaxed),
+            0
+        );
         assert_eq!(shared.total_frames.load(Ordering::Relaxed), 2);
         assert_eq!(
             shared.current_track_path.read().as_deref(),

@@ -31,7 +31,7 @@ const persistentSettingsFixture = (
   use_cache: false,
   preemptive_resample: true,
   streaming_first_buffer: false,
-  streaming_full_buffer_limit_mib: 256,
+  streaming_pcm_window_limit_mib: 256,
   use_next_prefetch: true,
   ...overrides
 });
@@ -57,7 +57,7 @@ test("settings API parses streaming buffer fields", async () => {
       status: "success",
       settings: persistentSettingsFixture({
         streaming_first_buffer: true,
-        streaming_full_buffer_limit_mib: 128
+        streaming_pcm_window_limit_mib: 128
       })
     })
   });
@@ -65,7 +65,7 @@ test("settings API parses streaming buffer fields", async () => {
   const settings = await client.getSettings();
 
   assert.equal(settings.streaming_first_buffer, true);
-  assert.equal(settings.streaming_full_buffer_limit_mib, 128);
+  assert.equal(settings.streaming_pcm_window_limit_mib, 128);
 });
 
 test("settings API rejects invalid streaming buffer payloads", async () => {
@@ -74,7 +74,7 @@ test("settings API rejects invalid streaming buffer payloads", async () => {
       status: "success",
       settings: {
         ...persistentSettingsFixture(),
-        streaming_full_buffer_limit_mib: 128.5
+        streaming_pcm_window_limit_mib: 128.5
       }
     })
   });
@@ -93,13 +93,13 @@ test("settings API saves streaming buffer updates", async () => {
 
   await client.saveSettings({
     streaming_first_buffer: true,
-    streaming_full_buffer_limit_mib: 0
+    streaming_pcm_window_limit_mib: 0
   });
 
   assert.deepEqual(savedBody, {
     settings: {
       streaming_first_buffer: true,
-      streaming_full_buffer_limit_mib: 0
+      streaming_pcm_window_limit_mib: 0
     }
   });
 });
