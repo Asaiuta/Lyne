@@ -723,6 +723,7 @@ mod tests {
         assert_eq!(session.source_sample_rate, 44_100);
         assert_eq!(session.output_sample_rate, 44_100);
         assert_eq!(session.channels, 1);
+        assert_eq!(session.total_frames, 4);
     }
 
     #[test]
@@ -743,6 +744,7 @@ mod tests {
 
         assert_eq!(session.source_sample_rate, 48_000);
         assert_eq!(session.output_sample_rate, 48_000);
+        assert_eq!(session.total_frames, 4);
     }
 
     #[test]
