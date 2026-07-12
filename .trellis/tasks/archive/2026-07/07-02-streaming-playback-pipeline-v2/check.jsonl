@@ -1,0 +1,12 @@
+{"file":".trellis/tasks/07-02-streaming-playback-pipeline-v2/prd.md","reason":"Verify user-value, maximum-performance requirements, exact seek behavior, memory ownership, and quantitative acceptance gates."}
+{"file":".trellis/tasks/07-02-streaming-playback-pipeline-v2/design.md","reason":"Verify slot safety proof, absolute-frame model, producer persistence, seek protection, source reuse, cache-line ownership, and rejected alternatives."}
+{"file":".trellis/tasks/07-02-streaming-playback-pipeline-v2/implement.md","reason":"Verify phase ordering proves the primitive and benchmarks before integration and deletes the old transport before completion."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Confirm no callback allocation/lock/I/O/logging/destruction and that the final spec replaces the obsolete queue/ring contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Confirm typed current-generation errors and stale generation/epoch/serial suppression across source, producer, window, and callback boundaries."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Confirm callback/per-slot logging is absent and source errors sanitize credentials and signed URLs."}
+{"file":".trellis/tasks/06-08-shared-state-split/prd.md","reason":"Confirm one PlaybackClock authority and one cache-line-aware streaming RT shape were implemented rather than parallel state splits."}
+{"file":".trellis/tasks/07-02-remote-range-seek/design.md","reason":"Confirm the source seam supports persistent probe/cache/identity/recovery behavior required by remote playback."}
+{"file":"src/player/state.rs","reason":"Until the planned streaming modules exist, verify the current queue/ring and atomic ownership boundary is fully replaced rather than mirrored by new state."}
+{"file":"src/player/loading.rs","reason":"Until the planned producer module exists, verify decoder reopen, per-block allocation/copy, fixed polling, and full-buffer duplication are actually removed during migration."}
+{"file":"src/player/callback.rs","reason":"Verify distance-independent seek application, exact slot reads, release on every return, no RT destruction, and callback tail benchmarks."}
+{"file":"src/player/buffer_budget.rs","reason":"Verify all decoded PCM owners use one exact capacity reservation ledger and no legacy path bypasses the process limit."}

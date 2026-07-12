@@ -19,19 +19,21 @@
   by the normal lockfile integration in this repository.
 - Update task markers after each phase, not only at the end.
 
-## Execution Status - 2026-07-10
+## Execution Status - 2026-07-12
 
-- [x] Phase 0 full baseline matrix. Shared output passes the consolidated
-  44.1/48/96/192 kHz stereo plus 5.1/7.1 matrix. Exclusive output passes all
-  stereo rows; this machine's Realtek headphone endpoint explicitly rejects
-  every probed 5.1/7.1 exclusive format, which is recorded as unsupported
-  hardware capability rather than a pipeline failure.
-- [x] Phase 1 isolated PCM window primitive. The primitive is not used by the
-  production player or callback; it is exposed only through benchmark support.
-- [ ] Phase 2 decoded-memory ledger and settings contract. The process ledger,
-  PCM-window reservation, diagnostics, and persisted/API/UI field migration are
-  implemented. Legacy current/pending/cache buffers still need reservation
-  tokens coupled to their exact allocation lifetime before this phase closes.
+- [x] Phase 0 baseline matrix and old-path evidence.
+- [x] Phase 1 isolated PCM window primitive, Miri coverage, and Loom models.
+- [x] Phase 2 exact decoded-memory ledger and settings/API/UI migration.
+- [x] Phase 3 playback clock and streaming ownership planes.
+- [x] Phase 4 persistent producer, decoder, and opened-source session.
+- [x] Phase 5 allocation-free callback rendering plus Ready/EOF integration.
+- [x] Phase 6 O(1) forward/backward resident-window seek.
+- [x] Phase 7 persistent out-of-window source seek with latest-wins control.
+- [x] Phase 8 nested diagnostics, remote source seam, and settings surface.
+- [x] Phase 9 physical deletion of the old queue/ring/replay transport.
+- [x] Phase 10 task-owned static, correctness, performance, and real-playback
+  verification. The implementation is complete; environment-specific residual
+  gates are recorded below rather than represented as pipeline failures.
 
 Phase 0/1 evidence:
 
@@ -1053,7 +1055,8 @@ Progress:
 - Real playback exposed and fixed missing v2 duration publication. Sessions now
   preserve probed total frames, map them to output-rate frames with checked
   integer arithmetic, and publish them during audio-thread install.
-- Full-workspace Clippy remains blocked by existing unrelated warnings across
+- `cargo clippy --workspace --all-targets` exits successfully. A stricter
+  `-D warnings` run remains blocked by existing unrelated warnings across
   database, WebDAV, settings, WASAPI, and library handler modules. The source
   seek/callback Cargo bench harness is also blocked by the repository's mixed
   panic=abort/unwind release artifacts; direct PCM/window binaries pass, while
