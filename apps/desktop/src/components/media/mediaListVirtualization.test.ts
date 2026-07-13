@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MEDIA_LIST_ROW_HEIGHT_PX,
+  resetMediaListVisibleRangeToStart,
   resolveMediaListVisibleRange,
   shouldVirtualizeMediaList
 } from "./mediaListVirtualization";
@@ -57,4 +58,15 @@ test("MediaList clamps large-list ranges when scrollTop is beyond the current re
 
   assert.equal(range.end, 121);
   assert.equal(range.end > range.start, true);
+});
+
+test("MediaList resets a filtered window to the start without expanding its row count", () => {
+  assert.deepEqual(resetMediaListVisibleRangeToStart({ start: 120, end: 138 }), {
+    start: 0,
+    end: 18
+  });
+  assert.deepEqual(resetMediaListVisibleRangeToStart({ start: 0, end: 0 }), {
+    start: 0,
+    end: 1
+  });
 });

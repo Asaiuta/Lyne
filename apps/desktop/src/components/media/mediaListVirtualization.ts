@@ -23,6 +23,13 @@ export const shouldVirtualizeMediaList = (
   threshold = MEDIA_LIST_VIRTUALIZE_THRESHOLD
 ): boolean => totalItems > threshold;
 
+export function resetMediaListVisibleRangeToStart(
+  range: Readonly<MediaListVisibleRange>
+): MediaListVisibleRange {
+  const count = Math.max(1, Math.trunc(range.end) - Math.max(0, Math.trunc(range.start)));
+  return { start: 0, end: count };
+}
+
 export function resolveMediaListVisibleRange(
   options: ResolveMediaListVisibleRangeOptions
 ): MediaListVisibleRange {

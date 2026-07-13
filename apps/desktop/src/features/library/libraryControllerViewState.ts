@@ -1,5 +1,6 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { Accessor } from "solid-js";
+import { resetMediaListVisibleRangeToStart } from "../../components/media/mediaListVirtualization";
 import type {
   LibraryFolderSummary,
   LibraryTrackGroupsResponse,
@@ -33,9 +34,11 @@ import {
   type LibraryWorkerViewResult
 } from "./libraryWorkerClient";
 import type { LibraryWorkerRow } from "./libraryWorkerProtocol";
+import { createLibraryVisibleRowsStore } from "./libraryVisibleRowsStore";
 
 const DEFAULT_LIBRARY_RANGE = { start: 0, end: 80 };
 const FULL_ROW_LIBRARY_TABS: readonly LibraryTab[] = ["folders"];
+const EMPTY_LIBRARY_ITEMS: LibraryListItem[] = [];
 
 interface LibraryControllerViewStateOptions {
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -71,7 +74,8 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
   const [roots, setRoots] = createSignal<LibraryRoot[]>([]);
   const [libraryRevision, setLibraryRevision] = createSignal<string | null>(null);
   const [libraryTotalCount, setLibraryTotalCount] = createSignal<number>(0);
-  const [virtualRows, setVirtualRows] = createSignal<LibraryListItem[]>([]);
+  const visibleRowsStore = createLibraryVisibleRowsStore();
+  const virtualRows = visibleRowsStore.rows;
   const [fullRows, setFullRows] = createSignal<LibraryListItem[]>([]);
   const [artistGroupOptions, setArtistGroupOptions] = createSignal<LibraryTrackGroupSummary[]>([]);
   const [albumGroupOptions, setAlbumGroupOptions] = createSignal<LibraryTrackGroupSummary[]>([]);
@@ -117,12 +121,14 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     );
 
   const applyWorkerView = (result: LibraryWorkerViewResult) => {
-    setLoadedVirtualRange(result.range);
-    setVirtualRows(result.rows.map(adaptWorkerRow));
-    setVirtualTotal(result.total);
-    setVirtualSizeBytes(result.totalSizeBytes);
-    setFolderOptions(result.folders);
-    setViewReady(true);
+    batch(() => {
+      setLoadedVirtualRange(result.range);
+      visibleRowsStore.replace(result.rows.map(adaptWorkerRow));
+      setVirtualTotal(result.total);
+      setVirtualSizeBytes(result.totalSizeBytes);
+      setFolderOptions(result.folders);
+      setViewReady(true);
+    });
   };
 
   const workerClient = new LibraryWorkerClient({
@@ -158,7 +164,8 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
 
   const requestGroupedView = (
     kind: "artists" | "albums",
-    selectedGroupKey?: string | null
+    selectedGroupKey?: string | null,
+    refreshOptions = false
   ) => {
     const requestId = latestGroupRequestId + 1;
     latestGroupRequestId = requestId;
@@ -176,11 +183,11 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
         setFolderOptions(payload.folders);
         const rows = payload.rows.map(adaptTrackSummary);
         if (kind === "artists") {
-          setArtistGroupOptions(payload.groups);
+          if (refreshOptions) setArtistGroupOptions(payload.groups);
           setSelectedArtistGroupKey(payload.selected_group_key);
           setArtistGroupRows(rows);
         } else {
-          setAlbumGroupOptions(payload.groups);
+          if (refreshOptions) setAlbumGroupOptions(payload.groups);
           setSelectedAlbumGroupKey(payload.selected_group_key);
           setAlbumGroupRows(rows);
         }
@@ -231,7 +238,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     setSelectedAlbumGroupKey(null);
     setArtistGroupRows([]);
     setAlbumGroupRows([]);
-    setVirtualRows([]);
+    visibleRowsStore.clear();
     setFullRows([]);
     setVirtualTotal(0);
     setVirtualSizeBytes(0);
@@ -267,7 +274,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
       .filter((value) => value.length > 0);
     const timer = window.setTimeout(() => {
       setDebouncedQueries(nextQueries);
-      setVirtualRange(DEFAULT_LIBRARY_RANGE);
+      setVirtualRange(resetMediaListVisibleRangeToStart);
     }, 180);
     onCleanup(() => window.clearTimeout(timer));
   });
@@ -283,11 +290,11 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     selectedFolder();
     sort();
     if (tab === "artists") {
-      requestGroupedView("artists", untrack(selectedArtistGroupKey));
+      requestGroupedView("artists", untrack(selectedArtistGroupKey), true);
       return;
     }
     if (tab === "albums") {
-      requestGroupedView("albums", untrack(selectedAlbumGroupKey));
+      requestGroupedView("albums", untrack(selectedAlbumGroupKey), true);
       return;
     }
     if (FULL_ROW_LIBRARY_TABS.includes(tab)) {
@@ -333,7 +340,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     artistGroupOptions().map((group) => ({
       key: group.key,
       label: group.label ?? t("library.group.unknownArtist"),
-      songs: selectedArtistGroupKey() === group.key ? artistGroupRows() : [],
+      songs: EMPTY_LIBRARY_ITEMS,
       count: group.count,
       artworkUrl: null,
       detail: undefined
@@ -343,7 +350,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     albumGroupOptions().map((group) => ({
       key: group.key,
       label: group.label ?? t("library.group.unknownAlbum"),
-      songs: selectedAlbumGroupKey() === group.key ? albumGroupRows() : [],
+      songs: EMPTY_LIBRARY_ITEMS,
       count: group.count,
       artworkUrl: resolveGroupArtworkUrl(group),
       detail: undefined
@@ -374,7 +381,7 @@ export function createLibraryControllerViewState(options: LibraryControllerViewS
     libraryTotalCount,
     setLibraryTotalCount,
     virtualRows,
-    setVirtualRows,
+    patchVirtualRow: visibleRowsStore.patch,
     fullRows,
     setFullRows,
     virtualTotal,

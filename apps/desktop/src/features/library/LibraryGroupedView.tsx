@@ -23,6 +23,7 @@ const EMPTY_LIBRARY_ITEMS: LibraryListItem[] = [];
 interface LibraryGroupedViewProps {
   kind: LibraryGroupedKind;
   groups: LibraryGroup[];
+  selectedItems: LibraryListItem[];
   selectedGroupKey: string | null;
   currentTrackPath: string | null;
   currentMediaId: string | null;
@@ -65,7 +66,9 @@ export function LibraryGroupedView(props: LibraryGroupedViewProps) {
     if (!selected) return first;
     return props.groups.find((group) => group.key === selected) ?? first;
   });
-  const selectedSongs = createMemo<LibraryListItem[]>(() => selectedGroup()?.songs ?? EMPTY_LIBRARY_ITEMS);
+  const selectedSongs = createMemo<LibraryListItem[]>(() =>
+    selectedGroup() ? props.selectedItems : EMPTY_LIBRARY_ITEMS
+  );
 
   createEffect(() => {
     props.onActiveItemsChange?.(selectedSongs());
