@@ -59,6 +59,10 @@ function isMovingMode(mode: AppearanceMode): boolean {
   return mode === "particles" || mode === "vinyl";
 }
 
+function isCoverMode(mode: AppearanceMode): boolean {
+  return mode === "cover-blur" || mode === "cover-immersive";
+}
+
 const signals = createRoot(() => {
   const [requestedMode, setRequestedModeSignal] = createSignal<AppearanceMode | null>(readStoredMode());
   const [runtimeState, setRuntimeState] = createSignal<AppearanceRuntimeState>({
@@ -77,9 +81,13 @@ const signals = createRoot(() => {
 });
 
 function baseMode(): AppearanceMode {
+  const state = signals.runtimeState();
+  if (!state.backgroundEnabled) {
+    return "solid";
+  }
+
   const requested = signals.requestedMode();
-  if (requested) return requested;
-  return signals.runtimeState().backgroundEnabled ? "cover-blur" : "solid";
+  return requested && isCoverMode(requested) ? requested : "cover-blur";
 }
 
 function effectiveMode(): AppearanceMode {
@@ -110,13 +118,18 @@ function installBrowserRuntime(): () => void {
 
   const media = window.matchMedia("(prefers-reduced-motion: reduce)");
   const syncReducedMotion = () => {
+    document.documentElement.dataset.reducedMotion = String(media.matches);
     signals.setRuntimeState((current) => ({ ...current, reducedMotion: media.matches }));
   };
   const syncWindowState = () => {
+    const windowFocused = document.hasFocus();
+    const windowVisible = document.visibilityState !== "hidden";
+    document.documentElement.dataset.windowFocused = String(windowFocused);
+    document.documentElement.dataset.windowVisible = String(windowVisible);
     signals.setRuntimeState((current) => ({
       ...current,
-      windowFocused: document.hasFocus(),
-      windowVisible: document.visibilityState !== "hidden"
+      windowFocused,
+      windowVisible
     }));
   };
   const handleModeEvent = (event: Event) => {
@@ -140,6 +153,9 @@ function installBrowserRuntime(): () => void {
     document.removeEventListener("visibilitychange", syncWindowState);
     window.removeEventListener(APPEARANCE_MODE_EVENT, handleModeEvent);
     media.removeEventListener("change", syncReducedMotion);
+    delete document.documentElement.dataset.reducedMotion;
+    delete document.documentElement.dataset.windowFocused;
+    delete document.documentElement.dataset.windowVisible;
   };
 }
 

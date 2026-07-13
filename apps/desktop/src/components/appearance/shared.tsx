@@ -12,6 +12,7 @@ export interface CoverStrategyProps {
 export interface MovingStrategyProps {
   readonly coverUrl: string | null;
   readonly active: boolean;
+  readonly maxFps?: number;
 }
 
 export interface CoverMediaState {

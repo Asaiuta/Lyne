@@ -11,6 +11,7 @@ interface AppearanceLayerProps {
   readonly enabled: boolean;
   readonly blur?: number;
   readonly maskOpacity?: number;
+  readonly dynamicBackgroundMaxFps: number;
   readonly fullPlayerOpen: boolean;
 }
 export function AppearanceLayer(props: AppearanceLayerProps) {
@@ -58,7 +59,11 @@ export function AppearanceLayer(props: AppearanceLayerProps) {
         />
       </Match>
       <Match when={mode() === "particles"}>
-        <ParticlesBg coverUrl={props.coverUrl} active={movingActive()} />
+        <ParticlesBg
+          coverUrl={props.coverUrl}
+          active={movingActive()}
+          maxFps={props.dynamicBackgroundMaxFps}
+        />
       </Match>
       <Match when={mode() === "vinyl"}>
         <VinylBg coverUrl={props.coverUrl} active={movingActive()} />
