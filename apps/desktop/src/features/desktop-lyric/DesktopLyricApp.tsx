@@ -174,7 +174,7 @@ export function DesktopLyricApp() {
   /** Whether the seek-interpolation loop has work to do. Reading these inside
    *  the rAF step is untracked; the effect below restarts the loop when the
    *  transition back to true happens. */
-  const shouldAnimate = () => playing() && hasLyrics();
+  const shouldAnimate = () => playing() && hasLyrics() && !document.hidden;
 
   const step = () => {
     if (!shouldAnimate()) {
@@ -288,6 +288,15 @@ export function DesktopLyricApp() {
   };
 
   onMount(() => {
+    const syncVisibility = () => {
+      if (document.hidden) {
+        if (raf !== 0) cancelAnimationFrame(raf);
+        raf = 0;
+        return;
+      }
+      if (playing() && hasLyrics()) startAnimation();
+    };
+    document.addEventListener("visibilitychange", syncVisibility);
     const unlistens: Array<Promise<() => void>> = [];
 
     unlistens.push(
@@ -338,6 +347,7 @@ export function DesktopLyricApp() {
       raf = 0;
       resizeObserver?.disconnect();
       if (hoverTimer) clearTimeout(hoverTimer);
+      document.removeEventListener("visibilitychange", syncVisibility);
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerdown", onBodyPointerDown);
       void boundsWatcher.then((off) => off());

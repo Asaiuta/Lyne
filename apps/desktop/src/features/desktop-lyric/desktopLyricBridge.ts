@@ -141,7 +141,7 @@ export const watchDesktopLyricBounds = async (): Promise<() => void> => {
   };
 };
 
-/** Resize the overlay height to fit the configured font (SPlayer-style). */
+/** Resize the overlay height to fit the configured font. */
 export const fitDesktopLyricHeight = async (
   fontSize: number,
   doubleLine: boolean
@@ -162,4 +162,3 @@ export const fitDesktopLyricHeight = async (
     console.warn("Failed to fit desktop lyric height", error);
   }
 };
-
