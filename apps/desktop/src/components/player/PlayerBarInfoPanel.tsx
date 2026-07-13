@@ -3,9 +3,9 @@ import { CoverArt } from "../CoverArt";
 import { MarqueeText } from "../MarqueeText";
 import {
   IconExpand,
-  IconSPlayerFavorite,
-  IconSPlayerFavoriteBorder,
-  IconSPlayerFormatList
+  IconFavoriteFilled,
+  IconFavoriteBorderFilled,
+  IconFormatListFilled
 } from "../icons";
 import { NaiveDropdown, type NaiveDropdownOption } from "../../shared/ui/naive";
 
@@ -121,8 +121,8 @@ export function PlayerBarInfoPanel(props: PlayerBarInfoPanelProps) {
             title={props.meta.favoriteLabel}
             onClick={() => props.meta.onToggleLike?.()}
           >
-            <Show when={props.meta.isLiked} fallback={<IconSPlayerFavoriteBorder />}>
-              <IconSPlayerFavorite />
+            <Show when={props.meta.isLiked} fallback={<IconFavoriteBorderFilled />}>
+              <IconFavoriteFilled />
             </Show>
           </button>
           <NaiveDropdown
@@ -143,7 +143,7 @@ export function PlayerBarInfoPanel(props: PlayerBarInfoPanelProps) {
               aria-label={props.menu.label}
               title={props.menu.label}
             >
-              <IconSPlayerFormatList />
+              <IconFormatListFilled />
             </button>
           </NaiveDropdown>
         </div>

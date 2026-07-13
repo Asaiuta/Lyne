@@ -1,16 +1,12 @@
-/* ── Page transition presets (ported from SPlayer animate.scss) ────── */
-/* 离场动画尽量短，减少 out-in 等待时间 */
-
-/* ── slide (default) ─────────────────────────────────────────────── */
 .page-slide-enter-active {
   transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
+    opacity var(--motion-duration-control) var(--motion-ease-native),
+    transform var(--motion-duration-control) var(--motion-ease-native);
 }
 .page-slide-leave-active {
   transition:
-    opacity 0.1s ease,
-    transform 0.1s ease;
+    opacity var(--motion-duration-exit) var(--motion-ease-native),
+    transform var(--motion-duration-exit) var(--motion-ease-native);
 }
 .page-slide-enter-from,
 .page-slide-leave-to {
@@ -20,10 +16,10 @@
 
 /* ── fade ────────────────────────────────────────────────────────── */
 .page-fade-enter-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-control) var(--motion-ease-native);
 }
 .page-fade-leave-active {
-  transition: opacity 0.1s ease;
+  transition: opacity var(--motion-duration-exit) var(--motion-ease-native);
 }
 .page-fade-enter-from,
 .page-fade-leave-to {
@@ -33,13 +29,13 @@
 /* ── zoom ────────────────────────────────────────────────────────── */
 .page-zoom-enter-active {
   transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
+    opacity var(--motion-duration-control) var(--motion-ease-native),
+    transform var(--motion-duration-control) var(--motion-ease-native);
 }
 .page-zoom-leave-active {
   transition:
-    opacity 0.1s ease,
-    transform 0.1s ease;
+    opacity var(--motion-duration-exit) var(--motion-ease-native),
+    transform var(--motion-duration-exit) var(--motion-ease-native);
 }
 .page-zoom-enter-from,
 .page-zoom-leave-to {
@@ -50,11 +46,11 @@
 /* ── up ──────────────────────────────────────────────────────────── */
 .page-up-enter-active {
   transition:
-    opacity 0.2s ease,
-    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity var(--motion-duration-control) var(--motion-ease-native),
+    transform var(--motion-duration-spatial) var(--motion-ease-decelerate);
 }
 .page-up-leave-active {
-  transition: opacity 0.1s ease;
+  transition: opacity var(--motion-duration-exit) var(--motion-ease-native);
 }
 .page-up-enter-from {
   opacity: 0;
@@ -71,13 +67,13 @@
 /* ── flow ────────────────────────────────────────────────────────── */
 .page-flow-enter-active {
   transition:
-    opacity 0.35s cubic-bezier(0.2, 0, 0.2, 1),
-    transform 0.35s cubic-bezier(0.2, 0, 0.2, 1);
+    opacity var(--motion-duration-flow) var(--motion-ease-flow),
+    transform var(--motion-duration-flow) var(--motion-ease-flow);
 }
 .page-flow-leave-active {
   transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
+    opacity var(--motion-duration-subtle) var(--motion-ease-native),
+    transform var(--motion-duration-subtle) var(--motion-ease-native);
 }
 .page-flow-enter-from {
   opacity: 0;
@@ -90,10 +86,10 @@
 
 /* ── mask-left ───────────────────────────────────────────────────── */
 .page-mask-left-enter-active {
-  transition: clip-path 0.5s cubic-bezier(0, 0, 0.2, 1);
+  transition: clip-path var(--motion-duration-reveal) var(--motion-ease-reveal);
 }
 .page-mask-left-leave-active {
-  transition: clip-path 0.15s ease-in;
+  transition: clip-path var(--motion-duration-subtle) var(--motion-ease-exit);
 }
 .page-mask-left-enter-from {
   clip-path: inset(0 100% 0 0);
@@ -110,10 +106,10 @@
 
 /* ── mask-top ────────────────────────────────────────────────────── */
 .page-mask-top-enter-active {
-  transition: clip-path 0.5s cubic-bezier(0, 0, 0.2, 1);
+  transition: clip-path var(--motion-duration-reveal) var(--motion-ease-reveal);
 }
 .page-mask-top-leave-active {
-  transition: clip-path 0.15s ease-in;
+  transition: clip-path var(--motion-duration-subtle) var(--motion-ease-exit);
 }
 .page-mask-top-enter-from {
   clip-path: inset(0 0 100% 0);
@@ -126,4 +122,63 @@
 }
 .page-mask-top-leave-to {
   clip-path: inset(100% 0 0 0);
+}
+
+/* Infinite motion lifecycle: active visible-state timing remains component-owned. */
+@keyframes motion-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes motion-skeleton-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+html[data-window-visible="false"] :is(
+  .appearance-cover-media,
+  .appearance-vinyl-disc,
+  .marquee-content.is-scrolling,
+  .sidebar-nav-action--heart.is-active,
+  .transport-spinner,
+  .online-discover-load-more .button-spinner,
+  .ncm-resource-comment-action:disabled svg,
+  .ncm-home-feed-skeleton .card-row-title::before,
+  .ncm-home-feed-skeleton-cover,
+  .ncm-home-feed-skeleton-line,
+  .full-player.cover-mode-record .cover-art,
+  .skeleton,
+  .naive-skeleton,
+  .n-qr-code__placeholder,
+  .naive-spin-indicator,
+  .naive-switch .n-base-loading::before,
+  .naive-switch .naive-switch-loading-indicator::before,
+  .n-base-loading.is-loading
+) {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(
+    .appearance-cover-media,
+    .appearance-vinyl-disc,
+    .marquee-content.is-scrolling,
+    .sidebar-nav-action--heart.is-active,
+    .transport-spinner,
+    .online-discover-load-more .button-spinner,
+    .ncm-resource-comment-action:disabled svg,
+    .ncm-home-feed-skeleton .card-row-title::before,
+    .ncm-home-feed-skeleton-cover,
+    .ncm-home-feed-skeleton-line,
+    .full-player.cover-mode-record .cover-art,
+    .skeleton,
+    .naive-skeleton,
+    .n-qr-code__placeholder,
+    .naive-spin-indicator,
+    .naive-switch .n-base-loading::before,
+    .naive-switch .naive-switch-loading-indicator::before,
+    .n-base-loading.is-loading
+  ) {
+    animation: none !important;
+  }
 }

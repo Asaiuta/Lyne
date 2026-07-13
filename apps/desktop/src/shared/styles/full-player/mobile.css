@@ -213,9 +213,11 @@
 
   .full-player-mobile-progress-fill {
     position: absolute;
-    inset: 0 auto 0 0;
+    inset: 0;
     border-radius: inherit;
     background: var(--full-player-ink-active);
+    transform: scaleX(var(--full-player-mobile-progress-scale, 0));
+    transform-origin: left center;
   }
 
   .full-player-mobile-control-section {

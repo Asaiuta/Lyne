@@ -53,12 +53,12 @@ export const getRootStyle = (
   settings: FullPlayerLayoutSettings,
   bgBlur: number
 ): JSX.CSSProperties => {
-  const backgroundBlur = Math.max(0, bgBlur);
+  const backgroundBlur = Math.min(80, Math.max(0, bgBlur));
   return {
     ...getLayoutRatioVars(settings),
     "--full-player-fullscreen-gradient": `${Math.min(100, Math.max(0, settings.playerFullscreenGradient))}%`,
-    "--full-player-background-blur": `${Math.max(80, backgroundBlur)}px`,
-    "--full-player-surface-blur": `${Math.max(6, Math.round(backgroundBlur * 0.75))}px`
+    "--full-player-background-blur": `${backgroundBlur}px`,
+    "--full-player-surface-blur": `${Math.round(backgroundBlur * 0.75)}px`
   };
 };
 

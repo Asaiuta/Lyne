@@ -40,13 +40,19 @@ export function PlayerProgressEdge(props: PlayerProgressEdgeProps) {
       onMouseLeave={props.onMouseLeave}
       onKeyDown={props.onKeyDown}
     >
-      <div class="player-progress-edge-fill absolute top-1/2 left-0 h-3px" style={{ width: `${props.progress * 100}%` }}>
-        <div class="player-progress-edge-thumb" aria-hidden="true" />
-      </div>
+      <div
+        class="player-progress-edge-fill absolute top-1/2 left-0 h-3px"
+        style={{ "--player-progress-scale": String(props.progress) }}
+      />
+      <div
+        class="player-progress-edge-thumb"
+        style={{ left: `${props.progress * 100}%` }}
+        aria-hidden="true"
+      />
       <Show when={props.loadingProgress !== null}>
         <div
           class="player-progress-edge-loading absolute top-1/2 left-0 h-3px"
-          style={{ width: `${props.loadingProgress ?? 0}%` }}
+          style={{ "--player-loading-scale": String((props.loadingProgress ?? 0) / 100) }}
           aria-hidden="true"
         />
       </Show>

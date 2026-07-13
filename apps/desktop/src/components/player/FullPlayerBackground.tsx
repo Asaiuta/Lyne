@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { SImage } from "../SImage";
 import type { PlayerBackgroundType } from "../../shared/state/uiSettingsModel";
 
@@ -102,6 +102,8 @@ function FullPlayerMeshBackground(props: FullPlayerMeshBackgroundProps) {
   let frame: number | undefined;
   let lastFrameTime = 0;
   let phase = 0;
+  let requestedActive = false;
+  let reducedMotion = false;
 
   const stop = () => {
     if (frame === undefined) return;
@@ -122,7 +124,10 @@ function FullPlayerMeshBackground(props: FullPlayerMeshBackgroundProps) {
   };
 
   const draw = (time: number) => {
-    if (!canvas || !context) return;
+    if (!canvas || !context || !requestedActive || reducedMotion || document.hidden) {
+      frame = undefined;
+      return;
+    }
     const fps = Math.min(256, Math.max(1, props.fps));
     const frameInterval = 1000 / fps;
     if (time - lastFrameTime < frameInterval) {
@@ -190,9 +195,17 @@ function FullPlayerMeshBackground(props: FullPlayerMeshBackgroundProps) {
     frame = window.requestAnimationFrame(draw);
   };
 
+  const syncVisibility = () => {
+    if (document.hidden || reducedMotion || !requestedActive) {
+      stop();
+      return;
+    }
+    if (context && frame === undefined) frame = window.requestAnimationFrame(draw);
+  };
+
   createEffect(() => {
-    const active = props.active;
-    if (!canvas || !active) {
+    requestedActive = props.active;
+    if (!canvas || !requestedActive || reducedMotion || document.hidden) {
       stop();
       return;
     }
@@ -201,6 +214,20 @@ function FullPlayerMeshBackground(props: FullPlayerMeshBackgroundProps) {
     frame = window.requestAnimationFrame(draw);
   });
 
+  onMount(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncReducedMotion = () => {
+      reducedMotion = media.matches;
+      syncVisibility();
+    };
+    syncReducedMotion();
+    document.addEventListener("visibilitychange", syncVisibility);
+    media.addEventListener("change", syncReducedMotion);
+    onCleanup(() => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+      media.removeEventListener("change", syncReducedMotion);
+    });
+  });
   onCleanup(stop);
 
   return (

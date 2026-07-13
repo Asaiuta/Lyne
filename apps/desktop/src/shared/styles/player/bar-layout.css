@@ -46,7 +46,7 @@
     overflow: hidden;
     margin-right: 12px;
     cursor: pointer;
-    transition: opacity 0.2s var(--ease-standard);
+    transition: opacity var(--motion-duration-control) var(--motion-ease-standard);
   }
 
   .player-bar-cover.is-leaving {
@@ -56,9 +56,9 @@
 
   .player-bar-cover .cover-art-image {
     transition:
-      transform 0.3s var(--ease-standard),
-      opacity 0.3s var(--ease-standard),
-      filter 0.3s var(--ease-standard);
+      transform var(--motion-duration-spatial) var(--motion-ease-standard),
+      opacity var(--motion-duration-spatial) var(--motion-ease-standard),
+      filter var(--motion-duration-spatial) var(--motion-ease-standard);
   }
 
   .player-bar-cover:hover .cover-art-image {
@@ -75,8 +75,8 @@
     opacity: 0;
     transform: scale(0.6);
     transition:
-      opacity 0.3s var(--ease-standard),
-      transform 0.3s var(--ease-standard);
+      opacity var(--motion-duration-spatial) var(--motion-ease-standard),
+      transform var(--motion-duration-spatial) var(--motion-ease-standard);
     pointer-events: none;
   }
 
@@ -104,7 +104,7 @@
   }
 
   .player-bar-info-enter {
-    animation: player-info-enter 0.36s var(--ease-standard) both;
+    animation: player-info-enter var(--motion-duration-surface) var(--motion-ease-standard) both;
   }
 
   @keyframes player-info-enter {
@@ -167,7 +167,7 @@
   }
 
   .player-info-secondary-item {
-    animation: player-secondary-enter 0.4s var(--ease-standard) both;
+    animation: player-secondary-enter var(--motion-duration-content) var(--motion-ease-standard) both;
   }
 
   .player-artists .marquee-content {
@@ -180,7 +180,7 @@
     align-items: center;
     white-space: nowrap;
     cursor: pointer;
-    transition: color 0.3s var(--ease-standard);
+    transition: color var(--motion-duration-spatial) var(--motion-ease-standard);
   }
 
   .player-artist-item:disabled {
@@ -318,8 +318,8 @@
     color: var(--muted);
     background: transparent;
     transition:
-      color 0.3s var(--ease-standard),
-      transform 0.3s var(--ease-standard);
+      color var(--motion-duration-spatial) var(--motion-ease-standard),
+      transform var(--motion-duration-spatial) var(--motion-ease-standard);
   }
 
   .player-inline-icon:hover {

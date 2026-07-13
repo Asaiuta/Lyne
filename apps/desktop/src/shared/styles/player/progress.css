@@ -18,9 +18,9 @@
     right: 0;
     top: 50%;
     height: 3px;
-    transform: translateY(-50%);
+    transform: translateY(-50%) scaleY(1);
     background: color-mix(in srgb, var(--player-bar-accent) 20%, transparent);
-    transition: height 0.3s var(--ease-standard);
+    transition: transform var(--motion-duration-spatial) var(--motion-ease-standard);
     pointer-events: none;
   }
 
@@ -33,34 +33,40 @@
     position: absolute;
     top: 50%;
     left: 0;
+    width: 100%;
     height: 3px;
-    transform: translateY(-50%);
+    transform: translateY(-50%) scaleX(var(--player-progress-scale, 0));
+    transform-origin: left center;
     border-radius: 0;
+  }
+
+  .player-progress-edge-loading {
+    transform: translateY(-50%) scaleX(var(--player-loading-scale, 0));
   }
 
   .player-progress-edge:hover::before,
   .player-progress-edge:focus-visible::before {
-    height: 4px;
+    transform: translateY(-50%) scaleY(1.333333);
   }
 
   .player-progress-edge-fill {
     background: var(--player-bar-accent);
     box-shadow: none;
-    transition: width 0.3s var(--ease-standard);
+    transition: transform var(--motion-duration-spatial) var(--motion-ease-standard);
   }
 
   .player-progress-edge-thumb {
     position: absolute;
     top: 50%;
-    right: 0;
     width: 14px;
     height: 14px;
     border-radius: var(--radius-pill);
     background: var(--player-bar-accent);
-    transform: translate(50%, -50%) scale(0.6);
+    transform: translate(-50%, -50%) scale(0.6);
     opacity: 0;
     box-shadow: 0 0 0 2px color-mix(in oklch, var(--surface-1) 82%, transparent);
     transition:
+      left var(--motion-duration-spatial) var(--motion-ease-standard),
       opacity 0.3s var(--ease-standard),
       transform 0.3s var(--ease-standard);
     pointer-events: none;
@@ -70,16 +76,20 @@
   .player-progress-edge:focus-visible .player-progress-edge-thumb,
   .player-progress-edge.is-dragging .player-progress-edge-thumb {
     opacity: 1;
-    transform: translate(50%, -50%) scale(1);
+    transform: translate(-50%, -50%) scale(1);
   }
 
   .player-progress-edge.is-dragging::before,
   .player-progress-edge:hover::before {
-    height: 4px;
+    transform: translateY(-50%) scaleY(1.333333);
   }
 
   .player-progress-edge.is-dragging .player-progress-edge-fill {
     transition: none;
+  }
+
+  .player-progress-edge.is-dragging .player-progress-edge-thumb {
+    transition-property: opacity, transform;
   }
 
   .player-progress-tooltip {

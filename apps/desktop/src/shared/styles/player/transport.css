@@ -83,20 +83,11 @@
   .transport-icon-swap {
     display: grid;
     place-items: center;
-    animation: transport-icon-enter 0.2s var(--ease-standard) both;
+    animation: transport-icon-enter var(--motion-duration-feedback) var(--motion-ease-standard) both;
   }
 
   .transport-spinner {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
+    animation: motion-spin var(--motion-loop-spinner) linear infinite;
   }
 
   @keyframes transport-icon-enter {

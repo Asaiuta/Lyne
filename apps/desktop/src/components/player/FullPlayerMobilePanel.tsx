@@ -233,6 +233,7 @@ export function FullPlayerMobilePanel(props: FullPlayerMobilePanelProps) {
               </FullPlayerTimeButton>
               <div
                 class={`full-player-mobile-progress${props.transport.canSeek ? " is-interactive" : ""}`}
+                style={{ "--full-player-mobile-progress-scale": String(props.transport.progress) }}
                 role={props.transport.canSeek ? "slider" : "presentation"}
                 aria-label={props.transport.canSeek ? props.labels.seek : undefined}
                 aria-valuemin={props.transport.canSeek ? 0 : undefined}
@@ -242,10 +243,7 @@ export function FullPlayerMobilePanel(props: FullPlayerMobilePanelProps) {
                 onClick={props.transport.onProgressClick}
                 onKeyDown={props.transport.onProgressKeyDown}
               >
-                <div
-                  class="full-player-mobile-progress-fill"
-                  style={{ width: `${props.transport.progress * 100}%` }}
-                />
+                <div class="full-player-mobile-progress-fill" />
               </div>
               <FullPlayerTimeButton
                 class="full-player-mobile-time"
