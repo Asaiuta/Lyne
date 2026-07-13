@@ -236,6 +236,24 @@ cargo bench
 
 请确认已通过 vcpkg 或 MSYS2 安装 soxr，并确保构建环境能找到对应库文件。桌面打包时还需要 `libsoxr.dll` 能被复制到 Tauri bundle 资源中。
 
+### Windows bench / 运行时提示找不到 DLL
+
+MSYS2 动态链接的 soxr 依赖 `libsoxr.dll` 及其 MinGW 传递依赖（`libgomp` / `libgcc_s_seh` / `libwinpthread`）。`cargo build` 时根目录 `build.rs` 会把完整运行时簇复制到 `target/<profile>/` 与 `target/<profile>/deps/`，避免 `harness = false` bench 因 `STATUS_DLL_NOT_FOUND` 秒退。
+
+若产物目录是旧的，可手动补齐：
+
+```powershell
+.\scripts\stage-soxr-runtime.ps1 -Profile release
+```
+
+跑 release bench 时建议用包装脚本（会 stage DLL，并以 `panic=abort` 构建，与仓库 release profile 一致）：
+
+```powershell
+.\scripts\run-release-bench.ps1 -Bench source_seek_perf --quick
+.\scripts\run-release-bench.ps1 -Bench audio_callback_output_path_perf --quick
+.\scripts\run-release-bench.ps1 -Bench pcm_window_perf --quick
+```
+
 ### 音频播放卡顿
 
 可以尝试使用本机 CPU 优化构建：

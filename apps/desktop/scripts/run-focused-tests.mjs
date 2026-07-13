@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readdir, rm } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -7,6 +7,26 @@ import { build } from "esbuild";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "src");
 const outDir = path.resolve(root, "..", "..", ".tmp", `desktop-focused-tests-${process.pid}`);
+const rawImportSuffix = "?raw";
+
+const rawTextImportPlugin = {
+  name: "raw-text-import",
+  setup(build) {
+    build.onResolve({ filter: /\?raw$/ }, (args) => {
+      const importPath = args.path.slice(0, -rawImportSuffix.length);
+      return {
+        path: path.isAbsolute(importPath)
+          ? importPath
+          : path.resolve(args.resolveDir, importPath),
+        namespace: "raw-text"
+      };
+    });
+    build.onLoad({ filter: /.*/, namespace: "raw-text" }, async (args) => ({
+      contents: await readFile(args.path, "utf8"),
+      loader: "text"
+    }));
+  }
+};
 
 const findTests = async (dir) => {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -44,7 +64,8 @@ const outfiles = await Promise.all(
       format: "esm",
       target: "node22",
       sourcemap: "inline",
-      logLevel: "silent"
+      logLevel: "silent",
+      plugins: [rawTextImportPlugin]
     });
     return outfile;
   })
