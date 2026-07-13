@@ -1,11 +1,12 @@
 import type { UISettings } from "../state/uiSettingsModel";
-import { paletteEngine, type DynamicPalette } from "../theme/paletteEngine";
+import { DEFAULT_THEME_SEED_HEX, paletteEngine, type DynamicPalette } from "../theme/paletteEngine";
 
 const CUSTOM_CSS_STYLE_ID = "audioplayer-custom-css";
-const SPLAYER_PRIMARY = "var(--splayer-primary, var(--color-primary))";
-const SPLAYER_BACKGROUND = "var(--splayer-background, var(--bg-base))";
-const SPLAYER_SURFACE_CONTAINER = "var(--splayer-surface-container, var(--surface-container-default))";
-const PLAYER_BAR_THEME_ACCENT = SPLAYER_PRIMARY;
+const THEME_PRIMARY = "var(--theme-primary, var(--splayer-primary, var(--color-primary)))";
+const THEME_BACKGROUND = "var(--theme-background, var(--splayer-background, var(--bg-base)))";
+const THEME_SURFACE_CONTAINER =
+  "var(--theme-surface-container, var(--splayer-surface-container, var(--surface-container-default)))";
+const PLAYER_BAR_THEME_ACCENT = THEME_PRIMARY;
 const FULL_PLAYER_COVER_ACCENT = "var(--player-cover-accent)";
 const FULL_PLAYER_DEFAULT_ACCENT = "var(--player-cover-accent-default)";
 
@@ -41,7 +42,7 @@ function readFontStack(settings: UISettings): string | null {
 
 function applyAccentColor(settings: UISettings): void {
   const root = document.documentElement;
-  const color = settings.customAccentColor.trim() || "#fe7971";
+  const color = settings.customAccentColor.trim() || DEFAULT_THEME_SEED_HEX;
   paletteEngine.applySeed(color, root);
   applyAppearanceColorTokenPlan(settings, root);
 }
@@ -61,10 +62,10 @@ function syncColorModeAttributes(root: HTMLElement, settings: Pick<AppearanceCol
 function semanticTokenEntries(settings: AppearanceColorSettings): readonly CssTokenEntry[] {
   const surfaceEntries: readonly CssTokenEntry[] = settings.themeGlobalColor
     ? [
-        ["--bg-dynamic", SPLAYER_BACKGROUND],
-        ["--surface-container-dynamic", SPLAYER_SURFACE_CONTAINER],
-        ["--player-bar-surface-dynamic", SPLAYER_SURFACE_CONTAINER],
-        ["--floating-surface-dynamic", SPLAYER_SURFACE_CONTAINER]
+        ["--bg-dynamic", THEME_BACKGROUND],
+        ["--surface-container-dynamic", THEME_SURFACE_CONTAINER],
+        ["--player-bar-surface-dynamic", THEME_SURFACE_CONTAINER],
+        ["--floating-surface-dynamic", THEME_SURFACE_CONTAINER]
       ]
     : [
         ["--bg-dynamic", "var(--bg-base)"],
@@ -75,7 +76,7 @@ function semanticTokenEntries(settings: AppearanceColorSettings): readonly CssTo
 
   return [
     ...surfaceEntries,
-    ["--accent-dynamic", SPLAYER_PRIMARY],
+    ["--accent-dynamic", THEME_PRIMARY],
     ["--player-bar-accent-dynamic", PLAYER_BAR_THEME_ACCENT],
     [
       "--player-cover-color",

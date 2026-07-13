@@ -27,7 +27,7 @@ test("neutral appearance token plan keeps runtime color writes on semantic roots
   assert.equal(semantic.get("--player-cover-color"), "var(--player-cover-accent)");
 });
 
-test("global appearance token plan tints shell surfaces from SPlayer palette aliases", () => {
+test("global appearance token plan tints shell surfaces from theme palette aliases", () => {
   const plan = buildAppearanceColorTokenPlan({
     playerFollowCoverColor: false,
     themeGlobalColor: true
@@ -36,10 +36,10 @@ test("global appearance token plan tints shell surfaces from SPlayer palette ali
 
   assertUniqueTokenNames(plan.semantic);
   assert.equal(plan.themeGlobalColor, true);
-  assert.equal(semantic.get("--bg-dynamic"), "var(--splayer-background, var(--bg-base))");
+  assert.equal(semantic.get("--bg-dynamic"), "var(--theme-background, var(--splayer-background, var(--bg-base)))");
   assert.equal(
     semantic.get("--surface-container-dynamic"),
-    "var(--splayer-surface-container, var(--surface-container-default))"
+    "var(--theme-surface-container, var(--splayer-surface-container, var(--surface-container-default)))"
   );
   assert.equal(semantic.get("--player-cover-color"), "var(--player-cover-accent-default)");
 });

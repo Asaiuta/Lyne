@@ -16,7 +16,7 @@ function makePixels(colors: ReadonlyArray<readonly [number, number, number, numb
   return new Uint8ClampedArray(colors.flatMap(([r, g, b, a]) => [r, g, b, a]));
 }
 
-test("createDefaultPalette keeps the SPlayer coral seed stable in dark mode", () => {
+test("createDefaultPalette keeps the reference coral seed stable in dark mode", () => {
   const palette = createDefaultPalette("dark");
 
   assert.equal(palette.tokens.primary, "rgb(255 179 173)");
@@ -53,7 +53,7 @@ test("createPaletteFromSource produces role-separated colors from a cover seed",
   assert.equal(palette.tokens.primary === palette.tokens.secondary, false);
 });
 
-test("createPaletteFromSeed falls back to the SPlayer coral seed for invalid input", () => {
+test("createPaletteFromSeed falls back to the reference coral seed for invalid input", () => {
   const palette = createPaletteFromSeed("not-a-color", "dark");
 
   assert.equal(palette.tokens.primary, "rgb(255 179 173)");
@@ -61,7 +61,7 @@ test("createPaletteFromSeed falls back to the SPlayer coral seed for invalid inp
   assert.equal(palette.theme.background, "rgb(68 41 39)");
 });
 
-test("extractPaletteSourceFromPixels returns SPlayer monotonous source for near-gray covers", () => {
+test("extractPaletteSourceFromPixels returns the monotonous fallback source for near-gray covers", () => {
   const pixels = makePixels(Array.from({ length: 20 }, () => [100, 101, 102, 255] as const));
 
   assert.deepEqual(extractPaletteSourceFromPixels(pixels), {
@@ -70,7 +70,7 @@ test("extractPaletteSourceFromPixels returns SPlayer monotonous source for near-
   });
 });
 
-test("createMonotonousPalette mirrors SPlayer dark gray fallback theme", () => {
+test("createMonotonousPalette mirrors the dark gray fallback theme", () => {
   const palette = createMonotonousPalette("dark");
 
   assert.equal(palette.isMonotonous, true);

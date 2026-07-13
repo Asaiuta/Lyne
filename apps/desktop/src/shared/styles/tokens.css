@@ -42,13 +42,13 @@
   --radius-icon-btn: var(--radius-pill);      /* icon buttons, transport, search bars */
 
   /* ---------- Color contract ----------
-     1. paletteEngine owns --color-* and --splayer-* palette aliases.
+     1. paletteEngine owns --color-* and --theme-* palette aliases.
      2. customAppearance owns --*-dynamic semantic entry points.
      3. Component-facing bridges such as --naive-* and --player-* derive
         from those palette/semantic tokens; feature CSS should not create
         new peer color roots. */
 
-  /* ---------- Color: app semantic surface ladder (SPlayer near-neutral desktop skin) ---------- */
+  /* ---------- Color: app semantic surface ladder (near-neutral desktop skin) ---------- */
   --bg-base: oklch(0.135 0.004 280);
   --surface-1-base: oklch(0.175 0.005 280);
   --surface-2-base: oklch(0.215 0.006 280);
@@ -65,22 +65,30 @@
   --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
   --player-bar-surface-default: rgb(24 24 28);
   --player-bar-surface: var(--player-bar-surface-dynamic, var(--player-bar-surface-default));
-  --player-bar-accent-default: rgb(255 218 214);
+  --player-bar-accent-default: var(--theme-primary);
   --player-bar-accent: var(--player-bar-accent-dynamic, var(--player-bar-accent-default));
   --player-cover-accent-default: rgb(239 239 239);
   --player-cover-accent: var(--player-cover-accent-dynamic, var(--player-cover-accent-default));
   --player-cover-accent-rgb: 239, 239, 239;
-  /* Palette aliases written by paletteEngine. Keep these public for custom
-     CSS compatibility, but treat them as palette aliases rather than
-     component styling roots. */
-  --splayer-primary: rgb(255 218 214);
-  --splayer-primary-rgb: 255, 218, 214;
-  --splayer-background: rgb(68 41 39);
-  --splayer-background-rgb: 68, 41, 39;
-  --splayer-surface-container: rgb(58 33 31);
-  --splayer-surface-container-rgb: 58, 33, 31;
-  --splayer-main-cover-color: rgb(255 218 214);
-  --splayer-main-cover-rgb: 255, 218, 214;
+  /* Theme palette aliases written by paletteEngine. */
+  --theme-primary: rgb(255 218 214);
+  --theme-primary-rgb: 255, 218, 214;
+  --theme-background: rgb(68 41 39);
+  --theme-background-rgb: 68, 41, 39;
+  --theme-surface-container: rgb(58 33 31);
+  --theme-surface-container-rgb: 58, 33, 31;
+  --theme-main-cover-color: rgb(255 218 214);
+  --theme-main-cover-rgb: 255, 218, 214;
+  /* Legacy compatibility aliases for existing custom CSS. Do not use these
+     names for new code. */
+  --splayer-primary: var(--theme-primary);
+  --splayer-primary-rgb: var(--theme-primary-rgb);
+  --splayer-background: var(--theme-background);
+  --splayer-background-rgb: var(--theme-background-rgb);
+  --splayer-surface-container: var(--theme-surface-container);
+  --splayer-surface-container-rgb: var(--theme-surface-container-rgb);
+  --splayer-main-cover-color: var(--theme-main-cover-color);
+  --splayer-main-cover-rgb: var(--theme-main-cover-rgb);
 
   /* alpha companions used for translucent panels / chips. */
   --surface-1-soft: oklch(0.16 0.006 280 / 0.7);
@@ -105,6 +113,14 @@
   --state-selected-on-surface: var(--color-primary-tonal-16);
   --surface-hover: var(--state-hover-on-surface);
   --surface-pressed: var(--state-pressed-on-surface);
+  /* Library/list selection stays neutral by default to match SPlayer.
+     Global color mode is the only owner allowed to tint these surfaces. */
+  --media-card-border: var(--border-subtle);
+  --media-card-border-emphasis: var(--border-strong);
+  --media-card-hover-bg: var(--surface-container);
+  --media-card-selected-bg: color-mix(in oklch, var(--surface-3) 74%, var(--surface-2));
+  --media-card-checked-bg: color-mix(in oklch, var(--surface-3) 58%, var(--surface-2));
+  --media-card-focus-ring: var(--border-strong);
   --text-placeholder: oklch(1 0 0 / 0.42);
   --text-secondary: oklch(1 0 0 / 0.72);
   --overlay: oklch(0 0 0 / 0.45);
@@ -154,29 +170,29 @@
   --color-primary-tonal-85: color-mix(in oklch, var(--color-primary) 85%, transparent);
   --color-primary-text-soft: color-mix(in oklch, var(--color-primary) 48%, var(--text-soft));
 
-  /* SPlayer-compatible Naive provider adapter. customAppearance.ts only
-     toggles data-theme-global-color; these variables derive from the palette
+  /* Naive provider adapter. customAppearance.ts only toggles
+     data-theme-global-color; these variables derive from the palette
      and semantic layers in CSS. Do not use --naive-* as a new app color
      source in feature CSS. */
-  --naive-primary-color: var(--splayer-primary);
-  --naive-primary-color-hover: color-mix(in srgb, var(--splayer-primary) 78%, transparent);
-  --naive-primary-color-pressed: color-mix(in srgb, var(--splayer-primary) 26%, transparent);
-  --naive-primary-color-suppl: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
-  --naive-primary-color-09: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-primary-color-10: color-mix(in srgb, var(--splayer-primary) 10%, transparent);
-  --naive-primary-color-12: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
-  --naive-primary-color-16: color-mix(in srgb, var(--splayer-primary) 16%, transparent);
-  --naive-primary-color-20: color-mix(in srgb, var(--splayer-primary) 20%, transparent);
-  --naive-primary-color-30: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
-  --naive-primary-color-38: color-mix(in srgb, var(--splayer-primary) 38%, transparent);
-  --naive-primary-color-48: color-mix(in srgb, var(--splayer-primary) 48%, transparent);
-  --naive-primary-color-58: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
+  --naive-primary-color: var(--theme-primary);
+  --naive-primary-color-hover: color-mix(in srgb, var(--theme-primary) 78%, transparent);
+  --naive-primary-color-pressed: color-mix(in srgb, var(--theme-primary) 26%, transparent);
+  --naive-primary-color-suppl: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+  --naive-primary-color-09: color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-primary-color-10: color-mix(in srgb, var(--theme-primary) 10%, transparent);
+  --naive-primary-color-12: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+  --naive-primary-color-16: color-mix(in srgb, var(--theme-primary) 16%, transparent);
+  --naive-primary-color-20: color-mix(in srgb, var(--theme-primary) 20%, transparent);
+  --naive-primary-color-30: color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  --naive-primary-color-38: color-mix(in srgb, var(--theme-primary) 38%, transparent);
+  --naive-primary-color-48: color-mix(in srgb, var(--theme-primary) 48%, transparent);
+  --naive-primary-color-58: color-mix(in srgb, var(--theme-primary) 58%, transparent);
   --naive-text-color-1: var(--text);
   --naive-text-color-2: var(--text-soft);
   --naive-text-color-3: var(--muted);
   --naive-text-color-disabled: var(--text-placeholder);
   --naive-placeholder-color-disabled: var(--text-placeholder);
-  --naive-icon-color: var(--splayer-primary);
+  --naive-icon-color: var(--theme-primary);
   --naive-icon-color-hover: var(--text-soft);
   --naive-icon-color-disabled: var(--text-placeholder);
   --naive-close-icon-color: var(--muted);
@@ -199,9 +215,9 @@
   --naive-slider-fill-color: var(--naive-primary-color);
   --naive-slider-fill-color-hover: var(--naive-primary-color);
   --naive-slider-rail-color: var(--naive-primary-color-20);
-  --naive-slider-rail-color-hover: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
+  --naive-slider-rail-color-hover: color-mix(in srgb, var(--theme-primary) 30%, transparent);
   --naive-slider-indicator-color: var(--surface-container-default);
-  --naive-slider-indicator-text-color: var(--splayer-primary);
+  --naive-slider-indicator-text-color: var(--theme-primary);
   --naive-switch-rail-color-active: var(--naive-primary-color);
   --naive-input-color: color-mix(in oklch, var(--surface-2) 70%, transparent);
   --naive-input-color-focus: var(--naive-input-color);
@@ -219,7 +235,7 @@
   --naive-menu-divider-color: var(--border-overlay);
   --naive-progress-rail-color: var(--surface-3);
   --naive-tooltip-color: var(--surface-container-default);
-  --naive-tooltip-text-color: var(--splayer-primary);
+  --naive-tooltip-text-color: var(--theme-primary);
   --naive-tabs-color-segment: var(--surface-container-default);
   --naive-tabs-tab-color-segment: var(--naive-primary-color-12);
 
@@ -249,13 +265,41 @@
   --glow-accent: 0 0 24px var(--color-primary-tonal-45);
 
   /* ---------- Motion ---------- */
-  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-emphasized: cubic-bezier(0.18, 0.74, 0.18, 1);
-  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --duration-fast: 140ms;
-  --duration-base: 220ms;
-  --duration-slow: 360ms;
-  --duration-xslow: 540ms;
+  /* Motion matrix: semantic categories preserve the established visual rhythm. */
+  --motion-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-emphasized: cubic-bezier(0.18, 0.74, 0.18, 1);
+  --motion-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-ease-native: ease;
+  --motion-ease-exit: ease-in;
+  --motion-ease-decelerate: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-ease-flow: cubic-bezier(0.2, 0, 0.2, 1);
+  --motion-ease-reveal: cubic-bezier(0, 0, 0.2, 1);
+  --motion-ease-linear: linear;
+  --motion-duration-instant: 0ms;
+  --motion-duration-exit: 100ms;
+  --motion-duration-micro: 140ms;
+  --motion-duration-subtle: 150ms;
+  --motion-duration-control-fast: 180ms;
+  --motion-duration-feedback: 200ms;
+  --motion-duration-control: 220ms;
+  --motion-duration-spatial: 300ms;
+  --motion-duration-spring: 320ms;
+  --motion-duration-flow: 350ms;
+  --motion-duration-surface: 360ms;
+  --motion-duration-content: 400ms;
+  --motion-duration-reveal: 500ms;
+  --motion-duration-emphasized: 540ms;
+  --motion-loop-spinner: 1s;
+  --motion-loop-skeleton: 1.4s;
+
+  /* Compatibility aliases for existing component styles. */
+  --ease-standard: var(--motion-ease-standard);
+  --ease-emphasized: var(--motion-ease-emphasized);
+  --ease-bounce: var(--motion-ease-bounce);
+  --duration-fast: var(--motion-duration-micro);
+  --duration-base: var(--motion-duration-control);
+  --duration-slow: var(--motion-duration-surface);
+  --duration-xslow: var(--motion-duration-emphasized);
 
   /* ---------- Typography ---------- */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Segoe UI", "Inter", system-ui, sans-serif;
@@ -303,50 +347,56 @@
 }
 
 [data-theme-global-color="true"] {
-  --surface-container-opaque-dynamic: var(--splayer-surface-container);
-  --floating-surface-opaque-dynamic: var(--splayer-surface-container);
-  --player-bar-surface-opaque-dynamic: var(--splayer-surface-container);
-  --naive-text-color-1: var(--splayer-primary);
-  --naive-text-color-2: color-mix(in srgb, var(--splayer-primary) 82%, transparent);
-  --naive-text-color-3: color-mix(in srgb, var(--splayer-primary) 52%, transparent);
-  --naive-text-color-disabled: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
-  --naive-placeholder-color-disabled: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
-  --naive-icon-color-hover: color-mix(in srgb, var(--splayer-primary) 47.5%, transparent);
-  --naive-icon-color-disabled: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
-  --naive-close-icon-color: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
-  --naive-hover-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-border-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-card-color: var(--splayer-surface-container);
-  --naive-tag-color: var(--splayer-surface-container);
-  --naive-modal-color: var(--splayer-surface-container);
-  --naive-popover-color: var(--splayer-surface-container);
-  --naive-button-color-2: color-mix(in srgb, var(--splayer-primary) 8%, transparent);
-  --naive-button-color-2-hover: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
-  --naive-button-color-2-pressed: color-mix(in srgb, var(--splayer-primary) 8%, transparent);
-  --naive-button-text-color-hover: color-mix(in srgb, var(--splayer-primary) 78%, transparent);
-  --naive-button-text-color-focus: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
-  --naive-button-color-primary: color-mix(in srgb, var(--splayer-primary) 90%, transparent);
-  --naive-button-color-hover-primary: var(--splayer-primary);
-  --naive-button-color-pressed-primary: color-mix(in srgb, var(--splayer-primary) 80%, transparent);
-  --naive-button-color-focus-primary: var(--splayer-primary);
-  --naive-switch-rail-color-active: color-mix(in srgb, var(--splayer-primary) 80%, transparent);
-  --naive-input-color: color-mix(in srgb, var(--splayer-primary) 10%, transparent);
-  --naive-input-color-focus: var(--splayer-surface-container);
-  --naive-input-placeholder-color: color-mix(in srgb, var(--splayer-primary) 58%, transparent);
-  --naive-input-border: 1px solid color-mix(in srgb, var(--splayer-primary) 10%, transparent);
-  --naive-input-clear-color: color-mix(in srgb, var(--splayer-primary) 38%, transparent);
-  --naive-input-clear-color-hover: color-mix(in srgb, var(--splayer-primary) 48%, transparent);
-  --naive-input-clear-color-pressed: color-mix(in srgb, var(--splayer-primary) 30%, transparent);
-  --naive-empty-text-color: color-mix(in srgb, var(--splayer-primary) 38%, transparent);
-  --naive-divider-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-dropdown-divider-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-layout-sider-border-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-drawer-header-border-bottom: 1px solid color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-drawer-footer-border-top: 1px solid color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-menu-divider-color: color-mix(in srgb, var(--splayer-primary) 9%, transparent);
-  --naive-progress-rail-color: color-mix(in srgb, var(--splayer-primary) 16%, transparent);
-  --naive-tabs-color-segment: color-mix(in srgb, var(--splayer-primary) 8%, transparent);
-  --naive-tabs-tab-color-segment: color-mix(in srgb, var(--splayer-primary) 12%, transparent);
+  --media-card-border: var(--color-primary-tonal-12);
+  --media-card-border-emphasis: var(--color-primary-tonal-58);
+  --media-card-hover-bg: var(--surface-container);
+  --media-card-selected-bg: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
+  --media-card-checked-bg: color-mix(in oklch, var(--color-primary-container) 34%, var(--surface-2));
+  --media-card-focus-ring: var(--color-primary-tonal-58);
+  --surface-container-opaque-dynamic: var(--theme-surface-container);
+  --floating-surface-opaque-dynamic: var(--theme-surface-container);
+  --player-bar-surface-opaque-dynamic: var(--theme-surface-container);
+  --naive-text-color-1: var(--theme-primary);
+  --naive-text-color-2: color-mix(in srgb, var(--theme-primary) 82%, transparent);
+  --naive-text-color-3: color-mix(in srgb, var(--theme-primary) 52%, transparent);
+  --naive-text-color-disabled: color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  --naive-placeholder-color-disabled: color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  --naive-icon-color-hover: color-mix(in srgb, var(--theme-primary) 47.5%, transparent);
+  --naive-icon-color-disabled: color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  --naive-close-icon-color: color-mix(in srgb, var(--theme-primary) 58%, transparent);
+  --naive-hover-color: color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-border-color: color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-card-color: var(--theme-surface-container);
+  --naive-tag-color: var(--theme-surface-container);
+  --naive-modal-color: var(--theme-surface-container);
+  --naive-popover-color: var(--theme-surface-container);
+  --naive-button-color-2: color-mix(in srgb, var(--theme-primary) 8%, transparent);
+  --naive-button-color-2-hover: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+  --naive-button-color-2-pressed: color-mix(in srgb, var(--theme-primary) 8%, transparent);
+  --naive-button-text-color-hover: color-mix(in srgb, var(--theme-primary) 78%, transparent);
+  --naive-button-text-color-focus: color-mix(in srgb, var(--theme-primary) 58%, transparent);
+  --naive-button-color-primary: color-mix(in srgb, var(--theme-primary) 90%, transparent);
+  --naive-button-color-hover-primary: var(--theme-primary);
+  --naive-button-color-pressed-primary: color-mix(in srgb, var(--theme-primary) 80%, transparent);
+  --naive-button-color-focus-primary: var(--theme-primary);
+  --naive-switch-rail-color-active: color-mix(in srgb, var(--theme-primary) 80%, transparent);
+  --naive-input-color: color-mix(in srgb, var(--theme-primary) 10%, transparent);
+  --naive-input-color-focus: var(--theme-surface-container);
+  --naive-input-placeholder-color: color-mix(in srgb, var(--theme-primary) 58%, transparent);
+  --naive-input-border: 1px solid color-mix(in srgb, var(--theme-primary) 10%, transparent);
+  --naive-input-clear-color: color-mix(in srgb, var(--theme-primary) 38%, transparent);
+  --naive-input-clear-color-hover: color-mix(in srgb, var(--theme-primary) 48%, transparent);
+  --naive-input-clear-color-pressed: color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  --naive-empty-text-color: color-mix(in srgb, var(--theme-primary) 38%, transparent);
+  --naive-divider-color: color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-dropdown-divider-color: color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-layout-sider-border-color: color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-drawer-header-border-bottom: 1px solid color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-drawer-footer-border-top: 1px solid color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-menu-divider-color: color-mix(in srgb, var(--theme-primary) 9%, transparent);
+  --naive-progress-rail-color: color-mix(in srgb, var(--theme-primary) 16%, transparent);
+  --naive-tabs-color-segment: color-mix(in srgb, var(--theme-primary) 8%, transparent);
+  --naive-tabs-tab-color-segment: color-mix(in srgb, var(--theme-primary) 12%, transparent);
 }
 
 /* ---------- Appearance modes and centralized backdrop registry ---------- */
@@ -413,10 +463,20 @@
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --duration-fast: 0ms;
-    --duration-base: 0ms;
-    --duration-slow: 0ms;
-    --duration-xslow: 0ms;
+    --motion-duration-instant: 0ms;
+    --motion-duration-exit: 0ms;
+    --motion-duration-micro: 0ms;
+    --motion-duration-subtle: 0ms;
+    --motion-duration-control-fast: 0ms;
+    --motion-duration-feedback: 0ms;
+    --motion-duration-control: 0ms;
+    --motion-duration-spatial: 0ms;
+    --motion-duration-spring: 0ms;
+    --motion-duration-flow: 0ms;
+    --motion-duration-surface: 0ms;
+    --motion-duration-content: 0ms;
+    --motion-duration-reveal: 0ms;
+    --motion-duration-emphasized: 0ms;
   }
 }
 
@@ -426,7 +486,7 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  /* Light-mode elevation direction matches SPlayer: page sits slightly
+  /* Light-mode elevation direction: page sits slightly
      off-white and surfaces step up toward pure white as they elevate,
      so cards and floating panels read as "lifted" against the page
      (the opposite of dark mode, where higher surfaces are lighter
@@ -447,19 +507,19 @@
   --surface-container: var(--surface-container-dynamic, var(--surface-container-default));
   --player-bar-surface-default: rgb(255 255 255);
   --player-bar-surface: var(--player-bar-surface-dynamic, var(--player-bar-surface-default));
-  --player-bar-accent-default: rgb(44 21 19);
+  --player-bar-accent-default: var(--theme-primary);
   --player-bar-accent: var(--player-bar-accent-dynamic, var(--player-bar-accent-default));
   --player-cover-accent-default: rgb(239 239 239);
   --player-cover-accent: var(--player-cover-accent-dynamic, var(--player-cover-accent-default));
   --player-cover-accent-rgb: 239, 239, 239;
-  --splayer-primary: rgb(44 21 19);
-  --splayer-primary-rgb: 44, 21, 19;
-  --splayer-background: rgb(255 233 231);
-  --splayer-background-rgb: 255, 233, 231;
-  --splayer-surface-container: rgb(255 218 214);
-  --splayer-surface-container-rgb: 255, 218, 214;
-  --splayer-main-cover-color: rgb(255 218 214);
-  --splayer-main-cover-rgb: 255, 218, 214;
+  --theme-primary: rgb(44 21 19);
+  --theme-primary-rgb: 44, 21, 19;
+  --theme-background: rgb(255 233 231);
+  --theme-background-rgb: 255, 233, 231;
+  --theme-surface-container: rgb(255 218 214);
+  --theme-surface-container-rgb: 255, 218, 214;
+  --theme-main-cover-color: rgb(255 218 214);
+  --theme-main-cover-rgb: 255, 218, 214;
 
   --surface-1-soft: oklch(0.98 0.002 280 / 0.85);
   --surface-2-soft: oklch(0.99 0.002 280 / 0.85);

@@ -50,8 +50,8 @@ export interface ExtractedPaletteSource {
 }
 
 const SAMPLE_SIZE = 50;
-const DEFAULT_SEED_HEX = "#fe7971";
-const DEFAULT_SEED_ARGB = argbFromHex(DEFAULT_SEED_HEX);
+export const DEFAULT_THEME_SEED_HEX = "#fe7971";
+const DEFAULT_SEED_ARGB = argbFromHex(DEFAULT_THEME_SEED_HEX);
 const MONOTONOUS_SOURCE_ARGB = argbFromHex("#efefef");
 const MONOTONOUS_MAIN_RGB = { r: 239, g: 239, b: 239 } as const;
 const MONOTONOUS_LIGHT = {
@@ -273,14 +273,14 @@ export function applyPalette(palette: DynamicPalette, root: HTMLElement = docume
   (Object.entries(palette.tokens) as Array<[PaletteTokenName, string]>).forEach(([name, value]) => {
     root.style.setProperty(tokenCssVar(name), value);
   });
-  root.style.setProperty("--splayer-primary", palette.theme.primary);
-  root.style.setProperty("--splayer-primary-rgb", palette.theme.primaryRgb);
-  root.style.setProperty("--splayer-background", palette.theme.background);
-  root.style.setProperty("--splayer-background-rgb", palette.theme.backgroundRgb);
-  root.style.setProperty("--splayer-surface-container", palette.theme.surfaceContainer);
-  root.style.setProperty("--splayer-surface-container-rgb", palette.theme.surfaceContainerRgb);
-  root.style.setProperty("--splayer-main-cover-color", palette.theme.main);
-  root.style.setProperty("--splayer-main-cover-rgb", palette.theme.mainRgb);
+  root.style.setProperty("--theme-primary", palette.theme.primary);
+  root.style.setProperty("--theme-primary-rgb", palette.theme.primaryRgb);
+  root.style.setProperty("--theme-background", palette.theme.background);
+  root.style.setProperty("--theme-background-rgb", palette.theme.backgroundRgb);
+  root.style.setProperty("--theme-surface-container", palette.theme.surfaceContainer);
+  root.style.setProperty("--theme-surface-container-rgb", palette.theme.surfaceContainerRgb);
+  root.style.setProperty("--theme-main-cover-color", palette.theme.main);
+  root.style.setProperty("--theme-main-cover-rgb", palette.theme.mainRgb);
 }
 
 export function reset(root: HTMLElement = document.documentElement): void {
@@ -369,7 +369,7 @@ export async function applyCover(
 export function createPaletteFromSeed(seedHex: string, scheme: ThemeScheme): DynamicPalette {
   let sourceArgb = DEFAULT_SEED_ARGB;
   try {
-    sourceArgb = argbFromHex(seedHex.trim() || DEFAULT_SEED_HEX);
+    sourceArgb = argbFromHex(seedHex.trim() || DEFAULT_THEME_SEED_HEX);
   } catch {
     sourceArgb = DEFAULT_SEED_ARGB;
   }
@@ -383,6 +383,7 @@ export function applySeed(seedHex: string, root: HTMLElement = document.document
 }
 
 export const paletteEngine = {
+  DEFAULT_THEME_SEED_HEX,
   argbToCss,
   argbToRgbChannels,
   applyCover,
