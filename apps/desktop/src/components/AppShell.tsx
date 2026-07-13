@@ -10,10 +10,6 @@ interface AppShellProps {
   children: JSX.Element;
 }
 
-/**
- * AppShell composes the SPlayer-style layout while keeping owning state in the
- * eventual top-level app port.
- */
 export function AppShell(props: AppShellProps) {
   return (
     <div class="app-shell">

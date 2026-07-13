@@ -39,16 +39,16 @@ import {
   IconPlaylist,
   IconQueueAdd,
   IconRefresh,
-  IconSPlayerAdd,
-  IconSPlayerDiscover,
-  IconSPlayerFavorite,
-  IconSPlayerHeartBit,
-  IconSPlayerHistory,
-  IconSPlayerHome,
-  IconSPlayerMenu,
-  IconSPlayerRadio,
-  IconSPlayerRecord,
-  IconSPlayerStar
+  IconAddFilled,
+  IconDiscoverFilled,
+  IconFavoriteFilled,
+  IconHeartbeatFilled,
+  IconHistoryFilled,
+  IconHomeFilled,
+  IconMenuFilled,
+  IconRadioFilled,
+  IconRecordFilled,
+  IconStarFilled
 } from "../components/icons";
 
 type IconComponent = NaiveSidebarIconComponent;
@@ -70,28 +70,30 @@ const NAV_GROUPS: ReadonlyArray<NavGroup> = [
   {
     key: "online",
     items: [
-      { key: "recommend", icon: IconSPlayerHome, labelKey: "sidebar.nav.recommend.label" },
-      { key: "discover", icon: IconSPlayerDiscover, labelKey: "sidebar.nav.discover.label" },
-      { key: "personal-fm", icon: IconSPlayerRadio, labelKey: "sidebar.nav.personalFm.label" },
-      { key: "radio", icon: IconSPlayerRecord, labelKey: "sidebar.nav.radio.label" }
+      { key: "recommend", icon: IconHomeFilled, labelKey: "sidebar.nav.recommend.label" },
+      { key: "discover", icon: IconDiscoverFilled, labelKey: "sidebar.nav.discover.label" },
+      { key: "personal-fm", icon: IconRadioFilled, labelKey: "sidebar.nav.personalFm.label" },
+      { key: "radio", icon: IconRecordFilled, labelKey: "sidebar.nav.radio.label" }
     ]
   },
   {
     key: "mine",
     items: [
-      { key: "liked-songs", icon: IconSPlayerFavorite, labelKey: "sidebar.nav.likedSongs.label" },
-      { key: "liked", icon: IconSPlayerStar, labelKey: "sidebar.nav.liked.label" },
+      { key: "liked-songs", icon: IconFavoriteFilled, labelKey: "sidebar.nav.likedSongs.label" },
+      { key: "liked", icon: IconStarFilled, labelKey: "sidebar.nav.liked.label" },
       { key: "cloud", icon: IconCloud, labelKey: "sidebar.nav.cloud.label" },
       { key: "download", icon: IconQueueAdd, labelKey: "sidebar.nav.download.label" },
       { key: "streaming", icon: IconPlaylist, labelKey: "sidebar.nav.streaming.label" },
       { key: "library", icon: IconFolder, labelKey: "sidebar.nav.library.label" },
-      { key: "recent", icon: IconSPlayerHistory, labelKey: "sidebar.nav.recent.label" }
+      { key: "recent", icon: IconHistoryFilled, labelKey: "sidebar.nav.recent.label" }
     ]
   }
 ];
 
 const STORAGE_KEY = "ui.sidebar.collapsed";
 const SECTIONS_STORAGE_KEY = "ui.sidebar.collapsedSections";
+const COLLAPSE_MOTION_FALLBACK_MS = 400;
+const COLLAPSE_TRANSITION_PROPERTY = "--sidebar-inline-size";
 const NARROW_BREAKPOINT_PX = 980;
 const LOGIN_REQUIRED_PAGES = new Set<ActivePage>([
   "personal-fm",
@@ -203,8 +205,17 @@ export function Sidebar(props: SidebarProps) {
   const { t, td } = useTranslation();
   const uiSettings = useUISettings();
   const accountStore = useNcmAccount();
-  const [collapsedPersisted, setCollapsedPersisted] = createSignal(readPersistedCollapse());
-  const [forceCollapsedNarrow, setForceCollapsedNarrow] = createSignal(isNarrowViewport());
+  const initialCollapsedPersisted = readPersistedCollapse();
+  const initialForceCollapsedNarrow = isNarrowViewport();
+  const [collapsedPersisted, setCollapsedPersisted] =
+    createSignal<boolean>(initialCollapsedPersisted);
+  const [forceCollapsedNarrow, setForceCollapsedNarrow] =
+    createSignal<boolean>(initialForceCollapsedNarrow);
+  const [collapsedContent, setCollapsedContent] = createSignal<boolean>(
+    initialCollapsedPersisted || initialForceCollapsedNarrow
+  );
+  const [collapseMotionActive, setCollapseMotionActive] = createSignal<boolean>(false);
+  let collapseMotionFallbackId: number | undefined;
   const [collapsedSections, setCollapsedSections] = createSignal(readPersistedCollapsedSections());
   const [createdPlaylists, setCreatedPlaylists] = createSignal<OnlinePlaylistSummary[]>([]);
   const [collectedPlaylists, setCollectedPlaylists] = createSignal<OnlinePlaylistSummary[]>([]);
@@ -239,7 +250,16 @@ export function Sidebar(props: SidebarProps) {
 
   onMount(() => {
     if (typeof window === "undefined") return;
-    const handler = () => setForceCollapsedNarrow(isNarrowViewport());
+    const handler = () => {
+      const forceCollapsed = isNarrowViewport();
+      if (collapseMotionFallbackId !== undefined) {
+        window.clearTimeout(collapseMotionFallbackId);
+        collapseMotionFallbackId = undefined;
+      }
+      setForceCollapsedNarrow(forceCollapsed);
+      setCollapsedContent(forceCollapsed || collapsedPersisted());
+      setCollapseMotionActive(false);
+    };
     window.addEventListener("resize", handler);
     onCleanup(() => window.removeEventListener("resize", handler));
   });
@@ -293,9 +313,63 @@ export function Sidebar(props: SidebarProps) {
   };
 
   const collapsed = () => collapsedPersisted() || forceCollapsedNarrow();
-  const className = () => `sidebar${collapsed() ? " is-collapsed" : ""}`;
+  const className = () =>
+    `sidebar${collapsed() ? " is-collapsed" : ""}${collapseMotionActive() ? " is-collapse-motion-active" : ""}`;
   const toggleAria = () =>
     collapsedPersisted() ? t("sidebar.aria.expand") : t("sidebar.aria.collapse");
+
+  const finishCollapseMotion = (): void => {
+    if (collapseMotionFallbackId !== undefined && typeof window !== "undefined") {
+      window.clearTimeout(collapseMotionFallbackId);
+      collapseMotionFallbackId = undefined;
+    }
+    setCollapseMotionActive(false);
+    setCollapsedContent(collapsed());
+  };
+
+  const handleCollapseTransitionEvent = (event: TransitionEvent): void => {
+    if (
+      event.target !== event.currentTarget ||
+      event.propertyName !== COLLAPSE_TRANSITION_PROPERTY
+    ) {
+      return;
+    }
+    if (event.type === "transitionrun") {
+      setCollapseMotionActive(true);
+      return;
+    }
+    if (event.type === "transitionend" || event.type === "transitioncancel") {
+      finishCollapseMotion();
+    }
+  };
+
+  const handleCollapseToggle = (): void => {
+    const nextCollapsed = !collapsedPersisted();
+    if (!nextCollapsed) setCollapsedContent(false);
+    setCollapseMotionActive(true);
+    setCollapsedPersisted(nextCollapsed);
+    if (
+      typeof window === "undefined" ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      queueMicrotask(finishCollapseMotion);
+      return;
+    }
+    if (collapseMotionFallbackId !== undefined) {
+      window.clearTimeout(collapseMotionFallbackId);
+    }
+    collapseMotionFallbackId = window.setTimeout(
+      finishCollapseMotion,
+      COLLAPSE_MOTION_FALLBACK_MS
+    );
+  };
+
+  onCleanup(() => {
+    if (collapseMotionFallbackId !== undefined && typeof window !== "undefined") {
+      window.clearTimeout(collapseMotionFallbackId);
+    }
+  });
+
   const isPageHidden = (page: SidebarPage): boolean =>
     uiSettings.sidebarHiddenItems[SIDEBAR_SETTING_KEY_BY_PAGE[page]];
   const isItemHidden = (item: NavItem): boolean =>
@@ -329,7 +403,7 @@ export function Sidebar(props: SidebarProps) {
   const showCollectedPlaylistGroup = (): boolean =>
     uiSettings.useOnlineService && !isPageHidden("collected-playlists");
   const showPlaylistDivider = (): boolean =>
-    !collapsed() && (showCreatedPlaylistGroup() || showCollectedPlaylistGroup());
+    !collapsedContent() && (showCreatedPlaylistGroup() || showCollectedPlaylistGroup());
   const playlistItemsForGroup = (groupKey: PlaylistGroupKey): OnlinePlaylistSummary[] =>
     groupKey === "created" ? createdPlaylists() : collectedPlaylists();
   const localPlaylistCover = (playlist: LocalPlaylist): string | null =>
@@ -437,7 +511,7 @@ export function Sidebar(props: SidebarProps) {
         </Show>
         <Show when={showHeartMode()}>
           <SidebarIconButton
-            icon={IconSPlayerHeartBit}
+            icon={IconHeartbeatFilled}
             label={td("sidebar.nav.likedSongs.heartMode")}
             variant="nav"
             class="sidebar-nav-action--heart"
@@ -472,13 +546,13 @@ export function Sidebar(props: SidebarProps) {
                 open={createSourceMenuOpen()}
                 value={createdPlaylistSource()}
                 options={createdPlaylistSourceOptions()}
-                triggerIcon={IconSPlayerMenu}
+                triggerIcon={IconMenuFilled}
                 checkIcon={IconCheckmark}
                 onOpenChange={setCreateSourceMenuOpen}
                 onChange={setCreatedPlaylistSource}
               />
               <SidebarIconButton
-                icon={IconSPlayerAdd}
+                icon={IconAddFilled}
                 label={td("sidebar.playlist.create")}
                 variant="section"
                 onClick={(event) => {
@@ -598,7 +672,7 @@ export function Sidebar(props: SidebarProps) {
   };
 
   const renderCollapsedPlaylistGroup = (groupKey: PlaylistGroupKey): JSX.Element => {
-    const Icon = groupKey === "created" ? IconPlaylist : IconSPlayerStar;
+    const Icon = groupKey === "created" ? IconPlaylist : IconStarFilled;
     const label = () =>
       groupKey === "created" ? createdSectionTitle() : t("sidebar.section.collectedPlaylists");
 
@@ -619,7 +693,13 @@ export function Sidebar(props: SidebarProps) {
   };
 
   return (
-    <nav class={className()} aria-label={t("sidebar.aria.primary")}>
+    <nav
+      class={className()}
+      aria-label={t("sidebar.aria.primary")}
+      onTransitionRun={handleCollapseTransitionEvent}
+      onTransitionEnd={handleCollapseTransitionEvent}
+      onTransitionCancel={handleCollapseTransitionEvent}
+    >
       <div class="sidebar-scrollbar">
         <div class="sidebar-content">
           <button
@@ -639,7 +719,7 @@ export function Sidebar(props: SidebarProps) {
               <For each={visibleNavGroups()}>
                 {(group, index) => (
                   <>
-                    <Show when={index() > 0 && !collapsed()}>
+                    <Show when={index() > 0 && !collapsedContent()}>
                       <div class="sidebar-menu-divider" role="separator" aria-hidden="true" />
                     </Show>
                     {renderNavList(group.items)}
@@ -653,7 +733,10 @@ export function Sidebar(props: SidebarProps) {
 
               <Show when={showCreatedPlaylistGroup()}>
                 <div class="sidebar-playlist-group sidebar-playlist-group--created">
-                  <Show when={!collapsed()} fallback={renderCollapsedPlaylistGroup("created")}>
+                  <Show
+                    when={!collapsedContent()}
+                    fallback={renderCollapsedPlaylistGroup("created")}
+                  >
                     {renderPlaylistHeader("created")}
                     {renderPlaylistBody("created")}
                   </Show>
@@ -662,7 +745,10 @@ export function Sidebar(props: SidebarProps) {
 
               <Show when={showCollectedPlaylistGroup()}>
                 <div class="sidebar-playlist-group sidebar-playlist-group--collected">
-                  <Show when={!collapsed()} fallback={renderCollapsedPlaylistGroup("collected")}>
+                  <Show
+                    when={!collapsedContent()}
+                    fallback={renderCollapsedPlaylistGroup("collected")}
+                  >
                     {renderPlaylistHeader("collected")}
                     {renderPlaylistBody("collected")}
                   </Show>
@@ -675,7 +761,7 @@ export function Sidebar(props: SidebarProps) {
       <button
         type="button"
         class="sidebar-rail-toggle"
-        onClick={() => setCollapsedPersisted((current) => !current)}
+        onClick={handleCollapseToggle}
         aria-label={toggleAria()}
         title={toggleAria()}
         disabled={forceCollapsedNarrow()}
