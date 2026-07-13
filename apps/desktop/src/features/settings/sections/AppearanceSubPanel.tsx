@@ -32,6 +32,7 @@ interface AppearanceSubPanelProps {
   highlightId: string | null;
   nextIndex: () => number;
   onBack: () => void;
+  showHeader?: boolean;
 }
 
 interface BooleanItemConfig {
@@ -141,15 +142,17 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
 
   return (
     <>
-      <div class="settings-subpage-head">
-        <button type="button" class="ghost-button settings-subpage-back" onClick={props.onBack}>
-          {t("settings.appearance.back")}
-        </button>
-        <div class="settings-subpage-copy">
-          <h2>{t(props.manager.labelKey)}</h2>
-          <p>{t(props.manager.descriptionKey)}</p>
+      <Show when={props.showHeader !== false}>
+        <div class="settings-subpage-head">
+          <button type="button" class="ghost-button settings-subpage-back" onClick={props.onBack}>
+            {t("settings.appearance.back")}
+          </button>
+          <div class="settings-subpage-copy">
+            <h2>{t(props.manager.labelKey)}</h2>
+            <p>{t(props.manager.descriptionKey)}</p>
+          </div>
         </div>
-      </div>
+      </Show>
 
       <Show when={props.manager.panel === "sidebar"}>
         <SettingGroup title={t("settings.appearance.sidebarManager")}>
@@ -188,6 +191,7 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
           />
           <div
             id="setting-homeSections"
+            data-setting-id="homeSections"
             class={standaloneSettingClass("homeSections")}
           >
             <HomeSectionManager />

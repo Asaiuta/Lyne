@@ -40,6 +40,7 @@ const APPEARANCE_ITEM_IDS = [
   "bgEnabled",
   "bgBlur",
   "bgMask",
+  "dynamicBackgroundMaxFps",
   ...managerIds(LAYOUT_MANAGER_ITEMS),
   ...managerIds(SIDEBAR_VISIBILITY_ITEMS),
   "showHomeGreeting",

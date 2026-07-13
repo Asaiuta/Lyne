@@ -1,6 +1,10 @@
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import type { UISettings, UISettingsFieldName } from "../../../shared/state/uiSettingsModel";
-import { commitUISettingField, type UISettingsRuntime } from "../../../shared/state/uiSettingsStorage";
+import {
+  commitUISettingField,
+  previewUISettingField,
+  type UISettingsRuntime
+} from "../../../shared/state/uiSettingsStorage";
 
 export const APPEARANCE_SIGNAL_FIELDS = [
   "themeMode",
@@ -14,7 +18,7 @@ export const APPEARANCE_SIGNAL_FIELDS = [
   "bgEnabled",
   "bgBlur",
   "bgMask",
-  "customChrome",
+  "dynamicBackgroundMaxFps",
   "routeAnimation",
   "fullPlayerLayout",
   "fullPlayerAutoFocusLyrics",
@@ -100,7 +104,7 @@ export const APPEARANCE_SIMPLE_COMMIT_FIELDS = [
   "bgEnabled",
   "bgBlur",
   "bgMask",
-  "customChrome",
+  "dynamicBackgroundMaxFps",
   "fullPlayerLayout",
   "fullPlayerAutoFocusLyrics",
   "fullPlayerCommentMode",
@@ -120,6 +124,7 @@ export const APPEARANCE_SIMPLE_COMMIT_FIELDS = [
 export const APPEARANCE_RETURNED_SETTER_FIELDS = [
   "bgBlur",
   "bgMask",
+  "dynamicBackgroundMaxFps",
   "customAccentColor",
   "customFontFamily",
   "customCss",
@@ -219,6 +224,17 @@ export function commitAppearanceSignalField<K extends AppearanceSignalField>(
 ): boolean {
   const signal = signals[field];
   return commitUISettingField(field, value, signal.value, signal.setValue, runtime);
+}
+
+export function previewAppearanceSignalField<K extends AppearanceSignalField>(
+  signals: AppearanceSignals,
+  field: K,
+  value: UISettings[K],
+  runtime?: UISettingsRuntime
+): void {
+  const signal = signals[field];
+  signal.setValue(() => value);
+  previewUISettingField(field, value, runtime);
 }
 
 export function createAppearanceFieldCommitters<

@@ -4,7 +4,8 @@ import type { TranslationKey } from "../../../shared/i18n";
 import { useTranslation } from "../../../shared/i18n";
 import { NaiveInput } from "../../../shared/ui/naive";
 import { useDismissibleOverlay } from "../../../shared/ui/useDismissibleOverlay";
-import { SETTINGS_CATALOG, type SettingsCatalogEntry } from "../search/catalog";
+import { usePresenceTransition } from "../../../shared/ui/usePresenceTransition";
+import type { SettingsCatalogEntry } from "../search/catalog";
 import { SETTINGS_CATEGORIES } from "./SettingsCategoryNav";
 import type { SettingsCategoryKey } from "./SettingsCategoryNav";
 
@@ -39,15 +40,37 @@ const settingsSearchResultDescriptionClass = "settings-search-result-desc";
 
 const settingsSearchEmptyClass = "settings-search-empty";
 
+const SETTINGS_SEARCH_FADE_DOWN_MS = 100;
+
+let catalogRequest: Promise<readonly SettingsCatalogEntry[]> | null = null;
+
+const loadSettingsCatalog = (): Promise<readonly SettingsCatalogEntry[]> => {
+  catalogRequest ??= import("../search/catalog").then((module) => module.SETTINGS_CATALOG);
+  return catalogRequest;
+};
+
 export function SettingsSearchBox(props: SettingsSearchBoxProps) {
   const { t } = useTranslation();
   const [query, setQuery] = createSignal("");
   const [open, setOpen] = createSignal(false);
   const [activeIndex, setActiveIndex] = createSignal(-1);
+  const [renderedMatches, setRenderedMatches] = createSignal<SettingsCatalogEntry[]>([]);
+  const [catalogEntries, setCatalogEntries] =
+    createSignal<readonly SettingsCatalogEntry[]>([]);
   let containerRef: HTMLDivElement | undefined;
 
+  const ensureCatalogLoaded = (): void => {
+    if (catalogEntries().length > 0) return;
+    void loadSettingsCatalog()
+      .then(setCatalogEntries)
+      .catch((error) => {
+        catalogRequest = null;
+        console.warn("[SettingsSearchBox] failed to load settings catalog", error);
+      });
+  };
+
   const indexedEntries = createMemo(() => {
-    return SETTINGS_CATALOG.map((entry) => ({
+    return catalogEntries().map((entry) => ({
       entry,
       label: t(entry.labelKey).toLowerCase(),
       description: entry.descriptionKey ? t(entry.descriptionKey).toLowerCase() : "",
@@ -71,10 +94,25 @@ export function SettingsSearchBox(props: SettingsSearchBoxProps) {
 
   const resultsVisible = createMemo<boolean>(() => open() && query().trim().length > 0);
 
-  const resultsStyle = () => (resultsVisible() ? undefined : { display: "none" });
+  const resultsPresence = usePresenceTransition(resultsVisible, {
+    durationMs: SETTINGS_SEARCH_FADE_DOWN_MS
+  });
+
+  const visibleMatches = createMemo<SettingsCatalogEntry[]>(() =>
+    resultsPresence.closing() ? renderedMatches() : matches()
+  );
+
+  const resultsClassName = () =>
+    `${settingsSearchResultsClass}${resultsPresence.visible() && !resultsPresence.closing() ? " is-visible" : ""}${resultsPresence.closing() ? " is-closing" : ""}`;
 
   createEffect(() => {
     props.onActiveChange?.(resultsVisible());
+  });
+
+  createEffect(() => {
+    if (resultsVisible()) {
+      setRenderedMatches(matches());
+    }
   });
 
   useDismissibleOverlay(open, {
@@ -90,12 +128,14 @@ export function SettingsSearchBox(props: SettingsSearchBoxProps) {
   };
 
   const handleQueryChange = (value: string) => {
+    ensureCatalogLoaded();
     setQuery(value);
     setOpen(true);
     setActiveIndex(-1);
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    ensureCatalogLoaded();
     const list = matches();
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -123,57 +163,61 @@ export function SettingsSearchBox(props: SettingsSearchBoxProps) {
         placeholder={t("settings.search.placeholder")}
         clearable
         onUpdateValue={handleQueryChange}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          ensureCatalogLoaded();
+          setOpen(true);
+        }}
         onKeyDown={handleKeyDown}
         ariaLabel={t("settings.search.placeholder")}
         ariaExpanded={resultsVisible()}
         ariaControls="settings-search-results"
         prefix={<IconSearch />}
       />
-      <div
-        class={settingsSearchResultsClass}
-        id="settings-search-results"
-        role="listbox"
-        style={resultsStyle()}
-      >
-        <Show
-          when={matches().length > 0}
-          fallback={<div class={settingsSearchEmptyClass}>{t("settings.search.noResults")}</div>}
+      <Show when={resultsPresence.rendered()}>
+        <div
+          class={resultsClassName()}
+          id="settings-search-results"
+          role="listbox"
         >
-          <For each={matches()}>
-            {(entry, index) => {
-              const active = () => index() === activeIndex();
-              const className = () =>
-                active()
-                  ? `${settingsSearchResultBaseClass} ${settingsSearchResultActiveClass}`
-                  : settingsSearchResultBaseClass;
+          <Show
+            when={visibleMatches().length > 0}
+            fallback={<div class={settingsSearchEmptyClass}>{t("settings.search.noResults")}</div>}
+          >
+            <For each={visibleMatches()}>
+              {(entry, index) => {
+                const active = () => index() === activeIndex();
+                const className = () =>
+                  active()
+                    ? `${settingsSearchResultBaseClass} ${settingsSearchResultActiveClass}`
+                    : settingsSearchResultBaseClass;
 
-              return (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={active()}
-                  class={className()}
-                  onMouseEnter={() => setActiveIndex(index())}
-                  onClick={() => handleSelect(entry)}
-                >
-                  <span class={settingsSearchResultCategoryClass}>
-                    {t(CATEGORY_LABELS[entry.category])}
-                  </span>
-                  <span class={settingsSearchResultLabelClass}>{t(entry.labelKey)}</span>
-                  <Show when={entry.descriptionKey}>
-                    {(descriptionKey) => (
-                      <span class={settingsSearchResultDescriptionClass}>
-                        {t(descriptionKey())}
-                      </span>
-                    )}
-                  </Show>
-                </button>
-              );
-            }}
-          </For>
-        </Show>
-      </div>
+                return (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={active()}
+                    class={className()}
+                    onMouseEnter={() => setActiveIndex(index())}
+                    onClick={() => handleSelect(entry)}
+                  >
+                    <span class={settingsSearchResultCategoryClass}>
+                      {t(CATEGORY_LABELS[entry.category])}
+                    </span>
+                    <span class={settingsSearchResultLabelClass}>{t(entry.labelKey)}</span>
+                    <Show when={entry.descriptionKey}>
+                      {(descriptionKey) => (
+                        <span class={settingsSearchResultDescriptionClass}>
+                          {t(descriptionKey())}
+                        </span>
+                      )}
+                    </Show>
+                  </button>
+                );
+              }}
+            </For>
+          </Show>
+        </div>
+      </Show>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   readUISettingsSnapshot,
   type UISettingsRuntime
 } from "../../../shared/state/uiSettingsStorage";
+import { DEFAULT_THEME_SEED_HEX } from "../../../shared/theme/paletteEngine";
 import {
   APPEARANCE_RETURNED_SETTER_FIELDS,
   APPEARANCE_SIGNAL_FIELDS,
@@ -14,7 +15,8 @@ import {
   createAppearanceAccessors,
   createAppearanceFieldCommitters,
   createAppearanceSetterAliases,
-  createAppearanceSignals
+  createAppearanceSignals,
+  previewAppearanceSignalField
 } from "./appearanceSettingsModel";
 
 const runtimeFromValues = (values: Record<string, string>): UISettingsRuntime => ({
@@ -115,6 +117,40 @@ test("appearance commit factory persists and rolls back through schema fields", 
   assert.equal(accessors.themeMode(), "dark");
 });
 
+test("appearance preview updates local signals and notifies without persisting", () => {
+  const values: Record<string, string> = {
+    [STORAGE_KEYS.playerBackgroundFps]: "30"
+  };
+  const previews: Array<{ field: string; value: unknown }> = [];
+  const writes: Array<{ key: string; value: string }> = [];
+  const runtime: UISettingsRuntime = {
+    storage: {
+      getItem: (key) => values[key] ?? null,
+      setItem: (key, value) => {
+        writes.push({ key, value });
+        values[key] = value;
+      }
+    },
+    events: {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    },
+    notifyPreview: (field, value) => {
+      previews.push({ field, value });
+    }
+  };
+
+  const signals = createAppearanceSignals(readUISettingsSnapshot(runtime));
+  const accessors = createAppearanceAccessors(signals);
+
+  previewAppearanceSignalField(signals, "playerBackgroundFps", 48, runtime);
+
+  assert.equal(accessors.playerBackgroundFps(), 48);
+  assert.deepEqual(previews, [{ field: "playerBackgroundFps", value: 48 }]);
+  assert.deepEqual(writes, []);
+  assert.equal(values[STORAGE_KEYS.playerBackgroundFps], "30");
+});
+
 test("appearance style committers run post-persist hooks only after successful writes", () => {
   const values: Record<string, string> = {};
   let applied = 0;
@@ -161,7 +197,7 @@ test("appearance style committers run post-persist hooks only after successful w
     }
   });
 
-  assert.equal(failingCommitters.customAccentColor("#fe7971"), false);
+  assert.equal(failingCommitters.customAccentColor(DEFAULT_THEME_SEED_HEX), false);
   assert.equal(accessors.customAccentColor(), "#c084fc");
   assert.equal(applied, 1);
 });

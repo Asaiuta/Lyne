@@ -20,11 +20,13 @@ import {
   APPEARANCE_RETURNED_SETTER_FIELDS,
   APPEARANCE_SIMPLE_COMMIT_FIELDS,
   APPEARANCE_STYLE_COMMIT_FIELDS,
+  type AppearanceSignalField,
   commitAppearanceSignalField,
   createAppearanceAccessors,
   createAppearanceFieldCommitters,
   createAppearanceSetterAliases,
-  createAppearanceSignals
+  createAppearanceSignals,
+  previewAppearanceSignalField
 } from "./appearanceSettingsModel";
 
 function resolveTheme(mode: ThemeMode): "dark" | "light" {
@@ -100,6 +102,23 @@ export function useAppearanceSettings() {
 
   const handleRunCustomJs = () => executeCustomJs(accessors.customJs());
 
+  const createPreviewHandler =
+    <K extends AppearanceSignalField>(field: K) =>
+    (value: UISettings[K]) => {
+      previewAppearanceSignalField(signals, field, value);
+    };
+
+  const handleBgBlurPreview = createPreviewHandler("bgBlur");
+  const handleBgMaskPreview = createPreviewHandler("bgMask");
+  const handleDynamicBackgroundMaxFpsPreview = createPreviewHandler("dynamicBackgroundMaxFps");
+  const handlePlayerStyleRatioPreview = createPreviewHandler("playerStyleRatio");
+  const handlePlayerFullscreenGradientPreview = createPreviewHandler("playerFullscreenGradient");
+  const handlePlayerBackgroundFpsPreview = createPreviewHandler("playerBackgroundFps");
+  const handlePlayerBackgroundFlowSpeedPreview = createPreviewHandler("playerBackgroundFlowSpeed");
+  const handlePlayerBackgroundRenderScalePreview = createPreviewHandler(
+    "playerBackgroundRenderScale"
+  );
+
   const handleToggleAllCovers = () => {
     const nextHidden = !allCoversHidden();
     const nextRecord: HiddenCovers = { ...DEFAULT_HIDDEN_COVERS };
@@ -139,18 +158,26 @@ export function useAppearanceSettings() {
     handleRunCustomJs,
     handleRouteAnimation: simpleCommitters.routeAnimation,
     handleBgToggle: simpleCommitters.bgEnabled,
+    handleBgBlurPreview,
     handleBgBlur: simpleCommitters.bgBlur,
+    handleBgMaskPreview,
     handleBgMask: simpleCommitters.bgMask,
-    handleCustomChrome: simpleCommitters.customChrome,
+    handleDynamicBackgroundMaxFpsPreview,
+    handleDynamicBackgroundMaxFps: simpleCommitters.dynamicBackgroundMaxFps,
     handleFullPlayerLayout: simpleCommitters.fullPlayerLayout,
     handleFullPlayerAutoFocusLyrics: simpleCommitters.fullPlayerAutoFocusLyrics,
     handleFullPlayerCommentMode: simpleCommitters.fullPlayerCommentMode,
     handlePlayerType: simpleCommitters.playerType,
+    handlePlayerStyleRatioPreview,
     handlePlayerStyleRatio: simpleCommitters.playerStyleRatio,
+    handlePlayerFullscreenGradientPreview,
     handlePlayerFullscreenGradient: simpleCommitters.playerFullscreenGradient,
     handlePlayerBackgroundType: simpleCommitters.playerBackgroundType,
+    handlePlayerBackgroundFpsPreview,
     handlePlayerBackgroundFps: simpleCommitters.playerBackgroundFps,
+    handlePlayerBackgroundFlowSpeedPreview,
     handlePlayerBackgroundFlowSpeed: simpleCommitters.playerBackgroundFlowSpeed,
+    handlePlayerBackgroundRenderScalePreview,
     handlePlayerBackgroundRenderScale: simpleCommitters.playerBackgroundRenderScale,
     handlePlayerExpandAnimation: simpleCommitters.playerExpandAnimation,
     handleDynamicCover: simpleCommitters.dynamicCover,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Setter } from "solid-js";
+import type { UISettings } from "./uiSettingsModel";
 import {
   createUISettingsStore,
   disposeBrowserSharedUISettingsStore,
@@ -14,6 +15,7 @@ import {
   readUISettingsSnapshot,
   STORAGE_KEYS,
   UI_SETTINGS_CHANGED_EVENT,
+  UI_SETTINGS_PREVIEW_EVENT,
   type UISettingsRuntime
 } from "./uiSettingsStorage";
 
@@ -121,11 +123,23 @@ const createStorageEvent = (key: string | null): Event => {
   return event;
 };
 
+const createPreviewEvent = (
+  field: keyof UISettings,
+  value: UISettings[keyof UISettings]
+): Event => {
+  const event = new Event(UI_SETTINGS_PREVIEW_EVENT);
+  Object.defineProperty(event, "detail", {
+    value: { field, value }
+  });
+  return event;
+};
+
 test("readUISettingsSnapshot reads settings from an injected storage adapter", () => {
   const settings = readUISettingsSnapshot(
     runtimeFromValues({
       [STORAGE_KEYS.bgEnabled]: "true",
       [STORAGE_KEYS.bgBlur]: "18",
+      [STORAGE_KEYS.dynamicBackgroundMaxFps]: "144",
       [STORAGE_KEYS.themeMode]: "light",
       [STORAGE_KEYS.closeAppMethod]: "exit",
       [STORAGE_KEYS.searchInputBehavior]: "clear",
@@ -150,6 +164,7 @@ test("readUISettingsSnapshot reads settings from an injected storage adapter", (
 
   assert.equal(settings.bgEnabled, true);
   assert.equal(settings.bgBlur, 18);
+  assert.equal(settings.dynamicBackgroundMaxFps, 144);
   assert.equal(settings.themeMode, "light");
   assert.equal(settings.closeAppMethod, "exit");
   assert.equal(settings.searchInputBehavior, "clear");
@@ -189,6 +204,7 @@ test("readUISettingsSnapshot falls back to defaults when injected storage fails"
 
   assert.equal(settings.bgEnabled, false);
   assert.equal(settings.bgBlur, 32);
+  assert.equal(settings.dynamicBackgroundMaxFps, 120);
   assert.equal(settings.themeMode, "auto");
   assert.equal(settings.ncmSongLevel, "exhigh");
   assert.equal(reported.length > 0, true);
@@ -240,7 +256,7 @@ test("readUISettingField reads one schema-managed field", () => {
   );
 });
 
-test("useUISettings shares one browser store and one listener pair", () => {
+test("useUISettings shares one browser store and one listener set", () => {
   disposeBrowserSharedUISettingsStore();
   const runtime = installBrowserSettingsRuntime({
     [STORAGE_KEYS.bgEnabled]: "false",
@@ -255,6 +271,7 @@ test("useUISettings shares one browser store and one listener pair", () => {
     assert.equal(firstSettings, secondSettings);
     assert.equal(runtime.readCount(), readsAfterFirstConsumer);
     assert.equal(runtime.listeners.filter((entry) => entry.type === UI_SETTINGS_CHANGED_EVENT).length, 1);
+    assert.equal(runtime.listeners.filter((entry) => entry.type === UI_SETTINGS_PREVIEW_EVENT).length, 1);
     assert.equal(runtime.listeners.filter((entry) => entry.type === "storage").length, 1);
 
     runtime.values[STORAGE_KEYS.bgEnabled] = "true";
@@ -285,6 +302,31 @@ test("useUISettings browser store syncs only known storage keys", () => {
 
     runtime.events.dispatchEvent(createStorageEvent(STORAGE_KEYS.bgEnabled));
     assert.equal(settings.bgEnabled, true);
+
+    disposeBrowserSharedUISettingsStore();
+  } finally {
+    disposeBrowserSharedUISettingsStore();
+    runtime.restore();
+  }
+});
+
+test("useUISettings browser store applies preview events without persisting", () => {
+  disposeBrowserSharedUISettingsStore();
+  const runtime = installBrowserSettingsRuntime({
+    [STORAGE_KEYS.bgBlur]: "12"
+  });
+  try {
+    const settings = useUISettings();
+
+    runtime.events.dispatchEvent(createPreviewEvent("bgBlur", 44));
+    assert.equal(settings.bgBlur, 44);
+    assert.equal(runtime.values[STORAGE_KEYS.bgBlur], "12");
+
+    runtime.events.dispatchEvent(createPreviewEvent("notASetting" as keyof UISettings, 60));
+    assert.equal(settings.bgBlur, 44);
+
+    runtime.events.dispatchEvent(new Event(UI_SETTINGS_CHANGED_EVENT));
+    assert.equal(settings.bgBlur, 12);
 
     disposeBrowserSharedUISettingsStore();
   } finally {
@@ -416,7 +458,7 @@ test("readUISettingsSnapshot reads custom appearance settings from schema", () =
   assert.equal(settings.customJs, "window.__custom = true;");
 });
 
-test("readUISettingsSnapshot rejects invalid SPlayer-aligned general enums", () => {
+test("readUISettingsSnapshot rejects invalid general enum values", () => {
   const settings = readUISettingsSnapshot(
     runtimeFromValues({
       [STORAGE_KEYS.closeAppMethod]: "quit",

@@ -1,16 +1,19 @@
 import { onCleanup, onMount } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import type { UISettings } from "./uiSettingsModel";
+import type { UISettings, UISettingsFieldName } from "./uiSettingsModel";
 import {
   browserUISettingsRuntime,
+  readUISettingsPreviewEvent,
   readUISettingsSnapshot,
   shouldSyncUISettingsFromEvent,
   UI_SETTINGS_CHANGED_EVENT,
+  UI_SETTINGS_PREVIEW_EVENT,
   type UISettingsRuntime
 } from "./uiSettingsStorage";
 
 export interface UISettingsStore {
   settings: UISettings;
+  preview: <K extends UISettingsFieldName>(field: K, value: UISettings[K]) => void;
   sync: () => void;
 }
 
@@ -26,6 +29,9 @@ export function createUISettingsStore(runtime: UISettingsRuntime): UISettingsSto
 
   return {
     settings,
+    preview: (field, value) => {
+      setSettings(reconcile({ ...settings, [field]: value } as UISettings));
+    },
     sync: () => {
       setSettings(reconcile(readUISettingsSnapshot(runtime)));
     }
@@ -38,12 +44,20 @@ function listenToUISettingsRuntime(runtime: UISettingsRuntime, store: UISettings
       store.sync();
     }
   };
+  const handlePreview: EventListener = (event) => {
+    const preview = readUISettingsPreviewEvent(event);
+    if (preview) {
+      store.preview(preview.field, preview.value);
+    }
+  };
 
   runtime.events.addEventListener(UI_SETTINGS_CHANGED_EVENT, handleChange);
+  runtime.events.addEventListener(UI_SETTINGS_PREVIEW_EVENT, handlePreview);
   runtime.events.addEventListener("storage", handleChange);
 
   return () => {
     runtime.events.removeEventListener(UI_SETTINGS_CHANGED_EVENT, handleChange);
+    runtime.events.removeEventListener(UI_SETTINGS_PREVIEW_EVENT, handlePreview);
     runtime.events.removeEventListener("storage", handleChange);
   };
 }

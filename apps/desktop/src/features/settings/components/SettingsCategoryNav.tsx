@@ -1,4 +1,4 @@
-import { For, type JSX } from "solid-js";
+import { For, createMemo, type JSX } from "solid-js";
 import {
   IconCloud,
   IconControls,
@@ -44,6 +44,8 @@ const settingsNavClass = "settings-nav n-menu";
 
 const settingsNavListClass = "settings-nav-list";
 
+const settingsNavActiveIndicatorClass = "settings-nav-active-indicator";
+
 const settingsNavItemWrapperClass = "n-menu-item";
 
 const settingsNavItemBaseClass = "settings-nav-item n-menu-item-content";
@@ -61,10 +63,23 @@ interface SettingsCategoryNavProps {
 
 export function SettingsCategoryNav(props: SettingsCategoryNavProps) {
   const { t } = useTranslation();
+  const activeIndex = createMemo<number>(() => {
+    const index = CATEGORIES.findIndex((cat) => cat.key === props.active);
+    return index >= 0 ? index : 0;
+  });
+  const listStyle = (): JSX.CSSProperties => ({
+    "--settings-nav-active-index": String(activeIndex())
+  });
 
   return (
     <nav class={settingsNavClass} aria-label={t("settings.nav.title")}>
-      <ul class={settingsNavListClass} role="tablist" aria-orientation="vertical">
+      <ul
+        class={settingsNavListClass}
+        role="tablist"
+        aria-orientation="vertical"
+        style={listStyle()}
+      >
+        <span class={settingsNavActiveIndicatorClass} aria-hidden="true" />
         <For each={CATEGORIES}>
           {(cat) => {
             const active = () => props.active === cat.key;

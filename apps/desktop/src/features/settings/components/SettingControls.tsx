@@ -1,11 +1,13 @@
 import type { Accessor } from "solid-js";
 import {
+  NaiveButton,
   NaiveInput,
   NaiveSelect,
+  NaiveSlider,
   NaiveSwitch,
   type NaiveSelectOption
 } from "../../../shared/ui/naive";
-import { SettingItem, RangeInput } from "./SettingItem";
+import { SettingItem, rangeValueClass, rangeWithValueClass } from "./SettingItem";
 import { WipBadge } from "./WipBadge";
 
 export type SelectOption = NaiveSelectOption<string>;
@@ -52,6 +54,8 @@ interface ButtonSettingItemProps extends BaseSettingControlProps {
 }
 
 export function ButtonSettingItem(props: ButtonSettingItemProps) {
+  const disabled = () => props.disabled || props.wip;
+
   return (
     <SettingItem
       id={props.id}
@@ -61,14 +65,19 @@ export function ButtonSettingItem(props: ButtonSettingItemProps) {
       index={props.index}
       badge={props.wip ? <WipBadge /> : undefined}
     >
-      <button
-        type="button"
-        class="ghost-button"
-        onClick={props.wip ? undefined : props.onClick}
-        disabled={props.disabled || props.wip}
+      <NaiveButton
+        class="settings-action-button"
+        variant="primary"
+        secondary
+        strong
+        size="medium"
+        onClick={() => {
+          if (!disabled()) props.onClick?.();
+        }}
+        disabled={disabled()}
       >
         {props.buttonLabel}
-      </button>
+      </NaiveButton>
     </SettingItem>
   );
 }
@@ -149,6 +158,9 @@ interface RangeSettingItemProps extends BaseSettingControlProps {
 }
 
 export function RangeSettingItem(props: RangeSettingItemProps) {
+  const disabled = () => props.disabled || props.wip;
+  const formattedValue = (value: number) => `${value}${props.formatSuffix ?? ""}`;
+
   return (
     <SettingItem
       id={props.id}
@@ -157,16 +169,25 @@ export function RangeSettingItem(props: RangeSettingItemProps) {
       highlighted={props.highlighted}
       index={props.index}
     >
-      <RangeInput
-        min={props.min}
-        max={props.max}
-        step={props.step}
-        value={props.value}
-        onPreview={props.onPreview}
-        onCommit={props.onCommit}
-        disabled={props.disabled || props.wip}
-        formatSuffix={props.formatSuffix}
-      />
+      <div class={rangeWithValueClass}>
+        <span class={rangeValueClass}>{formattedValue(props.value)}</span>
+        <NaiveSlider
+          class="settings-range-slider"
+          min={props.min}
+          max={props.max}
+          step={props.step}
+          value={props.value}
+          disabled={disabled()}
+          formatTooltip={formattedValue}
+          onUpdateValue={(value) => {
+            if (!disabled()) props.onPreview?.(value);
+          }}
+          onUpdateValueEnd={(value) => {
+            if (!disabled()) props.onCommit?.(value);
+          }}
+          ariaLabel={props.label}
+        />
+      </div>
     </SettingItem>
   );
 }

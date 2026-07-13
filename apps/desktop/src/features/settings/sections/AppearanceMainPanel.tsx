@@ -18,7 +18,6 @@ import {
   SelectSettingItem,
   type SelectOption
 } from "../components/SettingControls";
-import { settingsHintClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
 import {
   COVER_MANAGER_ITEM,
@@ -357,6 +356,7 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
         <BooleanSettingItem
           id="bgEnabled"
           label={t("settings.general.background.enabled")}
+          description={t("settings.general.background.enabled.desc")}
           highlighted={props.highlightId === "bgEnabled"}
           index={props.nextIndex()}
           checked={props.settings.bgEnabled()}
@@ -373,7 +373,7 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             max={80}
             step={1}
             value={props.settings.bgBlur()}
-            onPreview={props.settings.setBgBlur}
+            onPreview={props.settings.handleBgBlurPreview}
             onCommit={props.settings.handleBgBlur}
           />
           <RangeSettingItem
@@ -385,20 +385,25 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             max={100}
             step={1}
             value={props.settings.bgMask()}
-            onPreview={props.settings.setBgMask}
+            onPreview={props.settings.handleBgMaskPreview}
             onCommit={props.settings.handleBgMask}
             formatSuffix="%"
           />
+          <RangeSettingItem
+            id="dynamicBackgroundMaxFps"
+            label={t("settings.appearance.dynamicBackgroundMaxFps")}
+            description={t("settings.appearance.dynamicBackgroundMaxFps.desc")}
+            highlighted={props.highlightId === "dynamicBackgroundMaxFps"}
+            index={props.nextIndex()}
+            min={30}
+            max={144}
+            step={1}
+            value={props.settings.dynamicBackgroundMaxFps()}
+            onPreview={props.settings.handleDynamicBackgroundMaxFpsPreview}
+            onCommit={props.settings.handleDynamicBackgroundMaxFps}
+            formatSuffix=" fps"
+          />
         </Show>
-
-        <BooleanSettingItem
-          id="customChrome"
-          label={t("settings.general.window.customChrome")}
-          highlighted={props.highlightId === "customChrome"}
-          index={props.nextIndex()}
-          checked={props.settings.customChrome()}
-          onChange={props.settings.handleCustomChrome}
-        />
       </SettingGroup>
 
       <SettingGroup title={t("settings.appearance.layoutManagement")}>
@@ -467,7 +472,7 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             max={70}
             step={1}
             value={props.settings.playerStyleRatio()}
-            onPreview={props.settings.setPlayerStyleRatio}
+            onPreview={props.settings.handlePlayerStyleRatioPreview}
             onCommit={props.settings.handlePlayerStyleRatio}
             formatSuffix="%"
           />
@@ -484,7 +489,7 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             max={100}
             step={1}
             value={props.settings.playerFullscreenGradient()}
-            onPreview={props.settings.setPlayerFullscreenGradient}
+            onPreview={props.settings.handlePlayerFullscreenGradientPreview}
             onCommit={props.settings.handlePlayerFullscreenGradient}
             formatSuffix="%"
           />
@@ -526,7 +531,7 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             max={256}
             step={1}
             value={props.settings.playerBackgroundFps()}
-            onPreview={props.settings.setPlayerBackgroundFps}
+            onPreview={props.settings.handlePlayerBackgroundFpsPreview}
             onCommit={props.settings.handlePlayerBackgroundFps}
             formatSuffix=" fps"
           />
@@ -540,7 +545,7 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             max={10}
             step={0.1}
             value={props.settings.playerBackgroundFlowSpeed()}
-            onPreview={props.settings.setPlayerBackgroundFlowSpeed}
+            onPreview={props.settings.handlePlayerBackgroundFlowSpeedPreview}
             onCommit={props.settings.handlePlayerBackgroundFlowSpeed}
             formatSuffix="x"
           />
@@ -554,7 +559,7 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
             max={3}
             step={0.1}
             value={props.settings.playerBackgroundRenderScale()}
-            onPreview={props.settings.setPlayerBackgroundRenderScale}
+            onPreview={props.settings.handlePlayerBackgroundRenderScalePreview}
             onCommit={props.settings.handlePlayerBackgroundRenderScale}
             formatSuffix="x"
           />
@@ -625,11 +630,6 @@ export function AppearanceMainPanel(props: AppearanceMainPanelProps) {
           {(item) => renderBooleanItem(item, props, t)}
         </For>
       </SettingGroup>
-
-      <div class={settingsHintClass}>{t("settings.general.window.modeHint")}</div>
-      <Show when={!props.settings.customChrome()}>
-        <div class={settingsHintClass}>{t("settings.general.window.restartHint")}</div>
-      </Show>
     </>
   );
 }

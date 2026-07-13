@@ -9,6 +9,7 @@ import {
   commitUISettingField,
   readUISettingsSnapshot
 } from "../../../shared/state/uiSettingsStorage";
+import { DEFAULT_THEME_SEED_HEX } from "../../../shared/theme/paletteEngine";
 import {
   BooleanSettingItem,
   RangeSettingItem,
@@ -20,7 +21,7 @@ import { SettingGroup } from "../components/SettingGroup";
 
 const DESKTOP_LYRIC_COLORS = [
   "#ffffff",
-  "#fe7971",
+  DEFAULT_THEME_SEED_HEX,
   "#22c55e",
   "#38bdf8",
   "#fbbf24",

@@ -1,4 +1,5 @@
 import type { Accessor, Setter } from "solid-js";
+import { DEFAULT_THEME_SEED_HEX } from "../theme/paletteEngine";
 import {
   DEFAULT_CONTEXT_MENU_OPTIONS,
   DEFAULT_HIDDEN_COVERS,
@@ -31,6 +32,12 @@ import {
 } from "./uiSettingsModel";
 
 export const UI_SETTINGS_CHANGED_EVENT = "ui-settings-changed";
+export const UI_SETTINGS_PREVIEW_EVENT = "ui-settings-preview";
+
+export interface UISettingsPreviewEventDetail {
+  readonly field: UISettingsFieldName;
+  readonly value: UISettings[UISettingsFieldName];
+}
 
 export interface UISettingsStorage {
   getItem: (key: string) => string | null;
@@ -47,6 +54,7 @@ export interface UISettingsRuntime {
   storage: UISettingsStorage;
   events: UISettingsEventTarget;
   notifyChange?: () => void;
+  notifyPreview?: <K extends UISettingsFieldName>(field: K, value: UISettings[K]) => void;
   reportReadError?: (key: string, reason: string) => void;
   reportWriteError?: (key: string, reason: string) => void;
 }
@@ -318,6 +326,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   bgEnabled: createBoolField("ui.bg.enabled", false),
   bgBlur: createNumberField("ui.bg.blur", 32),
   bgMask: createNumberField("ui.bg.mask", 50),
+  dynamicBackgroundMaxFps: createClampedNumberField("ui.bg.dynamicMaxFps", 120, 30, 144),
   customChrome: createBoolField("ui.window.customChrome", true),
   fullPlayerLayout: createFullPlayerLayoutField("ui.fullPlayer.layout", "balanced"),
   fullPlayerAutoFocusLyrics: createBoolField("ui.fullPlayer.autoFocusLyrics", true),
@@ -375,7 +384,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
     "ui.contextMenu.options",
     DEFAULT_CONTEXT_MENU_OPTIONS
   ),
-  customAccentColor: createStringField("ui.theme.customAccentColor", "#fe7971"),
+  customAccentColor: createStringField("ui.theme.customAccentColor", DEFAULT_THEME_SEED_HEX),
   themeFollowCover: createBoolField("ui.theme.followCover", false),
   themeGlobalColor: createBoolField("ui.theme.globalColor", false),
   globalFont: createEnumField("ui.font.global", "default", VALID_GLOBAL_FONTS),
@@ -459,10 +468,15 @@ export const STORAGE_KEYS = Object.fromEntries(
 ) as { [K in keyof UISettings]: UISettingsSchema[K]["key"] };
 
 const UI_SETTING_FIELDS = Object.keys(UI_SETTINGS_SCHEMA) as UISettingsFieldName[];
+const UI_SETTING_FIELD_SET = new Set<UISettingsFieldName>(UI_SETTING_FIELDS);
 
 const UI_SETTING_FIELD_BY_STORAGE_KEY = Object.fromEntries(
   UI_SETTING_FIELDS.map((field) => [UI_SETTINGS_SCHEMA[field].key, field])
 ) as Record<string, UISettingsFieldName>;
+
+function isUISettingFieldName(value: string): value is UISettingsFieldName {
+  return UI_SETTING_FIELD_SET.has(value as UISettingsFieldName);
+}
 
 const fallbackUISettingsStorage: UISettingsStorage = {
   getItem: () => null
@@ -479,6 +493,15 @@ export const browserUISettingsRuntime = (): UISettingsRuntime => ({
   notifyChange: () => {
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event(UI_SETTINGS_CHANGED_EVENT));
+    }
+  },
+  notifyPreview: (field, value) => {
+    if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent<UISettingsPreviewEventDetail>(UI_SETTINGS_PREVIEW_EVENT, {
+          detail: { field, value }
+        })
+      );
     }
   },
   reportReadError: (key, reason) => {
@@ -577,6 +600,14 @@ export function persistUISettingField<K extends UISettingsFieldName>(
   return UI_SETTINGS_SCHEMA[field].write(runtime, value);
 }
 
+export function previewUISettingField<K extends UISettingsFieldName>(
+  field: K,
+  value: UISettings[K],
+  runtime: UISettingsRuntime = browserUISettingsRuntime()
+): void {
+  runtime.notifyPreview?.(field, value);
+}
+
 export function readUISettingField<K extends UISettingsFieldName>(
   field: K,
   runtime: UISettingsRuntime = browserUISettingsRuntime()
@@ -623,6 +654,26 @@ export function shouldSyncUISettingsFromEvent(event: Event): boolean {
   }
   const key = (event as StorageEvent).key;
   return key === null || storageKeyToUISettingField(key) !== null;
+}
+
+export function readUISettingsPreviewEvent(event: Event): UISettingsPreviewEventDetail | null {
+  if (event.type !== UI_SETTINGS_PREVIEW_EVENT) {
+    return null;
+  }
+
+  const detail = (event as CustomEvent<unknown>).detail;
+  if (!isPlainRecord(detail) || typeof detail.field !== "string") {
+    return null;
+  }
+
+  if (!isUISettingFieldName(detail.field)) {
+    return null;
+  }
+
+  return {
+    field: detail.field,
+    value: detail.value as UISettings[UISettingsFieldName]
+  };
 }
 
 function readNumber(runtime: UISettingsRuntime, key: string, fallback: number): number {

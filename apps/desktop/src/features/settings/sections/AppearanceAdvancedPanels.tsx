@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { useTranslation } from "../../../shared/i18n";
 import type { GlobalFont } from "../../../shared/state/uiSettingsModel";
+import { DEFAULT_THEME_SEED_HEX } from "../../../shared/theme/paletteEngine";
 import {
   BooleanSettingItem,
   SelectSettingItem,
@@ -17,9 +18,10 @@ interface AppearanceAdvancedPanelProps {
   highlightId: string | null;
   nextIndex: () => number;
   onBack: () => void;
+  showHeader?: boolean;
 }
 
-const PRESET_COLORS = ["#fe7971", "#ffb454", "#57c785", "#56a8ff", "#c084fc"] as const;
+const PRESET_COLORS = [DEFAULT_THEME_SEED_HEX, "#ffb454", "#57c785", "#56a8ff", "#c084fc"] as const;
 
 type FeedbackTone = "success" | "error";
 
@@ -44,7 +46,9 @@ export function ThemeConfigPanel(props: AppearanceAdvancedPanelProps) {
 
   return (
     <>
-      <PanelHeader manager={props.manager} onBack={props.onBack} />
+      <Show when={props.showHeader !== false}>
+        <PanelHeader manager={props.manager} onBack={props.onBack} />
+      </Show>
       <SettingGroup title={t("settings.appearance.themeConfig")}>
         <BooleanSettingItem
           id="themeGlobalColor"
@@ -115,7 +119,9 @@ export function FontConfigPanel(props: AppearanceAdvancedPanelProps) {
 
   return (
     <>
-      <PanelHeader manager={props.manager} onBack={props.onBack} />
+      <Show when={props.showHeader !== false}>
+        <PanelHeader manager={props.manager} onBack={props.onBack} />
+      </Show>
       <SettingGroup title={t("settings.appearance.fontConfig")}>
         <SelectSettingItem
           id="globalFont"
@@ -194,7 +200,9 @@ export function CustomCodePanel(props: AppearanceAdvancedPanelProps) {
 
   return (
     <>
-      <PanelHeader manager={props.manager} onBack={props.onBack} />
+      <Show when={props.showHeader !== false}>
+        <PanelHeader manager={props.manager} onBack={props.onBack} />
+      </Show>
       <SettingGroup title={t("settings.appearance.customCode")}>
         <div class="settings-danger-note" role="note">
           <strong>{t("settings.appearance.customCode.warningTitle")}</strong>

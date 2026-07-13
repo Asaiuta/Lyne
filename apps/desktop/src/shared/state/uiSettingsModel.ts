@@ -136,6 +136,7 @@ export interface UISettings {
   bgEnabled: boolean;
   bgBlur: number;
   bgMask: number;
+  dynamicBackgroundMaxFps: number;
   customChrome: boolean;
   fullPlayerLayout: "balanced" | "lyrics";
   fullPlayerAutoFocusLyrics: boolean;

@@ -1,12 +1,8 @@
-import { Match, Show, Switch, createEffect, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { settingsSectionClass } from "../components/SettingItem";
-import {
-  CustomCodePanel,
-  FontConfigPanel,
-  ThemeConfigPanel
-} from "./AppearanceAdvancedPanels";
 import { AppearanceMainPanel } from "./AppearanceMainPanel";
-import { AppearanceSubPanel } from "./AppearanceSubPanel";
+import { AppearanceManagerContent } from "./AppearanceManagerContent";
+import { AppearanceManagerModal } from "./AppearanceManagerModal";
 import {
   CONTEXT_MENU_ITEMS,
   COVER_DISPLAY_ITEMS,
@@ -30,13 +26,21 @@ const ALL_MANAGER_ITEMS: readonly ManagerConfig[] = [
   COVER_MANAGER_ITEM
 ];
 
-const isGenericSubPanel = (panel: AppearanceSubPanelId) =>
-  panel === "sidebar" ||
-  panel === "homeSections" ||
-  panel === "playlistPage" ||
-  panel === "fullPlayerElements" ||
-  panel === "contextMenu" ||
-  panel === "cover";
+const findHighlightedElementInAppearanceModal = (highlightedId: string): HTMLElement | null => {
+  const modal = document.querySelector<HTMLElement>(".appearance-manager-card");
+  if (!modal) return null;
+
+  const dataMatch = Array.from(modal.querySelectorAll<HTMLElement>("[data-setting-id]")).find(
+    (el) => el.dataset.settingId === highlightedId
+  );
+  if (dataMatch) return dataMatch;
+
+  return (
+    Array.from(modal.querySelectorAll<HTMLElement>("[id]")).find(
+      (el) => el.id === `setting-${highlightedId}`
+    ) ?? null
+  );
+};
 
 export function AppearanceSection(props: AppearanceSectionProps) {
   const [activeSubPanel, setActiveSubPanel] = createSignal<AppearanceSubPanelId | null>(null);
@@ -104,63 +108,55 @@ export function AppearanceSection(props: AppearanceSectionProps) {
     }
   });
 
-  let itemIndex = 0;
-  const nextIndex = () => itemIndex++;
+  createEffect(() => {
+    const highlightedId = props.highlightId;
+    if (highlightedId === null || activeManager() === null) return;
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+
+    let frame: number | undefined;
+    const timer = window.setTimeout(() => {
+      frame = window.requestAnimationFrame(() => {
+        const target = findHighlightedElementInAppearanceModal(highlightedId);
+        target?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    }, 0);
+
+    onCleanup(() => {
+      window.clearTimeout(timer);
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    });
+  });
+
+  let mainItemIndex = 0;
+  const nextMainIndex = () => mainItemIndex++;
+  const closeManager = () => setActiveSubPanel(null);
 
   return (
     <section class={settingsSectionClass}>
-      <Show when={activeManager()} keyed>
-        {(manager) => (
-          <Switch>
-            <Match when={manager.panel === "themeConfig"}>
-              <ThemeConfigPanel
-                manager={manager}
-                settings={settings}
-                highlightId={props.highlightId}
-                nextIndex={nextIndex}
-                onBack={() => setActiveSubPanel(null)}
-              />
-            </Match>
-            <Match when={manager.panel === "fontConfig"}>
-              <FontConfigPanel
-                manager={manager}
-                settings={settings}
-                highlightId={props.highlightId}
-                nextIndex={nextIndex}
-                onBack={() => setActiveSubPanel(null)}
-              />
-            </Match>
-            <Match when={manager.panel === "customCode"}>
-              <CustomCodePanel
-                manager={manager}
-                settings={settings}
-                highlightId={props.highlightId}
-                nextIndex={nextIndex}
-                onBack={() => setActiveSubPanel(null)}
-              />
-            </Match>
-            <Match when={isGenericSubPanel(manager.panel)}>
-              <AppearanceSubPanel
-                manager={manager}
-                settings={settings}
-                highlightId={props.highlightId}
-                nextIndex={nextIndex}
-                onBack={() => setActiveSubPanel(null)}
-              />
-            </Match>
-          </Switch>
-        )}
-      </Show>
+      <AppearanceMainPanel
+        settings={settings}
+        highlightId={props.highlightId}
+        nextIndex={nextMainIndex}
+        managerHighlighted={managerHighlighted}
+        onOpenSubPanel={setActiveSubPanel}
+      />
 
-      <Show when={!activeManager()}>
-        <AppearanceMainPanel
-          settings={settings}
-          highlightId={props.highlightId}
-          nextIndex={nextIndex}
-          managerHighlighted={managerHighlighted}
-          onOpenSubPanel={setActiveSubPanel}
-        />
-      </Show>
+      <AppearanceManagerModal
+        open={activeManager() !== null}
+        manager={activeManager()}
+        onClose={closeManager}
+      >
+        <Show when={activeManager()} keyed>
+          {(manager) => (
+            <AppearanceManagerContent
+              manager={manager}
+              settings={settings}
+              highlightId={props.highlightId}
+              onClose={closeManager}
+            />
+          )}
+        </Show>
+      </AppearanceManagerModal>
     </section>
   );
 }
