@@ -1,7 +1,9 @@
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "solid-js";
 import { SImage } from "../../../components/SImage";
-import { IconEye, IconMusic, IconPlay } from "../../../components/icons";
+import { IconEye, IconMusic, IconPlayFilled } from "../../../components/icons";
+import { SegmentedTabs, type SegmentedTabItem, type SegmentedTabsVariant } from "../../../components/page/SegmentedTabs";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
 import { NaiveH2, NaiveP } from "../../../shared/ui/naive";
 
@@ -34,6 +36,7 @@ interface NcmListDetailProps {
   coverShape?: "square" | "round";
   actionButtons?: JSX.Element;
   rightControls?: JSX.Element;
+  tabVariant?: SegmentedTabsVariant;
   onPlay: () => void;
   onTabChange?: (value: string) => void;
 }
@@ -45,6 +48,15 @@ const formatCount = (value: number): string => {
 };
 
 export function NcmListDetail(props: NcmListDetailProps) {
+  const tabs = createMemo<NcmListDetailTabItem[]>(() => props.tabs ?? []);
+  const tabItems = createMemo<SegmentedTabItem[]>(() =>
+    tabs().map((tab) => ({
+      value: tab.value,
+      label: tab.label,
+      count: tab.count != null ? formatCount(tab.count) : null
+    }))
+  );
+  const activeTab = createMemo<string>(() => props.activeTab ?? tabs()[0]?.value ?? "");
   const cover = () => coverSizeUrl(props.coverUrl, "m") ?? props.coverUrl ?? null;
   const playCountText = () => {
     const value = props.playCount;
@@ -80,7 +92,7 @@ export function NcmListDetail(props: NcmListDetailProps) {
               <Show when={playCountText()}>
                 {(count) => (
                   <span class="ncm-list-detail-play-count">
-                    <IconPlay />
+                    <IconPlayFilled />
                     {count()}
                   </span>
                 )}
@@ -112,39 +124,29 @@ export function NcmListDetail(props: NcmListDetailProps) {
           </Show>
           <div class="ncm-list-detail-menu">
             <div class="ncm-list-detail-menu-left">
-              <button
-                type="button"
-                class="primary-button ncm-list-detail-play"
+              <PageToolbarButton
+                variant="primary"
+                class="ncm-list-detail-play"
                 disabled={props.playDisabled || props.loading}
                 onClick={props.onPlay}
               >
-                <IconPlay />
+                <IconPlayFilled />
                 {props.playLabel}
-              </button>
+              </PageToolbarButton>
               {props.actionButtons}
             </div>
-            <Show when={props.rightControls || (props.tabs ?? []).length > 0}>
+            <Show when={props.rightControls || tabs().length > 0}>
               <div class="ncm-list-detail-menu-right">
                 {props.rightControls}
-                <Show when={(props.tabs ?? []).length > 0}>
-                  <div class="ncm-list-detail-tabs" role="tablist">
-                    <For each={props.tabs ?? []}>
-                      {(tab) => (
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={tab.value === props.activeTab}
-                          class={tab.value === props.activeTab ? "is-active" : ""}
-                          onClick={() => props.onTabChange?.(tab.value)}
-                        >
-                          {tab.label}
-                          <Show when={tab.count != null}>
-                            <span>{formatCount(tab.count ?? 0)}</span>
-                          </Show>
-                        </button>
-                      )}
-                    </For>
-                  </div>
+                <Show when={tabs().length > 0}>
+                  <SegmentedTabs
+                    class="ncm-list-detail-tabs"
+                    variant={props.tabVariant ?? "surface"}
+                    value={activeTab()}
+                    onChange={(next) => props.onTabChange?.(next)}
+                    items={tabItems()}
+                    ariaLabel={props.title}
+                  />
                 </Show>
               </div>
             </Show>

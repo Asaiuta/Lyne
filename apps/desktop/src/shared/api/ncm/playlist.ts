@@ -80,7 +80,7 @@ export const userPlaylist = (params: NcmUserPlaylistParams): Promise<NcmResponse
     noCache: true
   });
 
-/** Playlist square, same source as SPlayer `allCatlistPlaylist(..., hq=false)`. */
+/** Playlist square, same upstream helper as `allCatlistPlaylist(..., hq=false)`. */
 export const topPlaylist = (params: NcmTopPlaylistParams = {}): Promise<NcmResponseEnvelope> =>
   requestNcm("top/playlist", {
     method: "POST",
@@ -93,7 +93,7 @@ export const topPlaylist = (params: NcmTopPlaylistParams = {}): Promise<NcmRespo
     noCache: true
   });
 
-/** Featured playlist square, same source as SPlayer `allCatlistPlaylist(..., hq=true)`. */
+/** Featured playlist square, same upstream helper as `allCatlistPlaylist(..., hq=true)`. */
 export const topPlaylistHighquality = (params: NcmTopPlaylistParams = {}): Promise<NcmResponseEnvelope> =>
   requestNcm("top/playlist/highquality", {
     method: "POST",
@@ -150,7 +150,7 @@ export const songOrderUpdate = (pid: number, ids: readonly number[]): Promise<Nc
     noCache: true
   });
 
-/** All toplist summaries, same source as SPlayer `topPlaylist(true)`. */
+/** All toplist summaries, same upstream helper as `topPlaylist(true)`. */
 export const toplistDetail = (): Promise<NcmResponseEnvelope> =>
   requestNcm("toplist/detail", {
     method: "POST",

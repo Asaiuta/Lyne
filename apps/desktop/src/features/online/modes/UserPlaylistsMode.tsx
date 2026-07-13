@@ -3,6 +3,7 @@ import type { Accessor } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { IconPlayCircle } from "../../../components/icons";
 import { PageHeader } from "../../../components/page/PageHeader";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
 import { useUISettings } from "../../../shared/state/useUISettings";
@@ -118,15 +119,14 @@ export function UserPlaylistsMode(props: UserPlaylistsModeProps) {
         }
         actions={
           <Show when={props.loginProfile() === null}>
-            <button
-              type="button"
-              class="primary-button page-action"
+            <PageToolbarButton
+              variant="primary"
               onClick={props.onBeginLogin}
               disabled={props.isLoginBusy()}
             >
               <IconPlayCircle />
               {t("ncm.login.action.qr")}
-            </button>
+            </PageToolbarButton>
           </Show>
         }
       />

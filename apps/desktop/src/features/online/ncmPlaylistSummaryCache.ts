@@ -1,6 +1,6 @@
 import type { ApiClient } from "../../shared/api/client";
 import {
-  groupUserPlaylistsLikeSplayer,
+  groupUserPlaylistsByOwnership,
   loadAllNcmUserPlaylists,
   type OnlinePlaylistSummary,
   type UserPlaylistGroups,
@@ -63,7 +63,7 @@ export const createNcmUserPlaylistSummaryCache = (): NcmUserPlaylistSummaryCache
       .then((playlists) => {
         entry.likedPlaylist =
           playlists.find((playlist) => playlist.userId === userId) ?? playlists[0] ?? null;
-        return groupUserPlaylistsLikeSplayer(playlists, userId);
+        return groupUserPlaylistsByOwnership(playlists, userId);
       })
       .then((groups) => {
         entry.groups = groups;

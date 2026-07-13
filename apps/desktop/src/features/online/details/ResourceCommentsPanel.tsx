@@ -8,6 +8,7 @@ import {
   IconThumbUp,
   IconThumbUpFilled
 } from "../../../components/icons";
+import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import {
   resolveQueueVisibleRange
 } from "../../queue/queueVirtualization";
@@ -242,6 +243,10 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
   const [likeBusyIds, setLikeBusyIds] = createSignal<readonly number[]>([]);
   const [hugBusyIds, setHugBusyIds] = createSignal<readonly number[]>([]);
   const title = createMemo(() => props.title ?? t("ncm.comments.title"));
+  const commentSortTabs = createMemo<SegmentedTabItem[]>(() => [
+    { value: "hot", label: t("ncm.comments.hot") },
+    { value: "new", label: t("ncm.comments.new") }
+  ]);
   const activeAccount = createMemo(() => accountStore.activeAccount());
   const canWrite = createMemo(() => activeAccount()?.hasCookie === true);
   const activeRequestControllers = new Set<AbortController>();
@@ -560,22 +565,14 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
             {title()}
             <NaiveText depth={3}>{formatNumber(commentTotal())}</NaiveText>
           </NaiveH3>
-          <div class="ncm-resource-comment-tabs">
-            <button
-              type="button"
-              class={commentSort() === "hot" ? "is-active" : ""}
-              onClick={() => setCommentSort("hot")}
-            >
-              {t("ncm.comments.hot")}
-            </button>
-            <button
-              type="button"
-              class={commentSort() === "new" ? "is-active" : ""}
-              onClick={() => setCommentSort("new")}
-            >
-              {t("ncm.comments.new")}
-            </button>
-          </div>
+          <SegmentedTabs
+            class="ncm-resource-comment-tabs"
+            variant="tonal"
+            value={commentSort()}
+            onChange={(next) => setCommentSort(next === "new" ? "new" : "hot")}
+            items={commentSortTabs()}
+            ariaLabel={title()}
+          />
         </header>
       </Show>
 

@@ -3,11 +3,10 @@ import type { Accessor } from "solid-js";
 import { Portal } from "solid-js/web";
 import { IconClose } from "../../../components/icons";
 import { PageHeader } from "../../../components/page/PageHeader";
-import { SegmentedTabs } from "../../../components/page/SegmentedTabs";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
 import { usePresenceTransition } from "../../../shared/ui/usePresenceTransition";
-import { NaiveP } from "../../../shared/ui/naive";
+import { NaiveP, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
 import { OnlineLikedPlaylistDetailRoute } from "../details/OnlineLikedPlaylistDetailRoute";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
@@ -238,7 +237,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
       default: { const _exhaustive: never = tab; return _exhaustive; }
     }
   };
-  const discoverTabs = createMemo(() =>
+  const discoverTabs = createMemo<ReadonlyArray<NaiveTabItem<DiscoverTab>>>(() =>
     DISCOVER_TABS.map((tab) => ({ value: tab, label: discoverTabLabel(tab) }))
   );
   const discoverSectionTitle = createMemo(() => {
@@ -248,16 +247,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
       case "toplists": return t("ncm.discover.section.toplists");
       case "artists": return t("ncm.discover.section.artists");
       case "new": return t("ncm.discover.section.new");
-      default: { const _exhaustive: never = tab; return _exhaustive; }
-    }
-  });
-  const discoverSectionSubtitle = createMemo(() => {
-    const tab = discoverTab();
-    switch (tab) {
-      case "playlists": return t("ncm.discover.subtitle.playlists");
-      case "toplists": return t("ncm.discover.subtitle.toplists");
-      case "artists": return t("ncm.discover.subtitle.artists");
-      case "new": return t("ncm.discover.subtitle.new");
       default: { const _exhaustive: never = tab; return _exhaustive; }
     }
   });
@@ -280,6 +269,9 @@ export function DiscoverMode(props: DiscoverModeProps) {
     const types = catTypes();
     return Object.entries(types).map(([key, label]) => ({ key: Number(key), label }));
   });
+  const catTypeTabs = createMemo<ReadonlyArray<NaiveTabItem<string>>>(() =>
+    catTypesList().map((typeItem) => ({ value: String(typeItem.key), label: typeItem.label }))
+  );
   const selectedCatTypeKey = createMemo(() => {
     const selected = catEntries().find((cat) => cat.name === catName());
     return selected?.category ?? catTypesList()[0]?.key ?? null;
@@ -291,6 +283,10 @@ export function DiscoverMode(props: DiscoverModeProps) {
       return selected;
     }
     return available[0]?.key ?? null;
+  });
+  const activeCatTypeValue = createMemo<string>(() => {
+    const key = activeCatTypeKey();
+    return key === null ? "" : String(key);
   });
   const activeCatEntries = createMemo(() => {
     const activeType = activeCatTypeKey();
@@ -332,10 +328,12 @@ export function DiscoverMode(props: DiscoverModeProps) {
         <PageHeader
           title={pageTitle()}
           tabs={
-            <SegmentedTabs
+            <NaiveTabs
+              class="discover-primary-tabs"
               value={discoverTab()}
-              onChange={(next) => setDiscoverTabAndPersist(normalizeDiscoverTab(next))}
+              onChange={(next) => setDiscoverTabAndPersist(next)}
               items={discoverTabs()}
+              type="segment"
               ariaLabel={t("ncm.discover.tabs.aria")}
             />
           }
@@ -373,21 +371,14 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 </button>
               </div>
               <div class="cat-modal-tabs">
-                <div class="cat-modal-tab-rail" role="tablist" aria-label={t("ncm.discover.cat.title")}>
-                  <For each={catTypesList()}>
-                    {(typeItem) => (
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={activeCatTypeKey() === typeItem.key}
-                        class={`cat-modal-tab${activeCatTypeKey() === typeItem.key ? " is-active" : ""}`}
-                        onClick={() => setCatModalType(typeItem.key)}
-                      >
-                        {typeItem.label}
-                      </button>
-                    )}
-                  </For>
-                </div>
+                <NaiveTabs
+                  class="cat-modal-tab-rail"
+                  value={activeCatTypeValue()}
+                  onChange={(next) => setCatModalType(Number(next))}
+                  items={catTypeTabs()}
+                  type="segment"
+                  ariaLabel={t("ncm.discover.cat.title")}
+                />
                 <div class="cat-modal-pane" role="tabpanel">
                   <div class="cat-modal-tags">
                     <For each={activeCatEntries()}>
@@ -439,7 +430,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
                   catButtonRef = element;
                 }}
                 discoverSectionTitle={discoverSectionTitle()}
-                discoverSectionSubtitle={discoverSectionSubtitle()}
                 allPlaylists={playlistCards.items()}
                 isLoadingPlaylists={playlistCards.isLoading()}
                 hasMorePlaylists={playlistCards.hasMore()}
@@ -462,7 +452,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 discoverArtistAreaIndex={discoverArtistAreaIndex()}
                 setDiscoverArtistAreaIndex={setDiscoverArtistAreaIndex}
                 discoverSectionTitle={discoverSectionTitle()}
-                discoverSectionSubtitle={discoverSectionSubtitle()}
                 allArtists={artistCards.items()}
                 isLoadingArtists={artistCards.isLoading()}
                 hasMoreArtists={artistCards.hasMore()}
@@ -478,7 +467,6 @@ export function DiscoverMode(props: DiscoverModeProps) {
                 discoverNewAreaIndex={discoverNewAreaIndex()}
                 setDiscoverNewAreaIndex={setDiscoverNewAreaIndex}
                 discoverSectionTitle={discoverSectionTitle()}
-                discoverSectionSubtitle={discoverSectionSubtitle()}
                 allAlbums={albumCards.items()}
                 discoverSongs={discoverSongs}
                 isLoadingAlbums={albumCards.isLoading()}

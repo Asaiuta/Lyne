@@ -5,13 +5,14 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconChevronUp,
-  IconHeart,
-  IconHeartFilled,
-  IconList
+  IconFavoriteBorderFilled,
+  IconFavoriteFilled,
+  IconFormatListFilled
 } from "../../components/icons";
 import { NcmMediaList } from "./NcmMediaList";
 import { PageHeader } from "../../components/page/PageHeader";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { createApiClient } from "../../shared/api/client";
 import { usePlayback } from "../../app/PlaybackContext";
 import {
@@ -27,7 +28,8 @@ import {
 import { useTranslation } from "../../shared/i18n";
 import { useUISettings } from "../../shared/state/useUISettings";
 import { ncmDjRadioPageUrl } from "../../shared/api/ncm/urls";
-import { NaiveH2, NaiveSkeleton, NaiveSpin } from "../../shared/ui/naive";
+import { NaiveH2, NaiveSkeleton, NaiveSpin, NaiveTabs, type NaiveTabItem } from "../../shared/ui/naive";
+import "../../shared/styles/pages/cloud-search-liked-radio.css";
 import {
   type RadioCategory,
   type RadioCategorySection,
@@ -192,7 +194,7 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
   const categoryItems = createMemo(() => categories() ?? []);
   const hasOverflowCategories = createMemo(() => categoryItems().length > COLLAPSED_CATEGORY_COUNT);
   const sections = createMemo<RadioCategorySection[]>(() => categorySections() ?? []);
-  const categoryTabs = createMemo(() => [
+  const categoryTabs = createMemo<ReadonlyArray<NaiveTabItem<RadioTab>>>(() => [
     { value: "hot", label: t("ncm.radio.tab.hot") },
     { value: "recommend", label: t("ncm.radio.tab.recommend") }
   ]);
@@ -227,13 +229,13 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
     const items: NcmListDetailMetaItem[] = [];
     if (detail?.programCount != null) {
       items.push({
-        icon: <IconList />,
+        icon: <IconFormatListFilled />,
         text: t("ncm.radio.programCount", { count: detail.programCount })
       });
     }
     if (detail?.subscriberCount != null) {
       items.push({
-        icon: <IconHeart />,
+        icon: <IconFavoriteBorderFilled />,
         text: t("ncm.radio.subscriberCount", { count: detail.subscriberCount })
       });
     }
@@ -477,10 +479,11 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
                     }
                     tabs={
                       <div class="radio-category-tabs">
-                        <SegmentedTabs
+                        <NaiveTabs
                           value={categoryTab()}
-                          onChange={(next) => setCategoryTab(next as RadioTab)}
+                          onChange={setCategoryTab}
                           items={categoryTabs()}
+                          type="segment"
                           ariaLabel={t("ncm.radio.tabs.aria")}
                         />
                       </div>
@@ -541,26 +544,28 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
                 ]}
                 actionButtons={
                   <>
-                    <button
-                      type="button"
-                      class={`ghost-button radio-subscribe-button${isRadioSubscribed() ? " is-active" : ""}`}
+                    <PageToolbarButton
+                      variant="secondary"
+                      class="radio-subscribe-button"
+                      active={isRadioSubscribed()}
                       disabled={isTogglingRadioSub()}
                       onClick={() => void toggleRadioSub()}
                     >
-                      <Show when={isTogglingRadioSub()} fallback={isRadioSubscribed() ? <IconHeartFilled /> : <IconHeart />}>
+                      <Show when={isTogglingRadioSub()} fallback={isRadioSubscribed() ? <IconFavoriteFilled /> : <IconFavoriteBorderFilled />}>
                         <NaiveSpin size={17} ariaHidden />
                       </Show>
                       {radioSubLabel()}
-                    </button>
-                    <button type="button" class="ghost-button radio-source-button" onClick={() => openRadioSource(radio().id)}>
-                      <IconList />
+                    </PageToolbarButton>
+                    <PageToolbarButton variant="secondary" class="radio-source-button" onClick={() => openRadioSource(radio().id)}>
+                      <IconFormatListFilled />
                       {t("ncm.playlist.openSource")}
-                    </button>
+                    </PageToolbarButton>
                   </>
                 }
               />
               <div class="radio-detail-tabs radio-detail-tabs--mobile">
                 <SegmentedTabs
+                  variant="surface"
                   value={radioDetailTab()}
                   onChange={(next) => setRadioDetailTabWithReset(next === "comments" ? "comments" : "programs")}
                   items={[

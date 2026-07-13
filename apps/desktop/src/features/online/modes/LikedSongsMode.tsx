@@ -2,6 +2,7 @@ import { Show, createEffect, createSignal, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
 import { IconPlayCircle } from "../../../components/icons";
 import { PageHeader } from "../../../components/page/PageHeader";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { createApiClient } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
 import { NaiveP } from "../../../shared/ui/naive";
@@ -106,15 +107,14 @@ export function LikedSongsMode(props: LikedSongsModeProps) {
             <span class="page-header-meta-line">{t("ncm.liked.description")}</span>
           }
           actions={
-            <button
-              type="button"
-              class="primary-button page-action"
+            <PageToolbarButton
+              variant="primary"
               onClick={props.onBeginLogin}
               disabled={props.isLoginBusy()}
             >
               <IconPlayCircle />
               {t("ncm.login.action.qr")}
-            </button>
+            </PageToolbarButton>
           }
         />
       </Show>

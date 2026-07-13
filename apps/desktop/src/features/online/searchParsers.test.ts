@@ -14,7 +14,7 @@ import { parseAlbumDynamicInfo } from "./albumParsers";
 import { parsePlaylistDynamicInfo } from "./playlistParsers";
 import { parseRadioDetailInfo } from "./radioParsers";
 
-test("uses the same NetEase search type ids as the SPlayer search tabs", () => {
+test("uses the expected NetEase search type ids for search tabs", () => {
   assert.equal(NCM_SEARCH_TYPES.songs, 1);
   assert.equal(NCM_SEARCH_TYPES.albums, 10);
   assert.equal(NCM_SEARCH_TYPES.artists, 100);
@@ -144,7 +144,7 @@ test("parses artist album and video pages into feed cards", () => {
   );
 });
 
-test("parses artist detail metadata used by the SPlayer-style artist page", () => {
+test("parses artist detail metadata used by the artist page", () => {
   assert.deepEqual(
     parseArtistDetailInfo(
       {
@@ -189,7 +189,7 @@ test("parses artist detail metadata used by the SPlayer-style artist page", () =
   );
 });
 
-test("parses album dynamic metadata used by the SPlayer-style album page", () => {
+test("parses album dynamic metadata used by the album page", () => {
   assert.deepEqual(
     parseAlbumDynamicInfo({
       subed: true,
@@ -218,7 +218,7 @@ test("parses album dynamic metadata used by the SPlayer-style album page", () =>
   );
 });
 
-test("parses playlist dynamic metadata used by the SPlayer-style playlist page", () => {
+test("parses playlist dynamic metadata used by the playlist page", () => {
   assert.deepEqual(
     parsePlaylistDynamicInfo({
       subscribed: true,
@@ -250,7 +250,7 @@ test("parses playlist dynamic metadata used by the SPlayer-style playlist page",
   );
 });
 
-test("parses radio detail subscription metadata used by the SPlayer-style radio page", () => {
+test("parses radio detail subscription metadata used by the radio page", () => {
   assert.deepEqual(
     parseRadioDetailInfo(
       {

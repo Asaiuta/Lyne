@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { NcmPlaylistSummary } from "../../shared/api/client";
 import {
-  groupUserPlaylistsLikeSplayer,
+  groupUserPlaylistsByOwnership,
   loadAllNcmUserPlaylists
 } from "./ncmPlaylistSummary";
 
@@ -23,8 +23,8 @@ const playlist = (id: number, userId: number | null): NcmPlaylistSummary => ({
   subscribed: userId !== 42
 });
 
-test("groups user playlists with SPlayer's created and collected rules", () => {
-  const groups = groupUserPlaylistsLikeSplayer(
+test("groups user playlists with created and collected ownership rules", () => {
+  const groups = groupUserPlaylistsByOwnership(
     [
       playlist(1, 42),
       playlist(2, 42),

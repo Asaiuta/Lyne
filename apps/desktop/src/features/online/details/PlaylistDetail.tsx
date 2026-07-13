@@ -4,12 +4,12 @@ import {
   IconChevronLeft,
   IconClock,
   IconDots,
-  IconHeart,
-  IconHeartFilled,
+  IconFavoriteBorderFilled,
+  IconFavoriteFilled,
+  IconFormatListFilled,
   IconLink,
-  IconList,
-  IconPlay,
-  IconRefresh,
+  IconPlayFilled,
+  IconRefreshFilled,
   IconSearch,
   IconShare,
   IconTag
@@ -21,6 +21,8 @@ import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
+import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { SImage } from "../../../components/SImage";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
@@ -84,6 +86,14 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
     props.detail ?? props.playlist
   );
   const showCommentsTab = createMemo<boolean>(() => props.showCommentsTab ?? true);
+  const detailTabItems = createMemo<SegmentedTabItem[]>(() => [
+    { value: "songs", label: t("ncm.playlist.tab.songs"), count: props.trackCount },
+    {
+      value: "comments",
+      label: t("ncm.playlist.tab.comments"),
+      count: props.detail?.commentCount ?? null
+    }
+  ]);
   const showSongs = createMemo<boolean>(() => !showCommentsTab() || props.detailTab === "songs");
   const emptyStateText = createMemo<string>(() => {
     const query = props.filter.trim();
@@ -130,13 +140,13 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
   const menuItems = (): readonly NaiveDropdownOption[] => {
     const items: NaiveDropdownOption[] = [];
     if (props.onRefresh) {
-      items.push({ key: "refresh", label: t("ncm.playlist.refreshCache"), icon: <IconRefresh /> });
+      items.push({ key: "refresh", label: t("ncm.playlist.refreshCache"), icon: <IconRefreshFilled /> });
     }
     if (props.onPlaylistUpdated && props.setFeedback && canEditPlaylist()) {
       items.push({ key: "edit", label: t("ncm.playlist.edit"), icon: <IconDots /> });
     }
     if (props.setFeedback) {
-      items.push({ key: "batch", label: t("ncm.daily.batch"), icon: <IconList /> });
+      items.push({ key: "batch", label: t("ncm.daily.batch"), icon: <IconFormatListFilled /> });
     }
     items.push(
       { key: "copy", label: t("ncm.playlist.copyShareLink"), icon: <IconShare /> },
@@ -249,7 +259,7 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                         <Show when={playlistPlayCount()}>
                           {(playCount) => (
                             <span class="playlist-detail-play-count">
-                              <IconPlay />
+                              <IconPlayFilled />
                               {formatPlayCount(playCount())}
                             </span>
                           )}
@@ -306,27 +316,28 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                       </div>
                       <div class="playlist-detail-menu">
                         <div class="playlist-detail-menu-left">
-                          <button
-                            type="button"
-                            class="primary-button playlist-detail-play"
+                          <PageToolbarButton
+                            variant="primary"
+                            class="playlist-detail-play"
                             onClick={() => void props.onPlayAll()}
                             disabled={props.tracks.length === 0 || props.isLoadingTracks}
                           >
-                            <IconPlay />
+                            <IconPlayFilled />
                             {props.isLoadingTracks ? t("ncm.playlist.loading") : t("ncm.playlist.play")}
-                          </button>
+                          </PageToolbarButton>
                           <Show when={canToggleSubscribe()}>
-                            <button
-                              type="button"
-                              class={`ghost-button playlist-detail-subscribe${isSubscribed() ? " is-active" : ""}`}
+                            <PageToolbarButton
+                              variant="secondary"
+                              class="playlist-detail-subscribe"
+                              active={isSubscribed()}
                               onClick={() => void props.onToggleSubscribe?.()}
                               disabled={props.isLoadingDetail || props.isTogglingSubscribe}
                             >
-                              <Show when={props.isTogglingSubscribe} fallback={isSubscribed() ? <IconHeartFilled /> : <IconHeart />}>
+                              <Show when={props.isTogglingSubscribe} fallback={isSubscribed() ? <IconFavoriteFilled /> : <IconFavoriteBorderFilled />}>
                                 <NaiveSpin size={18} ariaHidden />
                               </Show>
                               {subscribeLabel()}
-                            </button>
+                            </PageToolbarButton>
                           </Show>
                           <NaiveDropdown
                             options={menuItems()}
@@ -338,16 +349,16 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                             onSelect={(option) => handleMenuSelect(option.key)}
                             ariaLabel={t("ncm.playlist.more")}
                           >
-                            <button
-                              type="button"
-                              class="ghost-button playlist-detail-more"
-                              aria-label={t("ncm.playlist.more")}
+                            <PageToolbarButton
+                              variant="icon"
+                              class="playlist-detail-more"
+                              ariaLabel={t("ncm.playlist.more")}
                               title={t("ncm.playlist.more")}
-                              aria-haspopup="menu"
-                              aria-expanded={menuOpen()}
+                              ariaHasPopup="menu"
+                              ariaExpanded={menuOpen()}
                             >
-                              <IconList />
-                            </button>
+                              <IconFormatListFilled />
+                            </PageToolbarButton>
                           </NaiveDropdown>
                         </div>
                         <div class="playlist-detail-menu-right">
@@ -361,30 +372,14 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                             />
                           </label>
                           <Show when={showCommentsTab()}>
-                            <div class="playlist-detail-tabs" role="tablist" aria-label={t("ncm.playlist.tabs.aria")}>
-                              <button
-                                type="button"
-                                class={props.detailTab === "songs" ? "is-active" : ""}
-                                role="tab"
-                                aria-selected={props.detailTab === "songs"}
-                                onClick={() => props.setDetailTab("songs")}
-                              >
-                                {t("ncm.playlist.tab.songs")}
-                                <span>{props.trackCount}</span>
-                              </button>
-                              <button
-                                type="button"
-                                class={props.detailTab === "comments" ? "is-active" : ""}
-                                role="tab"
-                                aria-selected={props.detailTab === "comments"}
-                                onClick={() => props.setDetailTab("comments")}
-                              >
-                                {t("ncm.playlist.tab.comments")}
-                                <Show when={props.detail?.commentCount !== null && props.detail?.commentCount !== undefined}>
-                                  <span>{props.detail?.commentCount ?? 0}</span>
-                                </Show>
-                              </button>
-                            </div>
+                            <SegmentedTabs
+                              class="playlist-detail-tabs"
+                              variant="surface"
+                              ariaLabel={t("ncm.playlist.tabs.aria")}
+                              value={props.detailTab}
+                              onChange={(next) => props.setDetailTab(next === "comments" ? "comments" : "songs")}
+                              items={detailTabItems()}
+                            />
                           </Show>
                         </div>
                       </div>

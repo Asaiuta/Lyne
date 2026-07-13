@@ -75,7 +75,7 @@ export const playlistSummaryFromDiscoverCard = (item: DiscoverCardItem): OnlineP
     subscribed: item.subscribed
   });
 
-export const groupUserPlaylistsLikeSplayer = (
+export const groupUserPlaylistsByOwnership = (
   playlists: readonly OnlinePlaylistSummary[],
   userId: number
 ): UserPlaylistGroups => {
@@ -119,7 +119,7 @@ export const loadAllNcmUserPlaylists = async (
 export const loadNcmUserPlaylistGroups = async (
   api: UserPlaylistApi,
   userId: number
-): Promise<UserPlaylistGroups> => groupUserPlaylistsLikeSplayer(
+): Promise<UserPlaylistGroups> => groupUserPlaylistsByOwnership(
   await loadAllNcmUserPlaylists(api, userId),
   userId
 );

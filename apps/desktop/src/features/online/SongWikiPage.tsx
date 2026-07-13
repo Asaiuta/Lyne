@@ -28,11 +28,13 @@ import {
   IconChevronDown,
   IconChevronLeft,
   IconClock,
-  IconList,
-  IconPlay,
+  IconFormatListFilled,
+  IconPlayFilled,
   IconStar
 } from "../../components/icons";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { NcmMediaList } from "./NcmMediaList";
+import "../../shared/styles/pages/song-wiki.css";
 import { SImage } from "../../components/SImage";
 import { NaiveH2, NaiveH3, NaiveSkeleton, NaiveSpin } from "../../shared/ui/naive";
 import { createErrorMessageReader, type FeedbackSetter } from "./shared/feedback";
@@ -333,27 +335,27 @@ export function SongWikiPage(props: SongWikiPageProps) {
                   </Show>
                 </div>
                 <div class="song-wiki-actions">
-                  <button type="button" class="primary-button song-wiki-play" onClick={() => void playCurrent()}>
-                    <IconPlay />
+                  <PageToolbarButton variant="primary" class="song-wiki-play" onClick={() => void playCurrent()}>
+                    <IconPlayFilled />
                     {t("ncm.songWiki.play")}
-                  </button>
-                  <button
-                    type="button"
-                    class="ghost-button song-wiki-back"
+                  </PageToolbarButton>
+                  <PageToolbarButton
+                    variant="secondary"
+                    class="song-wiki-back"
                     onClick={props.onBack}
                   >
                     <IconChevronLeft />
                     {t("ncm.songWiki.back")}
-                  </button>
-                  <button
-                    type="button"
-                    class="ghost-button song-wiki-more"
-                    aria-label={t("ncm.songWiki.openSource")}
+                  </PageToolbarButton>
+                  <PageToolbarButton
+                    variant="icon"
+                    class="song-wiki-more"
+                    ariaLabel={t("ncm.songWiki.openSource")}
                     title={t("ncm.songWiki.openSource")}
                     onClick={openSource}
                   >
-                    <IconList />
-                  </button>
+                    <IconFormatListFilled />
+                  </PageToolbarButton>
                 </div>
               </div>
             </header>

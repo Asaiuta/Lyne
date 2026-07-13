@@ -2,11 +2,10 @@ import { For, Match, Show, Switch, createMemo } from "solid-js";
 import type { Accessor } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { NcmMediaList } from "../NcmMediaList";
-import { SegmentedTabs } from "../../../components/page/SegmentedTabs";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
-import { NaiveH1 } from "../../../shared/ui/naive";
+import { NaiveH1, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import type { PlaybackController } from "../shared/playback";
 import type { FeedCardItem, OnlineTrackItem, SearchTab } from "../shared/types";
@@ -34,7 +33,7 @@ export interface SearchModeProps {
 
 export function SearchMode(props: SearchModeProps) {
   const { t } = useTranslation();
-  const tabItems = createMemo(() => [
+  const tabItems = createMemo<ReadonlyArray<NaiveTabItem<SearchTab>>>(() => [
     { value: "songs", label: t("ncm.tabs.songs") },
     { value: "playlists", label: t("ncm.tabs.playlists") },
     { value: "artists", label: t("ncm.tabs.artists") },
@@ -55,10 +54,12 @@ export function SearchMode(props: SearchModeProps) {
         </span>
       </div>
       <div class="online-search-tabs">
-        <SegmentedTabs
+        <NaiveTabs
+          class="online-search-segment-tabs"
           value={props.searchTab}
-          onChange={(next) => props.onSearchTabChange(next as SearchTab)}
+          onChange={props.onSearchTabChange}
           items={tabItems()}
+          type="segment"
           ariaLabel={t("ncm.tabs.aria")}
         />
       </div>

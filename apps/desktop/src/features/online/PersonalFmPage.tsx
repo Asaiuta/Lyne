@@ -26,6 +26,7 @@ import {
 } from "./shared/feedback";
 import { createPlaybackController } from "./shared/playback";
 import type { Feedback, OnlineTrackItem } from "./shared/types";
+import "../../shared/styles/pages/personal-fm.css";
 
 const api = createApiClient();
 

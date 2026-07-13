@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import type { Resource } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { EmptyState } from "../../../components/EmptyState";
@@ -11,7 +11,7 @@ import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
-import { NaiveSkeleton, NaiveSpin } from "../../../shared/ui/naive";
+import { NaiveSkeleton, NaiveSpin, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
 import { DISCOVER_PAGE_LIMIT, isTranslationKey } from "../shared/parsers";
 import type { PlaybackController } from "../shared/playback";
 import type {
@@ -60,7 +60,6 @@ export interface DiscoverPlaylistShowcaseProps {
   setCatModalOpen: (open: boolean) => void;
   setCatButtonRef: (element: HTMLButtonElement) => void;
   discoverSectionTitle: string;
-  discoverSectionSubtitle: string;
   allPlaylists: DiscoverCardItem[];
   isLoadingPlaylists: boolean;
   hasMorePlaylists: boolean;
@@ -71,6 +70,10 @@ export interface DiscoverPlaylistShowcaseProps {
 export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
+  const playlistKindTabs = createMemo<ReadonlyArray<NaiveTabItem<DiscoverPlaylistKind>>>(() => [
+    { value: "normal", label: t("ncm.discover.playlists.recommend") },
+    { value: "hq", label: t("ncm.discover.playlists.hq") }
+  ]);
   return (
     <section class="online-discover-section online-discover-playlists">
       <div class="online-discover-menu">
@@ -80,24 +83,23 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
           class="online-discover-cat-button"
           onClick={() => props.setCatModalOpen(true)}
         >
-          {props.catName}
-          <span aria-hidden="true">›</span>
+          <span class="online-discover-cat-button-label">{props.catName}</span>
+          <span class="online-discover-cat-button-arrow" aria-hidden="true">›</span>
         </button>
         <Show when={props.hasHqPlaylist}>
-          <div class="online-discover-mini-tabs">
-            <button type="button" class={props.discoverPlaylistKind === "normal" ? "is-active" : ""} onClick={() => props.setDiscoverPlaylistKind("normal")}>
-              {t("ncm.discover.playlists.recommend")}
-            </button>
-            <button type="button" class={props.discoverPlaylistKind === "hq" ? "is-active" : ""} onClick={() => props.setDiscoverPlaylistKind("hq")}>
-              {t("ncm.discover.playlists.hq")}
-            </button>
-          </div>
+          <NaiveTabs
+            class="online-discover-mini-tabs"
+            value={props.discoverPlaylistKind}
+            onChange={props.setDiscoverPlaylistKind}
+            items={playlistKindTabs()}
+            type="segment"
+            ariaLabel={t("ncm.discover.section.playlists")}
+          />
         </Show>
       </div>
       <div class="online-result-panel-head">
         <div class="online-result-panel-copy">
           <strong>{props.discoverSectionTitle}</strong>
-          <span>{props.discoverSectionSubtitle}</span>
         </div>
       </div>
       <Show
@@ -146,7 +148,6 @@ export interface DiscoverArtistShowcaseProps {
   discoverArtistAreaIndex: number;
   setDiscoverArtistAreaIndex: (index: number) => void;
   discoverSectionTitle: string;
-  discoverSectionSubtitle: string;
   allArtists: DiscoverCardItem[];
   isLoadingArtists: boolean;
   hasMoreArtists: boolean;
@@ -180,7 +181,6 @@ export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
       <div class="online-result-panel-head">
         <div class="online-result-panel-copy">
           <strong>{props.discoverSectionTitle}</strong>
-          <span>{props.discoverSectionSubtitle}</span>
         </div>
       </div>
       <Show
@@ -349,7 +349,6 @@ export interface DiscoverNewShowcaseProps {
   discoverNewAreaIndex: number;
   setDiscoverNewAreaIndex: (index: number) => void;
   discoverSectionTitle: string;
-  discoverSectionSubtitle: string;
   allAlbums: DiscoverCardItem[];
   discoverSongs: Resource<OnlineTrackItem[]>;
   isLoadingAlbums: boolean;
@@ -370,7 +369,6 @@ export interface DiscoverMvShowcaseProps {
   discoverMvOrderIndex: number;
   setDiscoverMvOrderIndex: (index: number) => void;
   discoverSectionTitle: string;
-  discoverSectionSubtitle: string;
   allVideos: FeedCardItem[];
   isLoadingVideos: boolean;
   hasMoreVideos: boolean;
@@ -415,7 +413,6 @@ export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
       <div class="online-result-panel-head">
         <div class="online-result-panel-copy">
           <strong>{props.discoverSectionTitle}</strong>
-          <span>{props.discoverSectionSubtitle}</span>
         </div>
       </div>
       <Show
@@ -484,7 +481,6 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
       <div class="online-result-panel-head">
         <div class="online-result-panel-copy">
           <strong>{props.discoverSectionTitle}</strong>
-          <span>{props.discoverSectionSubtitle}</span>
         </div>
       </div>
       <Show

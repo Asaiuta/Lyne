@@ -1,5 +1,13 @@
 import { Show, createEffect, createMemo, createSignal } from "solid-js";
-import { IconChat, IconChevronLeft, IconHeart, IconHeartFilled, IconMusic, IconSearch, IconShare } from "../../../components/icons";
+import {
+  IconChat,
+  IconChevronLeft,
+  IconFavoriteBorderFilled,
+  IconFavoriteFilled,
+  IconMusic,
+  IconSearch,
+  IconShare
+} from "../../../components/icons";
 import { NcmMediaList } from "../NcmMediaList";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { BackToTop } from "../../../components/page/BackToTop";
@@ -7,6 +15,7 @@ import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
@@ -138,21 +147,23 @@ export function AlbumDetail(props: AlbumDetailProps) {
                     </label>
                   }
                   actionButtons={
-                    <button
-                      type="button"
-                      class={`ghost-button page-action ncm-artist-subscribe${props.detail?.subscribed === true ? " is-active" : ""}`}
+                    <PageToolbarButton
+                      variant="secondary"
+                      class="ncm-artist-subscribe"
+                      active={props.detail?.subscribed === true}
                       disabled={props.isLoadingDetail || props.isTogglingSubscribe}
                       onClick={() => void props.onToggleSubscribe()}
                     >
-                      <Show when={props.isTogglingSubscribe} fallback={props.detail?.subscribed === true ? <IconHeartFilled /> : <IconHeart />}>
+                      <Show when={props.isTogglingSubscribe} fallback={props.detail?.subscribed === true ? <IconFavoriteFilled /> : <IconFavoriteBorderFilled />}>
                         <NaiveSpin size={18} ariaHidden />
                       </Show>
                       {props.isTogglingSubscribe ? t("ncm.album.subscribeWorking") : subscribeLabel()}
-                    </button>
+                    </PageToolbarButton>
                   }
                 />
                 <div class="ncm-detail-tabs ncm-detail-tabs--mobile">
                   <SegmentedTabs
+                    variant="surface"
                     value={detailTab()}
                     onChange={(next) => setDetailTab(next === "comments" ? "comments" : "songs")}
                     items={detailTabItems()}

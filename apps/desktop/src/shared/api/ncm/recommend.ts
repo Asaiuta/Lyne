@@ -137,7 +137,7 @@ export const albumNewest = (
     noCache: true
   });
 
-/** New albums, same source as SPlayer `newAlbumsAll`. */
+/** New albums, same upstream helper as `newAlbumsAll`. */
 export const albumNew = (
   params: NcmAlbumNewestParams = {}
 ): Promise<NcmResponseEnvelope> =>
@@ -151,7 +151,7 @@ export const albumNew = (
     noCache: true
   });
 
-/** Artist list, same source as SPlayer `artistTypeList`. */
+/** Artist list, same upstream helper as `artistTypeList`. */
 export const artistList = (
   params: NcmArtistListParams = {}
 ): Promise<NcmResponseEnvelope> =>
@@ -167,7 +167,7 @@ export const artistList = (
     noCache: true
   });
 
-/** New song express, same source as SPlayer `newSongs`. */
+/** New song express, same upstream helper as `newSongs`. */
 export const topSong = (params: NcmTopSongParams = {}): Promise<NcmResponseEnvelope> =>
   requestNcm("top/song", {
     method: "POST",

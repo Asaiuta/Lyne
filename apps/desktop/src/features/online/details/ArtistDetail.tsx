@@ -1,6 +1,13 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
-import { IconAlbum, IconChevronLeft, IconHeart, IconHeartFilled, IconMusic, IconVideo } from "../../../components/icons";
+import {
+  IconAlbum,
+  IconChevronLeft,
+  IconFavoriteBorderFilled,
+  IconFavoriteFilled,
+  IconMusic,
+  IconVideo
+} from "../../../components/icons";
 import { NcmMediaList } from "../NcmMediaList";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { BackToTop } from "../../../components/page/BackToTop";
@@ -8,6 +15,7 @@ import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import type { TranslationKey } from "../../../shared/i18n";
@@ -142,20 +150,22 @@ export function ArtistDetail(props: ArtistDetailProps) {
                 }}
                 actionButtons={
                   <>
-                    <button
-                      type="button"
-                      class={`ghost-button page-action ncm-artist-subscribe${props.detail?.followed === true ? " is-active" : ""}`}
+                    <PageToolbarButton
+                      variant="secondary"
+                      class="ncm-artist-subscribe"
+                      active={props.detail?.followed === true}
                       disabled={props.isLoadingDetail || props.isTogglingSubscribe}
                       onClick={() => void props.onToggleSubscribe()}
                     >
-                      <Show when={props.isTogglingSubscribe} fallback={props.detail?.followed === true ? <IconHeartFilled /> : <IconHeart />}>
+                      <Show when={props.isTogglingSubscribe} fallback={props.detail?.followed === true ? <IconFavoriteFilled /> : <IconFavoriteBorderFilled />}>
                         <NaiveSpin size={18} ariaHidden />
                       </Show>
                       {props.isTogglingSubscribe ? t("ncm.artist.subscribeWorking") : subscribeLabel()}
-                    </button>
+                    </PageToolbarButton>
                     <Show when={detailTab() === "songs"}>
                       <div class="ncm-artist-order-inline">
                         <SegmentedTabs
+                          variant="surface"
                           value={props.trackOrder}
                           onChange={(next) => void props.onChangeTrackOrder(next === "time" ? "time" : "hot")}
                           items={trackOrderItems()}
@@ -168,6 +178,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
               />
               <div class="ncm-detail-tabs">
                 <SegmentedTabs
+                  variant="surface"
                   value={detailTab()}
                   onChange={setTab}
                   items={detailTabItems()}

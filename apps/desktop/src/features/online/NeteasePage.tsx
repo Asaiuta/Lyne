@@ -1,4 +1,4 @@
-import { Match, Switch, createEffect, createMemo, createSignal, on } from "solid-js";
+import { Match, Switch, createEffect, createMemo, createSignal } from "solid-js";
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
@@ -27,6 +27,8 @@ import { OnlineDailySongsRoute } from "./details/OnlineDailySongsRoute";
 import { OnlineStandalonePlaylistDetailRoute } from "./details/OnlineStandalonePlaylistDetailRoute";
 import { OnlineVideoDetailRoute } from "./details/OnlineVideoDetailRoute";
 import type { DiscoverTab } from "../../shared/ui/navigation";
+import "../../shared/styles/components/online-pages.css";
+import "../../shared/styles/pages/cloud-search-liked-radio.css";
 
 const api = createApiClient();
 
@@ -62,7 +64,7 @@ export function NeteasePage(props: NeteasePageProps) {
   const { t } = useTranslation();
   const accountStore = useNcmAccount();
   const playbackContext = usePlayback();
-  const { query: globalQuery, submitNonce } = useUISearch();
+  const { pendingOnlineSearchRequest, consumeOnlineSearchRequest } = useUISearch();
 
   const [isLoginBusy] = createSignal<boolean>(false);
   const [, setFeedback] = createSignal<Feedback>(createInitialFeedback(t));
@@ -101,16 +103,15 @@ export function NeteasePage(props: NeteasePageProps) {
     applyNcmPlaylistSubscribeCacheUpdate(profile.userId, playlist, subscribed);
   };
 
-  createEffect(
-    on(
-      submitNonce,
-      () => {
-        props.onNavigate?.("search");
-        void onlineSearch.runSearch(globalQuery());
-      },
-      { defer: true }
-    )
-  );
+  createEffect(() => {
+    const request = pendingOnlineSearchRequest();
+    if (!request) {
+      return;
+    }
+    props.onNavigate?.("search");
+    consumeOnlineSearchRequest(request.version);
+    void onlineSearch.runSearch(request.query);
+  });
 
   return (
     <div class={`panel panel-page online-page${props.mode === "recommend" ? " is-recommend-page" : ""}${isDiscoverMode() ? " is-discover-page" : ""}`}>

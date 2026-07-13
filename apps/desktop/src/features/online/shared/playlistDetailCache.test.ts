@@ -101,7 +101,7 @@ test("playlist detail cache evicts older persisted entries while keeping memory 
   assert.equal(createPlaylistDetailCache(() => storage).read(7)?.playlist.id, 7);
 });
 
-test("playlist detail cache update check follows SPlayer timestamp then count rule", () => {
+test("playlist detail cache update check follows timestamp then count rule", () => {
   const cachedPlaylist = playlist({ id: 1, trackCount: 2, updateTime: 100 });
   const cached = {
     playlist: cachedPlaylist,

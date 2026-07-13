@@ -9,7 +9,7 @@ import {
   IconPlaylist,
   IconVolumeHigh
 } from "../../../components/icons";
-import { SegmentedTabs } from "../../../components/page/SegmentedTabs";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { createApiClient } from "../../../shared/api/client";
 import { isRecord, readArray, readNumber, readString } from "../../../shared/jsonReaders";
 import { useTranslation, type TranslationKey } from "../../../shared/i18n";
@@ -25,7 +25,7 @@ import {
   type NcmUserSubcountData
 } from "../../../shared/api/ncm/user";
 import { useUISettings } from "../../../shared/state/useUISettings";
-import { NaiveH1, NaiveP } from "../../../shared/ui/naive";
+import { NaiveH1, NaiveP, NaiveTabs } from "../../../shared/ui/naive";
 import {
   type OnlinePlaylistSummary,
   type UserPlaylistGroups
@@ -517,23 +517,24 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
               </div>
             </div>
             <Show when={props.loginProfile() === null}>
-              <button
-                type="button"
-                class="primary-button page-action"
+              <PageToolbarButton
+                variant="primary"
                 onClick={props.onBeginLogin}
                 disabled={props.isLoginBusy()}
               >
                 <IconHeart />
                 {t("ncm.login.action.qr")}
-              </button>
+              </PageToolbarButton>
             </Show>
           </header>
 
           <Show when={props.loginProfile() !== null} fallback={<NaiveP class="panel-note">{t("ncm.empty.loginRequired")}</NaiveP>}>
-            <SegmentedTabs
+            <NaiveTabs
+              class="liked-collection-tabs"
               value={activeTab()}
               onChange={(next) => setActiveTabAndPersist(next as CollectionTab)}
               items={collectionTabs.map((item) => ({ value: item.value, label: t(item.labelKey) }))}
+              type="segment"
               ariaLabel={t("ncm.collection.title")}
             />
 

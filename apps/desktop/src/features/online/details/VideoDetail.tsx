@@ -4,6 +4,7 @@ import { BackToTop } from "../../../components/page/BackToTop";
 import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { SImage } from "../../../components/SImage";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { mvDetail, mvDetailInfo, mvUrl, videoDetail, videoDetailInfo, videoUrl } from "../../../shared/api/ncm/video";
@@ -40,6 +41,7 @@ const formatNumber = (value: number | null): string => {
 };
 
 const formatQuality = (quality: number | null): string => (quality === null ? "AUTO" : `${quality}P`);
+const qualityValue = (quality: number | null): string => quality === null ? "auto" : String(quality);
 
 const formatDate = (timestamp: number | null): string | null => {
   if (timestamp === null) return null;
@@ -82,6 +84,13 @@ export function VideoDetail(props: VideoDetailProps) {
     const quality = selectedQuality();
     return sources().find((item) => item.quality === quality) ?? sources()[0] ?? null;
   });
+  const activeQualityValue = createMemo<string>(() => {
+    const activeSource = source();
+    return activeSource ? qualityValue(activeSource.quality) : "";
+  });
+  const qualityTabs = createMemo<SegmentedTabItem[]>(() =>
+    sources().map((item) => ({ value: qualityValue(item.quality), label: formatQuality(item.quality) }))
+  );
   const displayTitle = createMemo(() => detail()?.title ?? props.video?.title ?? t("ncm.video.title"));
   const displayCover = createMemo(() => detail()?.coverUrl ?? props.video?.coverUrl ?? null);
   const currentVideoKind = createMemo<"mv" | "video">(() => props.video ? videoKind(props.video) : "mv");
@@ -158,19 +167,17 @@ export function VideoDetail(props: VideoDetailProps) {
         </div>
 
         <Show when={sources().length > 1}>
-          <div class="ncm-video-quality" aria-label={t("ncm.video.quality")}>
-            <For each={sources()}>
-              {(item) => (
-                <button
-                  type="button"
-                  class={item.quality === selectedQuality() ? "is-active" : ""}
-                  onClick={() => setSelectedQuality(item.quality)}
-                >
-                  {formatQuality(item.quality)}
-                </button>
-              )}
-            </For>
-          </div>
+          <SegmentedTabs
+            class="ncm-video-quality"
+            variant="tonal"
+            ariaLabel={t("ncm.video.quality")}
+            value={activeQualityValue()}
+            onChange={(next) => {
+              const selected = sources().find((item) => qualityValue(item.quality) === next);
+              setSelectedQuality(selected?.quality ?? null);
+            }}
+            items={qualityTabs()}
+          />
         </Show>
 
         <Show when={playError()}>

@@ -1,11 +1,17 @@
 import { Show, createMemo, createSignal } from "solid-js";
-import { IconChevronLeft, IconList, IconPlay, IconRefresh } from "../../../components/icons";
+import {
+  IconChevronLeft,
+  IconFormatListFilled,
+  IconPlayFilled,
+  IconRefreshFilled
+} from "../../../components/icons";
 import type { MediaContextAction } from "../../../components/media/mediaContextActions";
 import { NcmMediaList } from "../NcmMediaList";
 import { BackToTop } from "../../../components/page/BackToTop";
 import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { NaiveDropdown, NaiveH2, NaiveP, type NaiveDropdownOption } from "../../../shared/ui/naive";
@@ -60,8 +66,8 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
   });
 
   const menuItems = (): readonly NaiveDropdownOption[] => [
-    { key: "refresh", label: t("ncm.daily.refresh"), icon: <IconRefresh /> },
-    { key: "batch", label: t("ncm.daily.batch"), icon: <IconList /> }
+    { key: "refresh", label: t("ncm.daily.refresh"), icon: <IconRefreshFilled /> },
+    { key: "batch", label: t("ncm.daily.batch"), icon: <IconFormatListFilled /> }
   ];
 
   const handleRefresh = async () => {
@@ -127,15 +133,15 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
           <NaiveH2>{t("ncm.daily.title")}</NaiveH2>
           <NaiveP class="ncm-daily-detail-meta">{tipText()}</NaiveP>
           <div class="ncm-daily-detail-menu">
-            <button
-              type="button"
-              class="primary-button ncm-daily-play-all"
+            <PageToolbarButton
+              variant="primary"
+              class="ncm-daily-play-all"
               disabled={props.tracks.length === 0 || playingAll()}
               onClick={() => void handlePlayAll()}
             >
-              <IconPlay />
+              <IconPlayFilled />
               <span>{playingAll() ? t("ncm.daily.playingAll") : t("ncm.daily.playAll")}</span>
-            </button>
+            </PageToolbarButton>
             <NaiveDropdown
               options={menuItems()}
               triggerMode="click"
@@ -147,16 +153,16 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
               ariaLabel={t("ncm.daily.more")}
               disabled={refreshing()}
             >
-              <button
-                type="button"
-                class="ghost-button ncm-daily-more"
-                aria-label={t("ncm.daily.more")}
+              <PageToolbarButton
+                variant="icon"
+                class="ncm-daily-more"
+                ariaLabel={t("ncm.daily.more")}
                 disabled={refreshing()}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen()}
+                ariaHasPopup="menu"
+                ariaExpanded={menuOpen()}
               >
-                <IconList />
-              </button>
+                <IconFormatListFilled />
+              </PageToolbarButton>
             </NaiveDropdown>
           </div>
         </header>

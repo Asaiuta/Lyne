@@ -1,11 +1,12 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import {
+  IconBatchFilled,
   IconCloud,
-  IconList,
+  IconFormatListFilled,
   IconMusic,
-  IconPlay,
-  IconRefresh,
+  IconPlayFilled,
+  IconRefreshFilled,
   IconSearch,
   IconStorage
 } from "../../components/icons";
@@ -24,6 +25,8 @@ import {
 import { createPlaybackController } from "./shared/playback";
 import type { Feedback, OnlineTrackItem } from "./shared/types";
 import { NcmMediaList } from "./NcmMediaList";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
+import "../../shared/styles/pages/cloud-search-liked-radio.css";
 
 const api = createApiClient();
 const CLOUD_PAGE_LIMIT = 500;
@@ -257,7 +260,7 @@ export function CloudPage(props: CloudPageProps) {
   });
 
   const menuItems = (): readonly NaiveDropdownOption[] => [
-    { key: "batch", label: t("ncm.cloud.batch"), icon: <IconList /> }
+    { key: "batch", label: t("ncm.cloud.batch"), icon: <IconBatchFilled /> }
   ];
 
   const handleMenuSelect = (key: string) => {
@@ -397,30 +400,30 @@ export function CloudPage(props: CloudPageProps) {
 
         <section class="cloud-toolbar">
           <div class="playlist-detail-menu-left">
-            <button
-              type="button"
-              class="primary-button playlist-detail-play"
+            <PageToolbarButton
+              variant="primary"
+              class="playlist-detail-play"
               onClick={() => void playAll()}
               disabled={isLoading() || filteredTracks().length === 0}
             >
-              <IconPlay />
+              <IconPlayFilled />
               {showInitialLoading()
                 ? t("ncm.cloud.loadingProgress", {
                     loaded: loadingProgress().loaded,
                     total: loadingProgress().total
                   })
                 : t("ncm.cloud.play")}
-            </button>
-            <button
-              type="button"
-              class="ghost-button playlist-detail-icon-button"
+            </PageToolbarButton>
+            <PageToolbarButton
+              variant="icon"
+              class="playlist-detail-icon-button"
               onClick={() => void loadCloudTracks(() => false, { force: true })}
               disabled={isLoading()}
               title={t("ncm.cloud.refresh")}
-              aria-label={t("ncm.cloud.refresh")}
+              ariaLabel={t("ncm.cloud.refresh")}
             >
-              <IconRefresh />
-            </button>
+              <IconRefreshFilled />
+            </PageToolbarButton>
             <NaiveDropdown
               options={menuItems()}
               triggerMode="click"
@@ -431,16 +434,16 @@ export function CloudPage(props: CloudPageProps) {
               onSelect={(option) => handleMenuSelect(option.key)}
               ariaLabel={t("ncm.cloud.batch")}
             >
-              <button
-                type="button"
-                class="ghost-button playlist-detail-icon-button"
+              <PageToolbarButton
+                variant="icon"
+                class="playlist-detail-icon-button"
                 title={t("ncm.cloud.batch")}
-                aria-label={t("ncm.cloud.batch")}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen()}
+                ariaLabel={t("ncm.cloud.batch")}
+                ariaHasPopup="menu"
+                ariaExpanded={menuOpen()}
               >
-                <IconList />
-              </button>
+                <IconFormatListFilled />
+              </PageToolbarButton>
             </NaiveDropdown>
           </div>
           <Show when={tracks().length > 0}>
