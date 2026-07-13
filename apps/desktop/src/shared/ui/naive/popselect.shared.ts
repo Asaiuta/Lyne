@@ -32,7 +32,6 @@ export interface NaivePopselectProps<TValue extends string> {
   optionCheckClass?: string;
   placement?: NaivePopselectPlacement;
   gutter?: number;
-  fallbackPopoverWidth?: number;
   stopTriggerPropagation?: boolean;
   onOpenChange: (open: boolean) => void;
   onChange: (value: TValue) => void;

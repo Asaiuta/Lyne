@@ -9,6 +9,10 @@ import {
 import { Portal } from "solid-js/web";
 import { NaiveButton } from "./button";
 import {
+  computeFloatingPosition,
+  type FloatingPosition
+} from "./floating-position";
+import {
   naivePopselectOptionCheckClass,
   naivePopselectOptionClass,
   naivePopselectOptionContentClass,
@@ -23,11 +27,6 @@ import { joinClassNames } from "./utils";
 
 export * from "./popselect.shared";
 
-type FallbackPopoverPosition = {
-  readonly left: number;
-  readonly top: number;
-};
-
 const POPSELECT_LEAVE_PRESENCE_MS = 180;
 
 const lazyNaivePopselect = createLazyNaive<NaivePopselectComponent>(() =>
@@ -40,18 +39,18 @@ export function NaivePopselect<TValue extends string>(
   props: NaivePopselectProps<TValue>
 ): JSX.Element {
   let fallbackRoot: HTMLDivElement | undefined;
-  let fallbackPopover: HTMLDivElement | undefined;
+  const [fallbackPopover, setFallbackPopover] =
+    createSignal<HTMLDivElement | null>(null);
   const [LoadedPopselect, setLoadedPopselect] =
     createSignal<NaivePopselectComponent | null>(lazyNaivePopselect.getLoaded());
   const [loadedWasRendered, setLoadedWasRendered] =
     createSignal<boolean>(lazyNaivePopselect.getLoaded() != null);
-  const [fallbackPosition, setFallbackPosition] = createSignal<FallbackPopoverPosition | null>(
-    null
-  );
+  const [fallbackPosition, setFallbackPosition] =
+    createSignal<FloatingPosition | null>(null);
   const [fallbackPresent, setFallbackPresent] = createSignal<boolean>(props.open);
   let fallbackLeaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let fallbackPositionFrame: number | undefined;
 
-  const popoverWidth = () => props.fallbackPopoverWidth ?? 100;
   const gutter = () => props.gutter ?? 10;
   const renderedLoadedPopselect = (): NaivePopselectComponent | null => {
     const Loaded = LoadedPopselect();
@@ -69,16 +68,38 @@ export function NaivePopselect<TValue extends string>(
   const ensureLoaded = (): void => {
     void lazyNaivePopselect.load().then((component) => setLoadedPopselect(() => component));
   };
+  const cancelFallbackPositionFrame = (): void => {
+    if (fallbackPositionFrame === undefined || typeof window === "undefined") return;
+    window.cancelAnimationFrame(fallbackPositionFrame);
+    fallbackPositionFrame = undefined;
+  };
   const updateFallbackPosition = (): void => {
+    if (typeof window === "undefined") return;
     const trigger = fallbackRoot?.querySelector<HTMLButtonElement>(
       "[data-naive-popselect-trigger]"
     );
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const width = popoverWidth();
-    setFallbackPosition({
-      left: rect.left + rect.width / 2 - width / 2,
-      top: rect.bottom + gutter()
+    const popover = fallbackPopover();
+    if (!trigger || !popover) return;
+
+    const width = popover.offsetWidth;
+    const height = popover.offsetHeight;
+    if (width <= 0 || height <= 0) return;
+
+    setFallbackPosition(
+      computeFloatingPosition({
+        anchor: trigger.getBoundingClientRect(),
+        content: { width, height },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        placement: props.placement ?? "bottom",
+        gutter: gutter()
+      })
+    );
+  };
+  const scheduleFallbackPositionUpdate = (): void => {
+    if (typeof window === "undefined" || fallbackPositionFrame !== undefined) return;
+    fallbackPositionFrame = window.requestAnimationFrame(() => {
+      fallbackPositionFrame = undefined;
+      updateFallbackPosition();
     });
   };
   const clearFallbackLeaveTimer = (): void => {
@@ -103,13 +124,15 @@ export function NaivePopselect<TValue extends string>(
       if (props.open || !fallbackPresent()) setFallbackPosition(null);
       return;
     }
-    if (props.open) updateFallbackPosition();
+    if (props.open) scheduleFallbackPositionUpdate();
   });
 
   createEffect(() => {
     if (props.open) {
       clearFallbackLeaveTimer();
+      setFallbackPosition(null);
       setFallbackPresent(true);
+      scheduleFallbackPositionUpdate();
       return;
     }
     if (!fallbackPresent()) return;
@@ -132,21 +155,38 @@ export function NaivePopselect<TValue extends string>(
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Node && fallbackRoot?.contains(target)) return;
-      if (target instanceof Node && fallbackPopover?.contains(target)) return;
+      if (target instanceof Node && fallbackPopover()?.contains(target)) return;
       props.onOpenChange(false);
     };
+    const handleLayoutChange = () => scheduleFallbackPositionUpdate();
+    const popover = fallbackPopover();
+    const resizeObserver =
+      popover && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(handleLayoutChange)
+        : null;
 
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("resize", handleLayoutChange);
+    window.addEventListener("scroll", handleLayoutChange, true);
+    if (resizeObserver && popover) resizeObserver.observe(popover);
+    scheduleFallbackPositionUpdate();
     onCleanup(() => {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", handleLayoutChange);
+      window.removeEventListener("scroll", handleLayoutChange, true);
+      resizeObserver?.disconnect();
+      cancelFallbackPositionFrame();
     });
   });
 
   lazyNaivePopselect.useIdlePreload({ idleTimeout: 1200, fallbackDelay: 600 });
 
-  onCleanup(clearFallbackLeaveTimer);
+  onCleanup(() => {
+    clearFallbackLeaveTimer();
+    cancelFallbackPositionFrame();
+  });
 
   return (
     <Show
@@ -171,7 +211,8 @@ export function NaivePopselect<TValue extends string>(
               const nextOpen = !props.open;
               props.onOpenChange(nextOpen);
               if (nextOpen) {
-                updateFallbackPosition();
+                setFallbackPosition(null);
+                scheduleFallbackPositionUpdate();
                 ensureLoaded();
               }
             }}
@@ -179,67 +220,66 @@ export function NaivePopselect<TValue extends string>(
             {props.triggerContent}
           </NaiveButton>
           <Show
-            when={
-              fallbackPresent() && typeof document !== "undefined"
-                ? fallbackPosition()
-                : null
-            }
+            when={fallbackPresent() && typeof document !== "undefined"}
           >
-            {(position) => (
-              <Portal mount={document.body}>
-                <div
-                  ref={fallbackPopover}
-                  class={popoverPresenceClass()}
-                  role="menu"
-                  aria-label={props.label}
-                  aria-hidden={!props.open}
-                  style={{
-                    left: `${position().left}px`,
-                    top: `${position().top}px`,
-                    width: `${popoverWidth()}px`,
-                    "pointer-events": props.open ? "auto" : "none"
-                  }}
-                >
-                  <For each={props.options}>
-                    {(option) => {
-                      const active = () => props.value === option.value;
-                      return (
-                        <NaiveButton
-                          class={optionClass(active())}
-                          role="menuitemradio"
-                          ariaChecked={active()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            props.onChange(option.value);
-                            props.onOpenChange(false);
-                          }}
+            <Portal mount={document.body}>
+              <div
+                ref={(element) => {
+                  setFallbackPopover(element);
+                  scheduleFallbackPositionUpdate();
+                }}
+                class={popoverPresenceClass()}
+                role="menu"
+                aria-label={props.label}
+                aria-hidden={!props.open || fallbackPosition() == null}
+                style={{
+                  position: "fixed",
+                  left: `${fallbackPosition()?.left ?? 0}px`,
+                  top: `${fallbackPosition()?.top ?? 0}px`,
+                  visibility: fallbackPosition() == null ? "hidden" : "visible",
+                  "pointer-events":
+                    props.open && fallbackPosition() != null ? "auto" : "none"
+                }}
+              >
+                <For each={props.options}>
+                  {(option) => {
+                    const active = () => props.value === option.value;
+                    return (
+                      <NaiveButton
+                        class={optionClass(active())}
+                        role="menuitemradio"
+                        ariaChecked={active()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          props.onChange(option.value);
+                          props.onOpenChange(false);
+                        }}
+                      >
+                        <span
+                          class={joinClassNames(
+                            "n-base-select-option__content",
+                            optionContentClass()
+                          )}
                         >
+                          {option.label}
+                        </span>
+                        <Show when={active() && props.renderCheck}>
                           <span
                             class={joinClassNames(
-                              "n-base-select-option__content",
-                              optionContentClass()
+                              "n-base-select-option__check",
+                              optionCheckClass()
                             )}
+                            aria-hidden="true"
                           >
-                            {option.label}
+                            {props.renderCheck?.(option)}
                           </span>
-                          <Show when={active() && props.renderCheck}>
-                            <span
-                              class={joinClassNames(
-                                "n-base-select-option__check",
-                                optionCheckClass()
-                              )}
-                              aria-hidden="true"
-                            >
-                              {props.renderCheck?.(option)}
-                            </span>
-                          </Show>
-                        </NaiveButton>
-                      );
-                    }}
-                  </For>
-                </div>
-              </Portal>
-            )}
+                        </Show>
+                      </NaiveButton>
+                    );
+                  }}
+                </For>
+              </div>
+            </Portal>
           </Show>
         </div>
       }
