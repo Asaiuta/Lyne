@@ -96,35 +96,23 @@
     padding: 0;
   }
 
-  .auxiliary-page-menu .segmented-tabs {
-    width: 200px;
-    height: 40px;
-    padding: 3px;
-    border-radius: var(--radius-pill);
-  }
-
   .auxiliary-page-menu .n-tabs {
+    --n-tab-border-radius: var(--radius-pill);
     width: 200px;
     height: 40px;
-    --n-tab-border-radius: var(--radius-pill);
-  }
-
-  .auxiliary-page-streaming .segmented-tabs {
-    width: 260px;
   }
 
   .auxiliary-page-streaming .n-tabs {
     width: 260px;
   }
 
-  .auxiliary-page-menu .segmented-tab {
-    flex: 1;
+  .auxiliary-page-menu .n-tabs-tab {
     min-height: 32px;
-    padding: 0 10px;
   }
 
   .auxiliary-page-menu .n-tabs-rail {
-    outline: 1px solid var(--n-tab-color-segment);
+    min-height: 40px;
+    outline: 1px solid var(--naive-tabs-color-segment);
   }
 
   .auxiliary-page-body {

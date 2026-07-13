@@ -241,7 +241,13 @@
     height: 40px;
     min-height: 40px;
     border-radius: var(--radius-pill);
-    transition: all 0.3s var(--ease-standard);
+    transition:
+      color 0.3s var(--ease-standard),
+      background-color 0.3s var(--ease-standard),
+      border-color 0.3s var(--ease-standard),
+      box-shadow 0.3s var(--ease-standard),
+      opacity 0.3s var(--ease-standard),
+      transform 0.3s var(--ease-standard);
   }
 
   .playlist-detail-play,
@@ -289,7 +295,13 @@
     padding: 0;
     flex: none;
     border-radius: 50%;
-    transition: all 0.3s var(--ease-standard);
+    transition:
+      color 0.3s var(--ease-standard),
+      background-color 0.3s var(--ease-standard),
+      border-color 0.3s var(--ease-standard),
+      box-shadow 0.3s var(--ease-standard),
+      opacity 0.3s var(--ease-standard),
+      transform 0.3s var(--ease-standard);
   }
 
   .playlist-detail-title-row .playlist-detail-back svg {
@@ -368,22 +380,33 @@
     color: var(--muted);
   }
 
-  .playlist-detail-tabs {
+  .playlist-detail-tabs.segmented-tabs {
+    --segmented-gap: 4px;
+    --segmented-padding: 4px;
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--segmented-gap);
     width: 200px;
-    padding: 4px;
+    padding: var(--segmented-padding);
+    border: 0;
     border-radius: var(--radius-pill);
     outline: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
     background: color-mix(in oklch, var(--surface-2) 80%, transparent);
+    isolation: isolate;
+    overflow: hidden;
   }
 
-  .playlist-detail-tabs button {
-    flex: 1;
+  .playlist-detail-tabs .segmented-tab {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 0;
     height: 32px;
+    min-height: 32px;
+    border: 0;
     border-radius: var(--radius-pill);
     color: var(--muted);
+    background: transparent;
     font-size: 14px;
     font-weight: 600;
     transition:
@@ -391,22 +414,12 @@
       color 0.3s var(--ease-standard);
   }
 
-  .playlist-detail-tabs button.is-active {
-    color: var(--accent-foreground);
-    background: var(--accent);
-  }
-
-  .ncm-detail-page--playlist .playlist-detail-tabs button.is-active {
-    color: var(--text);
-    background: color-mix(in oklch, var(--surface-3) 86%, var(--text) 8%);
-  }
-
-  .ncm-detail-page--playlist .playlist-detail-tabs {
+  .ncm-detail-page--playlist .playlist-detail-tabs.segmented-tabs {
     outline-color: color-mix(in oklch, var(--border) 36%, transparent);
     background: color-mix(in oklch, var(--surface-2) 84%, transparent);
   }
 
-  .playlist-detail-tabs span {
+  .playlist-detail-tabs .segmented-tab-count {
     margin-left: 2px;
     font-size: 11px;
     line-height: 1;
@@ -474,8 +487,9 @@
     width: 32px;
   }
 
-  .page-hero.is-small .playlist-detail-tabs button {
+  .page-hero.is-small .playlist-detail-tabs .segmented-tab {
     height: 24px;
+    min-height: 24px;
     font-size: 13px;
   }
 

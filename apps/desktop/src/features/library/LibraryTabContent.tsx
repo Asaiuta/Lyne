@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 import { IconFolder, IconMusic } from "../../components/icons";
 import { MediaList } from "../../components/media/MediaList";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import type { LocalPlaylist } from "../../shared/api/types";
 import type { TranslationKey, TranslationParams } from "../../shared/i18n";
 import { LibraryFoldersView } from "./LibraryFoldersView";
@@ -43,14 +44,10 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
                   <IconMusic />
                 </span>
                 <span>{props.t("library.tracks.emptyAll")}</span>
-                <button
-                  type="button"
-                  class="primary-button page-action"
-                  onClick={props.onManageRoots}
-                >
+                <PageToolbarButton variant="primary" onClick={props.onManageRoots}>
                   <IconFolder />
                   <span>{props.t("library.action.manageRoots")}</span>
-                </button>
+                </PageToolbarButton>
               </div>
             </Show>
           }

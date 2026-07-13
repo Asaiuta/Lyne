@@ -1,14 +1,15 @@
-import { createSignal } from "solid-js";
+import { createMemo, createSignal } from "solid-js";
 import {
   IconCloud,
   IconMusic,
-  IconPlayCircle,
-  IconRefresh
+  IconPlayFilled,
+  IconRefreshFilled
 } from "../../components/icons";
 import { EmptyState } from "../../components/EmptyState";
-import { SegmentedTabs } from "../../components/page/SegmentedTabs";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { useTranslation } from "../../shared/i18n";
-import { NaiveNumberAnimation } from "../../shared/ui/naive";
+import { NaiveNumberAnimation, NaiveTabs, type NaiveTabItem } from "../../shared/ui/naive";
+import "../../shared/styles/pages/auxiliary.css";
 
 type StreamingTab = "songs" | "artists" | "albums" | "playlists";
 
@@ -18,6 +19,12 @@ export function StreamingPage() {
   const songCount = () => 0;
   const songCountSuffix = () =>
     t("streaming.status.songCount", { count: "" });
+  const tabItems = createMemo<ReadonlyArray<NaiveTabItem<StreamingTab>>>(() => [
+    { value: "songs", label: t("streaming.tab.songs"), disabled: true },
+    { value: "artists", label: t("streaming.tab.artists"), disabled: true },
+    { value: "albums", label: t("streaming.tab.albums"), disabled: true },
+    { value: "playlists", label: t("streaming.tab.playlists"), disabled: true }
+  ]);
 
   return (
     <section class="panel panel-page auxiliary-page auxiliary-page-streaming">
@@ -39,33 +46,26 @@ export function StreamingPage() {
 
         <div class="auxiliary-page-menu">
           <div class="auxiliary-page-menu-left">
-            <button
-              type="button"
-              class="primary-button page-action auxiliary-page-play"
-              disabled
-            >
-              <IconPlayCircle />
+            <PageToolbarButton variant="primary" class="auxiliary-page-play" disabled>
+              <IconPlayFilled />
               <span>{t("streaming.action.play")}</span>
-            </button>
-            <button
-              type="button"
-              class="ghost-button page-action auxiliary-page-icon-button"
+            </PageToolbarButton>
+            <PageToolbarButton
+              variant="icon"
+              class="auxiliary-page-icon-button"
               disabled
-              aria-label={t("streaming.action.refresh")}
+              ariaLabel={t("streaming.action.refresh")}
               title={t("streaming.action.refresh")}
             >
-              <IconRefresh />
-            </button>
+              <IconRefreshFilled />
+            </PageToolbarButton>
           </div>
-          <SegmentedTabs
+          <NaiveTabs
+            class="streaming-tabs"
             value={activeTab()}
-            onChange={(next) => setActiveTab(next as StreamingTab)}
-            items={[
-              { value: "songs", label: t("streaming.tab.songs"), disabled: true },
-              { value: "artists", label: t("streaming.tab.artists"), disabled: true },
-              { value: "albums", label: t("streaming.tab.albums"), disabled: true },
-              { value: "playlists", label: t("streaming.tab.playlists"), disabled: true }
-            ]}
+            onChange={setActiveTab}
+            items={tabItems()}
+            type="segment"
             ariaLabel={t("streaming.title")}
           />
         </div>

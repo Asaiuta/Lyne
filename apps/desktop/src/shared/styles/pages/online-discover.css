@@ -2,6 +2,26 @@
     gap: 18px;
   }
 
+  .online-page.is-discover-page {
+    --online-discover-control-color: var(--text-secondary);
+    --online-discover-control-muted-color: var(--text-placeholder);
+    --online-discover-control-bg: var(--border-faint);
+    --online-discover-control-bg-hover: var(--state-hover-on-surface);
+    --online-discover-control-bg-active: color-mix(in oklch, var(--surface-3) 82%, var(--text) 8%);
+    --online-discover-control-border: var(--border-overlay);
+    --online-discover-control-border-hover: var(--state-pressed-on-surface);
+    --online-discover-control-ring: color-mix(in oklch, var(--text) 14%, transparent);
+    --online-discover-entry-bg: var(--naive-tabs-color-segment);
+    --online-discover-entry-bg-hover: color-mix(in oklch, var(--naive-tabs-color-segment) 90%, var(--text) 7%);
+    --online-discover-entry-bg-active: color-mix(in oklch, var(--naive-tabs-color-segment) 84%, var(--text) 10%);
+    --online-discover-entry-capsule-bg: color-mix(in oklch, var(--naive-tabs-color-segment) 90%, var(--text) 6%);
+    --online-discover-entry-capsule-bg-hover: color-mix(in oklch, var(--naive-tabs-color-segment) 86%, var(--text) 8%);
+    --online-discover-entry-capsule-bg-active: color-mix(in oklch, var(--naive-tabs-color-segment) 82%, var(--text) 10%);
+    --online-discover-card-hover-bg: var(--state-hover-on-surface);
+    --online-discover-card-border: var(--border-overlay);
+    --online-discover-card-border-hover: var(--state-pressed-on-surface);
+  }
+
   .online-page.is-recommend-page {
     width: 100%;
     max-width: 1500px;
@@ -94,78 +114,92 @@
   .online-discover-cat-button {
     gap: 8px;
     height: 40px;
-    padding: 0 18px;
-    color: var(--accent);
-    border: 1px solid transparent;
-    background: var(--color-primary-tonal-12);
+    padding: 0 17px 0 19px;
+    position: relative;
+    overflow: hidden;
+    color: var(--online-discover-control-color);
+    border: 0;
+    background: var(--online-discover-entry-bg);
     transition:
       color 0.3s var(--ease-standard),
-      border-color 0.3s var(--ease-standard),
       background-color 0.3s var(--ease-standard),
       box-shadow 0.3s var(--ease-standard),
       transform 0.3s var(--ease-standard);
   }
 
+  .online-discover-cat-button::before {
+    position: absolute;
+    inset: 3px;
+    border-radius: inherit;
+    background: var(--online-discover-entry-capsule-bg);
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.08);
+    content: "";
+    transition:
+      background-color 0.3s var(--ease-standard),
+      transform 0.3s var(--ease-standard);
+  }
+
   .online-discover-cat-button:hover {
-    border-color: var(--color-primary-tonal-28);
-    background: var(--color-primary-tonal-20);
+    color: var(--text);
+    background: var(--online-discover-entry-bg-hover);
+  }
+
+  .online-discover-cat-button:hover::before {
+    background: var(--online-discover-entry-capsule-bg-hover);
   }
 
   .online-discover-cat-button:active {
     transform: scale(0.98);
-    background: var(--color-primary-tonal-28);
+    background: var(--online-discover-entry-bg-active);
+  }
+
+  .online-discover-cat-button:active::before {
+    background: var(--online-discover-entry-capsule-bg-active);
   }
 
   .online-discover-cat-button:focus-visible {
     outline: none;
-    border-color: var(--color-primary-tonal-58);
-    box-shadow: 0 0 0 3px var(--color-primary-tonal-20);
+    box-shadow: 0 0 0 3px var(--online-discover-control-ring);
   }
 
-  .online-discover-cat-button span {
+  .online-discover-cat-button-label,
+  .online-discover-cat-button-arrow {
+    position: relative;
+    z-index: 1;
     color: currentColor;
+  }
+
+  .online-discover-cat-button-arrow {
     font-size: 18px;
     line-height: 1;
   }
 
-  .online-discover-mini-tabs {
+  .online-discover-mini-tabs.n-tabs {
+    --n-tab-text-color: var(--online-discover-control-muted-color);
+    --n-tab-text-color-hover: var(--text);
+    --n-tab-text-color-active: var(--text);
+    --n-bar-color: var(--online-discover-control-border-hover);
+    --n-tab-border-radius: 25px;
     width: 140px;
     height: 40px;
-    gap: 3px;
-    padding: 3px;
+    min-height: 40px;
     border-radius: 25px;
-    border: 1px solid var(--border-overlay);
-    background: var(--border-faint);
+    outline: 0;
   }
 
-  .online-discover-mini-tabs button {
-    display: inline-flex;
-    flex: 1;
+  .online-discover-mini-tabs .n-tabs-rail {
+    min-height: 40px;
+  }
+
+  .online-discover-mini-tabs .n-tabs-tab {
     height: 32px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 25px;
-    color: var(--text-placeholder);
+    min-height: 32px;
     font-size: 13px;
-    transition:
-      color 0.3s var(--ease-standard),
-      background-color 0.3s var(--ease-standard),
-      box-shadow 0.3s var(--ease-standard);
   }
 
-  .online-discover-mini-tabs button:hover {
-    color: var(--text);
-    background: var(--state-hover-on-surface);
-  }
-
-  .online-discover-mini-tabs button:focus-visible {
+  .online-discover-mini-tabs .n-tabs-tab:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 1px var(--color-primary-tonal-58);
-  }
-
-  .online-discover-mini-tabs button.is-active {
-    color: var(--accent-foreground);
-    background: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--online-discover-control-border-hover);
   }
 
   .online-discover-filter-menu {
@@ -182,8 +216,8 @@
   .online-discover-filter-menu button {
     min-height: 30px;
     padding: 0 12px;
-    color: var(--text-placeholder);
-    border: 1px solid var(--state-hover-on-surface);
+    color: var(--online-discover-control-muted-color);
+    border: 1px solid var(--online-discover-control-border);
     background: transparent;
     transition:
       color 0.3s var(--ease-standard),
@@ -193,50 +227,55 @@
   }
 
   .online-discover-filter-menu button:hover {
-    color: var(--accent);
-    border-color: var(--color-primary-tonal-28);
-    background: var(--color-primary-tonal-12);
+    color: var(--text);
+    border-color: var(--online-discover-control-border-hover);
+    background: var(--online-discover-control-bg-hover);
   }
 
   .online-discover-filter-menu button:focus-visible {
     outline: none;
-    border-color: var(--color-primary-tonal-58);
-    box-shadow: 0 0 0 3px var(--color-primary-tonal-20);
+    border-color: var(--online-discover-control-border-hover);
+    box-shadow: 0 0 0 3px var(--online-discover-control-ring);
   }
 
   .online-discover-filter-menu button.is-active {
-    color: var(--accent-foreground);
-    border-color: color-mix(in oklch, var(--accent) 55%, white 12%);
-    background: var(--color-primary-tonal-85);
+    color: var(--text);
+    border-color: var(--online-discover-control-border-hover);
+    background: var(--online-discover-control-bg-active);
   }
 
   .online-discover-new .online-discover-menu {
     align-items: flex-start;
   }
 
-  .online-page .page-header-tabs {
-    margin-left: 0;
-  }
-
   .online-page.is-discover-page .page-header-row {
     justify-content: flex-start;
   }
 
-  .online-page.is-discover-page .segmented-tabs {
-    height: 40px;
-    padding: 3px;
-    border-radius: 6px !important;
-    outline: 1px solid var(--border-faint);
+  .online-page.is-discover-page .page-header-tabs {
+    width: 100%;
+    margin-left: 0;
   }
 
-  .online-page.is-discover-page .segmented-tab {
-    min-width: 86px;
-    min-height: 32px;
-    padding: 0 18px;
-    border-radius: 6px !important;
+  .online-page.is-discover-page .page-header-tabs .discover-primary-tabs.n-tabs {
+    --n-tab-text-color: var(--online-discover-control-muted-color);
+    --n-tab-text-color-hover: var(--text);
+    --n-tab-text-color-active: var(--text);
+    --n-bar-color: var(--online-discover-control-border-hover);
+    --n-tab-border-radius: 6px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .online-page.is-discover-page .page-header-tabs .discover-primary-tabs .n-tabs-rail {
+    min-height: 40px;
+  }
+
+  .online-page.is-discover-page .page-header-tabs .discover-primary-tabs .n-tabs-tab {
+    min-height: 34px;
+    padding: 0;
     font-size: 14px;
     font-weight: 500;
-    transition: all 0.3s var(--ease-standard);
   }
 
   .online-discover-section > .online-result-panel-head {
@@ -313,7 +352,7 @@
   .media-sort-radio input {
     width: 14px;
     height: 14px;
-    accent-color: var(--accent);
+    accent-color: var(--online-discover-control-color, var(--text));
   }
 
   .media-sort-divider {
@@ -340,7 +379,7 @@
     place-items: center;
     width: 42px;
     height: 42px;
-    border: 1px solid var(--color-primary-tonal-28);
+    border: 1px solid var(--online-discover-card-border, var(--border-overlay));
     border-radius: var(--radius-pill);
     color: var(--text-soft);
     background: var(--floating-surface);
@@ -413,7 +452,7 @@
 
   .online-discover-section .album-card:hover,
   .ncm-home-feed .album-card:hover {
-    background: var(--color-primary-tonal-12);
+    background: var(--online-discover-card-hover-bg, var(--state-hover-on-surface));
   }
 
   .online-discover-section .album-card:hover .album-card-art,
@@ -444,13 +483,13 @@
     min-height: 80px;
     padding: 0;
     overflow: hidden;
-    border: 2px solid var(--color-primary-tonal-12);
+    border: 2px solid var(--online-discover-card-border, var(--border-overlay));
     background: var(--surface-2);
   }
 
   .online-discover-section .album-card.is-cover-hidden:hover,
   .ncm-home-feed .album-card.is-cover-hidden:hover {
-    border-color: var(--color-primary-tonal-58);
+    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
   }
 
   .online-discover-section .album-card.is-cover-hidden .album-card-copy,
@@ -564,17 +603,17 @@
   }
 
   .online-toplist-card:hover {
-    border-color: var(--color-primary-tonal-58, var(--state-hover-on-surface));
+    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
   }
 
   .online-toplist-card:focus-visible {
     outline: none;
-    border-color: var(--color-primary-tonal-58, var(--state-hover-on-surface));
-    box-shadow: 0 0 0 3px var(--color-primary-tonal-20);
+    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
+    box-shadow: 0 0 0 3px var(--online-discover-control-ring);
   }
 
   .online-toplist-card:active {
-    border-color: var(--color-primary-tonal-58, var(--state-hover-on-surface));
+    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
   }
 
   .online-toplist-card:hover .online-toplist-cover img {

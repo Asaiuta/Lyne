@@ -40,11 +40,20 @@
   }
 
   .ncm-video-comment-tabs,
-  .ncm-resource-comment-tabs {
+  .ncm-resource-comment-tabs.segmented-tabs {
     display: inline-flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
     gap: 6px;
+  }
+
+  .ncm-resource-comment-tabs.segmented-tabs {
+    --segmented-gap: 4px;
+    --segmented-padding: 3px;
+    padding: var(--segmented-padding);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2, var(--border-faint));
   }
 
   .ncm-video-comment-list,
@@ -199,7 +208,7 @@
   }
 
   .ncm-resource-comment-action:disabled svg {
-    animation: spin 1s linear infinite;
+    animation: motion-spin var(--motion-loop-spinner) linear infinite;
   }
 
   .ncm-resource-comment-reply {

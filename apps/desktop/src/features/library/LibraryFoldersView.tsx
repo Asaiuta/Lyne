@@ -38,11 +38,6 @@ interface DisplayFolderNode {
   children: DisplayFolderNode[];
 }
 
-/**
- * Mirror SPlayer's folder-tree merging: when a node has no direct songs and
- * only one child, collapse the child into the parent so the visible label
- * reads `Parent/Child` and the row jumps straight to the deepest folder.
- */
 const mergeNode = (node: LibraryFolderNode, depth: number): DisplayFolderNode => {
   let label = node.label;
   let key = node.key;

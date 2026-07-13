@@ -10,7 +10,7 @@
       );
     background-size: 200% 100%;
     border-radius: 6px;
-    animation: skeleton-pulse 1.4s ease-in-out infinite;
+    animation: motion-skeleton-sweep var(--motion-loop-skeleton) ease-in-out infinite;
     pointer-events: none;
   }
 
@@ -23,10 +23,6 @@
     border-radius: 4px;
   }
 
-  @keyframes skeleton-pulse {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
 
   .skeleton-grid {
     padding: 20px 4px;
@@ -89,7 +85,6 @@
     }
   }
 
-  /* ── Empty state (matches SPlayer n-empty illustration + caption) ── */
   .empty-state {
     display: flex;
     flex-direction: column;

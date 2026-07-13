@@ -130,33 +130,22 @@ export function WindowControls(props: WindowControlsProps) {
   return (
     <Show when={props.visible && appWindow() !== null}>
       <div class="window-controls" data-no-drag>
-        <div class="window-control-wrapper" onClick={handleMinimize} title={t("window.aria.minimize")}>
+        <div class="window-control-wrapper">
           <button
             type="button"
-            class="window-control-button"
-            onClick={(event) => {
-              event.stopPropagation();
-              handleMinimize();
-            }}
+            class="window-control-button is-minimize"
+            onClick={handleMinimize}
             aria-label={t("window.aria.minimize")}
             title={t("window.aria.minimize")}
           >
             <IconMinimize />
           </button>
-          <span class="window-control-expanded-area is-minimize" aria-hidden="true" />
         </div>
-        <div
-          class="window-control-wrapper"
-          onClick={handleToggleMaximize}
-          title={maximized() ? t("window.aria.restore") : t("window.aria.maximize")}
-        >
+        <div class="window-control-wrapper">
           <button
             type="button"
-            class="window-control-button"
-            onClick={(event) => {
-              event.stopPropagation();
-              handleToggleMaximize();
-            }}
+            class="window-control-button is-maximize"
+            onClick={handleToggleMaximize}
             aria-label={maximized() ? t("window.aria.restore") : t("window.aria.maximize")}
             title={maximized() ? t("window.aria.restore") : t("window.aria.maximize")}
           >
@@ -164,22 +153,17 @@ export function WindowControls(props: WindowControlsProps) {
               <IconRestore />
             </Show>
           </button>
-          <span class="window-control-expanded-area is-maximize" aria-hidden="true" />
         </div>
-        <div class="window-control-wrapper" onClick={handleClose} title={t("window.aria.close")}>
+        <div class="window-control-wrapper">
           <button
             type="button"
             class="window-control-button is-close"
-            onClick={(event) => {
-              event.stopPropagation();
-              handleClose();
-            }}
+            onClick={handleClose}
             aria-label={t("window.aria.close")}
             title={t("window.aria.close")}
           >
             <IconClose />
           </button>
-          <span class="window-control-expanded-area is-close" aria-hidden="true" />
         </div>
       </div>
     </Show>

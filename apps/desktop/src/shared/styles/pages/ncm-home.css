@@ -479,7 +479,7 @@
       linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent),
       var(--border-overlay);
     background-size: 220% 100%;
-    animation: ncm-home-feed-skeleton-pulse 1.4s ease-in-out infinite;
+    animation: ncm-home-feed-skeleton-pulse var(--motion-loop-skeleton) ease-in-out infinite;
   }
 
   .ncm-home-feed-skeleton-title {

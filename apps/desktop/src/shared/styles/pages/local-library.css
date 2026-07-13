@@ -72,26 +72,20 @@
     justify-content: flex-end;
   }
 
-  .local-library-menu .page-action {
-    height: 40px;
-    min-height: 40px;
-  }
-
-  .local-library-play {
-    padding-inline: 18px;
-  }
-
-  .local-library-circle {
-    width: 40px;
-    min-width: 40px;
-    padding: 0;
-  }
-
-  .local-library-circle svg,
-  .local-library-play svg,
   .local-library-search svg {
+    display: block;
+    flex: none;
     width: 18px;
     height: 18px;
+  }
+
+  .local-library-more-menu {
+    --n-min-width: 136px;
+    width: max-content;
+  }
+
+  :root[data-theme="light"]:not([data-theme-global-color="true"]) .local-library-more-menu {
+    --n-color: rgb(255 255 255);
   }
 
   .local-library-search {
@@ -132,65 +126,47 @@
     color: var(--text-placeholder);
   }
 
-  .local-library-folder-select {
-    position: relative;
+  .local-library-view-trigger {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    width: 200px;
+    justify-content: center;
+    gap: 7px;
+    min-width: 88px;
     height: 40px;
-    padding: 0 12px;
-    border-radius: var(--radius-pill);
-    color: var(--text-placeholder);
-    background: var(--border-overlay);
-    border: 1px solid var(--border-overlay);
-    transition:
-      width 0.3s var(--ease-standard),
-      background-color 0.3s var(--ease-standard),
-      border-color 0.3s var(--ease-standard);
-  }
-
-  .local-library-folder-select:focus-within,
-  .local-library-folder-select:hover {
-    color: var(--text-secondary);
-    background: var(--state-hover-on-surface);
-    border-color: var(--state-hover-on-surface);
-  }
-
-  .local-library-folder-select svg {
-    flex: none;
-    width: 18px;
-    height: 18px;
-  }
-
-  .local-library-folder-select select {
-    width: 100%;
-    min-width: 0;
+    padding: 0 16px;
     border: 0;
-    outline: none;
-    appearance: none;
-    color: var(--text);
-    background: transparent;
-    font-size: 13px;
-    cursor: pointer;
-  }
-
-  .local-library-folder-select option {
-    color: var(--bg);
-  }
-
-  .local-library-menu .segmented-tabs {
-    width: 320px;
-    height: 40px;
-    padding: 3px;
     border-radius: var(--radius-pill);
+    background: var(--border-overlay);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--motion-duration-feedback) var(--motion-ease-standard);
   }
 
-  .local-library-menu .segmented-tab {
-    flex: 1;
-    min-height: 32px;
-    padding: 0 10px;
+  .local-library-view-trigger:hover,
+  .local-library-view-trigger[aria-expanded="true"] {
+    background: var(--state-hover-on-surface);
   }
+
+  .local-library-view-trigger svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .local-library-view-menu {
+    --n-min-width: 96px;
+  }
+
+  .local-library-view-menu .n-dropdown-option-body__prefix--show-icon {
+    width: 30px;
+  }
+
+  .local-library-view-menu .n-dropdown-option-body__suffix {
+    min-width: 24px;
+    padding-inline: 4px 8px;
+  }
+
   @media (max-width: 1200px) {
     .local-library-menu {
       height: auto;
@@ -202,22 +178,6 @@
       justify-content: flex-end;
     }
 
-    .local-library-menu .segmented-tabs {
-      display: none;
-    }
-
-    .local-library-menu .segmented-tabs-select {
-      display: block;
-      width: 132px;
-      height: 40px;
-      padding: 0 14px;
-      border: 1px solid var(--border-overlay);
-      border-radius: var(--radius-pill);
-      color: var(--text);
-      background: var(--border-overlay);
-      font-size: 13px;
-      font-weight: 700;
-    }
   }
 
   @media (max-width: 760px) {
@@ -352,7 +312,7 @@
     min-height: 76px;
     margin-bottom: 8px;
     padding: 12px;
-    border: 2px solid var(--color-primary-tonal-12);
+    border: 2px solid var(--media-card-border);
     border-radius: var(--radius-sm);
     color: var(--text-soft);
     background: color-mix(in oklch, var(--surface-2) 88%, transparent);
@@ -367,17 +327,17 @@
   .local-browser-card:hover,
   .local-browser-card:focus-visible,
   .local-browser-card.is-active {
-    border-color: var(--color-primary-tonal-58);
+    border-color: var(--media-card-border-emphasis);
   }
 
   .local-browser-card:focus-visible {
-    outline: 2px solid var(--color-primary-tonal-58);
+    outline: 2px solid var(--media-card-focus-ring);
     outline-offset: 2px;
   }
 
   .local-browser-card.is-active {
     color: var(--text);
-    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
+    background: var(--media-card-selected-bg);
   }
 
   .local-browser-cover {
@@ -558,7 +518,7 @@
   }
 
   .local-playlist-grid .album-card:hover {
-    background-color: var(--color-primary-tonal-12);
+    background-color: var(--media-card-checked-bg);
   }
 
   .local-playlist-grid .album-card:hover .album-card-art {
@@ -587,13 +547,13 @@
     min-height: 80px;
     padding: 0;
     overflow: hidden;
-    border: 2px solid var(--color-primary-tonal-12);
+    border: 2px solid var(--media-card-border);
     background: var(--surface-2);
   }
 
   .local-playlist-grid .album-card.is-cover-hidden:hover,
   .local-playlist-grid .album-card.is-cover-hidden.is-active {
-    border-color: var(--color-primary-tonal-58);
+    border-color: var(--media-card-border-emphasis);
   }
 
   .local-playlist-grid .album-card.is-cover-hidden .album-card-copy {
@@ -641,7 +601,7 @@
     grid-template-columns: minmax(0, 1fr) 34px;
     align-items: center;
     margin-bottom: 8px;
-    border: 2px solid var(--color-primary-tonal-12);
+    border: 2px solid var(--media-card-border);
     border-radius: var(--radius-sm);
     color: var(--text-soft);
     background: color-mix(in oklch, var(--surface-2) 88%, transparent);
@@ -653,12 +613,12 @@
   .local-playlist-card:hover,
   .local-playlist-card:focus-within,
   .local-playlist-card.is-active {
-    border-color: var(--color-primary-tonal-58);
+    border-color: var(--media-card-border-emphasis);
   }
 
   .local-playlist-card.is-active {
     color: var(--text);
-    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
+    background: var(--media-card-selected-bg);
   }
 
   .local-playlist-main {
@@ -751,12 +711,12 @@
   }
 
   .local-folder-node:focus-visible {
-    outline: 2px solid var(--color-primary-tonal-58);
+    outline: 2px solid var(--media-card-focus-ring);
     outline-offset: 2px;
   }
 
   .local-folder-node.is-active {
-    background: color-mix(in oklch, var(--color-primary-container) 42%, var(--surface-2));
+    background: var(--media-card-selected-bg);
   }
 
   .local-folder-node-icon {

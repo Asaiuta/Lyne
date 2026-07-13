@@ -261,7 +261,7 @@ export function useDragSort(options: UseDragSortOptions): DragSortApi {
     };
     const handleLeave = (ev: PointerEvent) => {
       // pointerleave on the documentElement fires when the pointer exits
-      // the viewport; treat that as a cancel to mirror SPlayer behavior.
+      // the viewport; treat that as a cancel to mirror native list behavior.
       if (ev.target === document.documentElement || ev.relatedTarget === null) {
         cancel();
       }
