@@ -439,7 +439,7 @@ async fn websocket(
 
                     let needs_preload_now = shared_state.needs_preload.load(Ordering::Acquire);
                     if needs_preload_now && !last_preload_sent {
-                        let pos = shared_state.position_frames.load(Ordering::Relaxed);
+                        let pos = shared_state.playback_clock.callback.position_frames.load(Ordering::Relaxed);
                         let total = shared_state.total_frames.load(Ordering::Relaxed);
                         let sr = shared_state.sample_rate.load(Ordering::Relaxed).max(1);
                         let remaining_secs = total.saturating_sub(pos) as f64 / sr as f64;

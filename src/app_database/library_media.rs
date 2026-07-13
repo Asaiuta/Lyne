@@ -11,6 +11,23 @@ use super::{
     LibraryTrackViewSortField, LibraryTrackViewSortOrder, MediaItemRecord,
 };
 
+fn detach_playback_sessions_for_media_id(
+    conn: &rusqlite::Connection,
+    media_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE playback_sessions SET media_id = NULL WHERE media_id = ?1",
+        params![media_id],
+    )
+    .map_err(|e| {
+        format!(
+            "Failed to detach playback sessions from stale media item '{}': {}",
+            media_id, e
+        )
+    })?;
+    Ok(())
+}
+
 fn library_track_summary_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<LibraryTrackSummaryRecord> {
@@ -645,6 +662,7 @@ impl AppDatabase {
             if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
                 continue;
             }
+            detach_playback_sessions_for_media_id(&tx, trimmed)?;
             let changed = tx
                 .execute(
                     "DELETE FROM media_items WHERE media_id = ?1",
@@ -744,6 +762,7 @@ impl AppDatabase {
             if keep.contains(&media_id) {
                 continue;
             }
+            detach_playback_sessions_for_media_id(&tx, &media_id)?;
             let changed = tx
                 .execute(
                     "DELETE FROM media_items WHERE media_id = ?1",
@@ -835,6 +854,34 @@ impl AppDatabase {
             .trim_end_matches('/')
             .to_string();
         let root_id_prefix = format!("{}/", root_media_id);
+        tx.execute(
+            r#"
+                UPDATE playback_sessions
+                SET media_id = NULL
+                WHERE media_id IN (
+                    SELECT media_id
+                    FROM media_items
+                    WHERE source_kind = 'local'
+                      AND (
+                        media_id = ?1
+                        OR substr(media_id, 1, ?2) = ?3
+                      )
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM temp.local_scan_seen seen
+                        WHERE seen.task_id = ?4
+                          AND seen.media_id = media_items.media_id
+                      )
+                )
+                "#,
+            params![
+                root_media_id,
+                root_id_prefix.len() as i64,
+                root_id_prefix,
+                scan_task_id as i64,
+            ],
+        )
+        .map_err(|e| format!("Failed to detach stale media playback sessions: {}", e))?;
         let removed = tx
             .execute(
                 r#"

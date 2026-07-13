@@ -1153,6 +1153,20 @@ fn local_scan_seen_set_deletes_only_unseen_media_under_root() {
     let stale_media = db.record_media_stub(stale_path).unwrap();
     let outside_media = db.record_media_stub(outside_path).unwrap();
 
+    let stale_session_id = {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            r#"
+                INSERT INTO playback_sessions
+                    (media_id, source_path, status, started_at, updated_at, exclusive_mode)
+                VALUES (?1, ?2, 'ended', 1, 1, 0)
+                "#,
+            params![stale_media, stale_path],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    };
+
     db.begin_local_scan_seen_set(99).unwrap();
     db.mark_local_scan_seen_paths(99, &[kept_path.to_string()])
         .unwrap();
@@ -1166,6 +1180,17 @@ fn local_scan_seen_set_deletes_only_unseen_media_under_root() {
         Some(kept_path)
     );
     assert!(db.source_path_for_media_id(&stale_media).unwrap().is_none());
+    {
+        let conn = db.conn.lock().unwrap();
+        let detached_media_id: Option<String> = conn
+            .query_row(
+                "SELECT media_id FROM playback_sessions WHERE session_id = ?1",
+                params![stale_session_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(detached_media_id, None);
+    }
     assert_eq!(
         db.source_path_for_media_id(&outside_media)
             .unwrap()

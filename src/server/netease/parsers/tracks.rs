@@ -93,6 +93,20 @@ fn read_first_alias(item: &serde_json::Map<String, Value>) -> Option<String> {
         })
 }
 
+fn read_cover_url_from_object(item: &serde_json::Map<String, Value>) -> Option<String> {
+    [
+        "picUrl",
+        "coverUrl",
+        "coverImgUrl",
+        "blurPicUrl",
+        "cover",
+        "imgurl",
+        "img1v1Url",
+    ]
+    .iter()
+    .find_map(|key| item.get(*key).and_then(read_non_empty_string))
+}
+
 pub(in crate::server::netease) fn read_song_url(payload: &Value) -> Option<String> {
     payload
         .get("data")
@@ -140,9 +154,8 @@ pub(in crate::server::netease) fn read_song_detail(
             .and_then(Value::as_i64)
             .filter(|id| *id > 0),
         cover_url: album
-            .and_then(|album| album.get("picUrl"))
-            .and_then(read_non_empty_string)
-            .or_else(|| target.get("picUrl").and_then(read_non_empty_string)),
+            .and_then(read_cover_url_from_object)
+            .or_else(|| target.as_object().and_then(read_cover_url_from_object)),
     })
 }
 
@@ -326,9 +339,8 @@ pub(in crate::server::netease) fn read_track_summary(value: &Value) -> Option<Nc
             .or_else(|| item.get("album").and_then(read_non_empty_string)),
         duration_secs: duration_ms.map(|value| value / 1000.0),
         artwork_url: album
-            .and_then(|album| album.get("picUrl"))
-            .and_then(read_non_empty_string)
-            .or_else(|| item.get("picUrl").and_then(read_non_empty_string)),
+            .and_then(read_cover_url_from_object)
+            .or_else(|| read_cover_url_from_object(item)),
         size_bytes: item.get("size").and_then(Value::as_i64),
         quality_label: read_quality_label(item),
         privilege_tag: read_privilege_tag(item),

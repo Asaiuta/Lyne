@@ -1,8 +1,8 @@
 use super::*;
 use crate::app_database::{
-    LibraryTrackGroupKind, LibraryTrackGroupsQuery, LibraryTrackViewQuery, LibraryTrackViewRange,
-    LibraryTrackViewSort, LibraryTrackViewSortField, LibraryTrackViewSortOrder,
-    LibraryRootRecord,
+    LibraryRootRecord, LibraryTrackGroupKind, LibraryTrackGroupsQuery, LibraryTrackViewQuery,
+    LibraryTrackViewRange, LibraryTrackViewSort, LibraryTrackViewSortField,
+    LibraryTrackViewSortOrder,
 };
 use actix_web::{web, HttpResponse};
 use std::path::{Path, PathBuf};
@@ -608,8 +608,13 @@ fn resolve_local_library_delete_target(
         return Err("Refusing to delete a UNC path".to_string());
     }
 
-    let target_meta = std::fs::symlink_metadata(&target)
-        .map_err(|e| format!("Failed to inspect delete target '{}': {}", target.display(), e))?;
+    let target_meta = std::fs::symlink_metadata(&target).map_err(|e| {
+        format!(
+            "Failed to inspect delete target '{}': {}",
+            target.display(),
+            e
+        )
+    })?;
     let target_type = target_meta.file_type();
     if target_type.is_symlink() {
         return Err("Refusing to delete symbolic links".to_string());
@@ -621,9 +626,13 @@ fn resolve_local_library_delete_target(
         ));
     }
 
-    let canonical_target = target
-        .canonicalize()
-        .map_err(|e| format!("Failed to resolve delete target '{}': {}", target.display(), e))?;
+    let canonical_target = target.canonicalize().map_err(|e| {
+        format!(
+            "Failed to resolve delete target '{}': {}",
+            target.display(),
+            e
+        )
+    })?;
     if is_windows_system_path(&canonical_target) {
         return Err("Refusing to delete files from Windows system directories".to_string());
     }

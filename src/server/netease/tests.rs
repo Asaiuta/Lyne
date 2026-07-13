@@ -506,6 +506,84 @@ fn read_search_tracks_returns_stable_track_dto() {
 }
 
 #[test]
+fn read_search_tracks_supports_alternate_cover_url_fields() {
+    let payload = json!({
+        "result": {
+            "songs": [
+                {
+                    "id": 42,
+                    "name": "Album Blur Cover",
+                    "ar": [{ "name": "A" }],
+                    "al": { "name": "Album", "blurPicUrl": "album-blur.jpg" }
+                },
+                {
+                    "id": 43,
+                    "name": "Top Level Cover",
+                    "artists": [{ "name": "B" }],
+                    "album": { "name": "Other Album" },
+                    "coverUrl": "top-cover.jpg"
+                }
+            ]
+        }
+    });
+
+    let tracks = read_search_tracks(&payload);
+    assert_eq!(tracks.len(), 2);
+    assert_eq!(tracks[0].artwork_url.as_deref(), Some("album-blur.jpg"));
+    assert_eq!(tracks[1].artwork_url.as_deref(), Some("top-cover.jpg"));
+}
+
+#[test]
+fn search_cover_fallback_fills_missing_artwork_without_overwriting_existing() {
+    let mut tracks = read_search_tracks(&json!({
+        "result": {
+            "songs": [
+                {
+                    "id": 42,
+                    "name": "Missing Cover",
+                    "ar": [{ "name": "A" }],
+                    "al": { "name": "Album" }
+                },
+                {
+                    "id": 43,
+                    "name": "Existing Cover",
+                    "ar": [{ "name": "B" }],
+                    "al": { "name": "Album", "picUrl": "existing.jpg" }
+                },
+                {
+                    "id": 44,
+                    "name": "Still Missing",
+                    "ar": [{ "name": "C" }],
+                    "al": { "name": "Album" }
+                }
+            ]
+        }
+    }));
+    let details = read_song_detail_tracks(&json!({
+        "songs": [
+            {
+                "id": 42,
+                "name": "Missing Cover",
+                "ar": [{ "name": "A" }],
+                "al": { "name": "Album", "picUrl": "detail.jpg" }
+            },
+            {
+                "id": 43,
+                "name": "Existing Cover",
+                "ar": [{ "name": "B" }],
+                "al": { "name": "Album", "picUrl": "should-not-overwrite.jpg" }
+            }
+        ]
+    }));
+
+    super::search::merge_missing_search_track_artwork(&mut tracks, &details);
+
+    assert_eq!(tracks[0].artwork_url.as_deref(), Some("detail.jpg"));
+    assert_eq!(tracks[1].artwork_url.as_deref(), Some("existing.jpg"));
+    assert_eq!(tracks[2].artwork_url, None);
+}
+
+#[test]
 fn read_search_tracks_prefers_extended_quality_fields() {
     let payload = json!({
         "result": {
