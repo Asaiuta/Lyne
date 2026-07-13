@@ -8,6 +8,7 @@ import type {
   MediaSortState
 } from "../../components/media/mediaListTypes";
 import { CoverGridSkeleton } from "../../components/page/Skeleton";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import type { LocalPlaylist } from "../../shared/api/types";
 import { createApiClient } from "../../shared/api/client";
 import { useTranslation } from "../../shared/i18n";
@@ -79,10 +80,10 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
               <strong>{t("library.tabs.playlists")}</strong>
               <span>{t("library.playlists.empty")}</span>
             </div>
-            <button type="button" class="primary-button page-action" onClick={props.onCreatePlaylist}>
+            <PageToolbarButton variant="primary" onClick={props.onCreatePlaylist}>
               <IconPlus />
               <span>{t("library.action.createPlaylist")}</span>
-            </button>
+            </PageToolbarButton>
           </div>
         )
       }

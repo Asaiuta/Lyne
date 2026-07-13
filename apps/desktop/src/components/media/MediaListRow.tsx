@@ -7,8 +7,8 @@ import {
   IconPause,
   IconPlay,
   IconQueueAdd,
-  IconSPlayerFavorite,
-  IconSPlayerFavoriteBorder
+  IconFavoriteFilled,
+  IconFavoriteBorderFilled
 } from "../icons";
 import type { MediaListItem } from "../../shared/media/mediaListItem";
 import type { MediaRowAction } from "./mediaListTypes";
@@ -107,7 +107,7 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
   const RowActionIcon = () => {
     const action = props.rowAction;
     if (action.kind === "enqueue") return <IconQueueAdd />;
-    return favoriteActive() ? <IconSPlayerFavorite /> : <IconSPlayerFavoriteBorder />;
+    return favoriteActive() ? <IconFavoriteFilled /> : <IconFavoriteBorderFilled />;
   };
 
   return (

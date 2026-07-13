@@ -101,7 +101,7 @@ export function IconList(props: IconProps) {
   );
 }
 
-export function IconSPlayerFormatList(props: IconProps) {
+export function IconFormatListFilled(props: IconProps) {
   return (
     <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -112,23 +112,67 @@ export function IconSPlayerFormatList(props: IconProps) {
   );
 }
 
-export function IconSPlayerMenu(props: IconProps) {
+export function IconRefreshFilled(props: IconProps) {
   return (
     <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
         fill="currentColor"
-        d="M4 18h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1s.45 1 1 1m0-5h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1s.45 1 1 1M3 7c0 .55.45 1 1 1h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1"
+        d="M17.65 6.35a7.95 7.95 0 0 0-6.48-2.31c-3.67.37-6.69 3.35-7.1 7.02C3.52 15.91 7.27 20 12 20a7.98 7.98 0 0 0 7.21-4.56c.32-.67-.16-1.44-.9-1.44c-.37 0-.72.2-.88.53a5.994 5.994 0 0 1-6.8 3.31c-2.22-.49-4.01-2.3-4.48-4.52A6.002 6.002 0 0 1 12 6c1.66 0 3.14.69 4.22 1.78l-1.51 1.51c-.63.63-.19 1.71.7 1.71H19c.55 0 1-.45 1-1V6.41c0-.89-1.08-1.34-1.71-.71z"
       />
     </svg>
   );
 }
 
-export function IconSPlayerAdd(props: IconProps) {
+export function IconPlayFilled(props: IconProps) {
+  return (
+    <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
+      <path
+        fill="currentColor"
+        d="M8 6.82v10.36c0 .79.87 1.27 1.54.84l8.14-5.18a1 1 0 0 0 0-1.69L9.54 5.98A.998.998 0 0 0 8 6.82"
+      />
+    </svg>
+  );
+}
+
+export function IconAddFilled(props: IconProps) {
   return (
     <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
         fill="currentColor"
         d="M18 13h-5v5c0 .55-.45 1-1 1s-1-.45-1-1v-5H6c-.55 0-1-.45-1-1s.45-1 1-1h5V6c0-.55.45-1 1-1s1 .45 1 1v5h5c.55 0 1 .45 1 1s-.45 1-1 1"
+      />
+    </svg>
+  );
+}
+
+export function IconFolderCogFilled(props: IconProps) {
+  return (
+    <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
+      <path
+        fill="currentColor"
+        d="M4 4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h8.08a7 7 0 0 1-.08-1a7 7 0 0 1 7-7a7 7 0 0 1 3 .69V8a2 2 0 0 0-2-2h-8l-2-2zm14 10a.26.26 0 0 0-.26.21l-.19 1.32c-.3.13-.59.29-.85.47l-1.24-.5c-.11 0-.24 0-.31.13l-1 1.73c-.06.11-.04.24.06.32l1.06.82a4.193 4.193 0 0 0 0 1l-1.06.82a.26.26 0 0 0-.06.32l1 1.73c.06.13.19.13.31.13l1.24-.5c.26.18.54.35.85.47l.19 1.32c.02.12.12.21.26.21h2c.11 0 .22-.09.24-.21l.19-1.32c.3-.13.57-.29.84-.47l1.23.5c.13 0 .26 0 .33-.13l1-1.73a.26.26 0 0 0-.06-.32l-1.07-.82c.02-.17.04-.33.04-.5c0-.17-.01-.33-.04-.5l1.06-.82a.26.26 0 0 0 .06-.32l-1-1.73c-.06-.13-.19-.13-.32-.13l-1.23.5c-.27-.18-.54-.35-.85-.47l-.19-1.32A.236.236 0 0 0 20 14zm1 3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5c-.84 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5"
+      />
+    </svg>
+  );
+}
+
+export function IconBatchFilled(props: IconProps) {
+  return (
+    <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
+      <path
+        fill="currentColor"
+        d="M11 8c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1s.45 1 1 1h7c.55 0 1-.45 1-1m0 8c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1s.45 1 1 1h7c.55 0 1-.45 1-1m6.05-5.71a.996.996 0 0 1-1.41 0l-2.12-2.12a.996.996 0 1 1 1.41-1.41l1.41 1.41l3.54-3.54a.996.996 0 1 1 1.41 1.41zm0 8a.996.996 0 0 1-1.41 0l-2.12-2.12a.996.996 0 1 1 1.41-1.41l1.41 1.41l3.54-3.54a.996.996 0 1 1 1.41 1.41z"
+      />
+    </svg>
+  );
+}
+
+export function IconMenuFilled(props: IconProps) {
+  return (
+    <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
+      <path
+        fill="currentColor"
+        d="M4 18h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1s.45 1 1 1m0-5h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1s.45 1 1 1M3 7c0 .55.45 1 1 1h16c.55 0 1-.45 1-1s-.45-1-1-1H4c-.55 0-1 .45-1 1"
       />
     </svg>
   );
@@ -347,6 +391,17 @@ export function IconDelete(props: IconProps) {
   );
 }
 
+export function IconDeleteFilled(props: IconProps) {
+  return (
+    <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
+      <path
+        fill="currentColor"
+        d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zm13-15h-3.5l-1-1h-5l-1 1H5v2h14z"
+      />
+    </svg>
+  );
+}
+
 export function IconRefresh(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>
@@ -557,7 +612,7 @@ export function IconSparkle(props: IconProps) {
   );
 }
 
-export function IconSPlayerHome(props: IconProps) {
+export function IconHomeFilled(props: IconProps) {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -568,7 +623,7 @@ export function IconSPlayerHome(props: IconProps) {
   );
 }
 
-export function IconSPlayerDiscover(props: IconProps) {
+export function IconDiscoverFilled(props: IconProps) {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -580,7 +635,7 @@ export function IconSPlayerDiscover(props: IconProps) {
   );
 }
 
-export function IconSPlayerRadio(props: IconProps) {
+export function IconRadioFilled(props: IconProps) {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -591,7 +646,7 @@ export function IconSPlayerRadio(props: IconProps) {
   );
 }
 
-export function IconSPlayerRecord(props: IconProps) {
+export function IconRecordFilled(props: IconProps) {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -602,7 +657,7 @@ export function IconSPlayerRecord(props: IconProps) {
   );
 }
 
-export function IconSPlayerStar(props: IconProps) {
+export function IconStarFilled(props: IconProps) {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -613,7 +668,7 @@ export function IconSPlayerStar(props: IconProps) {
   );
 }
 
-export function IconSPlayerHistory(props: IconProps) {
+export function IconHistoryFilled(props: IconProps) {
   return (
     <svg width={20} height={20} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -658,7 +713,7 @@ export function IconHeartFilled(props: IconProps) {
   );
 }
 
-export function IconSPlayerFavoriteBorder(props: IconProps) {
+export function IconFavoriteBorderFilled(props: IconProps) {
   return (
     <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -669,7 +724,7 @@ export function IconSPlayerFavoriteBorder(props: IconProps) {
   );
 }
 
-export function IconSPlayerFavorite(props: IconProps) {
+export function IconFavoriteFilled(props: IconProps) {
   return (
     <svg width={32} height={32} viewBox="0 0 24 24" aria-hidden={true} {...props}>
       <path
@@ -689,7 +744,7 @@ export function IconHeartBit(props: IconProps) {
   );
 }
 
-export function IconSPlayerHeartBit(props: IconProps) {
+export function IconHeartbeatFilled(props: IconProps) {
   return (
     <svg width={32} height={32} viewBox="0 0 256 256" aria-hidden={true} {...props}>
       <path

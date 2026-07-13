@@ -4,19 +4,21 @@ import { ncmSongPageUrl } from "../../shared/api/ncm/urls";
 import type { PlaybackHistoryEntry } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
 import type { TranslationKey } from "../../shared/i18n";
-import { IconDelete, IconPlayCircle } from "../../components/icons";
+import { IconDeleteFilled, IconPlayFilled } from "../../components/icons";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import type { MediaListItem } from "../../shared/media/mediaListItem";
 import { BackToTop } from "../../components/page/BackToTop";
 import { PageBody } from "../../components/page/PageBody";
 import { PageHero } from "../../components/page/PageHero";
 import { PageSurface } from "../../components/page/PageSurface";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { resolveArtworkUrl } from "../../shared/ui/artwork";
 import { displayNameFromSourcePath } from "../../shared/media/mediaPath";
 import type { NcmTrackReference } from "../online/ncmPlayback";
 import { NcmMediaList } from "../online/NcmMediaList";
 import { createPlaybackController } from "../online/shared/playback";
 import type { Feedback as OnlineFeedback, OnlineTrackItem } from "../online/shared/types";
+import "../../shared/styles/pages/history.css";
 
 const api = createApiClient();
 const HISTORY_LIMIT = 500;
@@ -263,24 +265,24 @@ export function HistoryPage(props: HistoryPageProps) {
             <span class="history-page-size">{t("history.subtitle", { count: historySongs().length })}</span>
           </div>
           <div class="history-page-menu">
-            <button
-              type="button"
-              class="primary-button page-action history-page-play"
+            <PageToolbarButton
+              variant="primary"
+              class="history-page-play"
               onClick={() => void handlePlayAll()}
               disabled={historySongs().length === 0 || isBusy()}
             >
-              <IconPlayCircle />
+              <IconPlayFilled />
               <span>{t("history.action.play")}</span>
-            </button>
-            <button
-              type="button"
-              class="ghost-button page-action history-page-clear"
+            </PageToolbarButton>
+            <PageToolbarButton
+              variant="secondary"
+              class="history-page-clear"
               disabled
               title={t("history.action.clearUnavailable")}
             >
-              <IconDelete />
+              <IconDeleteFilled />
               <span>{t("history.action.clear")}</span>
-            </button>
+            </PageToolbarButton>
           </div>
         </header>
       </PageHero>

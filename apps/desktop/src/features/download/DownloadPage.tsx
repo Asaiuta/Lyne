@@ -3,12 +3,14 @@ import {
   IconDownload,
   IconList,
   IconMusic,
-  IconPlayCircle,
-  IconRefresh
+  IconPlayFilled,
+  IconRefreshFilled
 } from "../../components/icons";
 import { EmptyState } from "../../components/EmptyState";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { useTranslation } from "../../shared/i18n";
 import { NaiveTabs, type NaiveTabItem } from "../../shared/ui/naive";
+import "../../shared/styles/pages/auxiliary.css";
 
 type DownloadTab = "downloaded" | "downloading";
 
@@ -46,23 +48,19 @@ export function DownloadPage() {
 
         <div class="auxiliary-page-menu">
           <div class="auxiliary-page-menu-left">
-            <button
-              type="button"
-              class="primary-button page-action auxiliary-page-play"
-              disabled
-            >
-              <IconPlayCircle />
+            <PageToolbarButton variant="primary" class="auxiliary-page-play" disabled>
+              <IconPlayFilled />
               <span>{t("download.action.playAll")}</span>
-            </button>
-            <button
-              type="button"
-              class="ghost-button page-action auxiliary-page-icon-button"
+            </PageToolbarButton>
+            <PageToolbarButton
+              variant="icon"
+              class="auxiliary-page-icon-button"
               disabled
-              aria-label={t("download.action.refresh")}
+              ariaLabel={t("download.action.refresh")}
               title={t("download.action.refresh")}
             >
-              <IconRefresh />
-            </button>
+              <IconRefreshFilled />
+            </PageToolbarButton>
           </div>
           <NaiveTabs
             value={activeTab()}

@@ -1,20 +1,24 @@
-import { For, Show, createEffect, createMemo, createSignal, on } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, on } from "solid-js";
 import { useTranslation } from "../../shared/i18n";
 import { useUISearch } from "../../shared/state/UISearchContext";
 import {
-  IconChevronDown,
+  IconAddFilled,
+  IconCheckmark,
+  IconAlbum,
+  IconArtist,
+  IconBatchFilled,
   IconFolder,
-  IconList,
+  IconFolderCogFilled,
+  IconFormatListFilled,
   IconMusic,
-  IconPlayCircle,
-  IconPlus,
-  IconRefresh,
+  IconPlayFilled,
+  IconPlaylist,
+  IconRefreshFilled,
   IconSearch,
   IconStorage
 } from "../../components/icons";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import type { LocalPlaylist, PlayerState } from "../../shared/api/types";
-import { SegmentedTabs } from "../../components/page/SegmentedTabs";
 import { ManageRootsModal } from "./ManageRootsModal";
 import {
   LibraryBatchModal,
@@ -22,10 +26,16 @@ import {
   LibraryPlaylistTargetModal
 } from "./LibraryActionModals";
 import { LibraryTabContent } from "./LibraryTabContent";
-import { ALL_FOLDERS_VALUE, type LibraryListItem, type LibraryTab } from "./libraryViewTypes";
+import { type LibraryListItem, type LibraryTab } from "./libraryViewTypes";
 import { createLibraryPlaybackCoordinator } from "./libraryPlaybackCoordinator";
-import { NaiveDropdown, NaiveH1, type NaiveDropdownOption } from "../../shared/ui/naive";
+import {
+  NaiveDropdown,
+  NaiveH1,
+  type NaiveDropdownOption
+} from "../../shared/ui/naive";
 import { useLibraryDataController } from "./useLibraryDataController";
+import { PageToolbarButton } from "../../components/page/PageToolbarButton";
+import "../../shared/styles/pages/local-library.css";
 
 interface LibraryPageProps {
   onStateRefresh: (expectedPath?: string | null) => Promise<void>;
@@ -44,14 +54,17 @@ type LibraryConfirmAction =
   | { kind: "remove-playlist-items"; items: LibraryListItem[] }
   | { kind: "delete-playlist"; playlist: LocalPlaylist };
 
+const emptyTopNavLibraryQuery = () => "";
+
 export function LibraryPage(props: LibraryPageProps) {
   const { t } = useTranslation();
-  const { query: globalQuery, setQuery: setGlobalQuery, submitSearch } = useUISearch();
-  const controller = useLibraryDataController({ t, globalQuery });
+  const { setQuery: setGlobalQuery, submitSearch } = useUISearch();
+  const controller = useLibraryDataController({ t, globalQuery: emptyTopNavLibraryQuery });
   const [playlistModalItems, setPlaylistModalItems] = createSignal<LibraryListItem[] | null>(null);
   const [batchModalItems, setBatchModalItems] = createSignal<LibraryListItem[] | null>(null);
   const [confirmAction, setConfirmAction] = createSignal<LibraryConfirmAction | null>(null);
   const [moreMenuOpen, setMoreMenuOpen] = createSignal<boolean>(false);
+  const [viewMenuOpen, setViewMenuOpen] = createSignal<boolean>(false);
   const [groupPlaybackItems, setGroupPlaybackItems] = createSignal<LibraryListItem[]>([]);
   const playbackCoordinator = createLibraryPlaybackCoordinator({
     getSnapshot: () => ({
@@ -241,24 +254,42 @@ export function LibraryPage(props: LibraryPageProps) {
     }
   };
 
-  const tabItems = () => [
+  const tabItems = createMemo<ReadonlyArray<{ value: LibraryTab; label: string }>>(() => [
     { value: "songs", label: t("library.tabs.songs") },
     { value: "artists", label: t("library.tabs.artists") },
     { value: "albums", label: t("library.tabs.albums") },
     { value: "playlists", label: t("library.tabs.playlists") },
     { value: "folders", label: t("library.tabs.folders") }
-  ];
+  ]);
+
+  const viewMenuItems = createMemo<readonly NaiveDropdownOption[]>(() =>
+    tabItems().map((item) => ({
+      key: item.value,
+      label: item.label,
+      icon:
+        item.value === "songs" ? <IconMusic /> :
+        item.value === "artists" ? <IconArtist /> :
+        item.value === "albums" ? <IconAlbum /> :
+        item.value === "playlists" ? <IconPlaylist /> :
+        <IconFolder />,
+      suffix: item.value === controller.activeTab() ? <IconCheckmark /> : undefined
+    }))
+  );
+
+  const activeTabLabel = createMemo<string>(
+    () => tabItems().find((item) => item.value === controller.activeTab())?.label ?? ""
+  );
 
   const moreMenuItems = (): readonly NaiveDropdownOption[] => [
     {
       key: "manage-roots",
       label: t("library.action.manageRoots"),
-      icon: <IconFolder />
+      icon: <IconFolderCogFilled />
     },
     {
       key: "batch",
       label: t("library.action.batch"),
-      icon: <IconList />,
+      icon: <IconBatchFilled />,
       disabled: activePlaybackCount() === 0
     }
   ];
@@ -294,18 +325,18 @@ export function LibraryPage(props: LibraryPageProps) {
         </div>
         <div class="local-library-menu">
           <div class="local-library-menu-left">
-            <button
-              type="button"
-              class="primary-button page-action local-library-play"
+            <PageToolbarButton
+              variant="primary"
+              class="local-library-play"
               onClick={handlePlayAll}
               disabled={activePlaybackCount() === 0 || controller.isFetching()}
             >
-              <IconPlayCircle />
+              <IconPlayFilled />
               <span>{t("library.action.playAll")}</span>
-            </button>
-            <button
-              type="button"
-              class="ghost-button page-action local-library-circle"
+            </PageToolbarButton>
+            <PageToolbarButton
+              variant="icon"
+              class="local-library-icon-button"
               onClick={() => {
                 if (controller.activeTab() === "playlists") {
                   openCreatePlaylist();
@@ -318,7 +349,7 @@ export function LibraryPage(props: LibraryPageProps) {
                   ? false
                   : controller.isFetching() || controller.isScanning()
               }
-              aria-label={
+              ariaLabel={
                 controller.activeTab() === "playlists"
                   ? t("library.action.createPlaylist")
                   : t("library.action.refresh")
@@ -329,11 +360,12 @@ export function LibraryPage(props: LibraryPageProps) {
                   : t("library.action.refresh")
               }
             >
-              <Show when={controller.activeTab() === "playlists"} fallback={<IconRefresh />}>
-                <IconPlus />
+              <Show when={controller.activeTab() === "playlists"} fallback={<IconRefreshFilled />}>
+                <IconAddFilled />
               </Show>
-            </button>
+            </PageToolbarButton>
             <NaiveDropdown
+              class="local-library-more-menu"
               options={moreMenuItems()}
               triggerMode="click"
               placement="bottom-start"
@@ -342,32 +374,17 @@ export function LibraryPage(props: LibraryPageProps) {
               onSelect={(option) => handleMoreMenuSelect(option.key)}
               ariaLabel={t("library.action.more")}
             >
-              <button
-                type="button"
-                class="ghost-button page-action local-library-circle"
-                aria-label={t("library.action.more")}
+              <PageToolbarButton
+                variant="icon"
+                class="local-library-icon-button"
+                ariaLabel={t("library.action.more")}
                 title={t("library.action.more")}
-                aria-haspopup="menu"
-                aria-expanded={moreMenuOpen()}
+                ariaHasPopup="menu"
+                ariaExpanded={moreMenuOpen()}
               >
-                <IconList />
-              </button>
+                <IconFormatListFilled />
+              </PageToolbarButton>
             </NaiveDropdown>
-            <Show when={controller.activeTab() !== "folders"}>
-              <label class="local-library-folder-select" aria-label={t("library.folderFilter.label")}>
-                <IconFolder />
-                <select
-                  value={controller.selectedFolder()}
-                  onChange={(event) => controller.setSelectedFolder(event.currentTarget.value)}
-                >
-                  <option value={ALL_FOLDERS_VALUE}>{t("library.folderFilter.all")}</option>
-                  <For each={controller.folderGroups()}>
-                    {(group) => <option value={group.key}>{group.label}</option>}
-                  </For>
-                </select>
-                <IconChevronDown />
-              </label>
-            </Show>
           </div>
           <div class="local-library-menu-right">
             <Show when={controller.libraryTotalCount() > 0}>
@@ -381,12 +398,29 @@ export function LibraryPage(props: LibraryPageProps) {
                 />
               </label>
             </Show>
-            <SegmentedTabs
-              value={controller.activeTab()}
-              onChange={(next) => controller.setActiveTab(next as LibraryTab)}
-              items={tabItems()}
+            <NaiveDropdown
+              class="local-library-view-menu"
+              options={viewMenuItems()}
+              triggerMode="click"
+              placement="bottom-end"
+              open={viewMenuOpen()}
+              onOpenChange={setViewMenuOpen}
+              onSelect={(option) => {
+                const nextTab = tabItems().find((item) => item.value === option.key)?.value;
+                if (nextTab) controller.setActiveTab(nextTab);
+              }}
               ariaLabel={t("library.title")}
-            />
+            >
+              <button
+                type="button"
+                class="local-library-view-trigger"
+                aria-haspopup="menu"
+                aria-expanded={viewMenuOpen()}
+              >
+                <IconCheckmark />
+                <span>{activeTabLabel()}</span>
+              </button>
+            </NaiveDropdown>
           </div>
         </div>
       </header>

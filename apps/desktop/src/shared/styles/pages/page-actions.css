@@ -1,0 +1,125 @@
+button.page-toolbar-button {
+  appearance: none;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--naive-text-color-2);
+  background: var(--naive-button-color-2);
+  box-shadow: none;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color var(--motion-duration-spatial) var(--motion-ease-standard),
+    background-color var(--motion-duration-spatial) var(--motion-ease-standard),
+    opacity var(--motion-duration-spatial) var(--motion-ease-standard);
+}
+
+button.page-toolbar-button > svg {
+  display: block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+button.page-toolbar-button.page-toolbar-button--primary {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+button.page-toolbar-button.page-toolbar-button--primary:hover:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--primary:focus-visible:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+button.page-toolbar-button.page-toolbar-button--primary:active:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+button.page-toolbar-button.page-toolbar-button--secondary,
+button.page-toolbar-button.page-toolbar-button--secondary.is-active,
+button.page-toolbar-button.page-toolbar-button--icon,
+button.page-toolbar-button.page-toolbar-button--icon.is-active {
+  color: var(--naive-text-color-2);
+  background: var(--naive-button-color-2);
+}
+
+button.page-toolbar-button.page-toolbar-button--secondary:hover:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--secondary:focus-visible:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--secondary.is-active:hover:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--icon:hover:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--icon:focus-visible:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--icon.is-active:hover:not(:disabled) {
+  color: var(--naive-text-color-2);
+  background: var(--naive-button-color-2-hover);
+}
+
+button.page-toolbar-button.page-toolbar-button--secondary:active:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--secondary.is-active:active:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--icon:active:not(:disabled),
+button.page-toolbar-button.page-toolbar-button--icon.is-active:active:not(:disabled) {
+  background: var(--naive-button-color-2-pressed);
+}
+
+button.page-toolbar-button.page-toolbar-button--icon {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+button.page-toolbar-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--secondary,
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--secondary.is-active,
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--icon,
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--icon.is-active {
+  color: rgb(51 54 57);
+  background: rgb(46 51 56 / 0.05);
+}
+
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--secondary:hover:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--secondary:focus-visible:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--secondary.is-active:hover:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--icon:hover:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--icon:focus-visible:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--icon.is-active:hover:not(:disabled) {
+  color: rgb(51 54 57);
+  background: rgb(46 51 56 / 0.09);
+}
+
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--secondary:active:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--secondary.is-active:active:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--icon:active:not(:disabled),
+:root[data-theme="light"]:not([data-theme-global-color="true"])
+  button.page-toolbar-button.page-toolbar-button--icon.is-active:active:not(:disabled) {
+  background: rgb(46 51 56 / 0.13);
+}
