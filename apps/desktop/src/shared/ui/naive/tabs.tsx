@@ -33,9 +33,15 @@ export function NaiveTabs<TValue extends string>(
     resolved.items
   );
   const buttons: Array<HTMLButtonElement | undefined> = [];
+  const loadedTabsForRender = (): NaiveTabsComponent | null =>
+    resolved.type() === "segment" ? null : LoadedTabs();
 
   const ensureLoaded = (): void => {
+    if (resolved.type() === "segment") return;
     void lazyNaiveTabs.load().then((component) => setLoadedTabs(() => component));
+  };
+  const preloadLoadedTabs = (): void => {
+    if (resolved.type() !== "segment") lazyNaiveTabs.preload();
   };
   const focusNext = (currentIndex: number, direction: 1 | -1): void => {
     const items = resolved.items();
@@ -89,11 +95,11 @@ export function NaiveTabs<TValue extends string>(
 
   return (
     <Show
-      when={LoadedTabs()}
+      when={loadedTabsForRender()}
       fallback={
         <div
           class={resolved.rootClass()}
-          onPointerEnter={lazyNaiveTabs.preload}
+          onPointerEnter={preloadLoadedTabs}
           onFocusIn={ensureLoaded}
         >
           <div class={resolved.navClass()}>

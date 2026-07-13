@@ -80,7 +80,7 @@ test("resolveLoginQrImageUrl generates an image from qrurl when qrimg is empty",
   assert.equal(/^data:image\/svg\+xml/.test(imageUrl), true);
 });
 
-test("resolveLoginQrImageUrl falls back to the SPlayer-style login URL", async () => {
+test("resolveLoginQrImageUrl falls back to the default login URL", async () => {
   const imageUrl = await resolveLoginQrImageUrl("qr-key", {
     qrimg: ""
   });

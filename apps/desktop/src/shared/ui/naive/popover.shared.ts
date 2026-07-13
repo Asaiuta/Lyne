@@ -49,7 +49,7 @@ export interface NaivePopoverProps {
   defaultOpen?: boolean;
   /**
    * Teleport target element for the popover portal.
-   * Defaults to `document.body`, matching SPlayer's `to` prop.
+   * Defaults to `document.body`, matching NaiveUI's `to` prop.
    */
   to?: HTMLElement;
   /**

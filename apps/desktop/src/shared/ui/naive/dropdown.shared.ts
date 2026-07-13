@@ -73,7 +73,7 @@ export interface NaiveDropdownProps {
   onSelect?: (option: NaiveDropdownOption) => void;
   /**
    * Teleport target element for the menu portal. Defaults to `document.body`,
-   * matching SPlayer's `to` prop.
+   * matching NaiveUI's `to` prop.
    */
   to?: HTMLElement;
   /** Optional class slot on the menu surface. */
@@ -90,14 +90,14 @@ export interface NaiveDropdownProps {
    * When both `x` and `y` are defined the facade switches to virtual mode:
    * Kobalte's trigger element is rendered invisible at `(x, y)` so the
    * positioner anchors against that point. The `children` trigger slot is
-   * ignored in this mode. SPlayer's `NDropdown :x/:y/:show` shape maps here.
+   * ignored in this mode. NaiveUI's `NDropdown :x/:y/:show` shape maps here.
    */
   x?: number;
   /** Virtual anchor y coordinate. See `x`. */
   y?: number;
   /**
-   * Controlled open state for virtual mode. Equivalent to SPlayer's `:show`.
-   * Mirrors `open` when present - virtual mode prefers `show` for SPlayer
+   * Controlled open state for virtual mode. Equivalent to NaiveUI's `:show`.
+   * Mirrors `open` when present - virtual mode prefers `show` for virtual-anchor
    * ergonomics. If both are supplied, `show` wins.
    */
   show?: boolean;

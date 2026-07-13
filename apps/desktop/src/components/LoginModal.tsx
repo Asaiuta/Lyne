@@ -7,7 +7,6 @@ import {
 } from "solid-js";
 import { createStore } from "solid-js/store";
 import { Modal } from "./Modal";
-import { SegmentedTabs } from "./page/SegmentedTabs";
 import { IconClose, IconLogo } from "./icons";
 import { SImage } from "./SImage";
 import {
@@ -23,6 +22,7 @@ import { useTranslation } from "../shared/i18n";
 import { completeNcmLogin } from "../shared/state/ncmLoginCompletion";
 import { useQrLoginSession } from "./login/useQrLoginSession";
 import { isNumber, isRecord, isString } from "../shared/jsonReaders";
+import { NaiveTabs, type NaiveTabItem } from "../shared/ui/naive";
 
 type LoginTab = "qr" | "phone";
 type SpecialLoginMode = "uid" | "cookie" | null;
@@ -142,7 +142,7 @@ export function LoginModal(props: LoginModalProps) {
     }
   });
 
-  const tabs = createMemo(() => [
+  const tabs = createMemo<ReadonlyArray<NaiveTabItem<LoginTab>>>(() => [
     { value: "qr", label: t("ncm.loginModal.tab.qr") },
     { value: "phone", label: t("ncm.loginModal.tab.phone") }
   ]);
@@ -319,12 +319,12 @@ export function LoginModal(props: LoginModalProps) {
           <div class="login-modal-logo" aria-hidden="true">
             <IconLogo />
           </div>
-          <SegmentedTabs
+          <NaiveTabs
+            class="login-modal-tabs"
             value={activeTab()}
-            onChange={(next) => {
-              setActiveTab(next as LoginTab);
-            }}
+            onChange={setActiveTab}
             items={tabs()}
+            type="segment"
             ariaLabel={t("ncm.loginModal.tabs.aria")}
           />
 

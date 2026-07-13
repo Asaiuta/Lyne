@@ -357,7 +357,7 @@ export function NaiveFeedbackProvider(props: NaiveFeedbackProviderProps): JSX.El
             <div class="n-loading-bar-container" aria-hidden="true">
               <div
                 class={joinClassNames("n-loading-bar", `n-loading-bar--${loadingBarState().status}`)}
-                style={{ width: `${loadingBarState().progress}%` }}
+                style={{ "--n-loading-bar-scale": String(loadingBarState().progress / 100) }}
               />
             </div>
           </Show>

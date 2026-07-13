@@ -11,7 +11,7 @@ import {
   naiveSliderRailClass,
   resolveNaiveSliderValues
 } from "./slider.shared";
-import { isNaiveSliderStepKey } from "./slider-logic";
+import { isNaiveSliderStepKey, resolveNaiveSliderThumbStyle } from "./slider-logic";
 import { joinClassNames } from "./utils";
 
 const firstSliderValue = (values: readonly number[], fallback: number): number => {
@@ -32,13 +32,7 @@ export function NaiveSliderKobalte(props: NaiveSliderProps): JSX.Element {
   const showIndicator = () => props.tooltip !== false && (props.showTooltip || hovered() || dragging());
   const rootClass = () =>
     joinClassNames(naiveSliderClass(props, values(), hasMarks()), dragging() ? "is-dragging" : false);
-  const thumbStyle = (): JSX.CSSProperties | undefined =>
-    values().orientation === "vertical"
-      ? {
-          left: "50%",
-          transform: "translate(-50%, 50%)"
-        }
-      : undefined;
+  const thumbStyle = (): JSX.CSSProperties => ({ ...resolveNaiveSliderThumbStyle(values().orientation) });
 
   const handleChange = (nextValues: number[]): void => {
     props.onUpdateValue?.(firstSliderValue(nextValues, currentValue()));

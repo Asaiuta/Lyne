@@ -24,7 +24,7 @@
   }
 
   .naive-button.is-strong {
-    font-weight: 600;
+    font-weight: 500;
   }
 
   .naive-button.is-secondary {
@@ -191,7 +191,7 @@
     background:
       linear-gradient(90deg, transparent 25%, rgb(0 0 0 / 0.08) 50%, transparent 75%)
       0 0 / 200% 100%;
-    animation: naive-skeleton-shimmer 1.4s linear infinite;
+    animation: motion-skeleton-sweep var(--motion-loop-skeleton) linear infinite;
   }
 
   .naive-text {
@@ -299,7 +299,7 @@
   }
 
   /* ============================================================
-     NaiveForm / NaiveFormItem — SPlayer's NaiveUI 2.43.2 form
+     NaiveForm / NaiveFormItem — NaiveUI 2.43.2 form
      layout contract. Validation remains app-owned; this facade
      preserves the structural class hooks and label/feedback grid.
      ============================================================ */
@@ -904,7 +904,7 @@
 
   .naive-input .n-base-loading.is-loading {
     opacity: 1;
-    animation: naive-spin-rotate 1s linear infinite;
+    animation: motion-spin var(--motion-loop-spinner) linear infinite;
   }
 
   .naive-input .n-input__border,
@@ -1158,7 +1158,7 @@
     --n-tab-font-weight: 400;
     --n-tab-font-weight-active: 400;
     --n-font-weight-strong: 600;
-    --n-tab-border-radius: var(--radius-sm);
+    --n-tab-border-radius: 6px;
     --n-tab-padding: 6px 0;
     --n-tab-gap: 36px;
     --n-bar-color: var(--naive-primary-color);
@@ -1309,8 +1309,14 @@
     transition: background-color 0.3s var(--n-bezier);
   }
 
+  .naive-tabs.n-tabs--segment-type .n-tabs-nav {
+    width: 100%;
+  }
+
   .naive-tabs.n-tabs--segment-type .n-tabs-capsule {
     position: absolute;
+    top: 0;
+    left: 0;
     border-radius: var(--n-tab-border-radius);
     background-color: var(--n-tab-color-segment);
     box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.08);
@@ -1529,8 +1535,8 @@
     transition:
       background-color 0.3s var(--n-bezier),
       box-shadow 0.3s var(--n-bezier),
-      transform 0.2s var(--n-bezier),
-      opacity 0.2s var(--n-bezier);
+      transform var(--motion-duration-feedback) var(--n-bezier),
+      opacity var(--motion-duration-feedback) var(--n-bezier);
   }
 
   .naive-slider:not(.n-slider--disabled) .n-slider-handle-wrapper:hover .n-slider-handle,
@@ -1564,7 +1570,7 @@
     font-size: var(--n-mark-font-size);
     white-space: nowrap;
     pointer-events: none;
-    animation: naive-popover-enter 0.15s var(--n-bezier);
+    animation: naive-popover-enter var(--motion-duration-subtle) var(--n-bezier);
   }
 
   .naive-slider .n-slider-handle-indicator--top {
@@ -1742,8 +1748,8 @@
     border-radius: var(--n-border-radius);
     background: var(--n-color);
     transition:
-      background-color 0.2s var(--ease-standard),
-      box-shadow 0.2s var(--ease-standard);
+      background-color var(--motion-duration-control) var(--motion-ease-standard),
+      box-shadow var(--motion-duration-control) var(--motion-ease-standard);
   }
 
   .naive-checkbox .n-checkbox-box__border {
@@ -1752,8 +1758,8 @@
     border: 1px solid var(--n-border-color);
     border-radius: inherit;
     transition:
-      border-color 0.2s var(--ease-standard),
-      box-shadow 0.2s var(--ease-standard);
+      border-color var(--motion-duration-control) var(--motion-ease-standard),
+      box-shadow var(--motion-duration-control) var(--motion-ease-standard);
   }
 
   .naive-checkbox:not(.n-checkbox--disabled):hover .n-checkbox-box__border {
@@ -1788,8 +1794,8 @@
     opacity: 0;
     transform: scale(0.45);
     transition:
-      opacity 0.18s var(--ease-standard),
-      transform 0.18s var(--ease-standard);
+      opacity var(--motion-duration-control-fast) var(--motion-ease-standard),
+      transform var(--motion-duration-control-fast) var(--motion-ease-standard);
   }
 
   .naive-checkbox.n-checkbox--checked .n-checkbox-icon,
@@ -1910,9 +1916,9 @@
     border-radius: 50%;
     background: var(--n-color);
     transition:
-      border-color 0.2s var(--ease-standard),
-      box-shadow 0.2s var(--ease-standard),
-      background-color 0.2s var(--ease-standard);
+      border-color var(--motion-duration-control) var(--motion-ease-standard),
+      box-shadow var(--motion-duration-control) var(--motion-ease-standard),
+      background-color var(--motion-duration-control) var(--motion-ease-standard);
   }
 
   .naive-radio:not(.n-radio--disabled):hover .n-radio__dot {
@@ -1939,8 +1945,8 @@
     opacity: 0;
     transform: scale(0.4);
     transition:
-      opacity 0.18s var(--ease-standard),
-      transform 0.18s var(--ease-standard);
+      opacity var(--motion-duration-control-fast) var(--motion-ease-standard),
+      transform var(--motion-duration-control-fast) var(--motion-ease-standard);
   }
 
   .naive-radio.n-radio--checked .n-radio__dot::before,
@@ -1985,10 +1991,10 @@
     font-size: var(--n-font-size);
     line-height: 1;
     transition:
-      border-color 0.2s var(--ease-standard),
-      background-color 0.2s var(--ease-standard),
-      color 0.2s var(--ease-standard),
-      box-shadow 0.2s var(--ease-standard);
+      border-color var(--motion-duration-control) var(--motion-ease-standard),
+      background-color var(--motion-duration-control) var(--motion-ease-standard),
+      color var(--motion-duration-control) var(--motion-ease-standard),
+      box-shadow var(--motion-duration-control) var(--motion-ease-standard);
     user-select: none;
   }
 
@@ -2176,8 +2182,8 @@
   .n-collapse-transition {
     overflow: hidden;
     transition:
-      max-height 0.18s var(--ease-collapse, var(--ease-standard)),
-      opacity 0.18s var(--ease-collapse, var(--ease-standard));
+      max-height var(--motion-duration-control-fast) var(--ease-collapse, var(--motion-ease-standard)),
+      opacity var(--motion-duration-control-fast) var(--ease-collapse, var(--motion-ease-standard));
   }
 
   .n-collapse-transition[data-phase="entering"],
@@ -2351,7 +2357,7 @@
     border: 2px solid var(--n-loading-color);
     border-right-color: transparent;
     border-radius: 50%;
-    animation: naive-spin-rotate 1s linear infinite;
+    animation: motion-spin var(--motion-loop-spinner) linear infinite;
   }
 
   .naive-switch .n-switch__children-placeholder {
@@ -2928,7 +2934,7 @@
 
   .naive-select .n-base-loading.is-loading {
     opacity: 1;
-    animation: naive-spin-rotate 1s linear infinite;
+    animation: motion-spin var(--motion-loop-spinner) linear infinite;
   }
 
   .naive-select .n-base-suffix__arrow {
@@ -3421,7 +3427,7 @@
       );
     background-size: 200% 100%;
     border-radius: 6px;
-    animation: naive-skeleton-pulse 1.4s ease-in-out infinite;
+    animation: motion-skeleton-sweep var(--motion-loop-skeleton) ease-in-out infinite;
     pointer-events: none;
   }
 
@@ -3432,11 +3438,6 @@
   .naive-skeleton--text {
     height: 14px;
     border-radius: 4px;
-  }
-
-  @keyframes naive-skeleton-pulse {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
   }
 
   .naive-empty {
@@ -3519,7 +3520,7 @@
     border: 2px solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;
-    animation: naive-spin-rotate 1s linear infinite;
+    animation: motion-spin var(--motion-loop-spinner) linear infinite;
   }
 
   .naive-spin.button-spinner .naive-spin-indicator {
@@ -3530,11 +3531,6 @@
     color: var(--text-soft);
     font-size: 13px;
     line-height: 1.4;
-  }
-
-  @keyframes naive-spin-rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
   }
 
   .naive-progress {
@@ -3651,12 +3647,15 @@
   }
 
   .n-loading-bar {
+    width: 100%;
     height: 100%;
     border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
     background: var(--color-primary);
     box-shadow: 0 0 16px var(--color-primary-tonal-45);
+    transform: scaleX(var(--n-loading-bar-scale, 0));
+    transform-origin: left center;
     transition:
-      width var(--duration-slow) var(--ease-standard),
+      transform var(--duration-slow) var(--ease-standard),
       background-color var(--duration-fast) var(--ease-standard);
   }
 
@@ -3898,7 +3897,7 @@
   }
 
   /* ============================================================
-     NaivePopover — SPlayer's NaiveUI 2.43.2 visual contract.
+     NaivePopover — NaiveUI 2.43.2 visual contract.
      Source: D:/AI/SPlayer/node_modules/naive-ui/es/popover/src/styles/index.cssr.mjs
      plus D:/AI/SPlayer/src/style/main.scss global popover overrides.
      ============================================================ */
@@ -3952,11 +3951,11 @@
   /* Kobalte's Popper writes `data-placement="top" | "top-start" | …` on
      Popover.Content. Animate enter/leave with the matching scale origin. */
   .n-popover.n-popover-shared {
-    animation: naive-popover-enter 0.15s var(--n-bezier-ease-out);
+    animation: naive-popover-enter var(--motion-duration-subtle) var(--n-bezier-ease-out);
   }
 
   .n-popover.n-popover-shared[data-closed] {
-    animation: naive-popover-leave 0.15s var(--n-bezier-ease-in) forwards;
+    animation: naive-popover-leave var(--motion-duration-subtle) var(--n-bezier-ease-in) forwards;
   }
 
   @keyframes naive-popover-enter {
@@ -4110,7 +4109,7 @@
   }
 
   /* ============================================================
-     NaiveDropdown — SPlayer's NaiveUI 2.43.2 visual contract.
+     NaiveDropdown — NaiveUI 2.43.2 visual contract.
      Source: D:/AI/SPlayer/node_modules/naive-ui/es/dropdown/src/styles/index.cssr.mjs
      plus styles/_common.mjs, styles/light.mjs, and
      D:/AI/SPlayer/src/style/main.scss global dropdown overrides.
@@ -4147,6 +4146,7 @@
     --n-suffix-color: var(--naive-text-color-2);
     position: relative;
     z-index: var(--z-popover);
+    width: fit-content;
     min-width: var(--n-min-width, var(--n-min-width-default));
     padding: var(--n-padding, var(--n-padding-default));
     border-radius: var(--n-border-radius);
@@ -4155,14 +4155,14 @@
     box-shadow: var(--n-box-shadow);
     transform-origin: var(--kb-popper-content-transform-origin, center);
     outline: none;
-    animation: naive-popover-enter 0.15s var(--n-bezier-ease-out);
+    animation: naive-popover-enter var(--motion-duration-subtle) var(--n-bezier-ease-out);
     transition:
       background-color 0.3s var(--n-bezier),
       box-shadow 0.3s var(--n-bezier);
   }
 
   .n-dropdown.n-dropdown-menu[data-closed] {
-    animation: naive-popover-leave 0.15s var(--n-bezier-ease-in) forwards;
+    animation: naive-popover-leave var(--motion-duration-subtle) var(--n-bezier-ease-in) forwards;
   }
 
   .n-dropdown-option {
@@ -4295,7 +4295,7 @@
   }
 
   /* ============================================================
-     NaivePopselect — SPlayer's NPopselect / InternalSelectMenu contract.
+     NaivePopselect — NPopselect / InternalSelectMenu contract.
      Source: D:/AI/SPlayer/node_modules/naive-ui/es/popselect/src/*.mjs,
      _internal/select-menu/src/styles/index.cssr.mjs, and
      D:/AI/SPlayer/src/style/main.scss (.n-popselect-menu overrides).
@@ -4340,7 +4340,7 @@
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     transform-origin: var(--kb-popper-content-transform-origin, top center);
-    animation: naive-popover-enter 0.15s var(--n-bezier-ease-out);
+    animation: naive-popover-enter var(--motion-duration-subtle) var(--n-bezier-ease-out);
     transition:
       background-color 0.3s var(--n-bezier),
       box-shadow 0.3s var(--n-bezier);
@@ -4349,7 +4349,7 @@
   .n-popselect-menu.n-base-select-menu[data-closed],
   .n-popselect-menu.n-base-select-menu.is-closing {
     pointer-events: none;
-    animation: naive-popover-leave 0.15s var(--n-bezier-ease-in) forwards;
+    animation: naive-popover-leave var(--motion-duration-subtle) var(--n-bezier-ease-in) forwards;
   }
 
   .n-popselect-menu .n-base-select-option {
@@ -4420,7 +4420,7 @@
     height: 16px;
     place-items: center;
     color: var(--n-option-check-color);
-    animation: naive-popover-enter 0.2s var(--n-bezier-ease-out);
+    animation: naive-popover-enter var(--motion-duration-feedback) var(--n-bezier-ease-out);
   }
 
   .n-popselect-menu .n-base-select-option__check svg {

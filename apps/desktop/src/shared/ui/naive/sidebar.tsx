@@ -131,7 +131,6 @@ export function SidebarPopselect<TValue extends string>(props: SidebarPopselectP
       optionContentClass="sidebar-playlist-source-option-content"
       optionCheckClass="sidebar-playlist-source-option-check"
       gutter={10}
-      fallbackPopoverWidth={100}
       stopTriggerPropagation={true}
       triggerContent={
         <span class="sidebar-section-action-surface" aria-hidden="true">

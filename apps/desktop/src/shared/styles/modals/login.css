@@ -34,6 +34,10 @@
     height: 34px;
   }
 
+  .login-modal-tabs.n-tabs {
+    width: 100%;
+  }
+
   .login-modal-feedback {
     width: 100%;
     margin-top: 12px;

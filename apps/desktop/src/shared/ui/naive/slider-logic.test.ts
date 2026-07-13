@@ -4,7 +4,8 @@ import {
   getNaiveSliderPercent,
   isNaiveSliderStepKey,
   normalizeNaiveSliderValue,
-  resolveNaiveSliderMarks
+  resolveNaiveSliderMarks,
+  resolveNaiveSliderThumbStyle
 } from "./slider-logic";
 
 test("slider value helpers normalize finite values and percent bounds", () => {
@@ -49,4 +50,14 @@ test("slider keyboard blocking recognizes step keys only", () => {
   assert.equal(isNaiveSliderStepKey("PageDown"), true);
   assert.equal(isNaiveSliderStepKey("Enter"), false);
   assert.equal(isNaiveSliderStepKey(" "), false);
+});
+
+test("slider thumb inline style preserves centered alignment over Kobalte placement styles", () => {
+  assert.deepEqual(resolveNaiveSliderThumbStyle("horizontal"), {
+    transform: "translate(-50%, -50%)"
+  });
+  assert.deepEqual(resolveNaiveSliderThumbStyle("vertical"), {
+    left: "50%",
+    transform: "translate(-50%, 50%)"
+  });
 });

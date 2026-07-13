@@ -2,7 +2,6 @@ import {
   Show,
   createEffect,
   createSignal,
-  onMount,
   type JSX
 } from "solid-js";
 import {
@@ -77,8 +76,6 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
       fallbackInput.value = props.value;
     }
   });
-
-  onMount(ensureLoaded);
 
   return (
     <Show

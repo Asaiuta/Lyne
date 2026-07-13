@@ -71,7 +71,6 @@ export interface NaiveTabsSegmentCapsule {
 
 const defaultRootClass = "naive-tabs";
 const defaultSelectClass = "naive-tabs-select hidden w-full";
-const segmentRailPadding = 3;
 
 const tabType = <TValue extends string>(
   props: NaiveTabsProps<TValue>
@@ -162,7 +161,7 @@ export const createNaiveTabsSegmentCapsule = (
 ): NaiveTabsSegmentCapsule => {
   const [capsuleStyle, setCapsuleStyle] = createSignal<JSX.CSSProperties>({
     opacity: 0,
-    transform: "translateX(0px)"
+    transform: "translate(0px, 0px)"
   });
   const tabElements = new Map<string, HTMLElement>();
   let railEl: HTMLElement | undefined;
@@ -176,16 +175,16 @@ export const createNaiveTabsSegmentCapsule = (
       if (!railEl) return;
       const activeEl = tabElements.get(value());
       if (!activeEl) {
-        setCapsuleStyle({ opacity: 0, transform: "translateX(0px)" });
+        setCapsuleStyle({ opacity: 0, transform: "translate(0px, 0px)" });
         return;
       }
-      const railStyle = window.getComputedStyle(railEl);
-      const railPaddingLeft = Number.parseFloat(railStyle.paddingLeft) || segmentRailPadding;
+      const railRect = railEl.getBoundingClientRect();
+      const activeRect = activeEl.getBoundingClientRect();
       setCapsuleStyle({
-        width: `${activeEl.offsetWidth}px`,
-        height: `${activeEl.offsetHeight}px`,
+        width: `${activeRect.width}px`,
+        height: `${activeRect.height}px`,
         opacity: 1,
-        transform: `translateX(${activeEl.offsetLeft - railPaddingLeft}px)`
+        transform: `translate(${activeRect.left - railRect.left}px, ${activeRect.top - railRect.top}px)`
       });
     });
   };

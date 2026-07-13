@@ -1,12 +1,12 @@
 /* Uno's unlayered button reset is imported after component CSS. Keep this
    sidebar-only rule unlayered so the source trigger matches NaiveUI's button shell. */
 .sidebar .sidebar-section-action-icon {
-  background: rgba(46, 51, 56, 0.05);
+  background: var(--state-hover-on-surface);
 }
 
 .sidebar .sidebar-section-action-icon:hover,
 .sidebar .sidebar-section-action-icon.is-open {
-  background: rgba(46, 51, 56, 0.09);
+  background: var(--state-pressed-on-surface);
 }
 
 /* Menus are NaiveUI surfaces rendered through portals. Keep this unlayered so

@@ -1,25 +1,33 @@
-import { For } from "solid-js";
+import { For, createMemo } from "solid-js";
 
 export interface SegmentedTabItem {
   value: string;
   label: string;
+  count?: number | string | null;
   disabled?: boolean;
 }
+
+export type SegmentedTabsVariant = "accent" | "surface" | "tonal";
 
 interface SegmentedTabsProps {
   value: string;
   onChange: (next: string) => void;
   items: SegmentedTabItem[];
   ariaLabel?: string;
+  variant?: SegmentedTabsVariant;
+  class?: string;
+  tabClass?: string;
+  activeTabClass?: string;
+  selectClass?: string;
 }
 
 const segmentedTabsClass =
-  "segmented-tabs inline-flex items-center gap-1 p-1 rounded-pill bg-[var(--border-faint)] border border-border-subtle shadow-none";
+  "segmented-tabs inline-flex items-center gap-1 p-1 rounded-pill shadow-none";
 
 const segmentedTabBaseClass =
-  "segmented-tab min-h-[34px] px-3 rounded-pill text-xs font-600 text-muted transition-colors duration-fast ease-standard hover:text-text disabled:opacity-[0.48] disabled:cursor-not-allowed";
+  "segmented-tab min-h-[34px] px-3 rounded-pill text-xs font-600 transition-colors duration-fast ease-standard disabled:opacity-[0.48] disabled:cursor-not-allowed";
 
-const segmentedTabActiveClass = "is-active text-accent-foreground bg-accent shadow-none";
+const segmentedTabActiveClass = "is-active shadow-none";
 
 const segmentedTabsSelectClass = "segmented-tabs-select hidden w-full";
 
@@ -29,6 +37,26 @@ const segmentedTabsSelectClass = "segmented-tabs-select hidden w-full";
  */
 export function SegmentedTabs(props: SegmentedTabsProps) {
   const buttons: Array<HTMLButtonElement | undefined> = [];
+  const variantClass = createMemo<string>(() => `segmented-tabs--${props.variant ?? "accent"}`);
+  const rootClass = createMemo<string>(() =>
+    props.class
+      ? `${segmentedTabsClass} ${variantClass()} ${props.class}`
+      : `${segmentedTabsClass} ${variantClass()}`
+  );
+  const baseTabClass = createMemo<string>(() =>
+    props.tabClass ? `${segmentedTabBaseClass} ${props.tabClass}` : segmentedTabBaseClass
+  );
+  const activeTabClass = createMemo<string>(() =>
+    props.activeTabClass ? `${segmentedTabActiveClass} ${props.activeTabClass}` : segmentedTabActiveClass
+  );
+  const selectClass = createMemo<string>(() =>
+    props.selectClass ? `${segmentedTabsSelectClass} ${props.selectClass}` : segmentedTabsSelectClass
+  );
+  const activeIndex = createMemo<number>(() => {
+    const index = props.items.findIndex((item) => item.value === props.value);
+    return index >= 0 ? index : 0;
+  });
+  const tabCount = createMemo<number>(() => Math.max(props.items.length, 1));
 
   const focusNext = (currentIndex: number, direction: 1 | -1) => {
     const total = props.items.length;
@@ -72,14 +100,23 @@ export function SegmentedTabs(props: SegmentedTabsProps) {
 
   return (
     <>
-      <div class={segmentedTabsClass} role="tablist" aria-label={props.ariaLabel}>
+      <div
+        class={rootClass()}
+        role="tablist"
+        aria-label={props.ariaLabel}
+        style={{
+          "--segmented-active-index": String(activeIndex()),
+          "--segmented-tab-count": String(tabCount())
+        }}
+      >
+        <span class="segmented-tabs-indicator" aria-hidden="true" />
         <For each={props.items}>
           {(item, index) => {
             const active = () => item.value === props.value;
             const className = () =>
               active()
-                ? `${segmentedTabBaseClass} ${segmentedTabActiveClass}`
-                : segmentedTabBaseClass;
+                ? `${baseTabClass()} ${activeTabClass()}`
+                : baseTabClass();
             return (
               <button
                 ref={(el) => {
@@ -98,13 +135,14 @@ export function SegmentedTabs(props: SegmentedTabsProps) {
                 onKeyDown={(event) => handleKeyDown(index(), event)}
               >
                 {item.label}
+                {item.count != null ? <span class="segmented-tab-count">{item.count}</span> : null}
               </button>
             );
           }}
         </For>
       </div>
       <select
-        class={segmentedTabsSelectClass}
+        class={selectClass()}
         value={props.value}
         onChange={(event) => props.onChange(event.currentTarget.value)}
         aria-label={props.ariaLabel}

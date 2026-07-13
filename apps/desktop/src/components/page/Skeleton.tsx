@@ -11,7 +11,7 @@ interface SkeletonProps {
 const buildIndexes = (count: number): number[] => Array.from({ length: count }, (_, index) => index);
 
 /**
- * Pulsing placeholder block. Matches SPlayer's `n-skeleton` visual rhythm
+ * Pulsing placeholder block matching the local loading rhythm
  * (1.4s pulse) and supports rect/circle/text shapes.
  */
 export function Skeleton(props: SkeletonProps) {
@@ -24,7 +24,7 @@ interface CoverGridSkeletonProps {
 }
 
 /**
- * Grid of 50 (configurable) card placeholders. Matches SPlayer's CoverList
+ * Grid of 50 (configurable) card placeholders.
  * loading state where the `cover-grid` is filled with `n-skeleton` rows.
  */
 export function CoverGridSkeleton(props: CoverGridSkeletonProps) {
@@ -55,7 +55,7 @@ interface ListSkeletonProps {
 }
 
 /**
- * Vertical stack of row placeholders. Matches SPlayer's SongList loading
+ * Vertical stack of row placeholders.
  * (10 rows, 72px tall, 12px radius).
  */
 export function ListSkeleton(props: ListSkeletonProps) {

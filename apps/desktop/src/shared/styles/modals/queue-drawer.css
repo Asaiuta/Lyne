@@ -17,7 +17,7 @@
     min-height: 0;
     border-left: 1px solid var(--floating-border);
     border-radius: 12px 0 0 12px;
-    background: color-mix(in oklch, var(--floating-surface) 97%, transparent);
+    background: var(--floating-surface);
     box-shadow: var(--floating-shadow);
     animation: queue-drawer-slide-in 0.22s var(--ease-standard);
     overflow: hidden;

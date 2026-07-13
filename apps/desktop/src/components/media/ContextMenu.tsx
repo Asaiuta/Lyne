@@ -2,6 +2,11 @@ import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { NaiveDivider } from "../../shared/ui/naive";
+import {
+  computeFloatingPosition,
+  FLOATING_VIEWPORT_PADDING,
+  type FloatingPosition
+} from "../../shared/ui/naive/floating-position";
 import { useDismissibleOverlay } from "../../shared/ui/useDismissibleOverlay";
 
 export interface ContextMenuItem {
@@ -23,7 +28,16 @@ interface ContextMenuProps {
   onClose: () => void;
 }
 
-const EDGE_PADDING = 8;
+const EDGE_PADDING = FLOATING_VIEWPORT_PADDING;
+
+const pointAnchor = (x: number, y: number) => ({
+  left: x,
+  right: x,
+  top: y,
+  bottom: y,
+  width: 0,
+  height: 0
+});
 
 function SubMenuItem(
   props: {
@@ -34,8 +48,12 @@ function SubMenuItem(
 ) {
   const [submenuOpen, setSubmenuOpen] = createSignal(false);
   let itemRef: HTMLDivElement | undefined;
-  let submenuRef: HTMLDivElement | undefined;
+  const [submenuElement, setSubmenuElement] =
+    createSignal<HTMLDivElement | null>(null);
+  const [submenuPosition, setSubmenuPosition] =
+    createSignal<FloatingPosition | null>(null);
   let closeTimer: number | undefined;
+  let positionFrame: number | undefined;
 
   const handleEnter = () => {
     if (closeTimer !== undefined) {
@@ -49,28 +67,70 @@ function SubMenuItem(
     closeTimer = window.setTimeout(() => setSubmenuOpen(false), 150);
   };
 
-  const submenuPosition = () => {
+  const cancelPositionFrame = (): void => {
+    if (positionFrame === undefined) return;
+    window.cancelAnimationFrame(positionFrame);
+    positionFrame = undefined;
+  };
+
+  const updateSubmenuPosition = (): void => {
     const parentRect = itemRef?.getBoundingClientRect();
-    if (!parentRect) return { top: 0, left: 0 };
+    const submenu = submenuElement();
+    if (!parentRect || !submenu) return;
 
-    let top = parentRect.top;
-    let left = parentRect.right + 4;
+    const width = submenu.offsetWidth;
+    const height = submenu.offsetHeight;
+    if (width <= 0 || height <= 0) return;
 
-    if (typeof window !== "undefined" && submenuRef) {
-      const submenuRect = submenuRef.getBoundingClientRect();
-      const submenuWidth = submenuRect.width || 200;
-      const submenuHeight = submenuRect.height || (props.item.children!.length * 36 + 16);
+    setSubmenuPosition(
+      computeFloatingPosition({
+        anchor: parentRect,
+        content: { width, height },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        placement: "right-start",
+        gutter: 4,
+        padding: EDGE_PADDING
+      })
+    );
+  };
 
-      if (left + submenuWidth > window.innerWidth - EDGE_PADDING) {
-        left = Math.max(EDGE_PADDING, parentRect.left - submenuWidth - 4);
-      }
-      if (top + submenuHeight > window.innerHeight - EDGE_PADDING) {
-        top = Math.max(EDGE_PADDING, window.innerHeight - submenuHeight - EDGE_PADDING);
-      }
+  const schedulePositionUpdate = (): void => {
+    if (positionFrame !== undefined) return;
+    positionFrame = window.requestAnimationFrame(() => {
+      positionFrame = undefined;
+      updateSubmenuPosition();
+    });
+  };
+
+  createEffect(() => {
+    if (!submenuOpen()) {
+      setSubmenuPosition(null);
+      cancelPositionFrame();
+      return;
     }
 
-    return { top, left };
-  };
+    const submenu = submenuElement();
+    const handleLayoutChange = () => schedulePositionUpdate();
+    const resizeObserver =
+      submenu && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(handleLayoutChange)
+        : null;
+
+    window.addEventListener("resize", handleLayoutChange);
+    window.addEventListener("scroll", handleLayoutChange, true);
+    if (resizeObserver && submenu) resizeObserver.observe(submenu);
+    schedulePositionUpdate();
+    onCleanup(() => {
+      window.removeEventListener("resize", handleLayoutChange);
+      window.removeEventListener("scroll", handleLayoutChange, true);
+      resizeObserver?.disconnect();
+    });
+  });
+
+  onCleanup(() => {
+    if (closeTimer !== undefined) window.clearTimeout(closeTimer);
+    cancelPositionFrame();
+  });
 
   return (
     <>
@@ -97,11 +157,15 @@ function SubMenuItem(
       <Show when={submenuOpen() && typeof document !== "undefined"}>
         <Portal mount={document.body}>
           <div
-            ref={submenuRef}
+            ref={(element) => {
+              setSubmenuElement(element);
+              schedulePositionUpdate();
+            }}
             class="context-menu-submenu"
             style={{
-              top: `${submenuPosition().top}px`,
-              left: `${submenuPosition().left}px`
+              top: `${submenuPosition()?.top ?? 0}px`,
+              left: `${submenuPosition()?.left ?? 0}px`,
+              visibility: submenuPosition() == null ? "hidden" : "visible"
             }}
             onMouseEnter={handleEnter}
             onMouseLeave={handleLeave}
@@ -144,36 +208,77 @@ function SubMenuItem(
 }
 
 export function ContextMenu(props: ContextMenuProps) {
-  let menuRef: HTMLDivElement | undefined;
-  const [position, setPosition] = createSignal({ top: props.y, left: props.x });
+  const [menuElement, setMenuElement] = createSignal<HTMLDivElement | null>(null);
+  const [position, setPosition] = createSignal<FloatingPosition | null>(null);
+  let positionFrame: number | undefined;
+
+  const cancelPositionFrame = (): void => {
+    if (positionFrame === undefined) return;
+    window.cancelAnimationFrame(positionFrame);
+    positionFrame = undefined;
+  };
+
+  const updatePosition = (): void => {
+    const menu = menuElement();
+    if (!props.open || !menu) return;
+
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    if (width <= 0 || height <= 0) return;
+
+    setPosition(
+      computeFloatingPosition({
+        anchor: pointAnchor(props.x, props.y),
+        content: { width, height },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        placement: "bottom-start",
+        padding: EDGE_PADDING
+      })
+    );
+  };
+
+  const schedulePositionUpdate = (): void => {
+    if (positionFrame !== undefined) return;
+    positionFrame = window.requestAnimationFrame(() => {
+      positionFrame = undefined;
+      updatePosition();
+    });
+  };
 
   createEffect(() => {
     if (!props.open) {
+      setPosition(null);
+      cancelPositionFrame();
       return;
     }
 
     props.items;
-    const frame = window.requestAnimationFrame(() => {
-      const node = menuRef;
-      if (!node) return;
-      const rect = node.getBoundingClientRect();
-      let top = props.y;
-      let left = props.x;
-      if (left + rect.width > window.innerWidth - EDGE_PADDING) {
-        left = Math.max(EDGE_PADDING, window.innerWidth - rect.width - EDGE_PADDING);
-      }
-      if (top + rect.height > window.innerHeight - EDGE_PADDING) {
-        top = Math.max(EDGE_PADDING, props.y - rect.height);
-      }
-      setPosition({ top, left });
-    });
+    props.x;
+    props.y;
+    const menu = menuElement();
+    const handleLayoutChange = () => schedulePositionUpdate();
+    const resizeObserver =
+      menu && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(handleLayoutChange)
+        : null;
 
-    onCleanup(() => window.cancelAnimationFrame(frame));
+    setPosition(null);
+    window.addEventListener("resize", handleLayoutChange);
+    window.addEventListener("scroll", handleLayoutChange, true);
+    if (resizeObserver && menu) resizeObserver.observe(menu);
+    schedulePositionUpdate();
+    onCleanup(() => {
+      window.removeEventListener("resize", handleLayoutChange);
+      window.removeEventListener("scroll", handleLayoutChange, true);
+      resizeObserver?.disconnect();
+    });
   });
+
+  onCleanup(cancelPositionFrame);
 
   useDismissibleOverlay(() => props.open, {
     isInside: (target) => {
-      if (menuRef && menuRef.contains(target)) return true;
+      if (menuElement()?.contains(target)) return true;
       const submenus = document.querySelectorAll(".context-menu-submenu");
       for (const submenu of submenus) {
         if (submenu.contains(target)) return true;
@@ -189,9 +294,16 @@ export function ContextMenu(props: ContextMenuProps) {
     <Show when={props.open && typeof document !== "undefined"}>
       <Portal mount={document.body}>
         <div
-          ref={menuRef}
+          ref={(element) => {
+            setMenuElement(element);
+            schedulePositionUpdate();
+          }}
           class="context-menu"
-          style={{ top: `${position().top}px`, left: `${position().left}px` }}
+          style={{
+            top: `${position()?.top ?? 0}px`,
+            left: `${position()?.left ?? 0}px`,
+            visibility: position() == null ? "hidden" : "visible"
+          }}
           role="menu"
         >
           <Show when={props.header}>

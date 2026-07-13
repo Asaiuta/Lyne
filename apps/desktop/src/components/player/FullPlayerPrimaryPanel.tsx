@@ -152,7 +152,6 @@ export function FullPlayerPrimaryPanel(props: FullPlayerPrimaryPanelProps) {
                   optionCheckClass="full-player-meta-option-check"
                   placement="bottom"
                   gutter={8}
-                  fallbackPopoverWidth={132}
                   stopTriggerPropagation
                   onOpenChange={setLyricPriorityOpen}
                   onChange={props.meta.onSelectLyricPriority}

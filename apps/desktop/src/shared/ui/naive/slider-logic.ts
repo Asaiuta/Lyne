@@ -1,5 +1,10 @@
 export type NaiveSliderOrientation = "horizontal" | "vertical";
 
+export interface NaiveSliderThumbStyle {
+  readonly transform: string;
+  readonly left?: string;
+}
+
 export interface NaiveSliderMarkInput<TLabel = unknown> {
   readonly value: number;
   readonly label: TLabel;
@@ -45,6 +50,20 @@ export const isNaiveSliderStepKey = (key: string): boolean =>
   key === "End" ||
   key === "PageUp" ||
   key === "PageDown";
+
+export const resolveNaiveSliderThumbStyle = (
+  orientation: NaiveSliderOrientation
+): NaiveSliderThumbStyle =>
+  // Kobalte writes thumb placement as inline styles, so centering transforms must live
+  // in the inline style contract instead of only in CSS.
+  orientation === "vertical"
+    ? {
+        left: "50%",
+        transform: "translate(-50%, 50%)"
+      }
+    : {
+        transform: "translate(-50%, -50%)"
+      };
 
 export const resolveNaiveSliderMarks = <TLabel>(
   marks: ReadonlyArray<NaiveSliderMarkInput<TLabel>>,
