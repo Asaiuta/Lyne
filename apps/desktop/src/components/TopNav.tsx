@@ -53,9 +53,6 @@ interface TopNavProps {
 const TOP_NAV_HOT_LIMIT = 8;
 const TOP_NAV_SUGGESTION_DEBOUNCE_MS = 180;
 
-const isNcmSearchEntryPage = (page: ActivePage): page is "recommend" | "discover" | "search" =>
-  page === "recommend" || page === "discover" || page === "search";
-
 const loadNcmSuggestionItems = async (
   keywords: string,
   signal?: AbortSignal
@@ -89,23 +86,9 @@ export function TopNav(props: TopNavProps) {
   const { query, setQuery, activePage: searchPage, submitSearch, history, selectHistoryItem, clearHistory } =
     useUISearch();
 
-  const searchEnabled = () => isSearchEnabledPage(searchPage());
+  const searchEnabled = () => uiSettings.useOnlineService && isSearchEnabledPage(searchPage());
 
-  const searchScopeLabel = createMemo(() => {
-    const page = searchPage();
-    switch (page) {
-      case "library":
-        return t("nav.search.scope.library");
-      case "recommend":
-        return t("nav.search.scope.recommend");
-      case "discover":
-        return t("nav.search.scope.discover");
-      case "search":
-        return t("nav.search.scope.search");
-      default:
-        return t("nav.search.scope.disabled");
-    }
-  });
+  const searchScopeLabel = createMemo(() => t("nav.search.scope.online"));
   const [defaultKeyword, setDefaultKeyword] = createSignal<NcmSearchDefaultKeyword | null>(null);
   const [hotSearches, setHotSearches] = createSignal<readonly NcmSearchHotItem[]>([]);
   const [isSearchEntryLoading, setIsSearchEntryLoading] = createSignal(false);
@@ -114,11 +97,13 @@ export function TopNav(props: TopNavProps) {
   const [searchPanelOpen, setSearchPanelOpen] = createSignal(false);
   let searchInputRef: HTMLInputElement | undefined;
 
-  const searchClassName = () => `top-nav-search${searchEnabled() ? "" : " is-disabled"}`;
+  const searchOpen = () => searchPanelOpen() && searchEnabled();
+  const searchWrapClassName = () => `top-nav-search-wrap${searchOpen() ? " is-open" : ""}`;
+  const searchClassName = () =>
+    `top-nav-search${searchEnabled() ? "" : " is-disabled"}${searchOpen() ? " is-open" : ""}`;
   const searchTitle = () =>
     searchEnabled() ? undefined : t("nav.search.disabledHint", { scope: searchScopeLabel() });
-  const ncmSearchEntryEnabled = () =>
-    uiSettings.useOnlineService && searchEnabled() && isNcmSearchEntryPage(searchPage());
+  const ncmSearchEntryEnabled = () => searchEnabled();
   const trimmedSearchQuery = createMemo(() => query().trim());
   const defaultSearchLabel = createMemo(() =>
     uiSettings.useOnlineService && uiSettings.enableSearchKeyword
@@ -358,8 +343,8 @@ export function TopNav(props: TopNavProps) {
       </div>
 
       <div class="top-nav-main">
-        <div class="top-nav-search-wrap">
-          <Show when={searchPanelOpen() && searchEnabled()}>
+        <div class={searchWrapClassName()}>
+          <Show when={showSearchPanel()}>
             <div
               class="top-nav-search-mask"
               data-no-drag

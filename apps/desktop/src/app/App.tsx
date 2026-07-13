@@ -6,6 +6,7 @@ import {
   createEffect,
   createSignal,
   lazy,
+  type Accessor,
   type Component,
   type JSX
 } from "solid-js";
@@ -23,9 +24,9 @@ import { useTranslation } from "../shared/i18n";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import type { ActivePage } from "../shared/ui/navigation";
 import { isOnlineOnlyPage, LOCAL_FALLBACK_PAGE } from "../shared/ui/navigation";
-import { UISearchProvider } from "../shared/state/UISearchContext";
+import { UISearchProvider, useUISearch } from "../shared/state/UISearchContext";
 import { NaiveFeedbackProvider } from "../shared/ui/naive";
-import "../shared/styles/components/pages.css";
+import "../shared/styles/components/page-foundation.css";
 import { useAppController } from "./useAppController";
 import { PlaybackProvider } from "./PlaybackContext";
 import { Sidebar } from "./Sidebar";
@@ -110,6 +111,31 @@ function RouteLoadingFallback(): JSX.Element {
   );
 }
 
+interface OnlineSearchRouteCoordinatorProps {
+  activePage: Accessor<ActivePage>;
+  onlineSearchEnabled: Accessor<boolean>;
+  onNavigate: (page: ActivePage) => void;
+}
+
+function OnlineSearchRouteCoordinator(props: OnlineSearchRouteCoordinatorProps): null {
+  const search = useUISearch();
+
+  createEffect(() => {
+    const request = search.pendingOnlineSearchRequest();
+    if (!request) {
+      return;
+    }
+    if (!props.onlineSearchEnabled()) {
+      search.consumeOnlineSearchRequest(request.version);
+      return;
+    }
+    if (props.activePage() === "search") return;
+    props.onNavigate("search");
+  });
+
+  return null;
+}
+
 function AppContent() {
   const controller = useAppController(api);
   const playback = controller.playback;
@@ -186,6 +212,11 @@ function AppContent() {
     <PlaybackProvider value={playback}>
       <NaiveFeedbackProvider>
         <UISearchProvider activePage={navigation.activePage}>
+        <OnlineSearchRouteCoordinator
+          activePage={navigation.activePage}
+          onlineSearchEnabled={() => ui.uiSettings.useOnlineService}
+          onNavigate={navigation.handleActivePageChange}
+        />
         <AppShell
           sidebar={
             <Sidebar
@@ -221,6 +252,7 @@ function AppContent() {
               enabled={ui.uiSettings.bgEnabled}
               blur={ui.uiSettings.bgBlur}
               maskOpacity={ui.uiSettings.bgMask / 100}
+              dynamicBackgroundMaxFps={ui.uiSettings.dynamicBackgroundMaxFps}
               fullPlayerOpen={ui.fullPlayerOpen()}
             />
           }

@@ -1,6 +1,12 @@
-import { createContext, createEffect, createSignal, useContext } from "solid-js";
+import { createContext, createEffect, createMemo, createSignal, useContext } from "solid-js";
 import type { Accessor, JSX, Setter } from "solid-js";
 import type { ActivePage } from "../ui/navigation";
+
+export interface OnlineSearchRequest {
+  readonly query: string;
+  readonly sourcePage: ActivePage;
+  readonly version: number;
+}
 
 interface UISearchContextValue {
   query: Accessor<string>;
@@ -8,6 +14,8 @@ interface UISearchContextValue {
   activePage: Accessor<ActivePage>;
   submitNonce: Accessor<number>;
   submitSearch: () => void;
+  pendingOnlineSearchRequest: Accessor<OnlineSearchRequest | null>;
+  consumeOnlineSearchRequest: (version: number) => void;
   history: Accessor<readonly string[]>;
   selectHistoryItem: (value: string) => void;
   clearHistory: () => void;
@@ -77,9 +85,20 @@ export function UISearchProvider(props: UISearchProviderProps) {
   const initialHistory = readHistory();
   const [query, setQuery] = createSignal("");
   const [submitNonce, setSubmitNonce] = createSignal(0);
+  const [onlineSearchRequest, setOnlineSearchRequest] =
+    createSignal<OnlineSearchRequest | null>(null);
+  const [consumedOnlineSearchVersion, setConsumedOnlineSearchVersion] = createSignal(0);
   const [history, setHistory] = createSignal<readonly string[]>(initialHistory);
   const activePage = toAccessor(props.activePage);
   let lastPersistedHistory = JSON.stringify(initialHistory);
+
+  const pendingOnlineSearchRequest = createMemo<OnlineSearchRequest | null>(() => {
+    const request = onlineSearchRequest();
+    if (!request || request.version <= consumedOnlineSearchVersion()) {
+      return null;
+    }
+    return request;
+  });
 
   createEffect(() => {
     const nextHistory = history();
@@ -102,8 +121,19 @@ export function UISearchProvider(props: UISearchProviderProps) {
   };
 
   const submitSearch = () => {
-    pushHistory(query());
+    const submittedQuery = query();
+    const sourcePage = activePage();
+    pushHistory(submittedQuery);
     setSubmitNonce((current) => current + 1);
+    setOnlineSearchRequest((current) => ({
+      query: submittedQuery,
+      sourcePage,
+      version: (current?.version ?? 0) + 1
+    }));
+  };
+
+  const consumeOnlineSearchRequest = (version: number) => {
+    setConsumedOnlineSearchVersion((current) => Math.max(current, version));
   };
 
   const selectHistoryItem = (value: string) => {
@@ -122,6 +152,8 @@ export function UISearchProvider(props: UISearchProviderProps) {
         activePage,
         submitNonce,
         submitSearch,
+        pendingOnlineSearchRequest,
+        consumeOnlineSearchRequest,
         history,
         selectHistoryItem,
         clearHistory

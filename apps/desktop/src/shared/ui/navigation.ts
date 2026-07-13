@@ -34,7 +34,7 @@ export type DiscoverTab = (typeof DISCOVER_TABS)[number];
 
 export const DEFAULT_DISCOVER_TAB: DiscoverTab = "playlists";
 
-export const SEARCH_ENABLED_PAGES = ["recommend", "discover", "search", "library"] as const;
+export const SEARCH_ENABLED_PAGES = ACTIVE_PAGES;
 
 export const PLACEHOLDER_PAGES = [] as const satisfies readonly ActivePage[];
 

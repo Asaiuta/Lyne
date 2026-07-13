@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isOnlineOnlyPage, isPlaceholderPage, isSearchEnabledPage } from "./navigation";
+import { ACTIVE_PAGES, isOnlineOnlyPage, isPlaceholderPage, isSearchEnabledPage } from "./navigation";
 
-test("online search page is searchable and online-only", () => {
+test("top-nav search is available on every content page", () => {
+  for (const page of ACTIVE_PAGES) {
+    assert.equal(isSearchEnabledPage(page), true);
+  }
+});
+
+test("online search page is online-only", () => {
   assert.equal(isSearchEnabledPage("search"), true);
   assert.equal(isOnlineOnlyPage("search"), true);
   assert.equal(isPlaceholderPage("search"), false);
 });
 
-test("detail pages are online-only but not searchable placeholders", () => {
+test("detail pages are online-only, searchable, and not placeholders", () => {
   for (const page of [
     "album-detail",
     "playlist-detail",
@@ -18,12 +24,12 @@ test("detail pages are online-only but not searchable placeholders", () => {
     "radio-detail"
   ] as const) {
     assert.equal(isOnlineOnlyPage(page), true);
-    assert.equal(isSearchEnabledPage(page), false);
+    assert.equal(isSearchEnabledPage(page), true);
     assert.equal(isPlaceholderPage(page), false);
   }
 });
 
-test("library search remains local and enabled", () => {
+test("library remains local content while top-nav search stays enabled", () => {
   assert.equal(isSearchEnabledPage("library"), true);
   assert.equal(isOnlineOnlyPage("library"), false);
 });
