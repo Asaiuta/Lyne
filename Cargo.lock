@@ -450,6 +450,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "wasapi",
+ "windows-runtime-stage",
  "windows-sys 0.61.2",
 ]
 
@@ -3877,6 +3878,10 @@ checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
 dependencies = [
  "windows-link",
 ]
+
+[[package]]
+name = "windows-runtime-stage"
+version = "0.1.0"
 
 [[package]]
 name = "windows-strings"

@@ -33,9 +33,9 @@
     "icon": [
       "icons/icon.ico"
     ],
-    "resources": [
-      "../../../target/release/audio_server.exe",
-      "../../../target/release/libsoxr.dll"
-    ]
+    "resources": {
+      "../../../target/release/audio_server.exe": "audio_server.exe",
+      "../../../target/release/sidecar-runtime/*.dll": ""
+    }
   }
 }
