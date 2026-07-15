@@ -10,7 +10,7 @@ const defaultOutDir = path.join(appRoot, "output", "lyne-evidence");
 
 const parseArgs = (argv) => {
   const options = {
-    baseUrl: process.env.LYNE_AUDIO_SERVER_URL || "http://127.0.0.1:63790",
+    baseUrl: process.env.LYNE_AUDIO_SERVER_URL || "http://127.0.0.1:18083",
     token: process.env.LYNE_AUDIO_API_TOKEN || process.env.AUDIO_API_TOKEN || "",
     track: process.env.LYNE_PROBE_TRACK || "",
     outputDir: defaultOutDir,
@@ -64,7 +64,7 @@ const printHelp = () => {
   console.log(`Usage: node scripts/lyne-active-playback-control-probe.cjs [options]
 
 Options:
-  --base-url <url>      Audio server base URL (default: http://127.0.0.1:63790)
+  --base-url <url>      Audio server base URL (default: http://127.0.0.1:18083)
   --token <token>       Bearer token if the server requires AUDIO_API_TOKEN
   --track <path>        Local audio file to load before probing active playback
   --output-dir <dir>    Output directory relative to apps/desktop unless absolute

@@ -20,6 +20,9 @@ function renderBootstrapFailure(target: HTMLElement, error: unknown): void {
 }
 
 async function loadRendererMount(windowLabel: string): Promise<RendererMount> {
+  const runtime = await import("./shared/api/env");
+  await runtime.initializeApiRuntime();
+
   if (windowLabel === "desktop-lyric") {
     const module = await import("./features/desktop-lyric/mountDesktopLyricWindow");
     return module.mountDesktopLyricWindow;

@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: Stable HTTP contract for the desktop client.
 servers:
-  - url: http://127.0.0.1:63789
+  - url: http://127.0.0.1:18083
 paths:
   /state:
     get:

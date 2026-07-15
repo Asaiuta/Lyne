@@ -41,7 +41,7 @@ async fn main() -> std::io::Result<()> {
         .position(|a| a == "--port")
         .and_then(|i| args.get(i + 1))
         .and_then(|p| p.parse().ok())
-        .unwrap_or(63790);
+        .unwrap_or(18083);
 
     // Load config
     let engine_settings = EngineSettings::load_from_file(&runtime_paths.settings_path)

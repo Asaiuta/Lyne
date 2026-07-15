@@ -15,7 +15,7 @@ const supportedExtensions = new Set([
 
 const parseArgs = (argv) => {
   const options = {
-    baseUrl: process.env.LYNE_AUDIO_SERVER_URL || "http://127.0.0.1:63790",
+    baseUrl: process.env.LYNE_AUDIO_SERVER_URL || "http://127.0.0.1:18083",
     token: process.env.LYNE_AUDIO_API_TOKEN || process.env.AUDIO_API_TOKEN || "",
     root: process.env.LYNE_SCAN_ROOT || "",
     expected: process.env.LYNE_SCAN_EXPECTED || "",
@@ -73,7 +73,7 @@ const printHelp = () => {
   console.log(`Usage: node scripts/lyne-library-scan-evidence.cjs --root <music-dir> [options]
 
 Options:
-  --base-url <url>      Audio server base URL (default: http://127.0.0.1:63790)
+  --base-url <url>      Audio server base URL (default: http://127.0.0.1:18083)
   --token <token>       Bearer token if the server requires AUDIO_API_TOKEN
   --root <dir>          Real or fixture local library root to scan
   --expected <json>     Optional expected manifest for accuracy scoring
