@@ -80,6 +80,125 @@ Every error must include what operation failed and relevant context:
 .map_err(|e| format!("Failed to open loudness database '{}': {}", path, e))?;
 ```
 
+### Windows native runtime dependency closure
+
+#### 1. Scope / Trigger
+
+Apply this contract whenever a Windows executable or DLL depends on a
+non-system native runtime, including sidecars, benches, release bundles, and
+new consumers of `libsoxr.dll`. A successful Cargo launch is not proof that the
+artifact is self-contained: Cargo may inject `target/<profile>/deps` into the
+child environment and hide missing sibling DLLs.
+
+#### 2. Signatures
+
+The canonical implementation is the std-only `windows-runtime-stage` crate:
+
+```rust
+pub fn stage_binary_runtime(
+    binary: &Path,
+    plan: &StagePlan,
+) -> Result<StageReport, StageError>;
+
+pub fn stage_named_runtime(
+    names: &[&str],
+    plan: &StagePlan,
+) -> Result<StageReport, StageError>;
+```
+
+Its CLI contract is:
+
+```powershell
+cargo run --quiet `
+  --manifest-path crates/windows-runtime-stage/Cargo.toml `
+  --bin stage-windows-runtime -- `
+  --target-dir <target-dir> `
+  --profile <profile> `
+  [--root <linked-pe-file>]
+```
+
+`build.rs` and `scripts/stage-soxr-runtime.ps1` must remain thin callers.
+`apps/desktop/scripts/build-sidecar.mjs` must invoke `--root` after linking the
+actual `audio_server.exe`; that post-link scan is the authoritative closure
+check.
+
+#### 3. Contracts
+
+| Input / output | Contract |
+|------|------|
+| `CARGO_TARGET_DIR` / `--target-dir` | Selects the target tree; never assume the repository default when an override is present |
+| `SOXR_RUNTIME_DIR` | Optional highest-priority native runtime search directory |
+| Search candidates | Resolve imports case-insensitively from the importing file's directory and ordered configured search directories |
+| PE imports | Traverse every non-system import transitively; a candidate is valid only when its complete closure resolves |
+| Copy behavior | Compare file contents, not only name or length, before deciding a destination is current |
+| Development destinations | Stage beside the executable and into the profile `deps` directory |
+| Bundle destination | Stage all runtime DLLs in `target/<profile>/sidecar-runtime` |
+| Tauri release resources | Flatten `audio_server.exe` and `sidecar-runtime/*.dll` into the same installed resource directory |
+
+The process `PATH` is a discovery input during staging, not a supported runtime
+dependency. A directly launched staged executable must load its non-system DLLs
+from its own directory.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|------|------|
+| Root PE file does not exist or is not valid PE | Fail with the root path and parsing context |
+| Named runtime has several candidates | Try candidates in order until one complete transitive closure resolves |
+| A non-system DLL is unresolved | Fail with the importing PE name, missing DLL, and searched directories |
+| A staged file has the same length but different content | Replace it |
+| Post-link closure verification fails | Fail the sidecar build; do not start Tauri or create a bundle |
+| Release DLL is outside the flattened resource directory | Treat bundle layout as invalid even when development launch succeeds |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `audio_server.exe`, `libsoxr.dll`, `libgomp-1.dll`,
+  `libgcc_s_seh-1.dll`, and `libwinpthread-1.dll` are colocated, and the
+  executable reaches `/state` with a system-only `PATH`.
+- Base: a static native build has no non-system imports; the closure contains
+  only the linked root and needs no extra DLL copy.
+- Bad: copy only `libsoxr.dll`, then accept a Cargo-launched smoke test that
+  silently loads its MinGW dependencies from `target/debug/deps`.
+
+#### 6. Tests Required
+
+- Unit-test recursive import resolution, case-insensitive lookup, complete
+  candidate fallback, missing-transitive-import diagnostics, and
+  same-size/different-content replacement in `windows-runtime-stage`.
+- Run `cargo test -p windows-runtime-stage` and
+  `cargo check --workspace --all-targets` after changing staging behavior.
+- Run both development and release sidecar builds so the authoritative
+  post-link root is checked in each output profile.
+- Launch a copied/staged sidecar with a Windows-system-only `PATH`, assert an
+  authenticated or expected unauthenticated HTTP response, and verify loaded
+  non-system modules resolve beside the executable.
+- In a task-local copy, remove one transitive DLL and assert staging fails with
+  the importer and missing DLL. Do not mutate the live profile to create this
+  negative test.
+
+#### 7. Wrong vs Correct
+
+#### Wrong
+
+```powershell
+Copy-Item libsoxr.dll target/audio-dev
+# Assume success because `cargo run` happened to launch the sidecar.
+```
+
+#### Correct
+
+```powershell
+cargo run --quiet `
+  --manifest-path crates/windows-runtime-stage/Cargo.toml `
+  --bin stage-windows-runtime -- `
+  --target-dir target `
+  --profile audio-dev `
+  --root target/audio-dev/audio_server.exe
+```
+
+This verifies the imports of the linked executable and stages the complete
+non-system closure before runtime.
+
 ### Path validation for user-provided paths
 
 Use `validate_path()` from `server/mod.rs` for all file paths from HTTP requests:
