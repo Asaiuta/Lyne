@@ -10,6 +10,7 @@ import {
   IconFormatListFilled
 } from "../../components/icons";
 import { NcmMediaList } from "./NcmMediaList";
+import { PageBackButton } from "../../components/page/PageBackButton";
 import { PageHeader } from "../../components/page/PageHeader";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
@@ -472,10 +473,14 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
                   <PageHeader
                     title={category().name}
                     actions={
-                      <button type="button" class="ghost-button radio-category-back-button" onClick={() => setSelectedCategory(null)}>
+                      <PageToolbarButton
+                        variant="secondary"
+                        class="radio-category-back-button"
+                        onClick={() => setSelectedCategory(null)}
+                      >
                         <IconChevronLeft />
                         {t("ncm.radio.back")}
-                      </button>
+                      </PageToolbarButton>
                     }
                     tabs={
                       <div class="radio-category-tabs">
@@ -509,16 +514,17 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
         {(radio) => (
           <>
             <Show when={!props.isDetailRoute}>
-              <button type="button" class="ghost-button radio-inline-back-button" onClick={() => {
-                setSelectedRadio(null);
-                setRadioDetailInfo(null);
-                setRadioTracks([]);
-                setRadioProgramLoadCount(0);
-                setRadioDetailTabWithReset("programs");
-              }}>
-                <IconChevronLeft />
-                {t("ncm.radio.back")}
-              </button>
+              <PageBackButton
+                ariaLabel={t("ncm.radio.back")}
+                class="radio-inline-back-button"
+                onClick={() => {
+                  setSelectedRadio(null);
+                  setRadioDetailInfo(null);
+                  setRadioTracks([]);
+                  setRadioProgramLoadCount(0);
+                  setRadioDetailTabWithReset("programs");
+                }}
+              />
             </Show>
             <section class="online-discover-section radio-rec">
               <NcmListDetail

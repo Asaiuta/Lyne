@@ -1,65 +1,25 @@
-  .row-action,
-
-
-  .player-bar-cover,
-
-
-  .player-progress-edge,
-
-
-  .full-player-progress,
-
-
-  .library-root,
-
-
-  .queue-item,
-
-
-  .history-item,
-
-
-  .online-playlist-card,
-
-
-  .context-menu,
-
-
-  .login-modal-feedback {
-    background: color-mix(in oklch, var(--surface-2) 80%, transparent);
-    border: 1px solid var(--border-overlay);
-  }
-
-  .row-action {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border: 0;
-    border-radius: var(--radius-icon-btn);
-    color: var(--accent);
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .row-action:hover:not(:disabled) {
-    color: var(--accent-strong);
-    background: transparent;
-    transform: scale(1.15);
-  }
-
-  .context-menu {
+@layer components {
+  .n-dropdown.n-dropdown-menu.context-menu {
+    --n-min-width: 200px;
+    --n-option-height: 40px;
+    --n-option-opacity-disabled: 0.45;
+    --n-border-radius: var(--floating-radius);
+    --n-color: var(--floating-surface);
+    --n-text-color: var(--text-soft);
+    --n-option-text-color: var(--text-soft);
+    --n-option-text-color-hover: var(--text);
+    --n-option-color-hover: color-mix(in oklch, var(--surface-3) 84%, transparent);
+    --n-divider-color: var(--border-overlay);
+    --n-box-shadow: var(--floating-shadow);
     position: fixed;
     z-index: var(--z-context-menu);
     display: flex;
     flex-direction: column;
-    min-width: 200px;
-    padding: 8px;
     border: 1px solid var(--floating-border);
-    border-radius: var(--floating-radius);
-    background: var(--floating-surface);
-    box-shadow: var(--floating-shadow);
-    animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
+  }
+
+  .context-menu-header {
+    display: contents;
   }
 
   .context-menu-song-card {
@@ -67,7 +27,6 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    max-width: 180px;
     min-width: 0;
     padding: 4px 10px;
   }
@@ -122,25 +81,8 @@
     background: var(--border-overlay);
   }
 
-  .context-menu-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-height: 40px;
-    padding: 0 12px;
-    border-radius: var(--radius-card);
-    color: var(--text-soft);
-    text-align: left;
-  }
-
-  .context-menu-item:hover:not(:disabled) {
-    color: var(--text);
-    background: color-mix(in oklch, var(--surface-3) 84%, transparent);
-  }
-
-  .context-menu-item:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+  .context-menu .n-dropdown-option {
+    padding-inline: 12px;
   }
 
   .context-menu-icon {
@@ -150,38 +92,16 @@
     height: 18px;
   }
 
-  .context-menu-item--has-submenu {
-    position: relative;
-    cursor: pointer;
-  }
-
   .context-menu-submenu-arrow {
+    width: 14px;
+    height: 14px;
     margin-left: auto;
-    font-size: 12px;
     opacity: 0.5;
   }
 
-  .context-menu-item--has-submenu:hover .context-menu-submenu-arrow,
-  .context-menu-item--submenu-open .context-menu-submenu-arrow {
+  .context-menu .n-dropdown-option:hover .context-menu-submenu-arrow,
+  .context-menu .n-dropdown-option[aria-expanded="true"] .context-menu-submenu-arrow,
+  .context-menu .n-dropdown-option[data-expanded] .context-menu-submenu-arrow {
     opacity: 1;
   }
-
-  .context-menu-submenu {
-    position: fixed;
-    z-index: var(--z-context-menu);
-    display: flex;
-    flex-direction: column;
-    min-width: 200px;
-    padding: 8px;
-    border: 1px solid var(--floating-border);
-    border-radius: var(--floating-radius);
-    background: var(--floating-surface);
-    box-shadow: var(--floating-shadow);
-    animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
-  }
-
-  .context-menu-item--submenu-open {
-    color: var(--text);
-    background: color-mix(in oklch, var(--surface-3) 84%, transparent);
-    border-radius: var(--radius-card);
-  }
+}

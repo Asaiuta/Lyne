@@ -1,20 +1,20 @@
 import { Show, createEffect, createMemo, createSignal } from "solid-js";
 import {
   IconChat,
-  IconChevronLeft,
   IconFavoriteBorderFilled,
   IconFavoriteFilled,
   IconMusic,
-  IconSearch,
   IconShare
 } from "../../../components/icons";
 import { NcmMediaList } from "../NcmMediaList";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { BackToTop } from "../../../components/page/BackToTop";
+import { PageBackButton } from "../../../components/page/PageBackButton";
 import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { PageSearchInput } from "../../../components/page/PageSearchInput";
 import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
@@ -106,14 +106,11 @@ export function AlbumDetail(props: AlbumDetailProps) {
               <PageHero size="lg" offset={236} compact={compact()}>
                 <Show when={props.onBack}>
                   {(onBack) => (
-                    <button
-                      type="button"
-                      class="ghost-button ncm-daily-detail-back"
+                    <PageBackButton
+                      ariaLabel={t("ncm.album.backToFeed")}
+                      class="ncm-daily-detail-back"
                       onClick={onBack()}
-                    >
-                      <IconChevronLeft />
-                      {t("ncm.album.backToFeed")}
-                    </button>
+                    />
                   )}
                 </Show>
                 <NcmListDetail
@@ -136,15 +133,12 @@ export function AlbumDetail(props: AlbumDetailProps) {
                     { value: "comments", label: t("ncm.playlist.tab.comments"), count: props.detail?.commentCount }
                   ]}
                   rightControls={
-                    <label class="ncm-detail-search">
-                      <IconSearch />
-                      <input
-                        type="search"
-                        value={filter()}
-                        placeholder={t("ncm.playlist.search")}
-                        onInput={(event) => setFilter(event.currentTarget.value)}
-                      />
-                    </label>
+                    <PageSearchInput
+                      class="ncm-detail-search"
+                      value={filter()}
+                      placeholder={t("ncm.playlist.search")}
+                      onUpdateValue={setFilter}
+                    />
                   }
                   actionButtons={
                     <PageToolbarButton

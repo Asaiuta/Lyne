@@ -3,8 +3,11 @@ import { IconFolder, IconMusic } from "../../components/icons";
 import { MediaList } from "../../components/media/MediaList";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
-import type { LocalPlaylist } from "../../shared/api/types";
 import type { TranslationKey, TranslationParams } from "../../shared/i18n";
+import {
+  libraryDestinationToTab,
+  type LibraryDestination
+} from "../../shared/ui/navigation";
 import { LibraryFoldersView } from "./LibraryFoldersView";
 import { LibraryGroupedView } from "./LibraryGroupedView";
 import { LibraryPlaylistsView } from "./LibraryPlaylistsView";
@@ -15,12 +18,13 @@ type LibraryDataController = ReturnType<typeof useLibraryDataController>;
 
 interface LibraryTabContentProps {
   controller: LibraryDataController;
+  destination: LibraryDestination;
   currentTrackPath: string | null;
   currentMediaId: string | null;
   isPlaying: boolean;
   onManageRoots: () => void;
   onCreatePlaylist: () => void;
-  onDeletePlaylist: (playlist: LocalPlaylist) => void;
+  onSelectPlaylist: (playlistId: string) => void;
   onPlay: (item: LibraryListItem, contextItems: readonly LibraryListItem[]) => void;
   onEnqueue: (item: LibraryListItem) => void;
   onContextAction: (action: MediaContextAction, item: LibraryListItem) => void;
@@ -29,9 +33,11 @@ interface LibraryTabContentProps {
 }
 
 export function LibraryTabContent(props: LibraryTabContentProps) {
+  const activeTab = () => libraryDestinationToTab(props.destination);
+
   return (
     <div class="local-library-router">
-      <Show when={props.controller.activeTab() === "songs"}>
+      <Show when={activeTab() === "songs"}>
         <Show
           when={props.controller.virtualTotal() > 0}
           fallback={
@@ -75,7 +81,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
         </Show>
       </Show>
 
-      <Show when={props.controller.activeTab() === "artists"}>
+      <Show when={activeTab() === "artists"}>
         <LibraryGroupedView
           kind="artists"
           groups={props.controller.artistGroups()}
@@ -97,7 +103,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
           onActiveItemsChange={props.onActiveItemsChange}
         />
       </Show>
-      <Show when={props.controller.activeTab() === "albums"}>
+      <Show when={activeTab() === "albums"}>
         <LibraryGroupedView
           kind="albums"
           groups={props.controller.albumGroups()}
@@ -119,7 +125,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
           onActiveItemsChange={props.onActiveItemsChange}
         />
       </Show>
-      <Show when={props.controller.activeTab() === "playlists"}>
+      <Show when={activeTab() === "playlists"}>
         <LibraryPlaylistsView
           playlists={props.controller.localPlaylists()}
           selectedPlaylistId={props.controller.selectedPlaylistId()}
@@ -127,20 +133,22 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
           currentTrackPath={props.currentTrackPath}
           currentMediaId={props.currentMediaId}
           isPlaying={props.isPlaying}
-          isLoading={props.controller.isFetching()}
+          isLoading={
+            props.controller.isFetching() ||
+            props.controller.localPlaylistRequestState().status === "loading"
+          }
           sort={props.controller.sort()}
           onSortChange={props.controller.updateSort}
           onSortOrderChange={props.controller.updateSortOrder}
-          onSelectPlaylist={(playlistId) => void props.controller.selectLocalPlaylist(playlistId)}
+          onSelectPlaylist={props.onSelectPlaylist}
           onCreatePlaylist={props.onCreatePlaylist}
-          onDeletePlaylist={props.onDeletePlaylist}
           onPlay={props.onPlay}
           onEnqueue={props.onEnqueue}
           onContextAction={props.onContextAction}
           onActiveItemsChange={props.onActiveItemsChange}
         />
       </Show>
-      <Show when={props.controller.activeTab() === "folders"}>
+      <Show when={activeTab() === "folders"}>
         <LibraryFoldersView
           nodes={props.controller.folderTree()}
           selectedFolder={props.controller.selectedFolder()}

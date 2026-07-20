@@ -78,6 +78,9 @@ export type SidebarHiddenItemKey =
   | "download"
   | "streaming"
   | "library"
+  | "libraryAlbums"
+  | "libraryArtists"
+  | "libraryFolders"
   | "recent"
   | "createdPlaylists"
   | "collectedPlaylists"
@@ -268,6 +271,9 @@ export const DEFAULT_SIDEBAR_HIDDEN_ITEMS: SidebarHiddenItems = {
   download: false,
   streaming: false,
   library: false,
+  libraryAlbums: false,
+  libraryArtists: false,
+  libraryFolders: false,
   recent: false,
   createdPlaylists: false,
   collectedPlaylists: false,

@@ -2,6 +2,7 @@ import { For, createMemo, createSignal } from "solid-js";
 import { useTranslation } from "../../shared/i18n";
 import type { HomeSectionConfig, HomeSectionKey } from "../../shared/state/uiSettingsModel";
 import { commitUISettingField, readUISettingsSnapshot } from "../../shared/state/uiSettingsStorage";
+import { NaiveSwitch } from "../../shared/ui/naive";
 
 const SECTION_LABELS: Record<HomeSectionKey, string> = {
   dailyPicks: "ncm.home.section.dailyPicks",
@@ -25,9 +26,7 @@ const rowDropOverClass = "is-drop-over outline outline-1 outline-accent";
 const handleClass =
   "home-section-handle inline-flex h-[24px] w-[24px] cursor-grab items-center justify-center text-text-secondary text-[16px] leading-none select-none active:cursor-grabbing";
 
-const toggleClass = "home-section-toggle flex flex-1 cursor-pointer items-center gap-[8px] text-[13px]";
-
-const checkboxClass = "accent-accent";
+const toggleClass = "home-section-toggle flex flex-1 items-center gap-[8px] text-[13px]";
 
 function readSections(): HomeSectionConfig[] {
   return readUISettingsSnapshot().homeSections;
@@ -44,9 +43,9 @@ export function HomeSectionManager() {
 
   const sorted = createMemo(() => [...sections()].sort((a, b) => a.order - b.order));
 
-  const toggleVisibility = (key: HomeSectionKey) => {
+  const setVisibility = (key: HomeSectionKey, visible: boolean) => {
     const next = sections().map((s) =>
-      s.key === key ? { ...s, visible: !s.visible } : s
+      s.key === key ? { ...s, visible } : s
     );
     commitSections(next);
   };
@@ -117,15 +116,15 @@ export function HomeSectionManager() {
             onDragEnd={handleDragEnd}
           >
             <span class={handleClass} aria-hidden="true">⋮⋮</span>
-            <label class={toggleClass}>
-              <input
-                class={checkboxClass}
-                type="checkbox"
+            <div class={toggleClass}>
+              <NaiveSwitch
                 checked={section.visible}
-                onChange={() => toggleVisibility(section.key)}
+                round={false}
+                onChange={(checked) => setVisibility(section.key, checked)}
+                ariaLabel={t(SECTION_LABELS[section.key] as Parameters<typeof t>[0])}
               />
               <span>{t(SECTION_LABELS[section.key] as Parameters<typeof t>[0])}</span>
-            </label>
+            </div>
           </div>
         )}
       </For>

@@ -119,16 +119,15 @@ export function CopyLyricsModal(props: CopyLyricsModalProps) {
       size="lg"
       footer={
         <>
-          <button
-            type="button"
-            class="ghost-button"
+          <NaiveButton
+            variant="tertiary"
             onClick={toggleAll}
             disabled={props.lyrics.length === 0}
           >
             {selectedCount() === props.lyrics.length
               ? t("fullPlayer.copyLyrics.clear")
               : t("fullPlayer.copyLyrics.selectAll")}
-          </button>
+          </NaiveButton>
           <NaiveButton class="player" variant="primary" disabled={!canCopy()} onClick={copySelected}>
             {t("fullPlayer.copyLyrics.copy", { count: selectedCount() })}
           </NaiveButton>

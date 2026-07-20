@@ -6,12 +6,13 @@ import { IconPlay } from "../../../components/icons";
 import { VirtualizedGrid } from "../../../components/media/VirtualizedGrid";
 import { NcmMediaList } from "../NcmMediaList";
 import { CoverGridSkeleton } from "../../../components/page/Skeleton";
+import { LoadMoreButton } from "../../../components/page/LoadMoreButton";
 import { SImage } from "../../../components/SImage";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
-import { NaiveSkeleton, NaiveSpin, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
+import { NaiveSkeleton, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
 import { DISCOVER_PAGE_LIMIT, isTranslationKey } from "../shared/parsers";
 import type { PlaybackController } from "../shared/playback";
 import type {
@@ -27,30 +28,6 @@ import type {
   OnlineTrackItem
 } from "../shared/types";
 import { playlistSummaryFromDiscoverCard, type OnlinePlaylistSummary } from "../ncmPlaylistSummary";
-
-interface LoadMoreButtonProps {
-  isLoading: boolean;
-  onClick: () => void;
-}
-
-function LoadMoreButton(props: LoadMoreButtonProps) {
-  const { t } = useTranslation();
-  return (
-    <div class="online-discover-load-more">
-      <button
-        type="button"
-        class="ghost-button"
-        disabled={props.isLoading}
-        onClick={props.onClick}
-      >
-        <Show when={props.isLoading}>
-          <NaiveSpin class="button-spinner" size={14} ariaHidden />
-        </Show>
-        {props.isLoading ? t("ncm.playlist.loading") : t("ncm.discover.loadMore")}
-      </button>
-    </div>
-  );
-}
 
 export interface DiscoverPlaylistShowcaseProps {
   catName: string;
@@ -131,10 +108,14 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
         />
       </Show>
       <Show when={props.hasMorePlaylists && props.allPlaylists.length > 0}>
-        <LoadMoreButton
-          isLoading={props.isLoadingPlaylists}
-          onClick={props.onLoadMore}
-        />
+        <div class="online-discover-load-more">
+          <LoadMoreButton
+            label={t("ncm.discover.loadMore")}
+            loading={props.isLoadingPlaylists}
+            loadingLabel={t("ncm.playlist.loading")}
+            onClick={props.onLoadMore}
+          />
+        </div>
       </Show>
     </section>
   );
@@ -211,10 +192,14 @@ export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
         />
       </Show>
       <Show when={props.hasMoreArtists && props.allArtists.length > 0}>
-        <LoadMoreButton
-          isLoading={props.isLoadingArtists}
-          onClick={props.onLoadMore}
-        />
+        <div class="online-discover-load-more">
+          <LoadMoreButton
+            label={t("ncm.discover.loadMore")}
+            loading={props.isLoadingArtists}
+            loadingLabel={t("ncm.playlist.loading")}
+            onClick={props.onLoadMore}
+          />
+        </div>
       </Show>
     </section>
   );
@@ -441,10 +426,14 @@ export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
         />
       </Show>
       <Show when={props.hasMoreVideos && props.allVideos.length > 0}>
-        <LoadMoreButton
-          isLoading={props.isLoadingVideos}
-          onClick={props.onLoadMore}
-        />
+        <div class="online-discover-load-more">
+          <LoadMoreButton
+            label={t("ncm.discover.loadMore")}
+            loading={props.isLoadingVideos}
+            loadingLabel={t("ncm.playlist.loading")}
+            onClick={props.onLoadMore}
+          />
+        </div>
       </Show>
     </section>
   );
@@ -522,10 +511,14 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
               )}
             />
             <Show when={props.hasMoreAlbums}>
-              <LoadMoreButton
-                isLoading={props.isLoadingAlbums}
-                onClick={props.onLoadMoreAlbums}
-              />
+              <div class="online-discover-load-more">
+                <LoadMoreButton
+                  label={t("ncm.discover.loadMore")}
+                  loading={props.isLoadingAlbums}
+                  loadingLabel={t("ncm.playlist.loading")}
+                  onClick={props.onLoadMoreAlbums}
+                />
+              </div>
             </Show>
           </div>
         </Show>

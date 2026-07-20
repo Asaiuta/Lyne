@@ -12,6 +12,10 @@ interface PresenceTransitionState {
 
 const DEFAULT_DURATION_MS = 140;
 
+const prefersReducedMotion = (): boolean =>
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export function usePresenceTransition(
   open: Accessor<boolean>,
   options: PresenceTransitionOptions = {}
@@ -23,23 +27,37 @@ export function usePresenceTransition(
 
   createEffect(() => {
     let closeTimer: number | undefined;
+    let closeFrame: number | undefined;
     let openFrame: number | undefined;
 
     if (open()) {
       setRendered(true);
       setClosing(false);
-      openFrame = window.requestAnimationFrame(() => setVisible(true));
+      if (typeof window === "undefined" || prefersReducedMotion()) {
+        setVisible(true);
+      } else {
+        openFrame = window.requestAnimationFrame(() => setVisible(true));
+      }
     } else if (rendered()) {
       setVisible(false);
       setClosing(true);
-      closeTimer = window.setTimeout(() => {
+      const finishClose = (): void => {
         setRendered(false);
         setClosing(false);
-      }, durationMs);
+      };
+      if (typeof window === "undefined") {
+        finishClose();
+      } else if (prefersReducedMotion()) {
+        closeFrame = window.requestAnimationFrame(finishClose);
+      } else {
+        closeTimer = window.setTimeout(finishClose, durationMs);
+      }
     }
 
     onCleanup(() => {
+      if (typeof window === "undefined") return;
       if (openFrame !== undefined) window.cancelAnimationFrame(openFrame);
+      if (closeFrame !== undefined) window.cancelAnimationFrame(closeFrame);
       if (closeTimer !== undefined) window.clearTimeout(closeTimer);
     });
   });

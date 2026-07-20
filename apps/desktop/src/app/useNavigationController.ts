@@ -1,11 +1,28 @@
-import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, type Accessor } from "solid-js";
 import type { OnlinePlaylistSummary, UserPlaylistMode } from "../features/online/ncmPlaylistSummary";
 import type { FeedCardItem, OnlineTrackItem, RadioSubscribeEvent } from "../features/online/shared/types";
 import {
   persistNavigationStateSnapshot,
   readNavigationStateSnapshot
 } from "../shared/state/navigationPersistence";
-import { isPlaylistPage, normalizeDiscoverTab, type ActivePage, type DiscoverTab } from "../shared/ui/navigation";
+import {
+  DEFAULT_LIBRARY_DESTINATION,
+  isPlaylistPage,
+  normalizeDiscoverTab,
+  normalizeLibraryDestination,
+  type ActivePage,
+  type DiscoverTab,
+  type LibraryDestination,
+  type NavigationLocation
+} from "../shared/ui/navigation";
+import {
+  createNavigationHistory,
+  enterOfflineNavigation,
+  moveNavigationHistory,
+  pushNavigationLocation,
+  replaceNavigationLocation,
+  type NavigationHistoryState
+} from "./navigationHistory";
 
 export interface DiscoverTabRequest {
   tab: DiscoverTab;
@@ -51,15 +68,10 @@ export type LikedCollectionTabRequest = {
   version: number;
 };
 
-export interface LocalPlaylistRequest {
-  playlistId: string | null;
-  version: number;
-}
-
 export interface NavigationController {
   activePage: Accessor<ActivePage>;
+  libraryDestination: Accessor<LibraryDestination>;
   selectedPlaylistId: Accessor<number | null>;
-  localPlaylistRequest: Accessor<LocalPlaylistRequest>;
   discoverTabRequest: Accessor<DiscoverTabRequest>;
   dailySongsRequest: Accessor<DailySongsRequest>;
   artistDetailRequest: Accessor<ArtistDetailRequest>;
@@ -73,6 +85,9 @@ export interface NavigationController {
   canGoBack: Accessor<boolean>;
   canGoForward: Accessor<boolean>;
   handleActivePageChange: (page: ActivePage) => void;
+  handleNavigateToLibrary: (destination: LibraryDestination) => void;
+  handleReplaceLibraryDestination: (destination: LibraryDestination) => void;
+  handleEnterOfflineMode: () => void;
   handleSidebarPlaylistSelect: (page: UserPlaylistMode, playlist: OnlinePlaylistSummary) => void;
   handleSidebarLocalPlaylistSelect: (playlistId: string) => void;
   handleSelectedPlaylistChange: (playlistId: number | null) => void;
@@ -107,6 +122,9 @@ export function useNavigationController(): NavigationController {
   const restoredNavigation = readNavigationStateSnapshot();
   const [activePage, setActivePage] =
     createSignal<ActivePage>(restoredNavigation.activePage);
+  const [libraryDestination, setLibraryDestination] = createSignal<LibraryDestination>(
+    restoredNavigation.libraryDestination
+  );
   const [selectedPlaylistId, setSelectedPlaylistId] =
     createSignal<number | null>(restoredNavigation.selectedPlaylistId);
   const [discoverTabRequest, setDiscoverTabRequest] = createSignal<DiscoverTabRequest>({
@@ -146,50 +164,81 @@ export function useNavigationController(): NavigationController {
       tab: restoredNavigation.likedCollectionTab,
       version: restoredNavigation.likedCollectionTab === "playlists" ? 0 : 1
     });
-  const [localPlaylistRequest, setLocalPlaylistRequest] = createSignal<LocalPlaylistRequest>({
-    playlistId: null,
-    version: 0
-  });
-  const [historyStack, setHistoryStack] =
-    createSignal<ActivePage[]>([restoredNavigation.activePage]);
-  const [historyIndex, setHistoryIndex] = createSignal(0);
+  const initialLocation: NavigationLocation = {
+    page: restoredNavigation.activePage,
+    libraryDestination: restoredNavigation.libraryDestination
+  };
+  const [historyState, setHistoryState] = createSignal<NavigationHistoryState>(
+    createNavigationHistory(initialLocation)
+  );
 
   const canRetainPlaylistSelection = (page: ActivePage): boolean =>
     isPlaylistPage(page) || page === "playlist-detail";
 
-  const commitPageChange = (page: ActivePage) => {
-    setActivePage(page);
-    if (!canRetainPlaylistSelection(page)) {
+  const commitLocation = (location: NavigationLocation) => {
+    setActivePage(location.page);
+    setLibraryDestination(location.libraryDestination);
+    if (!canRetainPlaylistSelection(location.page)) {
       setSelectedPlaylistId(null);
     }
   };
 
-  const pushNavigation = (page: ActivePage) => {
-    const current = activePage();
-    if (page === current) {
-      if (!canRetainPlaylistSelection(page)) {
+  const pushLocation = (location: NavigationLocation) => {
+    const currentHistory = historyState();
+    const nextHistory = pushNavigationLocation(currentHistory, location);
+    if (nextHistory === currentHistory) {
+      if (!canRetainPlaylistSelection(location.page)) {
         setSelectedPlaylistId(null);
       }
       return;
     }
+    setHistoryState(nextHistory);
+    commitLocation(location);
+  };
 
-    const nextIndex = historyIndex() + 1;
-    setHistoryStack((prev) => [...prev.slice(0, nextIndex), page]);
-    setHistoryIndex(nextIndex);
-    commitPageChange(page);
+  const pushNavigation = (page: ActivePage) => {
+    pushLocation({
+      page,
+      libraryDestination:
+        page === "library" ? DEFAULT_LIBRARY_DESTINATION : libraryDestination()
+    });
   };
 
   const handleActivePageChange = (page: ActivePage) => {
     pushNavigation(page);
   };
 
-  const handleSidebarPlaylistSelect = (page: UserPlaylistMode, playlist: OnlinePlaylistSummary) => {
-    if (activePage() !== page) {
-      const nextIndex = historyIndex() + 1;
-      setHistoryStack((prev) => [...prev.slice(0, nextIndex), page]);
-      setHistoryIndex(nextIndex);
+  const handleNavigateToLibrary = (destination: LibraryDestination) => {
+    pushLocation({
+      page: "library",
+      libraryDestination: normalizeLibraryDestination(destination)
+    });
+  };
+
+  const handleReplaceLibraryDestination = (destination: LibraryDestination) => {
+    const location: NavigationLocation = {
+      page: "library",
+      libraryDestination: normalizeLibraryDestination(destination)
+    };
+    if (activePage() !== "library") {
+      pushLocation(location);
+      return;
     }
-    commitPageChange(page);
+    const nextHistory = replaceNavigationLocation(historyState(), location);
+    setHistoryState(nextHistory);
+    commitLocation(location);
+  };
+
+  const handleEnterOfflineMode = () => {
+    const nextHistory = enterOfflineNavigation(historyState());
+    const target = nextHistory.entries[nextHistory.index];
+    if (!target) return;
+    setHistoryState(nextHistory);
+    commitLocation(target);
+  };
+
+  const handleSidebarPlaylistSelect = (page: UserPlaylistMode, playlist: OnlinePlaylistSummary) => {
+    pushNavigation(page);
     setSelectedPlaylistId(playlist.id);
     setPlaylistDetailRequest((prev) => ({ playlist, version: prev.version + 1 }));
     pushNavigation("playlist-detail");
@@ -201,8 +250,7 @@ export function useNavigationController(): NavigationController {
 
   const handleSidebarLocalPlaylistSelect = (playlistId: string) => {
     setSelectedPlaylistId(null);
-    setLocalPlaylistRequest((prev) => ({ playlistId, version: prev.version + 1 }));
-    pushNavigation("library");
+    handleNavigateToLibrary({ kind: "playlist", playlistId });
   };
 
   const handleNavigateToDiscover = (tab: string) => {
@@ -283,38 +331,55 @@ export function useNavigationController(): NavigationController {
   };
 
   const handleGoBack = () => {
-    const nextIndex = historyIndex() - 1;
-    if (nextIndex < 0) return;
-    const target = historyStack()[nextIndex];
+    const currentHistory = historyState();
+    const nextHistory = moveNavigationHistory(currentHistory, -1);
+    if (nextHistory === currentHistory) return;
+    const target = nextHistory.entries[nextHistory.index];
     if (!target) return;
-    setHistoryIndex(nextIndex);
-    commitPageChange(target);
+    setHistoryState(nextHistory);
+    commitLocation(target);
   };
 
   const handleGoForward = () => {
-    const nextIndex = historyIndex() + 1;
-    const target = historyStack()[nextIndex];
+    const currentHistory = historyState();
+    const nextHistory = moveNavigationHistory(currentHistory, 1);
+    if (nextHistory === currentHistory) return;
+    const target = nextHistory.entries[nextHistory.index];
     if (!target) return;
-    setHistoryIndex(nextIndex);
-    commitPageChange(target);
+    setHistoryState(nextHistory);
+    commitLocation(target);
   };
 
-  const canGoBack = createMemo(() => historyIndex() > 0);
-  const canGoForward = createMemo(() => historyIndex() < historyStack().length - 1);
+  const canGoBack = createMemo<boolean>(() => historyState().index > 0);
+  const canGoForward = createMemo<boolean>(
+    () => historyState().index < historyState().entries.length - 1
+  );
 
-  createEffect(() => {
-    persistNavigationStateSnapshot({
-      activePage: activePage(),
-      selectedPlaylistId: selectedPlaylistId(),
-      discoverTab: discoverTabRequest().tab,
-      likedCollectionTab: likedCollectionTabRequest().tab
-    });
-  });
+  createEffect(
+    on(
+      () => [
+        activePage(),
+        libraryDestination(),
+        selectedPlaylistId(),
+        discoverTabRequest().tab,
+        likedCollectionTabRequest().tab
+      ] as const,
+      ([page, destination, playlistId, discoverTab, likedCollectionTab]) => {
+        persistNavigationStateSnapshot({
+          activePage: page,
+          libraryDestination: destination,
+          selectedPlaylistId: playlistId,
+          discoverTab,
+          likedCollectionTab
+        });
+      }
+    )
+  );
 
   return {
     activePage,
+    libraryDestination,
     selectedPlaylistId,
-    localPlaylistRequest,
     discoverTabRequest,
     dailySongsRequest,
     artistDetailRequest,
@@ -328,6 +393,9 @@ export function useNavigationController(): NavigationController {
     canGoBack,
     canGoForward,
     handleActivePageChange,
+    handleNavigateToLibrary,
+    handleReplaceLibraryDestination,
+    handleEnterOfflineMode,
     handleSidebarPlaylistSelect,
     handleSidebarLocalPlaylistSelect,
     handleSelectedPlaylistChange,

@@ -28,8 +28,11 @@ async function loadRendererMount(windowLabel: string): Promise<RendererMount> {
     return module.mountDesktopLyricWindow;
   }
 
-  const module = await import("./app/mountMainWindow");
-  return module.mountMainWindow;
+  const [module, initialLocale] = await Promise.all([
+    import("./app/mountMainWindow"),
+    import("./shared/i18n/locale").then((locale) => locale.loadInitialLocale())
+  ]);
+  return (target) => module.mountMainWindow(target, initialLocale);
 }
 
 const root = document.getElementById("root");

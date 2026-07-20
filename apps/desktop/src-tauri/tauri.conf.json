@@ -35,7 +35,8 @@
     ],
     "resources": {
       "../../../target/release/audio_server.exe": "audio_server.exe",
-      "../../../target/release/sidecar-runtime/*.dll": ""
+      "../../../target/release/sidecar-runtime/*.dll": "",
+      "plugins": "plugins"
     }
   }
 }

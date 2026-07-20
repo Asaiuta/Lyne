@@ -8,7 +8,9 @@ import {
 } from "../../components/icons";
 import { EmptyState } from "../../components/EmptyState";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
+import { RouteContentTransition } from "../../components/RouteContentTransition";
 import { useTranslation } from "../../shared/i18n";
+import { useUISettings } from "../../shared/state/useUISettings";
 import { NaiveTabs, type NaiveTabItem } from "../../shared/ui/naive";
 import "../../shared/styles/pages/auxiliary.css";
 
@@ -16,6 +18,7 @@ type DownloadTab = "downloaded" | "downloading";
 
 export function DownloadPage() {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   const [activeTab, setActiveTab] = createSignal<DownloadTab>("downloaded");
 
   const downloadedCount = () => 0;
@@ -73,17 +76,26 @@ export function DownloadPage() {
         </div>
       </header>
 
-      <div class="auxiliary-page-body">
-        <EmptyState
-          size="lg"
-          icon={<IconList />}
-          description={
-            activeTab() === "downloaded"
-              ? t("download.empty.downloaded")
-              : t("download.empty.downloading")
-          }
-        />
-      </div>
+      <RouteContentTransition
+        value={activeTab()}
+        transitionKey={activeTab()}
+        animation={uiSettings.routeAnimation}
+        motionScope="download-content"
+      >
+        {(displayedDownloadTab) => (
+          <div class="auxiliary-page-body" data-download-tab={displayedDownloadTab()}>
+            <EmptyState
+              size="lg"
+              icon={<IconList />}
+              description={
+                displayedDownloadTab() === "downloaded"
+                  ? t("download.empty.downloaded")
+                  : t("download.empty.downloading")
+              }
+            />
+          </div>
+        )}
+      </RouteContentTransition>
     </section>
   );
 }

@@ -7,14 +7,18 @@ import {
   IconMusic,
   IconPlayFilled,
   IconRefreshFilled,
-  IconSearch,
   IconStorage
 } from "../../components/icons";
 import { createApiClient } from "../../shared/api/client";
 import { usePlayback } from "../../app/PlaybackContext";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
-import { NaiveDropdown, NaiveH2, type NaiveDropdownOption } from "../../shared/ui/naive";
+import {
+  NaiveButton,
+  NaiveDropdown,
+  NaiveH2,
+  type NaiveDropdownOption
+} from "../../shared/ui/naive";
 import { CloudMatchModal } from "./details/CloudMatchModal";
 import { DailySongsBatchModal } from "./details/DailySongsBatchModal";
 import {
@@ -25,6 +29,7 @@ import {
 import { createPlaybackController } from "./shared/playback";
 import type { Feedback, OnlineTrackItem } from "./shared/types";
 import { NcmMediaList } from "./NcmMediaList";
+import { PageSearchInput } from "../../components/page/PageSearchInput";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import "../../shared/styles/pages/cloud-search-liked-radio.css";
 
@@ -369,9 +374,9 @@ export function CloudPage(props: CloudPageProps) {
                 <strong>{t("ncm.login.title")}</strong>
                 <span class="status-line">{t("ncm.cloud.loginRequired")}</span>
               </div>
-              <button type="button" class="primary-button" onClick={props.onRequireNcmLogin}>
+              <NaiveButton variant="primary" strong onClick={props.onRequireNcmLogin}>
                 {t("ncm.login.action.qr")}
-              </button>
+              </NaiveButton>
             </section>
           </>
         }
@@ -447,14 +452,12 @@ export function CloudPage(props: CloudPageProps) {
             </NaiveDropdown>
           </div>
           <Show when={tracks().length > 0}>
-            <label class="playlist-detail-search cloud-search">
-              <IconSearch />
-              <input
-                value={searchValue()}
-                onInput={(event) => setSearchValue(event.currentTarget.value)}
-                placeholder={t("ncm.cloud.searchPlaceholder")}
-              />
-            </label>
+            <PageSearchInput
+              class="playlist-detail-search cloud-search"
+              value={searchValue()}
+              placeholder={t("ncm.cloud.searchPlaceholder")}
+              onUpdateValue={setSearchValue}
+            />
           </Show>
         </section>
 

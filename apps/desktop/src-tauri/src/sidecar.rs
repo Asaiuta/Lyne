@@ -77,7 +77,7 @@ impl ApiRuntimeState {
         Ok(())
     }
 
-    fn snapshot(&self) -> Result<ApiRuntimeConfig, String> {
+    pub(crate) fn snapshot(&self) -> Result<ApiRuntimeConfig, String> {
         let status = self.status.lock().map_err(|_| {
             "Failed to lock API runtime state while reading configuration.".to_string()
         })?;

@@ -3,7 +3,15 @@ import { Modal } from "../../components/Modal";
 import { IconDelete, IconPlaylist, IconPlus } from "../../components/icons";
 import type { LocalPlaylist } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
-import { NaiveList, NaiveListItem, NaiveThing } from "../../shared/ui/naive";
+import {
+  NaiveButton,
+  NaiveCheckbox,
+  NaiveInput,
+  NaiveInputNumber,
+  NaiveList,
+  NaiveListItem,
+  NaiveThing
+} from "../../shared/ui/naive";
 import type { LibraryListItem } from "./libraryViewTypes";
 
 interface LibraryPlaylistTargetModalProps {
@@ -128,29 +136,29 @@ export function LibraryPlaylistTargetModal(props: LibraryPlaylistTargetModalProp
 
         <div class="local-playlist-create-inline">
           <span class="field-label">{t("library.playlists.create.title")}</span>
-          <input
-            class="text-input"
+          <NaiveInput
             type="text"
             value={name()}
-            onInput={(event) => setName(event.currentTarget.value)}
+            onUpdateValue={setName}
             placeholder={t("library.playlists.create.namePlaceholder")}
+            ariaLabel={t("library.playlists.create.namePlaceholder")}
           />
-          <input
-            class="text-input"
+          <NaiveInput
             type="text"
             value={description()}
-            onInput={(event) => setDescription(event.currentTarget.value)}
+            onUpdateValue={setDescription}
             placeholder={t("library.playlists.create.descriptionPlaceholder")}
+            ariaLabel={t("library.playlists.create.descriptionPlaceholder")}
           />
-          <button
-            type="button"
-            class="primary-button"
+          <NaiveButton
+            variant="primary"
+            strong
             onClick={() => void handleCreate()}
             disabled={!name().trim() || creating() || submittingPlaylistId() !== null}
           >
             <IconPlus />
             <span>{hasItems() ? t("library.playlists.createAndAdd") : t("library.action.createPlaylist")}</span>
-          </button>
+          </NaiveButton>
         </div>
       </div>
     </Modal>
@@ -161,15 +169,15 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
   const { t } = useTranslation();
   const [checkedIds, setCheckedIds] = createSignal<string[]>([]);
   const [rangeOpen, setRangeOpen] = createSignal<boolean>(false);
-  const [rangeStart, setRangeStart] = createSignal<string>("");
-  const [rangeEnd, setRangeEnd] = createSignal<string>("");
+  const [rangeStart, setRangeStart] = createSignal<number | null>(null);
+  const [rangeEnd, setRangeEnd] = createSignal<number | null>(null);
 
   createEffect(() => {
     if (props.open) return;
     setCheckedIds([]);
     setRangeOpen(false);
-    setRangeStart("");
-    setRangeEnd("");
+    setRangeStart(null);
+    setRangeEnd(null);
   });
 
   const checkedSet = createMemo<Set<string>>(() => new Set(checkedIds()));
@@ -207,9 +215,9 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
   };
 
   const applyRange = () => {
-    const startValue = Number(rangeStart());
-    const endValue = Number(rangeEnd());
-    if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) return;
+    const startValue = rangeStart();
+    const endValue = rangeEnd();
+    if (startValue === null || endValue === null) return;
     const start = Math.max(1, Math.min(Math.floor(startValue), props.items.length));
     const end = Math.max(1, Math.min(Math.floor(endValue), props.items.length));
     if (start > end) return;
@@ -241,11 +249,11 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
         <div class="local-batch-table" role="table" aria-label={t("library.batch.title")}>
           <div class="local-batch-row local-batch-head" role="row">
             <span class="local-batch-cell local-batch-check" role="columnheader">
-              <input
-                type="checkbox"
-                aria-label={t("library.batch.selectAll")}
+              <NaiveCheckbox
+                size="small"
+                ariaLabel={t("library.batch.selectAll")}
                 checked={allChecked()}
-                onChange={toggleAll}
+                onUpdateChecked={toggleAll}
               />
             </span>
             <span class="local-batch-cell local-batch-index" role="columnheader">#</span>
@@ -256,13 +264,13 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
           <div class="local-batch-body" role="rowgroup">
             <For each={props.items}>
               {(item, index) => (
-                <label class="local-batch-row" role="row">
+                <div class="local-batch-row" role="row">
                   <span class="local-batch-cell local-batch-check" role="cell">
-                    <input
-                      type="checkbox"
-                      aria-label={t("media.selection.item", { title: displayTitle(item) })}
+                    <NaiveCheckbox
+                      size="small"
+                      ariaLabel={t("media.selection.item", { title: displayTitle(item) })}
                       checked={checkedSet().has(item.id)}
-                      onChange={() => toggleItem(item.id)}
+                      onUpdateChecked={() => toggleItem(item.id)}
                     />
                   </span>
                   <span class="local-batch-cell local-batch-index" role="cell">{index() + 1}</span>
@@ -275,7 +283,7 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
                   <span class="local-batch-cell" role="cell">
                     {displayText(item.album, t("library.group.unknownAlbum"))}
                   </span>
-                </label>
+                </div>
               )}
             </For>
           </div>
@@ -286,56 +294,59 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
               {t("library.selection.count", { count: selectedItems().length })}
             </span>
             <div class="local-batch-range">
-              <button type="button" class="ghost-button" onClick={() => setRangeOpen((open) => !open)}>
+              <NaiveButton variant="tertiary" onClick={() => setRangeOpen((open) => !open)}>
                 {t("library.batch.advancedFilter")}
-              </button>
+              </NaiveButton>
               <Show when={rangeOpen()}>
                 <div class="local-batch-range-popover">
-                  <input
-                    class="text-input"
-                    type="number"
-                    min="1"
+                  <NaiveInputNumber
+                    class="local-batch-range-input"
+                    size="small"
+                    min={1}
                     max={props.items.length}
                     value={rangeStart()}
                     placeholder={t("library.batch.rangeStart")}
-                    onInput={(event) => setRangeStart(event.currentTarget.value)}
+                    onUpdateValue={setRangeStart}
+                    ariaLabel={t("library.batch.rangeStart")}
                   />
                   <span>-</span>
-                  <input
-                    class="text-input"
-                    type="number"
-                    min="1"
+                  <NaiveInputNumber
+                    class="local-batch-range-input"
+                    size="small"
+                    min={1}
                     max={props.items.length}
                     value={rangeEnd()}
                     placeholder={t("library.batch.rangeEnd")}
-                    onInput={(event) => setRangeEnd(event.currentTarget.value)}
+                    onUpdateValue={setRangeEnd}
+                    ariaLabel={t("library.batch.rangeEnd")}
                   />
-                  <button type="button" class="ghost-button" onClick={applyRange}>
+                  <NaiveButton size="small" secondary onClick={applyRange}>
                     {t("library.batch.rangeSelect")}
-                  </button>
+                  </NaiveButton>
                 </div>
               </Show>
             </div>
           </div>
           <div class="local-batch-actions">
-            <button
-              type="button"
-              class="primary-button"
+            <NaiveButton
+              variant="primary"
+              strong
               disabled={selectedItems().length === 0}
               onClick={handleAddToPlaylist}
             >
               <IconPlaylist />
               <span>{t("library.action.addToPlaylist")}</span>
-            </button>
-            <button
-              type="button"
-              class="primary-button danger-button"
+            </NaiveButton>
+            <NaiveButton
+              variant="primary"
+              strong
+              class="danger-button"
               disabled={selectedItems().length === 0}
               onClick={handleDelete}
             >
               <IconDelete />
               <span>{t("library.batch.deleteSongs")}</span>
-            </button>
+            </NaiveButton>
           </div>
         </div>
       </div>
@@ -371,22 +382,22 @@ export function LibraryConfirmActionModal(props: LibraryConfirmActionModalProps)
       size="sm"
       footer={
         <div class="button-row local-confirm-actions">
-          <button
-            type="button"
-            class="ghost-button"
+          <NaiveButton
+            variant="tertiary"
             onClick={props.onClose}
             disabled={submitting()}
           >
             {t("library.action.cancel")}
-          </button>
-          <button
-            type="button"
-            class="primary-button danger-button"
+          </NaiveButton>
+          <NaiveButton
+            variant="primary"
+            strong
+            class="danger-button"
             onClick={() => void handleConfirm()}
             disabled={submitting()}
           >
             {props.confirmLabel}
-          </button>
+          </NaiveButton>
         </div>
       }
     >

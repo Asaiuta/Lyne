@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createLazyNaive, scheduleIdlePreload } from "./lazy-naive";
+import { scheduleIdlePreload } from "../idlePreload";
+import { createLazyNaive } from "./lazy-naive";
 
 test("createLazyNaive resolves the import thunk once and caches the value", async () => {
   let calls = 0;

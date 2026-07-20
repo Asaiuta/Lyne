@@ -44,6 +44,7 @@ test("readNavigationStateSnapshot restores a valid persisted page and tabs", () 
 
   assert.deepEqual(readNavigationStateSnapshot({ runtime }), {
     activePage: "discover",
+    libraryDestination: { kind: "tab", tab: "songs" },
     selectedPlaylistId: null,
     discoverTab: "artists",
     likedCollectionTab: "albums"
@@ -60,6 +61,7 @@ test("normalizeNavigationStateSnapshot falls back from stale page and tab values
     }),
     {
       activePage: "recommend",
+      libraryDestination: { kind: "tab", tab: "songs" },
       selectedPlaylistId: null,
       discoverTab: "playlists",
       likedCollectionTab: "playlists"
@@ -77,6 +79,7 @@ test("normalizeNavigationStateSnapshot restores search without playlist selectio
     }),
     {
       activePage: "search",
+      libraryDestination: { kind: "tab", tab: "songs" },
       selectedPlaylistId: null,
       discoverTab: "playlists",
       likedCollectionTab: "artists"
@@ -96,6 +99,7 @@ test("legacy Discover MV tab normalizes to the default visible tab", () => {
 
   assert.deepEqual(readNavigationStateSnapshot({ runtime }), {
     activePage: "discover",
+    libraryDestination: { kind: "tab", tab: "songs" },
     selectedPlaylistId: null,
     discoverTab: "playlists",
     likedCollectionTab: "playlists"
@@ -120,6 +124,7 @@ test("detail pages are not restored without their navigation request payload", (
       }),
       {
         activePage: "recommend",
+        libraryDestination: { kind: "tab", tab: "songs" },
         selectedPlaylistId: null,
         discoverTab: "new",
         likedCollectionTab: "albums"
@@ -138,6 +143,7 @@ test("playlist id is restored only for playlist pages", () => {
     }),
     {
       activePage: "created-playlists",
+      libraryDestination: { kind: "tab", tab: "songs" },
       selectedPlaylistId: 12,
       discoverTab: "new",
       likedCollectionTab: "artists"
@@ -160,6 +166,7 @@ test("persistNavigationStateSnapshot writes normalized state", () => {
     persistNavigationStateSnapshot(
       {
         activePage: "library",
+        libraryDestination: { kind: "playlist", playlistId: " local-5 " },
         selectedPlaylistId: 5,
         discoverTab: "new",
         likedCollectionTab: "playlists"
@@ -171,6 +178,7 @@ test("persistNavigationStateSnapshot writes normalized state", () => {
 
   assert.deepEqual(JSON.parse(runtime.values[NAVIGATION_STATE_STORAGE_KEY] ?? "null"), {
     activePage: "library",
+    libraryDestination: { kind: "playlist", playlistId: "local-5" },
     selectedPlaylistId: null,
     discoverTab: "new",
     likedCollectionTab: "playlists"
@@ -184,10 +192,46 @@ test("readNavigationStateSnapshot falls back when JSON is invalid", () => {
 
   assert.deepEqual(readNavigationStateSnapshot({ runtime }), {
     activePage: "recommend",
+    libraryDestination: { kind: "tab", tab: "songs" },
     selectedPlaylistId: null,
     discoverTab: "playlists",
     likedCollectionTab: "playlists"
   });
+});
+
+test("navigation snapshot restores library tabs and specific local playlists", () => {
+  assert.deepEqual(
+    normalizeNavigationStateSnapshot({
+      activePage: "library",
+      libraryDestination: { kind: "tab", tab: "albums" }
+    }).libraryDestination,
+    { kind: "tab", tab: "albums" }
+  );
+
+  assert.deepEqual(
+    normalizeNavigationStateSnapshot({
+      activePage: "library",
+      libraryDestination: { kind: "playlist", playlistId: "local-42" }
+    }).libraryDestination,
+    { kind: "playlist", playlistId: "local-42" }
+  );
+});
+
+test("navigation snapshot rejects invalid library destinations", () => {
+  assert.deepEqual(
+    normalizeNavigationStateSnapshot({
+      activePage: "library",
+      libraryDestination: { kind: "tab", tab: "old-view" }
+    }).libraryDestination,
+    { kind: "tab", tab: "songs" }
+  );
+  assert.deepEqual(
+    normalizeNavigationStateSnapshot({
+      activePage: "library",
+      libraryDestination: { kind: "playlist", playlistId: "" }
+    }).libraryDestination,
+    { kind: "tab", tab: "songs" }
+  );
 });
 
 test("navigation scroll positions round-trip by key", () => {

@@ -3,6 +3,11 @@ import { useTranslation } from "../../../shared/i18n";
 import type { GlobalFont } from "../../../shared/state/uiSettingsModel";
 import { DEFAULT_THEME_SEED_HEX } from "../../../shared/theme/paletteEngine";
 import {
+  NaiveButton,
+  NaiveColorPicker,
+  NaiveInput
+} from "../../../shared/ui/naive";
+import {
   BooleanSettingItem,
   SelectSettingItem,
   type SelectOption
@@ -29,9 +34,13 @@ function PanelHeader(props: { manager: ManagerConfig; onBack: () => void }) {
   const { t } = useTranslation();
   return (
     <div class="settings-subpage-head">
-      <button type="button" class="ghost-button settings-subpage-back" onClick={props.onBack}>
+      <NaiveButton
+        variant="tertiary"
+        class="settings-subpage-back"
+        onClick={props.onBack}
+      >
         {t("settings.appearance.back")}
-      </button>
+      </NaiveButton>
       <div class="settings-subpage-copy">
         <h2>{t(props.manager.labelKey)}</h2>
         <p>{t(props.manager.descriptionKey)}</p>
@@ -90,14 +99,13 @@ export function ThemeConfigPanel(props: AppearanceAdvancedPanelProps) {
                 />
               )}
             </For>
-            <input
-              type="color"
+            <NaiveColorPicker
               class="settings-color-picker"
               value={props.settings.customAccentColor()}
-              onInput={(event) => props.settings.setCustomAccentColor(event.currentTarget.value)}
-              onChange={(event) => props.settings.handleCustomAccentColor(event.currentTarget.value)}
+              onUpdateValue={props.settings.setCustomAccentColor}
+              onComplete={props.settings.handleCustomAccentColor}
               disabled={props.settings.themeFollowCover()}
-              aria-label={t("settings.appearance.customAccentColor")}
+              ariaLabel={t("settings.appearance.customAccentColor")}
             />
           </div>
         </SettingItem>
@@ -141,14 +149,15 @@ export function FontConfigPanel(props: AppearanceAdvancedPanelProps) {
           highlighted={isHi("customFontFamily")}
           index={props.nextIndex()}
         >
-          <input
+          <NaiveInput
             class="settings-text-input"
             type="text"
             value={props.settings.customFontFamily()}
-            onInput={(event) => props.settings.setCustomFontFamily(event.currentTarget.value)}
-            onChange={(event) => props.settings.handleCustomFontFamily(event.currentTarget.value)}
+            onUpdateValue={props.settings.setCustomFontFamily}
+            onChange={props.settings.handleCustomFontFamily}
             disabled={props.settings.globalFont() !== "custom"}
             placeholder={t("settings.appearance.customFontFamily.placeholder")}
+            ariaLabel={t("settings.appearance.customFontFamily")}
           />
         </SettingItem>
       </SettingGroup>
@@ -217,13 +226,15 @@ export function CustomCodePanel(props: AppearanceAdvancedPanelProps) {
           index={props.nextIndex()}
         >
           <div class="settings-code-stack">
-            <textarea
+            <NaiveInput
+              type="textarea"
               class="settings-code-input"
-              spellcheck={false}
+              inputProps={{ spellcheck: false }}
               value={props.settings.customCss()}
-              onInput={(event) => props.settings.setCustomCss(event.currentTarget.value)}
+              onUpdateValue={props.settings.setCustomCss}
               onBlur={commitCustomCss}
               placeholder={t("settings.appearance.customCss.placeholder")}
+              ariaLabel={t("settings.appearance.customCss")}
             />
           </div>
         </SettingItem>
@@ -236,18 +247,20 @@ export function CustomCodePanel(props: AppearanceAdvancedPanelProps) {
           index={props.nextIndex()}
         >
           <div class="settings-code-stack">
-            <textarea
+            <NaiveInput
+              type="textarea"
               class="settings-code-input"
-              spellcheck={false}
+              inputProps={{ spellcheck: false }}
               value={props.settings.customJs()}
-              onInput={(event) => props.settings.setCustomJs(event.currentTarget.value)}
+              onUpdateValue={props.settings.setCustomJs}
               onBlur={commitCustomJs}
               placeholder={t("settings.appearance.customJs.placeholder")}
+              ariaLabel={t("settings.appearance.customJs")}
             />
             <div class="settings-code-actions">
-              <button type="button" class="ghost-button" onClick={runCustomJs}>
+              <NaiveButton variant="tertiary" onClick={runCustomJs}>
                 {t("settings.appearance.customJs.run")}
-              </button>
+              </NaiveButton>
             </div>
           </div>
         </SettingItem>

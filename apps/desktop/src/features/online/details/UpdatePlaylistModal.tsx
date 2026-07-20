@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal } from "solid-js";
 import { IconPlaylist } from "../../../components/icons";
 import { Modal } from "../../../components/Modal";
 import { createApiClient } from "../../../shared/api/client";
@@ -6,6 +6,12 @@ import { useTranslation } from "../../../shared/i18n";
 import { assertNcmOk, updatePlaylist } from "../../../shared/api/ncm";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
+import {
+  NaiveButton,
+  NaiveInput,
+  NaiveSelect,
+  type NaiveSelectOption
+} from "../../../shared/ui/naive";
 
 interface UpdatePlaylistModalProps {
   open: boolean;
@@ -55,22 +61,20 @@ export function UpdatePlaylistModal(props: UpdatePlaylistModalProps) {
       .finally(() => setLoadingTags(false));
   });
 
-  const selectedSet = createMemo<Set<string>>(() => new Set(selectedTags()));
+  const tagOptions = createMemo<ReadonlyArray<NaiveSelectOption<string>>>(() =>
+    availableTags().map((tag) => ({ value: tag, label: tag }))
+  );
   const canSubmit = createMemo<boolean>(() =>
     props.playlist !== null && name().trim().length > 0 && !submitting()
   );
 
-  const toggleTag = (tag: string) => {
-    const current = selectedSet();
-    if (current.has(tag)) {
-      setSelectedTags(selectedTags().filter((value) => value !== tag));
-      return;
-    }
-    if (selectedTags().length >= MAX_TAGS) {
+  const updateSelectedTags = (tags: string[]) => {
+    if (tags.length > MAX_TAGS) {
       props.setFeedback("error", t("ncm.playlist.tagsLimit"));
+      setSelectedTags(tags.slice(0, MAX_TAGS));
       return;
     }
-    setSelectedTags([...selectedTags(), tag]);
+    setSelectedTags(tags);
   };
 
   const submit = async () => {
@@ -116,56 +120,63 @@ export function UpdatePlaylistModal(props: UpdatePlaylistModalProps) {
           void submit();
         }}
       >
-        <label class="create-playlist-field">
+        <div class="create-playlist-field">
           <span class="field-label">{t("ncm.playlist.name")}</span>
-          <input
-            class="text-input"
+          <NaiveInput
             type="text"
             value={name()}
             disabled={props.nameLocked}
             placeholder={t("ncm.playlist.namePlaceholder")}
-            onInput={(event) => setName(event.currentTarget.value)}
+            clearable={!props.nameLocked}
+            onUpdateValue={setName}
+            ariaLabel={t("ncm.playlist.name")}
           />
-        </label>
-        <label class="create-playlist-field">
+        </div>
+        <div class="create-playlist-field">
           <span class="field-label">{t("ncm.playlist.description")}</span>
-          <textarea
-            class="text-input ncm-update-playlist-desc"
-            maxLength={800}
+          <NaiveInput
+            type="textarea"
+            class="ncm-update-playlist-desc"
+            maxlength={800}
             value={desc()}
             placeholder={t("ncm.playlist.descriptionPlaceholder")}
-            onInput={(event) => setDesc(event.currentTarget.value)}
+            autosize={{ minRows: 3, maxRows: 6 }}
+            clearable
+            onUpdateValue={setDesc}
+            ariaLabel={t("ncm.playlist.description")}
           />
-        </label>
+        </div>
         <div class="ncm-update-playlist-tags">
           <span class="field-label">{t("ncm.playlist.tags")}</span>
           <Show
             when={availableTags().length > 0}
             fallback={<div class="status-line">{loadingTags() ? t("ncm.playlist.loadingTags") : t("ncm.playlist.noTags")}</div>}
           >
-            <div class="ncm-update-playlist-tag-grid">
-              <For each={availableTags()}>
-                {(tag) => (
-                  <button
-                    type="button"
-                    class={`ncm-update-playlist-tag${selectedSet().has(tag) ? " is-active" : ""}`}
-                    onClick={() => toggleTag(tag)}
-                  >
-                    {tag}
-                  </button>
-                )}
-              </For>
-            </div>
+            <NaiveSelect<string>
+              multiple
+              class="ncm-update-playlist-tag-select"
+              value={selectedTags()}
+              options={tagOptions()}
+              filterable
+              clearable
+              maxTagCount="responsive"
+              placeholder={t("ncm.playlist.tags")}
+              onUpdateValue={updateSelectedTags}
+              ariaLabel={t("ncm.playlist.tags")}
+            />
           </Show>
         </div>
-        <button
-          type="submit"
-          class="primary-button create-playlist-submit"
+        <NaiveButton
+          nativeType="submit"
+          variant="primary"
+          strong
+          block
+          class="create-playlist-submit"
           disabled={!canSubmit()}
         >
           <IconPlaylist />
           <span>{submitting() ? t("ncm.playlist.updating") : t("ncm.playlist.edit")}</span>
-        </button>
+        </NaiveButton>
       </form>
     </Modal>
   );

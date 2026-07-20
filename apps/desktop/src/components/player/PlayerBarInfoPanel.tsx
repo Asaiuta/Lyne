@@ -15,6 +15,7 @@ interface PlayerBarInfoCoverProps {
   coverUrl: string | null;
   coverAlt: string;
   coverExpandLabel: string;
+  onWarmup?: () => void;
   onClick: () => void;
 }
 
@@ -86,6 +87,9 @@ export function PlayerBarInfoPanel(props: PlayerBarInfoPanelProps) {
         <button
           type="button"
           class={`player-bar-cover${props.cover.coverTransitioning ? " is-leaving" : ""}`}
+          onPointerEnter={() => props.cover.onWarmup?.()}
+          onFocusIn={() => props.cover.onWarmup?.()}
+          onPointerDown={() => props.cover.onWarmup?.()}
           onClick={props.cover.onClick}
           aria-label={props.cover.coverExpandLabel}
           title={props.cover.coverExpandLabel}

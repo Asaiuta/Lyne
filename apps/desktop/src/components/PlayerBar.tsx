@@ -57,10 +57,12 @@ interface PlayerBarProps {
   onSeek: (position: number) => void;
   onVolumePreview?: (volume: number) => void;
   onVolumeChange: (volume: number) => void;
+  onVolumeStep: (volume: number) => void;
   onSkipPrev: () => void;
   onSkipNext: () => void;
   onCycleRepeat: () => void;
   onToggleShuffle: () => void;
+  onCoverWarmup?: () => void;
   onCoverClick: () => void;
   onOpenQueue: () => void;
   onOpenSettings?: () => void;
@@ -327,7 +329,8 @@ export function PlayerBar(props: PlayerBarProps) {
       event.stopPropagation();
       const delta = event.deltaY > 0 ? -0.05 : 0.05;
       const next = Math.max(0, Math.min(1, uiVolume() + delta));
-      commitVolume(next);
+      setUiVolume(next);
+      props.onVolumeStep(next);
     }) as JSX.EventHandlerUnion<HTMLButtonElement, WheelEvent>
   });
   const utilityQueue = () => ({
@@ -343,6 +346,7 @@ export function PlayerBar(props: PlayerBarProps) {
     coverUrl: props.coverUrl,
     coverAlt: coverAlt(),
     coverExpandLabel: t("player.aria.coverExpand"),
+    onWarmup: props.onCoverWarmup,
     onClick: props.onCoverClick
   });
   const infoMeta = () => ({

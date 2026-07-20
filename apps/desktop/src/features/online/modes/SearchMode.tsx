@@ -1,6 +1,7 @@
 import { For, Match, Show, Switch, createMemo } from "solid-js";
 import type { Accessor } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
+import { RouteContentTransition } from "../../../components/RouteContentTransition";
 import { NcmMediaList } from "../NcmMediaList";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
@@ -33,6 +34,7 @@ export interface SearchModeProps {
 
 export function SearchMode(props: SearchModeProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   const tabItems = createMemo<ReadonlyArray<NaiveTabItem<SearchTab>>>(() => [
     { value: "songs", label: t("ncm.tabs.songs") },
     { value: "playlists", label: t("ncm.tabs.playlists") },
@@ -64,48 +66,57 @@ export function SearchMode(props: SearchModeProps) {
         />
       </div>
 
-      <div class="online-search-router">
-        <Switch>
-          <Match when={props.searchTab === "songs"}>
-            <SongsResultPanel {...props} />
-          </Match>
-          <Match when={props.searchTab === "playlists"}>
-            <PlaylistResultsPanel {...props} />
-          </Match>
-          <Match when={props.searchTab === "artists"}>
-            <FeedCardResultsPanel
-              items={props.artistResults}
-              tab="artists"
-              isSearching={props.isSearching}
-              onSelect={props.onSelectArtist}
-            />
-          </Match>
-          <Match when={props.searchTab === "albums"}>
-            <FeedCardResultsPanel
-              items={props.albumResults}
-              tab="albums"
-              isSearching={props.isSearching}
-              onSelect={props.onSelectAlbum}
-            />
-          </Match>
-          <Match when={props.searchTab === "videos"}>
-            <FeedCardResultsPanel
-              items={props.videoResults}
-              tab="videos"
-              isSearching={props.isSearching}
-              onSelect={props.onSelectVideo}
-            />
-          </Match>
-          <Match when={props.searchTab === "radios"}>
-            <FeedCardResultsPanel
-              items={props.radioResults}
-              tab="radios"
-              isSearching={props.isSearching}
-              onSelect={(item) => void props.onSelectRadio?.(item)}
-            />
-          </Match>
-        </Switch>
-      </div>
+      <RouteContentTransition
+        value={props.searchTab}
+        transitionKey={props.searchTab}
+        animation={uiSettings.routeAnimation}
+        motionScope="search-content"
+      >
+        {(displayedSearchTab) => (
+          <div class="online-search-router" data-search-tab={displayedSearchTab()}>
+            <Switch>
+              <Match when={displayedSearchTab() === "songs"}>
+                <SongsResultPanel {...props} />
+              </Match>
+              <Match when={displayedSearchTab() === "playlists"}>
+                <PlaylistResultsPanel {...props} />
+              </Match>
+              <Match when={displayedSearchTab() === "artists"}>
+                <FeedCardResultsPanel
+                  items={props.artistResults}
+                  tab="artists"
+                  isSearching={props.isSearching}
+                  onSelect={props.onSelectArtist}
+                />
+              </Match>
+              <Match when={displayedSearchTab() === "albums"}>
+                <FeedCardResultsPanel
+                  items={props.albumResults}
+                  tab="albums"
+                  isSearching={props.isSearching}
+                  onSelect={props.onSelectAlbum}
+                />
+              </Match>
+              <Match when={displayedSearchTab() === "videos"}>
+                <FeedCardResultsPanel
+                  items={props.videoResults}
+                  tab="videos"
+                  isSearching={props.isSearching}
+                  onSelect={props.onSelectVideo}
+                />
+              </Match>
+              <Match when={displayedSearchTab() === "radios"}>
+                <FeedCardResultsPanel
+                  items={props.radioResults}
+                  tab="radios"
+                  isSearching={props.isSearching}
+                  onSelect={(item) => void props.onSelectRadio?.(item)}
+                />
+              </Match>
+            </Switch>
+          </div>
+        )}
+      </RouteContentTransition>
     </section>
   );
 }

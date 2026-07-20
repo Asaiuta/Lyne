@@ -203,6 +203,8 @@ const NETWORK_ITEM_IDS = [
   "socketTest"
 ] as const;
 
+const PLUGIN_ITEM_IDS = ["plugins"] as const;
+
 const ABOUT_ITEM_IDS = [
   "appVersion",
   "checkUpdate",
@@ -222,6 +224,7 @@ export const SETTINGS_SECTION_ITEM_IDS: Record<SettingsCategoryKey, readonly str
   keyboard: KEYBOARD_ITEM_IDS,
   network: NETWORK_ITEM_IDS,
   "audio-engine": AUDIO_ENGINE_ITEM_IDS,
+  plugins: PLUGIN_ITEM_IDS,
   about: ABOUT_ITEM_IDS
 };
 
@@ -234,5 +237,6 @@ export const SETTINGS_SECTION_ITEM_ID_SETS: Record<SettingsCategoryKey, Readonly
   keyboard: new Set(KEYBOARD_ITEM_IDS),
   network: new Set(NETWORK_ITEM_IDS),
   "audio-engine": new Set(AUDIO_ENGINE_ITEM_IDS),
+  plugins: new Set(PLUGIN_ITEM_IDS),
   about: new Set(ABOUT_ITEM_IDS)
 };

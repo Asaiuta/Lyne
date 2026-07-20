@@ -17,7 +17,7 @@ import { usePlayback } from "../../app/PlaybackContext";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { useUISettings } from "../../shared/state/useUISettings";
-import { NaiveH2, NaiveH3 } from "../../shared/ui/naive";
+import { NaiveButton, NaiveH2, NaiveH3 } from "../../shared/ui/naive";
 import { NcmMediaList } from "./NcmMediaList";
 import {
   createErrorMessageReader,
@@ -194,9 +194,9 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
               <strong>{t("ncm.fm.title")}</strong>
               <span class="status-line">{t("ncm.radio.loginRequired")}</span>
             </div>
-            <button type="button" class="primary-button" onClick={props.onRequireNcmLogin}>
+            <NaiveButton variant="primary" strong onClick={props.onRequireNcmLogin}>
               {t("ncm.login.action.qr")}
-            </button>
+            </NaiveButton>
           </section>
         }
       >
@@ -242,9 +242,13 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
                 </span>
               </div>
               <div class="personal-fm-actions">
-                <button
-                  type="button"
-                  class="primary-button personal-fm-play"
+                <NaiveButton
+                  circle
+                  secondary
+                  strong
+                  ariaLabel={isCurrentFmTrackPlaying() ? t("player.aria.pause") : t("player.aria.play")}
+                  title={isCurrentFmTrackPlaying() ? t("player.aria.pause") : t("player.aria.play")}
+                  class="personal-fm-play"
                   onClick={() => void handlePlayPause()}
                   disabled={isLoading()}
                 >
@@ -252,37 +256,43 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
                     <IconPause />
                   </Show>
                   <span>{isCurrentFmTrackPlaying() ? t("player.aria.pause") : t("player.aria.play")}</span>
-                </button>
-                <button
-                  type="button"
-                  class="ghost-button personal-fm-icon-button"
+                </NaiveButton>
+                <NaiveButton
+                  variant="tertiary"
+                  round
+                  size="medium"
+                  class="personal-fm-icon-button"
                   onClick={() => void handleNextBatch()}
                   disabled={isLoading()}
-                  aria-label={t("player.aria.next")}
+                  ariaLabel={t("player.aria.next")}
                   title={t("player.aria.next")}
                 >
                   <IconSkipNext />
-                </button>
-                <button
-                  type="button"
-                  class="ghost-button personal-fm-icon-button"
+                </NaiveButton>
+                <NaiveButton
+                  variant="tertiary"
+                  round
+                  size="medium"
+                  class="personal-fm-icon-button"
                   onClick={() => void dislikeTrack(currentFmTrack())}
                   disabled={isLoading() || currentFmTrack() === null}
-                  aria-label={t("ncm.fm.aria.dislike")}
+                  ariaLabel={t("ncm.fm.aria.dislike")}
                   title={t("ncm.fm.aria.dislike")}
                 >
                   <IconThumbDown />
-                </button>
-                <button
-                  type="button"
-                  class="ghost-button personal-fm-icon-button"
+                </NaiveButton>
+                <NaiveButton
+                  variant="tertiary"
+                  round
+                  size="medium"
+                  class="personal-fm-icon-button"
                   onClick={() => void loadTracks()}
                   disabled={isLoading()}
-                  aria-label={t("ncm.cloud.refresh")}
+                  ariaLabel={t("ncm.cloud.refresh")}
                   title={t("ncm.cloud.refresh")}
                 >
                   <IconRefresh />
-                </button>
+                </NaiveButton>
               </div>
               <span class="personal-fm-eyebrow">
                 <IconMusic />

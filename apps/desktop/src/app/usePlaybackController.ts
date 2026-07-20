@@ -18,6 +18,11 @@ import {
 import { usePlaybackDisplayClock } from "./playbackDisplayClock";
 import { usePlaybackCommands } from "./usePlaybackCommands";
 import { usePlaybackSocket } from "./usePlaybackSocket";
+import {
+  applyEffectiveAudioSettingsToPlayerState,
+  createAudioSettingsStore,
+  type AudioSettingsStore
+} from "../shared/state/audioSettingsStore";
 
 const TRACK_STATE_SETTLE_TIMEOUT_MS = 2500;
 const TRACK_STATE_POLL_INTERVAL_MS = 120;
@@ -56,6 +61,7 @@ export const getPlaybackPollingMode = (input: PlaybackPollingInput): PlaybackPol
 
 export interface PlaybackController {
   state: Accessor<RequestState<PlayerState>>;
+  audioSettings: AudioSettingsStore;
   spectrum: Accessor<number[]>;
   loadingProgress: Accessor<number | null>;
   wsStatus: Accessor<WsStatus>;
@@ -81,6 +87,7 @@ export interface PlaybackController {
   handleSeek: (position: number) => Promise<void>;
   handleVolumePreview: (volume: number) => Promise<void>;
   handleVolumeChange: (volume: number) => Promise<void>;
+  handleVolumeStep: (volume: number) => Promise<void>;
   handleCycleRepeat: () => Promise<void>;
   handleToggleShuffle: () => Promise<void>;
 }
@@ -95,7 +102,19 @@ interface PlaybackControllerDeps {
 export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackController {
   const { api, notifyPlaybackHistoryChanged, refreshQueueForCurrentSurface } = deps;
 
-  const [state, setState] = createSignal<RequestState<PlayerState>>({ status: "idle" });
+  const [rawState, setRawState] = createSignal<RequestState<PlayerState>>({ status: "idle" });
+  const audioSettings = createAudioSettingsStore(api);
+  const state = createMemo<RequestState<PlayerState>>(() => {
+    const current = rawState();
+    const effective = audioSettings.effective();
+    if (current.status !== "success" || !effective) {
+      return current;
+    }
+    return {
+      status: "success",
+      data: applyEffectiveAudioSettingsToPlayerState(current.data, effective)
+    };
+  });
   const [spectrum, setSpectrum] = createSignal<number[]>([]);
   const [loadingProgress, setLoadingProgress] = createSignal<number | null>(null);
   const [wsStatus, setWsStatus] = createSignal<WsStatus>("connecting");
@@ -105,19 +124,21 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
   const [lastSocketActivityAt, setLastSocketActivityAt] = createSignal<number>(Date.now());
   const [pollClock, setPollClock] = createSignal<number>(0);
   let lastRefreshAt = 0;
+  let refreshRequestGeneration = 0;
 
   const applyPlayerState = (next: PlayerState) => {
-    setState((current) => mergePlayerState(current, next));
+    setRawState((current) => mergePlayerState(current, next));
   };
 
   const patchPlayerState: PlaybackController["patchPlayerState"] = (patch) => {
-    setState((current) => patchMergedPlayerState(current, patch));
+    setRawState((current) => patchMergedPlayerState(current, patch));
   };
 
   const refreshState = async (expectedPath?: string | null) => {
+    const requestGeneration = ++refreshRequestGeneration;
     const current = state();
     if (current.status !== "success") {
-      setState({ status: "loading" });
+      setRawState({ status: "loading" });
     }
 
     const normalizedExpectedPath = expectedPath?.trim() ? expectedPath : null;
@@ -132,6 +153,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
         latestState = next;
 
         if (!normalizedExpectedPath || sameMediaPath(next.file_path, normalizedExpectedPath)) {
+          if (requestGeneration !== refreshRequestGeneration) return;
           applyPlayerState(next);
           return;
         }
@@ -144,12 +166,15 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
           ) {
             return;
           }
+          if (requestGeneration !== refreshRequestGeneration) return;
           applyPlayerState(next);
           return;
         }
       } catch (error) {
         if (!normalizedExpectedPath || Date.now() >= deadline) {
-          setState({ status: "error", error: readErrorMessage(error) });
+          if (requestGeneration === refreshRequestGeneration) {
+            setRawState({ status: "error", error: readErrorMessage(error) });
+          }
           return;
         }
       }
@@ -158,6 +183,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
         window.setTimeout(resolve, TRACK_STATE_POLL_INTERVAL_MS)
       );
       if (latestState && sameMediaPath(latestState.file_path, normalizedExpectedPath)) {
+        if (requestGeneration !== refreshRequestGeneration) return;
         applyPlayerState(latestState);
         return;
       }
@@ -166,6 +192,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
 
   onMount(() => {
     void refreshState();
+    void audioSettings.refresh().catch(() => undefined);
     refreshQueueForCurrentSurface();
   });
 
@@ -204,6 +231,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
 
   const commands = usePlaybackCommands({
     api,
+    audioSettings,
     repeatMode,
     shuffleMode,
     applyPlayerState,
@@ -277,6 +305,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
 
   return {
     state,
+    audioSettings,
     spectrum,
     loadingProgress,
     wsStatus,
@@ -302,6 +331,7 @@ export function usePlaybackController(deps: PlaybackControllerDeps): PlaybackCon
     handleSeek: commands.handleSeek,
     handleVolumePreview: commands.handleVolumePreview,
     handleVolumeChange: commands.handleVolumeChange,
+    handleVolumeStep: commands.handleVolumeStep,
     handleCycleRepeat: commands.handleCycleRepeat,
     handleToggleShuffle: commands.handleToggleShuffle
   };

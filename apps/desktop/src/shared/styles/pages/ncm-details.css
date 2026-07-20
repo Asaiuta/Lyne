@@ -235,7 +235,7 @@
   }
 
   .ncm-list-detail-play svg,
-  .ncm-list-detail-menu-left .ghost-button svg {
+  .ncm-list-detail-menu-left .page-toolbar-button > svg {
     width: 18px;
     height: 18px;
   }
@@ -329,8 +329,7 @@
     font-size: 13px;
   }
 
-  .ncm-list-detail.is-compact .ncm-list-detail-play,
-  .ncm-list-detail.is-compact .ncm-list-detail-menu-left .page-action {
+  .ncm-list-detail.is-compact .ncm-list-detail-play {
     padding-inline: 14px;
   }
 
@@ -642,8 +641,7 @@
     height: 17px;
   }
 
-  .ncm-detail-page .ncm-list-detail-play,
-  .ncm-detail-page .ncm-list-detail-menu-left .page-action {
+  .ncm-detail-page .ncm-list-detail-play {
     min-width: 86px;
     height: 40px;
     padding-inline: 18px;
@@ -674,51 +672,6 @@
     min-height: 32px;
     color: var(--text-secondary);
     font-size: 13px;
-  }
-
-  .ncm-detail-search {
-    display: flex;
-    align-items: center;
-    width: 132px;
-    height: 40px;
-    min-width: 132px;
-    gap: 8px;
-    padding: 0 12px;
-    border: 1px solid color-mix(in oklch, var(--border) 36%, transparent);
-    border-radius: var(--radius-pill);
-    color: var(--muted);
-    background: color-mix(in oklch, var(--surface-2) 84%, transparent);
-    transition:
-      width 0.24s var(--ease-standard),
-      border-color 0.24s var(--ease-standard),
-      background-color 0.24s var(--ease-standard);
-  }
-
-  .ncm-detail-search:focus-within {
-    width: 186px;
-    border-color: color-mix(in oklch, var(--text) 18%, var(--border));
-    background: var(--surface-container);
-  }
-
-  .ncm-detail-search svg {
-    width: 17px;
-    height: 17px;
-    flex: none;
-  }
-
-  .ncm-detail-search input {
-    width: 100%;
-    min-width: 0;
-    border: 0;
-    outline: 0;
-    color: var(--text);
-    background: transparent;
-    font: inherit;
-    font-size: 13px;
-  }
-
-  .ncm-detail-search input::placeholder {
-    color: var(--muted);
   }
 
   .ncm-detail-page .media-list-header {
@@ -1063,7 +1016,7 @@
     color: var(--text-soft);
   }
 
-  .ncm-video-actions .ghost-button {
+  .ncm-video-actions .naive-button {
     min-height: 40px;
     border-radius: 8px;
   }

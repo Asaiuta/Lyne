@@ -14,7 +14,7 @@ import {
   naivePopselectOptionContentClass,
   naivePopselectPopoverClass,
   naivePopselectRootClass,
-  naivePopselectTriggerClass
+  naivePopselectTriggerButtonClass
 } from "./popselect.shared";
 
 const POPSELECT_LEAVE_PRESENCE_MS = 180;
@@ -65,7 +65,7 @@ export function NaivePopselectKobalte<TValue extends string>(
   let leaveTimer: ReturnType<typeof setTimeout> | undefined;
 
   const rootClass = () => naivePopselectRootClass(props);
-  const triggerClass = () => naivePopselectTriggerClass(props, props.open);
+  const triggerClass = () => naivePopselectTriggerButtonClass(props, props.open);
   const popoverClass = () => naivePopselectPopoverClass(props, props.open);
   const clearLeaveTimer = (): void => {
     if (leaveTimer === undefined) return;

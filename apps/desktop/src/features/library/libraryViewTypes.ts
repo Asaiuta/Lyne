@@ -35,7 +35,6 @@ export interface LibraryGroup {
   detail?: string | undefined;
 }
 
-export type LibraryTab = "songs" | "artists" | "albums" | "playlists" | "folders";
 export type LibrarySortField =
   | "default"
   | "title"

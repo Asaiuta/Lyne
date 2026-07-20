@@ -19,10 +19,7 @@ export type NaiveDropdownTriggerMode = "click" | "hover" | "manual";
 
 /**
  * Option descriptor for `NaiveDropdown`. Mirrors NaiveUI 2.43.2's `DropdownOption`
- * shape, but reduced to the subset PR2 supports.
- *
- * Cascade `children` (submenus) is intentionally not modeled here yet - see the
- * runtime warning in `NaiveDropdownKobalte.tsx`.
+ * shape, reduced to the subset used by AudioPlayer.
  */
 export interface NaiveDropdownOption {
   key: string;
@@ -38,11 +35,8 @@ export interface NaiveDropdownOption {
   type?: "divider";
   /** Per-option select handler. Receives the option for ergonomics. */
   onSelect?: (option: NaiveDropdownOption) => void;
-  /**
-   * Cascade `children` (submenus). Deferred in PR2 - supplying this triggers a
-   * `console.warn` and is skipped at render time.
-   */
-  children?: NaiveDropdownOption[];
+  /** Cascade submenu options. */
+  children?: ReadonlyArray<NaiveDropdownOption>;
 }
 
 export interface NaiveDropdownProps {
@@ -55,6 +49,8 @@ export interface NaiveDropdownProps {
   children?: JSX.Element;
   /** Option list. */
   options: ReadonlyArray<NaiveDropdownOption>;
+  /** Optional non-interactive content rendered before the option list. */
+  header?: JSX.Element;
   /** Initial placement. Defaults to `"bottom-start"` (Naive default). */
   placement?: NaiveDropdownPlacement;
   /** Distance between anchor and dropdown menu. */

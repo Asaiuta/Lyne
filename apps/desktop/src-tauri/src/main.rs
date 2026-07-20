@@ -7,6 +7,7 @@ use tauri::{
 };
 
 mod desktop_lyric;
+mod plugin_host;
 mod sidecar;
 mod smtc;
 
@@ -116,7 +117,16 @@ fn initialize_runtime(app: &tauri::AppHandle) -> Result<(), String> {
         .try_state::<sidecar::ApiRuntimeState>()
         .ok_or_else(|| "Failed to access managed API runtime state during setup.".to_string())?;
 
-    sidecar::start(app, &sidecar_state, &runtime_state)
+    sidecar::start(app, &sidecar_state, &runtime_state)?;
+
+    if let Err(error) = plugin_host::start(
+        app,
+        &app.state::<plugin_host::PluginHostState>(),
+        &runtime_state,
+    ) {
+        eprintln!("[audio-desktop] plugin host startup degraded: {error}");
+    }
+    Ok(())
 }
 
 fn publish_startup_failure(app: &tauri::AppHandle, error: String) {
@@ -137,9 +147,13 @@ fn main() {
     let app = tauri::Builder::default()
         .manage(sidecar::SidecarState::new())
         .manage(sidecar::ApiRuntimeState::new(sidecar::generate_api_token()))
+        .manage(plugin_host::PluginHostState::empty())
         .manage(smtc::SmtcState::new())
         .invoke_handler(tauri::generate_handler![
             sidecar::get_api_runtime_config,
+            plugin_host::plugin_host_list,
+            plugin_host::plugin_host_set_enabled,
+            plugin_host::plugin_host_update_settings,
             reveal_path_in_folder,
             desktop_lyric::open_desktop_lyric,
             desktop_lyric::close_desktop_lyric,
@@ -180,6 +194,9 @@ fn main() {
 
     app.run(|app_handle, event| match event {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+            if let Some(plugin_state) = app_handle.try_state::<plugin_host::PluginHostState>() {
+                plugin_host::stop(&plugin_state);
+            }
             if let (Some(sidecar_state), Some(runtime_state)) = (
                 app_handle.try_state::<sidecar::SidecarState>(),
                 app_handle.try_state::<sidecar::ApiRuntimeState>(),

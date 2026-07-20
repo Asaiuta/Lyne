@@ -28,7 +28,6 @@ import "../../shared/styles/modals/category-load-settings.css";
 interface SettingsPageProps {
   isOpen: boolean;
   onClose: () => void;
-  onStateRefresh: () => Promise<void>;
   initialCategory?: SettingsCategoryKey;
 }
 
@@ -36,9 +35,7 @@ interface SettingsSectionProps {
   highlightId: string | null;
 }
 
-interface AudioEngineSectionProps extends SettingsSectionProps {
-  onStateRefresh: () => Promise<void>;
-}
+type AudioEngineSectionProps = SettingsSectionProps;
 
 const lazySettingsSection = <Props extends object>(
   loader: () => Promise<Component<Props>>
@@ -64,6 +61,9 @@ const NetworkSection = lazySettingsSection<SettingsSectionProps>(() =>
 );
 const AudioEngineSection = lazySettingsSection<AudioEngineSectionProps>(() =>
   import("./sections/AudioEngineSection").then((module) => module.AudioEngineSection)
+);
+const PluginSection = lazySettingsSection<SettingsSectionProps>(() =>
+  import("./sections/PluginSection").then((module) => module.PluginSection)
 );
 const AboutSection = lazySettingsSection<SettingsSectionProps>(() =>
   import("./sections/AboutSection").then((module) => module.AboutSection)
@@ -386,10 +386,10 @@ export function SettingsPage(props: SettingsPageProps) {
                       <NetworkSection highlightId={highlightId()} />
                     </Match>
                     <Match when={renderedCategory() === "audio-engine"}>
-                      <AudioEngineSection
-                        highlightId={highlightId()}
-                        onStateRefresh={props.onStateRefresh}
-                      />
+                      <AudioEngineSection highlightId={highlightId()} />
+                    </Match>
+                    <Match when={renderedCategory() === "plugins"}>
+                      <PluginSection highlightId={highlightId()} />
                     </Match>
                     <Match when={renderedCategory() === "about"}>
                       <AboutSection highlightId={highlightId()} />

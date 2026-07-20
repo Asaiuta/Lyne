@@ -15,7 +15,7 @@ const toolbarSurfaces = [
 ] as const;
 
 const referenceIconSurfaces = [
-  ["library", libraryPageSource, ["IconPlayFilled", "IconRefreshFilled", "IconFormatListFilled"]],
+  ["library", libraryPageSource, ["IconPlayFilled", "IconRefreshFilled", "IconDeleteFilled", "IconFormatListFilled"]],
   ["history", historyPageSource, ["IconPlayFilled", "IconDeleteFilled"]],
   ["download", downloadPageSource, ["IconPlayFilled", "IconRefreshFilled"]]
 ] as const;

@@ -1,8 +1,8 @@
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
+import { RouteContentTransition } from "../../../components/RouteContentTransition";
 import {
   IconAlbum,
-  IconChevronLeft,
   IconFavoriteBorderFilled,
   IconFavoriteFilled,
   IconMusic,
@@ -11,6 +11,8 @@ import {
 import { NcmMediaList } from "../NcmMediaList";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { BackToTop } from "../../../components/page/BackToTop";
+import { LoadMoreButton } from "../../../components/page/LoadMoreButton";
+import { PageBackButton } from "../../../components/page/PageBackButton";
 import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
@@ -125,14 +127,11 @@ export function ArtistDetail(props: ArtistDetailProps) {
             <>
               <PageHero size="lg" offset={236} compact={compact()}>
                 <Show when={(props.showInlineBack ?? true) && props.onBack}>
-                  <button
-                    type="button"
-                    class="ghost-button ncm-daily-detail-back"
+                  <PageBackButton
+                    ariaLabel={t("ncm.artist.backToFeed")}
+                    class="ncm-daily-detail-back"
                     onClick={() => props.onBack?.()}
-                  >
-                    <IconChevronLeft />
-                    {t("ncm.artist.backToFeed")}
-                  </button>
+                  />
                 </Show>
               <NcmListDetail
                 title={artist()?.title ?? ""}
@@ -186,66 +185,73 @@ export function ArtistDetail(props: ArtistDetailProps) {
                 />
               </div>
             </PageHero>
-            <PageBody class="ncm-detail-page-body">
-              <Show when={detailTab() === "songs"}>
-                <div class="ncm-artist-song-panel">
-                  <NcmMediaList
-                    items={props.tracks}
-                    currentSourcePath={playbackContext.currentTrackPath()}
-                    currentSongId={playbackContext.currentSongId()}
-                    isPlayingNow={playbackContext.isPlaying()}
-                    onPlay={(item) => void props.playback.playOnlineTrack(item)}
-                    onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
-                    onContextAction={(action, item) => {
-                      if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
-                    }}
-                    isLoading={props.isLoading}
-                    emptyState={<NaiveP class="panel-note">{t("ncm.artist.empty")}</NaiveP>}
-                    hideSize
-                    hideTopScrollTool
-                  />
-                  <Show when={props.hasMoreTracks && props.tracks.length > 0}>
-                    <div class="online-discover-load-more">
-                      <button
-                        type="button"
-                        class="ghost-button"
-                        disabled={props.isLoading}
-                        onClick={() => void props.onLoadMoreTracks()}
-                      >
-                        {props.isLoading ? t("ncm.playlist.loading") : t("ncm.discover.loadMore")}
-                      </button>
+            <RouteContentTransition
+              value={detailTab()}
+              transitionKey={detailTab()}
+              animation={uiSettings.routeAnimation}
+              motionScope="artist-content"
+            >
+              {(displayedDetailTab) => (
+                <PageBody class="ncm-detail-page-body">
+                  <Show when={displayedDetailTab() === "songs"}>
+                    <div class="ncm-artist-song-panel">
+                      <NcmMediaList
+                        items={props.tracks}
+                        currentSourcePath={playbackContext.currentTrackPath()}
+                        currentSongId={playbackContext.currentSongId()}
+                        isPlayingNow={playbackContext.isPlaying()}
+                        onPlay={(item) => void props.playback.playOnlineTrack(item)}
+                        onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
+                        onContextAction={(action, item) => {
+                          if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
+                        }}
+                        isLoading={props.isLoading}
+                        emptyState={<NaiveP class="panel-note">{t("ncm.artist.empty")}</NaiveP>}
+                        hideSize
+                        hideTopScrollTool
+                      />
+                      <Show when={props.hasMoreTracks && props.tracks.length > 0}>
+                        <div class="online-discover-load-more">
+                          <LoadMoreButton
+                            label={t("ncm.discover.loadMore")}
+                            loading={props.isLoading}
+                            loadingLabel={t("ncm.playlist.loading")}
+                            onClick={() => void props.onLoadMoreTracks()}
+                          />
+                        </div>
+                      </Show>
                     </div>
                   </Show>
-                </div>
-              </Show>
-              <Show when={detailTab() === "albums"}>
-                <ArtistResourceGrid
-                  items={props.albums}
-                  isLoading={props.isLoadingAlbums}
-                  hasMore={props.hasMoreAlbums}
-                  emptyText={t("ncm.artist.albums.empty")}
-                  loadingText={t("ncm.playlist.loading")}
-                  loadMoreText={t("ncm.discover.loadMore")}
-                  coverHidden={uiSettings.hiddenCovers.album}
-                  onLoadMore={props.onLoadMoreAlbums}
-                  onSelect={props.onSelectAlbum}
-                />
-              </Show>
-              <Show when={detailTab() === "videos"}>
-                <ArtistResourceGrid
-                  items={props.videos}
-                  isLoading={props.isLoadingVideos}
-                  hasMore={props.hasMoreVideos}
-                  emptyText={t("ncm.artist.videos.empty")}
-                  loadingText={t("ncm.playlist.loading")}
-                  loadMoreText={t("ncm.discover.loadMore")}
-                  coverHidden={uiSettings.hiddenCovers.video}
-                  variant="videos"
-                  onLoadMore={props.onLoadMoreVideos}
-                  onSelect={props.onSelectVideo}
-                />
-              </Show>
-            </PageBody>
+                  <Show when={displayedDetailTab() === "albums"}>
+                    <ArtistResourceGrid
+                      items={props.albums}
+                      isLoading={props.isLoadingAlbums}
+                      hasMore={props.hasMoreAlbums}
+                      emptyText={t("ncm.artist.albums.empty")}
+                      loadingText={t("ncm.playlist.loading")}
+                      loadMoreText={t("ncm.discover.loadMore")}
+                      coverHidden={uiSettings.hiddenCovers.album}
+                      onLoadMore={props.onLoadMoreAlbums}
+                      onSelect={props.onSelectAlbum}
+                    />
+                  </Show>
+                  <Show when={displayedDetailTab() === "videos"}>
+                    <ArtistResourceGrid
+                      items={props.videos}
+                      isLoading={props.isLoadingVideos}
+                      hasMore={props.hasMoreVideos}
+                      emptyText={t("ncm.artist.videos.empty")}
+                      loadingText={t("ncm.playlist.loading")}
+                      loadMoreText={t("ncm.discover.loadMore")}
+                      coverHidden={uiSettings.hiddenCovers.video}
+                      variant="videos"
+                      onLoadMore={props.onLoadMoreVideos}
+                      onSelect={props.onSelectVideo}
+                    />
+                  </Show>
+                </PageBody>
+              )}
+            </RouteContentTransition>
             <BackToTop label={t("media.scroll.top")} />
             </>
           )}
@@ -313,14 +319,12 @@ function ArtistResourceGrid(props: ArtistResourceGridProps) {
       </Show>
       <Show when={props.hasMore && props.items.length > 0}>
         <div class="online-discover-load-more">
-          <button
-            type="button"
-            class="ghost-button"
-            disabled={props.isLoading}
+          <LoadMoreButton
+            label={props.loadMoreText}
+            loading={props.isLoading}
+            loadingLabel={props.loadingText}
             onClick={() => void props.onLoadMore()}
-          >
-            {props.isLoading ? props.loadingText : props.loadMoreText}
-          </button>
+          />
         </div>
       </Show>
     </div>

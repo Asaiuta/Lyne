@@ -62,6 +62,23 @@ test("context menu uses action descriptors to hide song-only actions without a s
   );
 });
 
+test("context menu hides online actions while preserving local actions offline", () => {
+  const menu = createMediaContextMenuItems({
+    actionSet: new Set(["play", "view-comments", "search", "copy-name", "copy-path"]),
+    settings: settings({ useOnlineService: false }),
+    target: { songId: 42 },
+    t: labels,
+    renderIcons: false
+  });
+  const actionableItems = menu.filter((item) => !item.divider);
+
+  assert.deepEqual(actionableItems.map((item) => item.key), ["play", "more", "copy-path"]);
+  assert.deepEqual(
+    actionableItems.find((item) => item.key === "more")?.children?.map((item) => item.key),
+    ["copy-name"]
+  );
+});
+
 test("context menu keeps submenu dividers only between visible children", () => {
   const menu = createMediaContextMenuItems({
     actionSet: new Set(["copy-name", "music-tag-editor"]),

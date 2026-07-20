@@ -211,6 +211,46 @@ test("readUISettingsSnapshot falls back to defaults when injected storage fails"
   assert.equal(reported[0]?.reason, "storage_unavailable");
 });
 
+test("legacy sidebar visibility migrates new library switches from the old library value", () => {
+  const hidden = readUISettingsSnapshot(
+    runtimeFromValues({
+      [STORAGE_KEYS.sidebarHiddenItems]: JSON.stringify({
+        library: true,
+        recent: false
+      })
+    })
+  ).sidebarHiddenItems;
+
+  assert.equal(hidden.library, true);
+  assert.equal(hidden.libraryAlbums, true);
+  assert.equal(hidden.libraryArtists, true);
+  assert.equal(hidden.libraryFolders, true);
+  assert.equal(hidden.recent, false);
+});
+
+test("explicit sidebar library switches override legacy inheritance independently", () => {
+  const hidden = readUISettingsSnapshot(
+    runtimeFromValues({
+      [STORAGE_KEYS.sidebarHiddenItems]: JSON.stringify({
+        library: true,
+        libraryAlbums: false,
+        libraryArtists: true,
+        libraryFolders: false
+      })
+    })
+  ).sidebarHiddenItems;
+
+  assert.deepEqual(
+    {
+      library: hidden.library,
+      albums: hidden.libraryAlbums,
+      artists: hidden.libraryArtists,
+      folders: hidden.libraryFolders
+    },
+    { library: true, albums: false, artists: true, folders: false }
+  );
+});
+
 test("createUISettingsStore keeps injected runtimes isolated", () => {
   const firstRuntime = mutableRuntimeFromValues({
     [STORAGE_KEYS.bgEnabled]: "false",

@@ -4,6 +4,7 @@ import { Modal } from "../../../components/Modal";
 import { SImage } from "../../../components/SImage";
 import { createApiClient, type NcmTrackSummary } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
+import { NaiveButton, NaiveInputNumber } from "../../../shared/ui/naive";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import type { OnlineTrackItem } from "../shared/types";
 
@@ -18,13 +19,6 @@ interface CloudMatchModalProps {
 
 const api = createApiClient();
 
-const parsePositiveInteger = (value: string): number | null => {
-  const trimmed = value.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-};
-
 const displayText = (value: string | null | undefined, fallback: string): string => {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : fallback;
@@ -33,7 +27,7 @@ const displayText = (value: string | null | undefined, fallback: string): string
 export function CloudMatchModal(props: CloudMatchModalProps) {
   const { t } = useTranslation();
   const readErrorMessage = createErrorMessageReader(t);
-  const [targetIdText, setTargetIdText] = createSignal<string>("");
+  const [targetId, setTargetId] = createSignal<number | null>(null);
   const [verifiedTargetId, setVerifiedTargetId] = createSignal<number | null>(null);
   const [verifiedTrack, setVerifiedTrack] = createSignal<NcmTrackSummary | null>(null);
   const [statusText, setStatusText] = createSignal<string | null>(null);
@@ -43,7 +37,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
 
   createEffect(() => {
     if (!props.open) {
-      setTargetIdText("");
+      setTargetId(null);
       setVerifiedTargetId(null);
       setVerifiedTrack(null);
       setStatusText(null);
@@ -56,15 +50,14 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
   const sourceTitle = createMemo<string>(() =>
     displayText(props.item?.title, props.item?.source_path ?? String(props.item?.songId ?? ""))
   );
-  const parsedTargetId = createMemo<number | null>(() => parsePositiveInteger(targetIdText()));
   const isVerified = createMemo<boolean>(() => {
-    const targetId = parsedTargetId();
-    return targetId !== null && targetId === verifiedTargetId() && verifiedTrack() !== null;
+    const currentTargetId = targetId();
+    return currentTargetId !== null && currentTargetId === verifiedTargetId() && verifiedTrack() !== null;
   });
   const busy = createMemo<boolean>(() => validating() || submitting());
 
-  const resetVerification = (value: string) => {
-    setTargetIdText(value);
+  const resetVerification = (value: number | null) => {
+    setTargetId(value);
     setVerifiedTargetId(null);
     setVerifiedTrack(null);
     setStatusText(null);
@@ -73,13 +66,13 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
 
   const validateTarget = async () => {
     const source = props.item;
-    const targetId = parsedTargetId();
-    if (source === null || targetId === null) {
+    const currentTargetId = targetId();
+    if (source === null || currentTargetId === null) {
       setStatusTone("error");
       setStatusText(t("ncm.cloud.match.invalidTarget"));
       return;
     }
-    if (source.songId === targetId) {
+    if (source.songId === currentTargetId) {
       setStatusTone("error");
       setStatusText(t("ncm.cloud.match.sameId"));
       return;
@@ -89,7 +82,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
     setStatusTone("neutral");
     setStatusText(null);
     try {
-      const [track] = await api.listNcmSongDetailTracks([targetId]);
+      const [track] = await api.listNcmSongDetailTracks([currentTargetId]);
       if (!track) {
         setVerifiedTargetId(null);
         setVerifiedTrack(null);
@@ -97,7 +90,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
         setStatusText(t("ncm.cloud.match.notFound"));
         return;
       }
-      setVerifiedTargetId(targetId);
+      setVerifiedTargetId(currentTargetId);
       setVerifiedTrack(track);
       setStatusTone("success");
       setStatusText(t("ncm.cloud.match.verified"));
@@ -114,13 +107,13 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
   const submit = async () => {
     const source = props.item;
     const userId = props.userId;
-    const targetId = parsedTargetId();
-    if (source === null || userId === null || targetId === null) {
+    const currentTargetId = targetId();
+    if (source === null || userId === null || currentTargetId === null) {
       setStatusTone("error");
       setStatusText(t("ncm.cloud.match.invalidTarget"));
       return;
     }
-    if (source.songId === targetId) {
+    if (source.songId === currentTargetId) {
       setStatusTone("error");
       setStatusText(t("ncm.cloud.match.sameId"));
       return;
@@ -136,7 +129,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
       await api.matchNcmCloudTrack({
         userId,
         songId: source.songId,
-        adjustSongId: targetId
+        adjustSongId: currentTargetId
       });
       props.setFeedback("success", t("ncm.cloud.match.success"));
       props.onClose();
@@ -165,10 +158,15 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
           void submit();
         }}
       >
-        <label class="create-playlist-field">
+        <div class="create-playlist-field">
           <span class="field-label">{t("ncm.cloud.match.sourceId")}</span>
-          <input class="text-input" type="text" value={String(props.item?.songId ?? "")} disabled />
-        </label>
+          <NaiveInputNumber
+            value={props.item?.songId ?? null}
+            showButton={false}
+            disabled
+            ariaLabel={t("ncm.cloud.match.sourceId")}
+          />
+        </div>
 
         <div class="ncm-cloud-match-source">
           <div class="ncm-cloud-match-cover">
@@ -186,29 +184,33 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
           </div>
         </div>
 
-        <label class="create-playlist-field">
+        <div class="create-playlist-field">
           <span class="field-label">{t("ncm.cloud.match.targetId")}</span>
           <div class="ncm-cloud-match-target-row">
-            <input
-              class="text-input"
-              type="text"
-              inputmode="numeric"
-              value={targetIdText()}
+            <NaiveInputNumber
+              value={targetId()}
+              min={1}
+              step={1}
+              precision={0}
+              showButton={false}
               placeholder={t("ncm.cloud.match.targetPlaceholder")}
               disabled={busy()}
-              onInput={(event) => resetVerification(event.currentTarget.value)}
+              onUpdateValue={resetVerification}
+              ariaLabel={t("ncm.cloud.match.targetId")}
             />
-            <button
-              type="button"
-              class="ghost-button ncm-cloud-match-verify"
-              disabled={busy() || parsedTargetId() === null || isVerified()}
+            <NaiveButton
+              variant={isVerified() ? "default" : "primary"}
+              secondary
+              strong
+              class="ncm-cloud-match-verify"
+              disabled={busy() || targetId() === null || isVerified()}
               onClick={() => void validateTarget()}
             >
               <IconSearch />
               <span>{isVerified() ? t("ncm.cloud.match.verified") : t("ncm.cloud.match.verify")}</span>
-            </button>
+            </NaiveButton>
           </div>
-        </label>
+        </div>
 
         <Show when={verifiedTrack()}>
           {(track) => (
@@ -242,13 +244,19 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
         </Show>
 
         <div class="ncm-cloud-match-actions">
-          <button type="button" class="ghost-button" disabled={submitting()} onClick={props.onClose}>
+          <NaiveButton secondary strong disabled={submitting()} onClick={props.onClose}>
             {t("ncm.cloud.match.cancel")}
-          </button>
-          <button type="submit" class="primary-button" disabled={busy() || !isVerified()}>
+          </NaiveButton>
+          <NaiveButton
+            nativeType="submit"
+            variant="primary"
+            secondary
+            strong
+            disabled={busy() || !isVerified()}
+          >
             <IconCloud />
             <span>{submitting() ? t("ncm.cloud.match.submitting") : t("ncm.cloud.match.submit")}</span>
-          </button>
+          </NaiveButton>
         </div>
       </form>
     </Modal>

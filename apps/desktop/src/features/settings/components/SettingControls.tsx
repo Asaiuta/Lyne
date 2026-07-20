@@ -194,6 +194,7 @@ export function RangeSettingItem(props: RangeSettingItemProps) {
 
 interface TextSettingItemProps extends BaseSettingControlProps {
   value: string;
+  secret?: boolean;
   onInput?: (value: string) => void;
   onCommit?: (value: string) => void;
   placeholder?: string;
@@ -219,7 +220,7 @@ export function TextSettingItem(props: TextSettingItemProps) {
       badge={props.wip ? <WipBadge /> : undefined}
     >
       <NaiveInput
-        type="text"
+        type={props.secret ? "password" : "text"}
         value={props.value}
         onUpdateValue={(value) => {
           if (!disabled()) props.onInput?.(value);

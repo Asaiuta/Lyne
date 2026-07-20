@@ -261,6 +261,7 @@ export function useAppController(api: ApiClient): AppController {
 
   const playbackContext: PlaybackContextValue = {
     state: playback.state,
+    audioSettings: playback.audioSettings,
     spectrum: playback.spectrum,
     loadingProgress: playback.loadingProgress,
     wsStatus: playback.wsStatus,
@@ -296,6 +297,7 @@ export function useAppController(api: ApiClient): AppController {
     seek: playback.handleSeek,
     previewVolume: playback.handleVolumePreview,
     changeVolume: playback.handleVolumeChange,
+    stepVolume: playback.handleVolumeStep,
     skipPrevious: queue.handleSkipPrev,
     skipNext: queue.handleSkipNext,
     cycleRepeat: playback.handleCycleRepeat,

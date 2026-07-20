@@ -1,4 +1,4 @@
-import { For, createMemo, type JSX } from "solid-js";
+import { createMemo, type JSX } from "solid-js";
 import {
   IconCloud,
   IconControls,
@@ -6,10 +6,12 @@ import {
   IconLogo,
   IconMusic,
   IconSettings,
-  IconTextPlay
+  IconTextPlay,
+  IconTune
 } from "../../../components/icons";
 import type { TranslationKey } from "../../../shared/i18n";
 import { useTranslation } from "../../../shared/i18n";
+import { NaiveMenu, type NaiveMenuItem } from "../../../shared/ui/naive";
 
 export type SettingsCategoryKey =
   | "general"
@@ -20,6 +22,7 @@ export type SettingsCategoryKey =
   | "keyboard"
   | "network"
   | "audio-engine"
+  | "plugins"
   | "about";
 
 interface CategoryDef {
@@ -37,6 +40,7 @@ const CATEGORIES: ReadonlyArray<CategoryDef> = [
   { key: "keyboard", labelKey: "settings.nav.keyboard", icon: () => <IconControls /> },
   { key: "network", labelKey: "settings.nav.network", icon: () => <IconCloud /> },
   { key: "audio-engine", labelKey: "settings.nav.audioEngine", icon: () => <IconControls /> },
+  { key: "plugins", labelKey: "settings.nav.plugins", icon: () => <IconTune /> },
   { key: "about", labelKey: "settings.nav.about", icon: () => <IconLogo /> }
 ];
 
@@ -44,17 +48,13 @@ const settingsNavClass = "settings-nav n-menu";
 
 const settingsNavListClass = "settings-nav-list";
 
-const settingsNavActiveIndicatorClass = "settings-nav-active-indicator";
+const settingsNavItemBaseClass = "settings-nav-item";
 
-const settingsNavItemWrapperClass = "n-menu-item";
+const settingsNavItemActiveClass = "is-active";
 
-const settingsNavItemBaseClass = "settings-nav-item n-menu-item-content";
+const settingsNavItemIconClass = "settings-nav-item-icon";
 
-const settingsNavItemActiveClass = "is-active n-menu-item-content--selected";
-
-const settingsNavItemIconClass = "settings-nav-item-icon n-menu-item-content__icon";
-
-const settingsNavItemLabelClass = "settings-nav-item-label n-menu-item-content-header";
+const settingsNavItemLabelClass = "settings-nav-item-label";
 
 interface SettingsCategoryNavProps {
   active: SettingsCategoryKey;
@@ -63,51 +63,29 @@ interface SettingsCategoryNavProps {
 
 export function SettingsCategoryNav(props: SettingsCategoryNavProps) {
   const { t } = useTranslation();
-  const activeIndex = createMemo<number>(() => {
-    const index = CATEGORIES.findIndex((cat) => cat.key === props.active);
-    return index >= 0 ? index : 0;
-  });
-  const listStyle = (): JSX.CSSProperties => ({
-    "--settings-nav-active-index": String(activeIndex())
-  });
+  const items = createMemo<ReadonlyArray<NaiveMenuItem<SettingsCategoryKey>>>(() =>
+    CATEGORIES.map((category) => ({
+      key: category.key,
+      label: t(category.labelKey),
+      textValue: t(category.labelKey),
+      icon: category.icon()
+    }))
+  );
 
   return (
-    <nav class={settingsNavClass} aria-label={t("settings.nav.title")}>
-      <ul
-        class={settingsNavListClass}
-        role="tablist"
-        aria-orientation="vertical"
-        style={listStyle()}
-      >
-        <span class={settingsNavActiveIndicatorClass} aria-hidden="true" />
-        <For each={CATEGORIES}>
-          {(cat) => {
-            const active = () => props.active === cat.key;
-            const className = () =>
-              active()
-                ? `${settingsNavItemBaseClass} ${settingsNavItemActiveClass}`
-                : settingsNavItemBaseClass;
-
-            return (
-              <li class={settingsNavItemWrapperClass}>
-                <button
-                  type="button"
-                  role="tab"
-                  class={className()}
-                  data-setting-category={cat.key}
-                  aria-selected={active()}
-                  onClick={() => props.onSelect(cat.key)}
-                >
-                  <span class={settingsNavItemIconClass} aria-hidden="true">
-                    {cat.icon()}
-                  </span>
-                  <span class={settingsNavItemLabelClass}>{t(cat.labelKey)}</span>
-                </button>
-              </li>
-            );
-          }}
-        </For>
-      </ul>
+    <nav aria-label={t("settings.nav.title")}>
+      <NaiveMenu
+        value={props.active}
+        items={items()}
+        onSelect={props.onSelect}
+        orientation="vertical"
+        ariaLabel={t("settings.nav.title")}
+        class={`${settingsNavClass} ${settingsNavListClass}`}
+        itemClass={settingsNavItemBaseClass}
+        itemActiveClass={settingsNavItemActiveClass}
+        itemIconClass={settingsNavItemIconClass}
+        itemLabelClass={settingsNavItemLabelClass}
+      />
     </nav>
   );
 }

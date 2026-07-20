@@ -1,3 +1,21 @@
+  .row-action {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: var(--radius-icon-btn);
+    color: var(--accent);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .row-action:hover:not(:disabled) {
+    color: var(--accent-strong);
+    background: transparent;
+    transform: scale(1.15);
+  }
+
   .media-list-table {
     --media-row-height: 90px;
     --media-row-content-gap: 12px;

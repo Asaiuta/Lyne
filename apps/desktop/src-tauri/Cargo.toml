@@ -10,7 +10,7 @@ tauri-build = { version = "2", features = [] }
 audio-runtime-paths = { path = "../../../crates/audio-runtime-paths" }
 hex = "0.4"
 rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["devtools", "tray-icon"] }
@@ -19,6 +19,7 @@ tauri = { version = "2", features = ["devtools", "tray-icon"] }
 # no-op stubs in src/smtc.rs; MPRIS is a later increment (no dbus deps here).
 [target.'cfg(windows)'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

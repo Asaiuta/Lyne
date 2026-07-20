@@ -14,6 +14,7 @@ import { useTranslation } from "../shared/i18n";
 import { useUISearch } from "../shared/state/UISearchContext";
 import { useUISettings } from "../shared/state/useUISettings";
 import { isSearchEnabledPage, type ActivePage } from "../shared/ui/navigation";
+import { NaiveButton, NaiveInput } from "../shared/ui/naive";
 import { TopNavAccountMenu, type TopNavAccountCollectionTab } from "./TopNavAccountMenu";
 import {
   searchFallbackKeyword,
@@ -29,7 +30,6 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconChat,
-  IconClose,
   IconMusic,
   IconSearch,
   IconSettings,
@@ -138,12 +138,9 @@ export function TopNav(props: TopNavProps) {
       query: trimmedSearchQuery()
     });
 
-  const handleSearchInput = (event: InputEvent) => {
-    const target = event.currentTarget;
-    if (target instanceof HTMLInputElement) {
-      setQuery(target.value);
-      setSearchPanelOpen(true);
-    }
+  const handleSearchInput = (value: string) => {
+    setQuery(value);
+    setSearchPanelOpen(true);
   };
 
   const handleSearchSubmit = (fallbackKeyword?: string | null) => {
@@ -318,85 +315,82 @@ export function TopNav(props: TopNavProps) {
   return (
     <header class="top-nav" role="banner">
       <div class="top-nav-group top-nav-history" role="group" aria-label={t("nav.aria.back")}>
-        <button
-          type="button"
+        <NaiveButton
           class="top-nav-icon-button"
-          data-no-drag
-          aria-label={t("nav.aria.back")}
+          circle
+          tertiary
+          dataNoDrag
+          ariaLabel={t("nav.aria.back")}
           title={t("nav.aria.back")}
           onClick={props.onGoBack}
           disabled={!props.canGoBack}
         >
           <IconChevronLeft />
-        </button>
-        <button
-          type="button"
+        </NaiveButton>
+        <NaiveButton
           class="top-nav-icon-button"
-          data-no-drag
-          aria-label={t("nav.aria.forward")}
+          circle
+          tertiary
+          dataNoDrag
+          ariaLabel={t("nav.aria.forward")}
           title={t("nav.aria.forward")}
           onClick={props.onGoForward}
           disabled={!props.canGoForward}
         >
           <IconChevronRight />
-        </button>
+        </NaiveButton>
       </div>
 
       <div class="top-nav-main">
-        <div class={searchWrapClassName()}>
-          <Show when={showSearchPanel()}>
-            <div
-              class="top-nav-search-mask"
-              data-no-drag
-              aria-hidden="true"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={closeSearchFocus}
-            />
-          </Show>
-          <div class={searchClassName()} title={searchTitle()} data-no-drag>
-            <IconSearch class="top-nav-search-icon" />
-            <input
-              ref={searchInputRef}
-              type="search"
-              value={query()}
-              onInput={handleSearchInput}
-              onFocus={() => {
-                setSearchPanelOpen(true);
-              }}
-              onBlur={() =>
-                window.setTimeout(() => {
-                  setSearchPanelOpen(false);
-                  if (uiSettings.searchInputBehavior === "clear") {
-                    setQuery("");
-                  }
-                }, 120)
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handleSearchSubmit(defaultKeyword()?.realKeyword ?? null);
-                }
-              }}
-              placeholder={td(`nav.search.placeholder.${searchPage()}`)}
-              aria-label={t("nav.aria.search")}
-              aria-disabled={!searchEnabled()}
-              disabled={!searchEnabled()}
-            />
-            <Show when={searchEnabled() && query().length > 0}>
-              <button
-                type="button"
-                class="top-nav-search-clear"
-                aria-label={t("nav.search.clear")}
-                title={t("nav.search.clear")}
+        <Show when={uiSettings.useOnlineService}>
+          <div class={searchWrapClassName()}>
+            <Show when={showSearchPanel()}>
+              <div
+                class="top-nav-search-mask"
+                data-no-drag
+                aria-hidden="true"
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={handleSearchClear}
-              >
-                <IconClose />
-              </button>
+                onClick={closeSearchFocus}
+              />
             </Show>
-          </div>
-          <Show when={showSearchPanel()}>
-            <div class="top-nav-search-panel" role="listbox" aria-label={t("nav.search.panel.label")}>
+            <div class={searchClassName()} title={searchTitle()} data-no-drag>
+              <NaiveInput
+                inputRef={(element) => {
+                  if (element instanceof HTMLInputElement) searchInputRef = element;
+                }}
+                type="search"
+                class="top-nav-search-input"
+                value={query()}
+                clearable
+                round
+                clearAriaLabel={t("nav.search.clear")}
+                onClear={handleSearchClear}
+                onUpdateValue={handleSearchInput}
+                onFocus={() => {
+                  setSearchPanelOpen(true);
+                }}
+                onBlur={() =>
+                  window.setTimeout(() => {
+                    setSearchPanelOpen(false);
+                    if (uiSettings.searchInputBehavior === "clear") {
+                      setQuery("");
+                    }
+                  }, 120)
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleSearchSubmit(defaultKeyword()?.realKeyword ?? null);
+                  }
+                }}
+                placeholder={td(`nav.search.placeholder.${searchPage()}`)}
+                ariaLabel={t("nav.aria.search")}
+                disabled={!searchEnabled()}
+                prefix={<IconSearch class="top-nav-search-icon" />}
+              />
+            </div>
+            <Show when={showSearchPanel()}>
+              <div class="top-nav-search-panel" role="listbox" aria-label={t("nav.search.panel.label")}>
               <Show when={showSearchEntryPanel()}>
                 <Show when={defaultSearchLabel()}>
                   {(label) => (
@@ -517,28 +511,32 @@ export function TopNav(props: TopNavProps) {
                   </For>
                 </Show>
               </Show>
-            </div>
-          </Show>
-        </div>
+              </div>
+            </Show>
+          </div>
+        </Show>
 
         <div class="top-nav-drag" data-tauri-drag-region aria-hidden="true" />
       </div>
 
       <div class="top-nav-group top-nav-actions" data-no-drag>
-        <TopNavAccountMenu
-          onRequireNcmLogin={props.onRequireNcmLogin}
-          onNavigateToLikedCollectionTab={props.onNavigateToLikedCollectionTab}
-        />
-        <button
-          type="button"
+        <Show when={uiSettings.useOnlineService}>
+          <TopNavAccountMenu
+            onRequireNcmLogin={props.onRequireNcmLogin}
+            onNavigateToLikedCollectionTab={props.onNavigateToLikedCollectionTab}
+          />
+        </Show>
+        <NaiveButton
           class="top-nav-icon-button"
-          data-no-drag
-          aria-label={t("sidebar.nav.settings.label")}
+          circle
+          tertiary
+          dataNoDrag
+          ariaLabel={t("sidebar.nav.settings.label")}
           title={t("sidebar.nav.settings.label")}
           onClick={props.onOpenSettings}
         >
           <IconSettings />
-        </button>
+        </NaiveButton>
         {props.windowControls}
       </div>
     </header>

@@ -1,4 +1,9 @@
 import type { JSX } from "solid-js";
+import {
+  naiveButtonClassNames,
+  type NaiveButtonSize,
+  type NaiveButtonVariant
+} from "./button";
 import { joinClassNames } from "./utils";
 
 export interface NaivePopselectOption<TValue extends string> {
@@ -16,6 +21,14 @@ export type NaivePopselectPlacement =
   | "left"
   | "right";
 
+export interface NaivePopselectTriggerButtonProps {
+  variant?: NaiveButtonVariant;
+  size?: NaiveButtonSize;
+  round?: boolean;
+  secondary?: boolean;
+  strong?: boolean;
+}
+
 export interface NaivePopselectProps<TValue extends string> {
   label: string;
   open: boolean;
@@ -25,6 +38,7 @@ export interface NaivePopselectProps<TValue extends string> {
   class?: string;
   triggerClass?: string;
   triggerOpenClass?: string;
+  triggerButton?: NaivePopselectTriggerButtonProps;
   popoverClass?: string;
   optionClass?: string;
   optionActiveClass?: string;
@@ -60,6 +74,18 @@ export const naivePopselectTriggerClass = <TValue extends string>(
     fallbackClass(props.triggerClass, "naive-popselect-trigger"),
     open ? props.triggerOpenClass ?? "is-open" : false
   );
+
+export const naivePopselectTriggerButtonClass = <TValue extends string>(
+  props: Pick<
+    NaivePopselectProps<TValue>,
+    "triggerButton" | "triggerClass" | "triggerOpenClass"
+  >,
+  open: boolean
+): string => {
+  const triggerClass = naivePopselectTriggerClass(props, open);
+  if (props.triggerButton === undefined) return triggerClass;
+  return naiveButtonClassNames({ ...props.triggerButton, class: triggerClass });
+};
 
 export const naivePopselectPopoverClass = <TValue extends string>(
   props: Pick<NaivePopselectProps<TValue>, "popoverClass">,

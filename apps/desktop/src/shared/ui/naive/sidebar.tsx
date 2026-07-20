@@ -5,7 +5,11 @@ import {
 } from "solid-js";
 import { NaiveButton, type NaiveAriaHasPopup, type NaiveButtonMouseHandler } from "./button";
 import { NaiveAvatar, NaiveBadge, NaiveEllipsis } from "./display";
-import { NaivePopselect, type NaivePopselectOption } from "./popselect";
+import {
+  NaivePopselect,
+  type NaivePopselectOption,
+  type NaivePopselectTriggerButtonProps
+} from "./popselect";
 import { joinClassNames } from "./utils";
 
 export type NaiveSidebarIconComponent = Component<JSX.SvgSVGAttributes<SVGSVGElement>>;
@@ -15,6 +19,7 @@ interface SidebarNavButtonProps {
   label: string;
   active?: boolean;
   collapsed?: boolean;
+  expanded?: boolean;
   routeKey?: string;
   badgeCount?: number;
   onClick: NaiveButtonMouseHandler;
@@ -57,6 +62,14 @@ interface SidebarPlaylistItemProps {
 
 const activeClass = (active: boolean | undefined): string => (active ? " is-active" : "");
 
+const SIDEBAR_SECTION_ACTION_BUTTON = {
+  variant: "tertiary",
+  size: "tiny",
+  round: true,
+  secondary: true,
+  strong: true
+} satisfies NaivePopselectTriggerButtonProps;
+
 export function SidebarNavButton(props: SidebarNavButtonProps) {
   const Icon = props.icon;
   const badgeCount = () => props.badgeCount ?? 0;
@@ -64,24 +77,23 @@ export function SidebarNavButton(props: SidebarNavButtonProps) {
 
   return (
     <NaiveButton
-      class={`sidebar-nav-button${activeClass(props.active)}`}
+      class={`sidebar-nav-button sidebar-nav-item${activeClass(props.active)}`}
       dataPerfRouteKey={props.routeKey}
       onClick={props.onClick}
       ariaCurrent={props.active ? "page" : undefined}
+      ariaExpanded={props.expanded}
       ariaLabel={labelWhenCollapsed()}
       title={labelWhenCollapsed()}
     >
-      <span class={`sidebar-nav-item${activeClass(props.active)}`}>
-        <span class="sidebar-nav-icon" aria-hidden="true">
-          <Icon />
-        </span>
-        <span class="sidebar-nav-label">{props.label}</span>
-        <Show when={badgeCount() > 0}>
-          <NaiveBadge class="sidebar-nav-badge" ariaLabel={String(badgeCount())}>
-            {badgeCount()}
-          </NaiveBadge>
-        </Show>
+      <span class="sidebar-nav-icon" aria-hidden="true">
+        <Icon />
       </span>
+      <span class="sidebar-nav-label">{props.label}</span>
+      <Show when={badgeCount() > 0}>
+        <NaiveBadge class="sidebar-nav-badge" ariaLabel={String(badgeCount())}>
+          {badgeCount()}
+        </NaiveBadge>
+      </Show>
     </NaiveButton>
   );
 }
@@ -90,14 +102,27 @@ export function SidebarIconButton(props: SidebarIconButtonProps) {
   const Icon = props.icon;
   const baseClass = () =>
     props.variant === "section" ? "sidebar-section-action-icon" : "sidebar-nav-action";
-  const surfaceClass = () =>
-    props.variant === "section" ? "sidebar-section-action-surface" : "sidebar-nav-action-surface";
-  const stateClass = () => `${props.open ? " is-open" : ""}${activeClass(props.active)}`;
+  const buttonVisualProps = (): NaivePopselectTriggerButtonProps =>
+    props.variant === "section"
+      ? SIDEBAR_SECTION_ACTION_BUTTON
+      : {
+          variant: props.active ? "primary" : "tertiary",
+          size: "small",
+          round: true,
+          secondary: true,
+          strong: true
+        };
+  const stateClass = () => `${props.open ? " is-open" : ""}${props.active ? " is-sidebar-active" : ""}`;
   const className = () => joinClassNames(baseClass(), props.class) + stateClass();
 
   return (
     <NaiveButton
       class={className()}
+      variant={buttonVisualProps().variant}
+      size={buttonVisualProps().size}
+      round={buttonVisualProps().round}
+      secondary={buttonVisualProps().secondary}
+      strong={buttonVisualProps().strong}
       ariaLabel={props.label}
       ariaHasPopup={props.hasPopup}
       ariaExpanded={props.expanded}
@@ -105,9 +130,7 @@ export function SidebarIconButton(props: SidebarIconButtonProps) {
       title={props.label}
       onClick={props.onClick}
     >
-      <span class={surfaceClass()} aria-hidden="true">
-        <Icon />
-      </span>
+      <Icon />
     </NaiveButton>
   );
 }
@@ -125,6 +148,7 @@ export function SidebarPopselect<TValue extends string>(props: SidebarPopselectP
       class="sidebar-playlist-source-menu"
       triggerClass="sidebar-section-action-icon sidebar-playlist-source-trigger"
       triggerOpenClass="is-open"
+      triggerButton={SIDEBAR_SECTION_ACTION_BUTTON}
       popoverClass="sidebar-playlist-source-popover"
       optionClass="sidebar-playlist-source-option"
       optionActiveClass="is-active"
@@ -132,11 +156,7 @@ export function SidebarPopselect<TValue extends string>(props: SidebarPopselectP
       optionCheckClass="sidebar-playlist-source-option-check"
       gutter={10}
       stopTriggerPropagation={true}
-      triggerContent={
-        <span class="sidebar-section-action-surface" aria-hidden="true">
-          <TriggerIcon />
-        </span>
-      }
+      triggerContent={<TriggerIcon />}
       renderCheck={() => <CheckIcon />}
       onOpenChange={props.onOpenChange}
       onChange={props.onChange}
@@ -151,32 +171,30 @@ export function SidebarPlaylistItem(props: SidebarPlaylistItemProps) {
 
   return (
     <NaiveButton
-      class={`sidebar-playlist-button${activeClass(props.active)}${hiddenCoverClass()}`}
+      class={`sidebar-playlist-button sidebar-playlist-item${activeClass(props.active)}${hiddenCoverClass()}`}
       onClick={props.onClick}
       title={props.label}
     >
-      <span class={`sidebar-playlist-item${activeClass(props.active)}${hiddenCoverClass()}`}>
-        <Show
-          when={showCover()}
-          fallback={
-            <span class="sidebar-playlist-icon" aria-hidden="true">
-              <Icon />
-            </span>
-          }
+      <Show
+        when={showCover()}
+        fallback={
+          <span class="sidebar-playlist-icon" aria-hidden="true">
+            <Icon />
+          </span>
+        }
+      >
+        <NaiveAvatar
+          class="sidebar-playlist-cover"
+          ariaHidden={true}
+          fallback={<span>{props.label.slice(0, 1)}</span>}
         >
-          <NaiveAvatar
-            class="sidebar-playlist-cover"
-            ariaHidden={true}
-            fallback={<span>{props.label.slice(0, 1)}</span>}
-          >
-            {props.cover}
-          </NaiveAvatar>
-        </Show>
-        <span class="sidebar-playlist-copy">
-          <NaiveEllipsis class="sidebar-playlist-name" title={props.label}>
-            {props.label}
-          </NaiveEllipsis>
-        </span>
+          {props.cover}
+        </NaiveAvatar>
+      </Show>
+      <span class="sidebar-playlist-copy">
+        <NaiveEllipsis class="sidebar-playlist-name" title={props.label}>
+          {props.label}
+        </NaiveEllipsis>
       </span>
     </NaiveButton>
   );

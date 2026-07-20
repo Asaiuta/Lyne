@@ -19,8 +19,8 @@ import {
   type LibrarySortField,
   type LibrarySortOrder,
   type LibrarySortState,
-  type LibraryTab
 } from "./libraryViewTypes";
+import type { LibraryTab } from "../../shared/ui/navigation";
 import {
   buildFolderTreeFromFolders,
   folderNameFromPath,

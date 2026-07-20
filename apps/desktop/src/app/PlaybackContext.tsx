@@ -14,9 +14,11 @@ import type {
   ShuffleMode
 } from "../shared/api/types";
 import type { WsStatus } from "./playbackSocketContracts";
+import type { AudioSettingsStore } from "../shared/state/audioSettingsStore";
 
 export interface PlaybackContextValue {
   state: Accessor<RequestState<PlayerState>>;
+  audioSettings: AudioSettingsStore;
   spectrum: Accessor<number[]>;
   loadingProgress: Accessor<number | null>;
   wsStatus: Accessor<WsStatus>;
@@ -52,6 +54,7 @@ export interface PlaybackContextValue {
   seek: (position: number) => Promise<void>;
   previewVolume: (volume: number) => Promise<void>;
   changeVolume: (volume: number) => Promise<void>;
+  stepVolume: (volume: number) => Promise<void>;
   skipPrevious: () => Promise<void>;
   skipNext: () => Promise<void>;
   cycleRepeat: () => Promise<void>;

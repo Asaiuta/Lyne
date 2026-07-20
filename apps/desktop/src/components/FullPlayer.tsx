@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { useTranslation } from "../shared/i18n";
 import type { NcmArtistSummary } from "../shared/api/ncmDomainTypes";
@@ -49,6 +49,7 @@ import "../shared/styles/components/full-player.css";
 
 interface FullPlayerProps {
   isOpen: boolean;
+  onReady?: () => void;
   onClose: () => void;
   onAddToPlaylist?: () => void;
   onDownload?: () => void;
@@ -136,6 +137,8 @@ export function FullPlayer(props: FullPlayerProps) {
   let lyricListRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let closePresenceTimer: number | undefined;
+
+  onMount(() => props.onReady?.());
 
   const clearClosePresenceTimer = () => {
     if (closePresenceTimer === undefined) return;
@@ -253,7 +256,9 @@ export function FullPlayer(props: FullPlayerProps) {
     event.preventDefault();
     event.stopPropagation();
     const delta = event.deltaY > 0 ? -0.05 : 0.05;
-    commitVolume(safeVolume() + delta);
+    const next = clamp01(safeVolume() + delta);
+    setUiVolume(next);
+    void playback.stepVolume(next);
   }) as JSX.EventHandlerUnion<HTMLButtonElement, WheelEvent>;
   const repeatLabel = () => t(`player.repeat.${repeatMode()}` as const);
   const shuffleLabel = () => t(`player.shuffle.${shuffleMode()}` as const);
@@ -721,7 +726,9 @@ export function FullPlayer(props: FullPlayerProps) {
       style={rootStyle()}
       role="dialog"
       aria-label={t("fullPlayer.aria.dialog")}
+      aria-hidden={!props.isOpen}
       aria-modal="true"
+      inert={!props.isOpen}
       onMouseMove={handleSurfaceMove}
       onClick={handleSurfaceMove}
       onMouseLeave={handleSurfaceLeave}

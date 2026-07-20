@@ -14,6 +14,7 @@ import { SettingGroup } from "../components/SettingGroup";
 import { persistUISettingField } from "../../../shared/state/uiSettingsStorage";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { IconDelete, IconFolder, IconFolderPlus } from "../../../components/icons";
+import { NaiveButton } from "../../../shared/ui/naive";
 
 interface LocalSectionProps {
   highlightId: string | null;
@@ -112,15 +113,15 @@ export function LocalSection(props: LocalSectionProps) {
           index={nextIndex()}
         >
           <div class="local-lyric-directory-control">
-            <button
-              type="button"
-              class="ghost-button local-lyric-directory-add"
+            <NaiveButton
+              variant="tertiary"
+              class="local-lyric-directory-add"
               onClick={addLocalLyricDirectory}
               title={t("settings.local.localLyricDirectories.action")}
             >
               <IconFolderPlus />
               <span>{t("settings.local.localLyricDirectories.action")}</span>
-            </button>
+            </NaiveButton>
             <Show when={localLyricDirectories().length > 0}>
               <div class="local-lyric-directory-list">
                 <For each={localLyricDirectories()}>
@@ -128,15 +129,15 @@ export function LocalSection(props: LocalSectionProps) {
                     <div class="local-lyric-directory-item">
                       <IconFolder />
                       <span class="local-lyric-directory-path" title={directory}>{directory}</span>
-                      <button
-                        type="button"
+                      <NaiveButton
+                        variant="tertiary"
                         class="local-lyric-directory-remove"
                         onClick={() => removeLocalLyricDirectory(directory)}
                         title={t("settings.local.localLyricDirectories.remove")}
-                        aria-label={t("settings.local.localLyricDirectories.remove")}
+                        ariaLabel={t("settings.local.localLyricDirectories.remove")}
                       >
                         <IconDelete />
-                      </button>
+                      </NaiveButton>
                     </div>
                   )}
                 </For>

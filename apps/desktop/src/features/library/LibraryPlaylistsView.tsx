@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo } from "solid-js";
 import { AlbumCard } from "../../components/AlbumCard";
 import { IconPlaylist, IconPlus } from "../../components/icons";
+import { MediaList } from "../../components/media/MediaList";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
 import type {
   MediaSortField,
@@ -34,7 +35,6 @@ interface LibraryPlaylistsViewProps {
   onSortOrderChange: (order: MediaSortOrder) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onCreatePlaylist: () => void;
-  onDeletePlaylist: (playlist: LocalPlaylist) => void;
   onPlay: (item: LibraryListItem, contextItems: readonly LibraryListItem[]) => void;
   onEnqueue: (item: LibraryListItem) => void;
   onContextAction: (action: MediaContextAction, item: LibraryListItem) => void;
@@ -46,6 +46,13 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
   const uiSettings = useUISettings();
   const api = createApiClient();
 
+  const selectedPlaylist = createMemo<LocalPlaylist | null>(() => {
+    const selectedPlaylistId = props.selectedPlaylistId;
+    if (!selectedPlaylistId) return null;
+    return (
+      props.playlists.find((playlist) => playlist.playlist_id === selectedPlaylistId) ?? null
+    );
+  });
   const selectedPlaylistItems = createMemo<LibraryListItem[]>(() => props.items);
   const playlistCover = (playlist: LocalPlaylist): string | null =>
     resolveArtworkUrl({
@@ -88,23 +95,63 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
         )
       }
     >
-      <div class="local-playlist-grid-view">
-        <div class="album-grid local-playlist-grid content-fade-in">
-          <For each={props.playlists}>
-            {(playlist) => (
-              <AlbumCard
-                title={playlist.name}
-                subtitle={playlistSubtitle(playlist)}
-                coverUrl={playlistCover(playlist)}
-                description={playlist.description}
-                playCount={playlistPlayCount(playlist)}
-                coverVisible={!uiSettings.hiddenCovers.playlist}
-                onClick={() => props.onSelectPlaylist(playlist.playlist_id)}
-              />
-            )}
-          </For>
+      <Show
+        when={selectedPlaylist()}
+        fallback={
+          <div class="local-playlist-grid-view">
+            <div class="album-grid local-playlist-grid content-fade-in">
+              <For each={props.playlists}>
+                {(playlist) => (
+                  <AlbumCard
+                    title={playlist.name}
+                    subtitle={playlistSubtitle(playlist)}
+                    coverUrl={playlistCover(playlist)}
+                    description={playlist.description}
+                    playCount={playlistPlayCount(playlist)}
+                    coverVisible={!uiSettings.hiddenCovers.playlist}
+                    onClick={() => props.onSelectPlaylist(playlist.playlist_id)}
+                  />
+                )}
+              </For>
+            </div>
+          </div>
+        }
+      >
+        <div class="local-playlist-detail">
+          <div class="local-playlist-songs">
+            <MediaList
+              items={selectedPlaylistItems()}
+              currentSourcePath={props.currentTrackPath}
+              currentMediaId={props.currentMediaId}
+              isPlayingNow={props.isPlaying}
+              onPlay={(item) => props.onPlay(item, selectedPlaylistItems())}
+              onEnqueue={props.onEnqueue}
+              onContextAction={props.onContextAction}
+              isLoading={props.isLoading}
+              emptyState={t("library.playlists.emptyTracks")}
+              contextActions={[
+                "play",
+                "enqueue",
+                "search",
+                "copy-name",
+                "copy-id",
+                "copy-song-info",
+                "share-link",
+                "music-tag-editor",
+                "copy-path",
+                "show-in-folder",
+                "song-wiki",
+                "delete-from-playlist"
+              ]}
+              deleteActionLabel={t("library.action.removeFromPlaylist")}
+              sort={props.sort}
+              onSortChange={props.onSortChange}
+              onSortOrderChange={props.onSortOrderChange}
+              hideTopScrollTool={true}
+            />
+          </div>
         </div>
-      </div>
+      </Show>
     </Show>
   );
 }

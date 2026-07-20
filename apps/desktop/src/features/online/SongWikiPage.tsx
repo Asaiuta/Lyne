@@ -32,6 +32,7 @@ import {
   IconPlayFilled,
   IconStar
 } from "../../components/icons";
+import { PageBackButton } from "../../components/page/PageBackButton";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { NcmMediaList } from "./NcmMediaList";
 import "../../shared/styles/pages/song-wiki.css";
@@ -242,10 +243,11 @@ export function SongWikiPage(props: SongWikiPageProps) {
         </Match>
         <Match when={status() === "error"}>
           <div class="song-wiki-empty content-fade-in">
-            <button type="button" class="ghost-button song-wiki-back" onClick={props.onBack}>
-              <IconChevronLeft />
-              {t("ncm.songWiki.back")}
-            </button>
+            <PageBackButton
+              ariaLabel={t("ncm.songWiki.back")}
+              class="song-wiki-back"
+              onClick={props.onBack}
+            />
             <strong>{t("ncm.songWiki.errorTitle")}</strong>
             <span>{feedback().message}</span>
           </div>
@@ -340,12 +342,13 @@ export function SongWikiPage(props: SongWikiPageProps) {
                     {t("ncm.songWiki.play")}
                   </PageToolbarButton>
                   <PageToolbarButton
-                    variant="secondary"
+                    variant="icon"
+                    ariaLabel={t("ncm.songWiki.back")}
                     class="song-wiki-back"
                     onClick={props.onBack}
+                    title={t("ncm.songWiki.back")}
                   >
                     <IconChevronLeft />
-                    {t("ncm.songWiki.back")}
                   </PageToolbarButton>
                   <PageToolbarButton
                     variant="icon"

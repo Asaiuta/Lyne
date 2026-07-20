@@ -236,7 +236,7 @@ export const MEDIA_CONTEXT_ACTION_DESCRIPTORS: Record<MediaContextAction, MediaC
   "search": {
     labelKey: "media.context.search",
     icon: () => <IconSearch />,
-    enabled: (settings) => settings.contextMenuOptions.search,
+    enabled: (settings) => settings.contextMenuOptions.search && settings.useOnlineService,
     effect: "search"
   },
   "download": {

@@ -1,7 +1,9 @@
 import { For, Show, createEffect, createSignal, onMount } from "solid-js";
+import { IconDeleteFilled, IconPlayFilled } from "../../components/icons";
 import { createApiClient } from "../../shared/api/client";
 import type { QueueEntry, QueueStatus, RequestState } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
+import { NaiveButton } from "../../shared/ui/naive";
 import type { TranslationKey } from "../../shared/i18n";
 
 const api = createApiClient();
@@ -237,9 +239,17 @@ export function QueuePage(props: QueuePageProps) {
           onInput={(event) => setLoadPath(event.currentTarget.value)}
           placeholder={t("queue.load.placeholder")}
         />
-        <button class="primary-button" type="button" onClick={() => void handleLoad()} disabled={isSubmitting()}>
+        <NaiveButton
+          class="queue-command-button"
+          round
+          secondary
+          size="medium"
+          strong
+          onClick={() => void handleLoad()}
+          disabled={isSubmitting()}
+        >
           {t("queue.load.button")}
-        </button>
+        </NaiveButton>
       </div>
 
       <div class="settings-group">
@@ -253,17 +263,28 @@ export function QueuePage(props: QueuePageProps) {
           placeholder={t("queue.next.placeholder")}
         />
         <div class="button-row">
-          <button class="ghost-button" type="button" onClick={() => void handleQueueNext()} disabled={isSubmitting()}>
+          <NaiveButton
+            class="queue-command-button"
+            round
+            secondary
+            size="medium"
+            strong
+            onClick={() => void handleQueueNext()}
+            disabled={isSubmitting()}
+          >
             {t("queue.next.button")}
-          </button>
-          <button
-            class="ghost-button"
-            type="button"
+          </NaiveButton>
+          <NaiveButton
+            class="queue-command-button"
+            round
+            secondary
+            size="medium"
+            strong
             onClick={() => void handleCancelPreload()}
             disabled={isSubmitting() || !canCancel()}
           >
             {t("queue.cancel.button")}
-          </button>
+          </NaiveButton>
         </div>
       </div>
 
@@ -286,12 +307,30 @@ export function QueuePage(props: QueuePageProps) {
                       </span>
                     </div>
                     <div class="queue-item-actions">
-                      <button type="button" class="ghost-button" onClick={() => void handlePlay(entry)} disabled={isSubmitting() || isCurrent()}>
-                        {t("queue.entry.play")}
-                      </button>
-                      <button type="button" class="ghost-button" onClick={() => void handleRemove(entry)} disabled={isSubmitting()}>
-                        {t("queue.entry.remove")}
-                      </button>
+                      <NaiveButton
+                        ariaLabel={t("queue.entry.play")}
+                        title={t("queue.entry.play")}
+                        class="queue-row-action"
+                        round
+                        secondary
+                        size="medium"
+                        onClick={() => void handlePlay(entry)}
+                        disabled={isSubmitting() || isCurrent()}
+                      >
+                        <IconPlayFilled />
+                      </NaiveButton>
+                      <NaiveButton
+                        ariaLabel={t("queue.entry.remove")}
+                        title={t("queue.entry.remove")}
+                        class="queue-row-action"
+                        round
+                        secondary
+                        size="medium"
+                        onClick={() => void handleRemove(entry)}
+                        disabled={isSubmitting()}
+                      >
+                        <IconDeleteFilled />
+                      </NaiveButton>
                     </div>
                   </li>
                 );
@@ -307,12 +346,28 @@ export function QueuePage(props: QueuePageProps) {
           placeholder={t("queue.persistent.placeholder")}
         />
         <div class="button-row">
-          <button class="ghost-button" type="button" onClick={() => void handleEnqueue()} disabled={isSubmitting()}>
+          <NaiveButton
+            class="queue-command-button"
+            round
+            secondary
+            size="medium"
+            strong
+            onClick={() => void handleEnqueue()}
+            disabled={isSubmitting()}
+          >
             {t("queue.persistent.add")}
-          </button>
-          <button class="ghost-button" type="button" onClick={() => void handleClear()} disabled={isSubmitting() || entries().length === 0}>
+          </NaiveButton>
+          <NaiveButton
+            class="queue-command-button"
+            round
+            secondary
+            size="medium"
+            strong
+            onClick={() => void handleClear()}
+            disabled={isSubmitting() || entries().length === 0}
+          >
             {t("queue.persistent.clear")}
-          </button>
+          </NaiveButton>
         </div>
       </div>
 

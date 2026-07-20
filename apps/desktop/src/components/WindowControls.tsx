@@ -4,6 +4,7 @@ import { useTranslation } from "../shared/i18n";
 import { persistUISettingField } from "../shared/state/uiSettingsStorage";
 import { useUISettings } from "../shared/state/useUISettings";
 import { dialog, message } from "../shared/ui/naive/feedback-services";
+import { NaiveButton, NaiveCheckbox } from "../shared/ui/naive";
 import { IconClose, IconMaximize, IconMinimize, IconRestore } from "./icons";
 import {
   requestWindowClose,
@@ -83,16 +84,15 @@ export function WindowControls(props: WindowControlsProps) {
         content: (
           <div class="window-close-confirm">
             <p>{t("window.closeConfirm.content")}</p>
-            <label class="window-close-confirm-remember">
-              <input
-                type="checkbox"
-                checked={remembered}
-                onChange={(event) => {
-                  remembered = event.currentTarget.checked;
-                }}
-              />
-              <span>{t("window.closeConfirm.remember")}</span>
-            </label>
+            <NaiveCheckbox
+              class="window-close-confirm-remember"
+              defaultChecked={remembered}
+              onUpdateChecked={(checked) => {
+                remembered = checked;
+              }}
+            >
+              {t("window.closeConfirm.remember")}
+            </NaiveCheckbox>
           </div>
         ),
         negativeText: t("window.closeConfirm.exit"),
@@ -131,39 +131,45 @@ export function WindowControls(props: WindowControlsProps) {
     <Show when={props.visible && appWindow() !== null}>
       <div class="window-controls" data-no-drag>
         <div class="window-control-wrapper">
-          <button
-            type="button"
+          <NaiveButton
             class="window-control-button is-minimize"
+            circle
+            tertiary
+            dataNoDrag
             onClick={handleMinimize}
-            aria-label={t("window.aria.minimize")}
+            ariaLabel={t("window.aria.minimize")}
             title={t("window.aria.minimize")}
           >
             <IconMinimize />
-          </button>
+          </NaiveButton>
         </div>
         <div class="window-control-wrapper">
-          <button
-            type="button"
+          <NaiveButton
             class="window-control-button is-maximize"
+            circle
+            tertiary
+            dataNoDrag
             onClick={handleToggleMaximize}
-            aria-label={maximized() ? t("window.aria.restore") : t("window.aria.maximize")}
+            ariaLabel={maximized() ? t("window.aria.restore") : t("window.aria.maximize")}
             title={maximized() ? t("window.aria.restore") : t("window.aria.maximize")}
           >
             <Show when={maximized()} fallback={<IconMaximize />}>
               <IconRestore />
             </Show>
-          </button>
+          </NaiveButton>
         </div>
         <div class="window-control-wrapper">
-          <button
-            type="button"
+          <NaiveButton
             class="window-control-button is-close"
+            circle
+            tertiary
+            dataNoDrag
             onClick={handleClose}
-            aria-label={t("window.aria.close")}
+            ariaLabel={t("window.aria.close")}
             title={t("window.aria.close")}
           >
             <IconClose />
-          </button>
+          </NaiveButton>
         </div>
       </div>
     </Show>

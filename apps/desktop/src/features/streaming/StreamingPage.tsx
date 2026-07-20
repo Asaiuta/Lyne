@@ -7,7 +7,9 @@ import {
 } from "../../components/icons";
 import { EmptyState } from "../../components/EmptyState";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
+import { RouteContentTransition } from "../../components/RouteContentTransition";
 import { useTranslation } from "../../shared/i18n";
+import { useUISettings } from "../../shared/state/useUISettings";
 import { NaiveNumberAnimation, NaiveTabs, type NaiveTabItem } from "../../shared/ui/naive";
 import "../../shared/styles/pages/auxiliary.css";
 
@@ -15,6 +17,7 @@ type StreamingTab = "songs" | "artists" | "albums" | "playlists";
 
 export function StreamingPage() {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
   const [activeTab, setActiveTab] = createSignal<StreamingTab>("songs");
   const songCount = () => 0;
   const songCountSuffix = () =>
@@ -71,13 +74,22 @@ export function StreamingPage() {
         </div>
       </header>
 
-      <div class="auxiliary-page-body">
-        <EmptyState
-          size="lg"
-          icon={<IconCloud />}
-          description={t("streaming.empty.disconnected")}
-        />
-      </div>
+      <RouteContentTransition
+        value={activeTab()}
+        transitionKey={activeTab()}
+        animation={uiSettings.routeAnimation}
+        motionScope="streaming-content"
+      >
+        {(displayedStreamingTab) => (
+          <div class="auxiliary-page-body" data-streaming-tab={displayedStreamingTab()}>
+            <EmptyState
+              size="lg"
+              icon={<IconCloud />}
+              description={t("streaming.empty.disconnected")}
+            />
+          </div>
+        )}
+      </RouteContentTransition>
     </section>
   );
 }

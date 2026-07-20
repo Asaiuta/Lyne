@@ -332,9 +332,10 @@
     gap: 8px;
   }
 
-  .media-sort-radio {
+  .media-sort-radio.n-radio {
     display: flex;
     align-items: center;
+    width: 100%;
     gap: 8px;
     min-height: 28px;
     padding: 4px 8px;
@@ -344,15 +345,9 @@
     transition: background-color 0.3s var(--ease-standard);
   }
 
-  .media-sort-radio:hover {
+  .media-sort-radio.n-radio:hover {
     color: var(--text);
     background: color-mix(in oklch, var(--surface-3) 84%, transparent);
-  }
-
-  .media-sort-radio input {
-    width: 14px;
-    height: 14px;
-    accent-color: var(--online-discover-control-color, var(--text));
   }
 
   .media-sort-divider {

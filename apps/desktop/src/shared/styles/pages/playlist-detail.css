@@ -236,7 +236,6 @@
   .playlist-detail-subscribe,
   .playlist-detail-more,
   .playlist-detail-icon-button,
-  .playlist-detail-search,
   .playlist-detail-tabs {
     height: 40px;
     min-height: 40px;
@@ -289,24 +288,7 @@
   }
 
   .playlist-detail-title-row .playlist-detail-back {
-    width: 36px;
-    height: 36px;
-    min-height: 36px;
-    padding: 0;
     flex: none;
-    border-radius: 50%;
-    transition:
-      color 0.3s var(--ease-standard),
-      background-color 0.3s var(--ease-standard),
-      border-color 0.3s var(--ease-standard),
-      box-shadow 0.3s var(--ease-standard),
-      opacity 0.3s var(--ease-standard),
-      transform 0.3s var(--ease-standard);
-  }
-
-  .playlist-detail-title-row .playlist-detail-back svg {
-    width: 18px;
-    height: 18px;
   }
 
   .playlist-detail-more {
@@ -336,48 +318,6 @@
   .playlist-detail-icon-button svg {
     width: 18px;
     height: 18px;
-  }
-
-  .playlist-detail-search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 130px;
-    padding: 0 12px;
-    border: 1px solid color-mix(in oklch, var(--border) 35%, transparent);
-    border-radius: var(--radius-pill);
-    color: var(--muted);
-    background: color-mix(in oklch, var(--surface-2) 80%, transparent);
-    transition:
-      width 0.3s var(--ease-standard),
-      border-color 0.3s var(--ease-standard),
-      background-color 0.3s var(--ease-standard);
-  }
-
-  .playlist-detail-search:focus-within {
-    width: 200px;
-    border-color: var(--color-primary-tonal-45);
-  }
-
-  .playlist-detail-search svg {
-    width: 18px;
-    height: 18px;
-    flex: none;
-  }
-
-  .playlist-detail-search input {
-    min-width: 0;
-    width: 100%;
-    border: 0;
-    outline: 0;
-    color: var(--text);
-    background: transparent;
-    font: inherit;
-    font-size: 14px;
-  }
-
-  .playlist-detail-search input::placeholder {
-    color: var(--muted);
   }
 
   .playlist-detail-tabs.segmented-tabs {
@@ -456,11 +396,15 @@
   .page-hero.is-small .playlist-detail-subscribe,
   .page-hero.is-small .playlist-detail-more,
   .page-hero.is-small .playlist-detail-icon-button,
-  .page-hero.is-small .playlist-detail-search,
   .page-hero.is-small .playlist-detail-tabs {
     height: 32px;
     min-height: 32px;
     font-size: 13px;
+  }
+
+  .page-hero.is-small .playlist-detail-search {
+    --n-height: 32px;
+    --n-font-size: 13px;
   }
 
   .page-hero.is-small .playlist-detail-play,
@@ -470,13 +414,6 @@
 
   .page-hero.is-small .playlist-detail-title-row {
     margin-bottom: 8px;
-  }
-
-  .page-hero.is-small .playlist-detail-title-row .playlist-detail-back {
-    width: 32px;
-    height: 32px;
-    min-height: 32px;
-    padding: 0;
   }
 
   .page-hero.is-small .playlist-detail-more {
@@ -814,10 +751,4 @@
       margin-bottom: 8px;
     }
 
-    .playlist-detail-title-row .playlist-detail-back {
-      width: 32px;
-      height: 32px;
-      min-height: 32px;
-      padding: 0;
-    }
   }

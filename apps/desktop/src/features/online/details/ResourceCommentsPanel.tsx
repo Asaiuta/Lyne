@@ -9,6 +9,7 @@ import {
   IconThumbUpFilled
 } from "../../../components/icons";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
+import { LoadMoreButton } from "../../../components/page/LoadMoreButton";
 import {
   resolveQueueVisibleRange
 } from "../../queue/queueVirtualization";
@@ -635,14 +636,13 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
       </Show>
 
       <Show when={commentHasMore()}>
-        <button
-          type="button"
-          class="ghost-button ncm-resource-comments-more"
-          disabled={commentLoading()}
-          onClick={handleLoadMore}
-        >
-          {commentLoading() ? t("ncm.comments.loading") : t("ncm.comments.more")}
-        </button>
+        <LoadMoreButton
+          class="ncm-resource-comments-more"
+          label={t("ncm.comments.more")}
+          loading={commentLoading()}
+          loadingLabel={t("ncm.comments.loading")}
+          onClick={() => void handleLoadMore()}
+        />
       </Show>
     </section>
   );

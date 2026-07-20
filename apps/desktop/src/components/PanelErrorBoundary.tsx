@@ -1,5 +1,5 @@
 import { ErrorBoundary, type JSX } from "solid-js";
-import { NaiveAlert } from "../shared/ui/naive";
+import { NaiveAlert, NaiveButton } from "../shared/ui/naive";
 
 interface PanelErrorBoundaryProps {
   children: JSX.Element;
@@ -22,9 +22,9 @@ export function PanelErrorBoundary(props: PanelErrorBoundaryProps) {
               <span class="status-error">{readErrorMessage(error)}</span>
             </NaiveAlert>
           </div>
-          <button type="button" class="ghost-button" onClick={reset}>
+          <NaiveButton variant="tertiary" onClick={reset}>
             Retry
-          </button>
+          </NaiveButton>
         </section>
       )}
     >

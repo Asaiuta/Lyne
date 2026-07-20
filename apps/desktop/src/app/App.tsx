@@ -4,10 +4,10 @@ import {
   Suspense,
   Switch,
   createEffect,
+  createMemo,
   createSignal,
-  lazy,
+  on,
   type Accessor,
-  type Component,
   type JSX
 } from "solid-js";
 import { AppShell } from "../components/AppShell";
@@ -23,57 +23,54 @@ import { createApiClient } from "../shared/api/client";
 import { useTranslation } from "../shared/i18n";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import type { ActivePage } from "../shared/ui/navigation";
-import { isOnlineOnlyPage, LOCAL_FALLBACK_PAGE } from "../shared/ui/navigation";
 import { UISearchProvider, useUISearch } from "../shared/state/UISearchContext";
 import { NaiveFeedbackProvider } from "../shared/ui/naive";
 import "../shared/styles/components/page-foundation.css";
 import { useAppController } from "./useAppController";
 import { PlaybackProvider } from "./PlaybackContext";
 import { Sidebar } from "./Sidebar";
+import { createDeferredLazyComponent } from "./deferredLazyComponent";
+import { useFullPlayerWarmup } from "./useFullPlayerWarmup";
 
 const api = createApiClient();
 
-const lazyComponent = <Props extends object>(
-  loader: () => Promise<Component<Props>>
-): Component<Props> => lazy(async () => ({ default: await loader() }));
-
-const LibraryPage = lazyComponent(() =>
+const LibraryPage = createDeferredLazyComponent(() =>
   import("../features/library/LibraryPage").then((module) => module.LibraryPage)
 );
-const NeteasePage = lazyComponent(() =>
+const NeteasePage = createDeferredLazyComponent(() =>
   import("../features/online/NeteasePage").then((module) => module.NeteasePage)
 );
-const HistoryPage = lazyComponent(() =>
+const HistoryPage = createDeferredLazyComponent(() =>
   import("../features/history/HistoryPage").then((module) => module.HistoryPage)
 );
-const DownloadPage = lazyComponent(() =>
+const DownloadPage = createDeferredLazyComponent(() =>
   import("../features/download/DownloadPage").then((module) => module.DownloadPage)
 );
-const StreamingPage = lazyComponent(() =>
+const StreamingPage = createDeferredLazyComponent(() =>
   import("../features/streaming/StreamingPage").then((module) => module.StreamingPage)
 );
-const CloudPage = lazyComponent(() =>
+const CloudPage = createDeferredLazyComponent(() =>
   import("../features/online/CloudPage").then((module) => module.CloudPage)
 );
-const PersonalFmPage = lazyComponent(() =>
+const PersonalFmPage = createDeferredLazyComponent(() =>
   import("../features/online/PersonalFmPage").then((module) => module.PersonalFmPage)
 );
-const NeteaseRadioPage = lazyComponent(() =>
+const NeteaseRadioPage = createDeferredLazyComponent(() =>
   import("../features/online/NeteaseRadioPage").then((module) => module.NeteaseRadioPage)
 );
-const SongWikiPage = lazyComponent(() =>
+const SongWikiPage = createDeferredLazyComponent(() =>
   import("../features/online/SongWikiPage").then((module) => module.SongWikiPage)
 );
-const QueueDrawer = lazyComponent(() =>
+const QueueDrawer = createDeferredLazyComponent(() =>
   import("../features/queue/QueueDrawer").then((module) => module.QueueDrawer)
 );
-const SettingsPage = lazyComponent(() =>
+const SettingsPage = createDeferredLazyComponent(() =>
   import("../features/settings/SettingsPage").then((module) => module.SettingsPage)
 );
-const FullPlayer = lazyComponent(() =>
+const FullPlayer = createDeferredLazyComponent(() =>
   import("../components/FullPlayer").then((module) => module.FullPlayer)
 );
-const LoginModal = lazyComponent(() =>
+const LoginModal = createDeferredLazyComponent(() =>
   import("../components/LoginModal").then((module) => module.LoginModal)
 );
 
@@ -146,7 +143,7 @@ function AppContent() {
   const accountStore = useNcmAccount();
   const [isNcmLoginOpen, setIsNcmLoginOpen] = createSignal<boolean>(false);
   const [loginDisableUid, setLoginDisableUid] = createSignal<boolean>(false);
-  const [hasRequestedFullPlayer, setHasRequestedFullPlayer] = createSignal<boolean>(false);
+  const [shouldMountFullPlayer, setShouldMountFullPlayer] = createSignal<boolean>(false);
   const [hasRequestedQueueDrawer, setHasRequestedQueueDrawer] = createSignal<boolean>(false);
   const [hasRequestedSettingsPage, setHasRequestedSettingsPage] = createSignal<boolean>(false);
   const [hasRequestedLoginModal, setHasRequestedLoginModal] = createSignal<boolean>(false);
@@ -154,6 +151,16 @@ function AppContent() {
     createSignal<ActivePage>(navigation.activePage());
   const [settingsInitialCategory, setSettingsInitialCategory] =
     createSignal<SettingsCategoryKey | undefined>(undefined);
+  const hasPlayableTrack = createMemo<boolean>(() => {
+    const player = playback.player();
+    return player !== null && (player.file_path !== null || player.ncm_song_id !== null);
+  });
+  const fullPlayerWarmup = useFullPlayerWarmup({
+    load: FullPlayer.loadModule,
+    hasPlayableTrack,
+    requestMount: () => setShouldMountFullPlayer(true),
+    commitOpen: () => ui.setFullPlayerOpen(true)
+  });
   const requireNcmLogin = (options: { disableUid?: boolean } = {}) => {
     setLoginDisableUid(options.disableUid === true);
     setIsNcmLoginOpen(true);
@@ -195,14 +202,17 @@ function AppContent() {
     });
   };
 
-  createEffect(() => {
-    if (!ui.uiSettings.useOnlineService && isOnlineOnlyPage(navigation.activePage())) {
-      navigation.handleActivePageChange(LOCAL_FALLBACK_PAGE);
-    }
-  });
+  createEffect(
+    on(
+      () => ui.uiSettings.useOnlineService,
+      (onlineServiceEnabled) => {
+        if (!onlineServiceEnabled) navigation.handleEnterOfflineMode();
+      }
+    )
+  );
 
   createEffect(() => {
-    if (ui.fullPlayerOpen()) setHasRequestedFullPlayer(true);
+    if (ui.fullPlayerOpen()) setShouldMountFullPlayer(true);
     if (queue.queueDrawerOpen()) setHasRequestedQueueDrawer(true);
     if (ui.settingsOpen()) setHasRequestedSettingsPage(true);
     if (isNcmLoginOpen()) setHasRequestedLoginModal(true);
@@ -222,7 +232,9 @@ function AppContent() {
             <Sidebar
               api={api}
               activePage={navigation.activePage()}
+              libraryDestination={navigation.libraryDestination()}
               onChange={navigation.handleActivePageChange}
+              onSelectLibraryDestination={navigation.handleNavigateToLibrary}
               selectedPlaylistId={navigation.selectedPlaylistId()}
               onSelectPlaylist={navigation.handleSidebarPlaylistSelect}
               onSelectLocalPlaylist={navigation.handleSidebarLocalPlaylistSelect}
@@ -280,12 +292,14 @@ function AppContent() {
               onSeek={playback.seek}
               onVolumePreview={playback.previewVolume}
               onVolumeChange={playback.changeVolume}
+              onVolumeStep={playback.stepVolume}
               onSkipPrev={playback.skipPrevious}
               onSkipNext={playback.skipNext}
               onCycleRepeat={playback.cycleRepeat}
               onToggleShuffle={playback.toggleShuffle}
               onToggleLike={playback.toggleLike}
-              onCoverClick={() => ui.setFullPlayerOpen(true)}
+              onCoverWarmup={fullPlayerWarmup.prewarm}
+              onCoverClick={fullPlayerWarmup.requestOpen}
               onOpenQueue={queue.handleToggleQueue}
               onOpenSettings={() => openSettings()}
               onNavigate={navigation.handleActivePageChange}
@@ -329,7 +343,12 @@ function AppContent() {
                         onPlay={playback.play}
                         onPause={playback.pause}
                         onPlaybackHistoryChanged={ui.notifyPlaybackHistoryChanged}
-                        localPlaylistRequest={navigation.localPlaylistRequest()}
+                        routeActive={navigation.activePage() === "library"}
+                        destination={navigation.libraryDestination()}
+                        routeAnimation={ui.uiSettings.routeAnimation}
+                        showViewMenu={ui.uiSettings.useOnlineService}
+                        onDestinationChange={navigation.handleNavigateToLibrary}
+                        onReplaceDestination={navigation.handleReplaceLibraryDestination}
                       />
                     </Match>
                     <Match when={displayedNeteaseMode()}>
@@ -439,9 +458,10 @@ function AppContent() {
 
         <PanelErrorBoundary title={td("player.fallback.empty")}>
           <Suspense fallback={null}>
-          <Show when={hasRequestedFullPlayer()}>
+          <Show when={shouldMountFullPlayer()}>
             <FullPlayer
               isOpen={ui.fullPlayerOpen()}
+              onReady={fullPlayerWarmup.notifyShellMounted}
               onClose={() => ui.setFullPlayerOpen(false)}
               onSelectArtist={handleFullPlayerArtistSelect}
               onSelectAlbum={handleFullPlayerAlbumSelect}
@@ -474,7 +494,6 @@ function AppContent() {
             <SettingsPage
               isOpen={ui.settingsOpen()}
               onClose={() => ui.setSettingsOpen(false)}
-              onStateRefresh={playback.refreshState}
               initialCategory={settingsInitialCategory()}
             />
           </Show>

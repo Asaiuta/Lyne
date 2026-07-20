@@ -18,6 +18,8 @@ interface NaiveSelectBaseProps<TValue extends NaiveSelectValue = string> {
   onFocus?: (event: FocusEvent) => void;
   onBlur?: (event: FocusEvent) => void;
   onOpenChange?: (open: boolean) => void;
+  /** Initial open state for uncontrolled usage. */
+  defaultOpen?: boolean;
   onSearch?: (value: string) => void;
   open?: boolean;
   placeholder?: string;

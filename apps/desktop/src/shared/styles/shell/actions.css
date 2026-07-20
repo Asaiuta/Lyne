@@ -106,36 +106,20 @@
     flex-wrap: wrap;
   }
 
-  .primary-button,
-  .ghost-button,
-  .page-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    min-height: 34px;
-    padding: 0 14px;
-    border-radius: var(--radius-button);
-    font-weight: 500;
-    font-size: 14px;
-    border: 1px solid transparent;
-    transition:
-      background-color var(--duration-fast) var(--ease-standard),
-      color var(--duration-fast) var(--ease-standard),
-      border-color var(--duration-fast) var(--ease-standard),
-      transform var(--duration-fast) var(--ease-standard);
+  .queue-row-action {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
   }
 
-  /* Page-level action buttons live in 40px menu bars alongside pill-shaped
-     search, select, and segmented-tab controls — match the pill so the bar
-     reads as a single shape language. */
-  .page-action {
-    border-radius: var(--radius-pill);
+  .queue-row-action > svg {
+    width: 18px;
+    height: 18px;
   }
 
   .segmented-tabs {
-    --segmented-active-index: 0;
-    --segmented-tab-count: 1;
     --segmented-gap: 4px;
     --segmented-padding: 4px;
     --segmented-surface: var(--border-faint);
@@ -145,8 +129,21 @@
     --segmented-hover-bg: var(--state-hover-on-surface);
     --segmented-active-bg: var(--accent);
     --segmented-active-color: var(--accent-foreground);
+    --n-tab-gap: var(--segmented-gap);
+    --n-tab-padding: 0;
+    --n-tab-border-radius: var(--radius-pill);
     position: relative;
+    display: inline-flex;
+    width: max-content;
+    max-width: 100%;
+    background: transparent;
+  }
+
+  .segmented-tabs .segmented-tabs-rail {
+    box-sizing: border-box;
+    padding: var(--segmented-padding);
     border: 1px solid var(--segmented-border-color);
+    border-radius: var(--radius-pill);
     background: var(--segmented-surface);
     isolation: isolate;
     overflow: hidden;
@@ -172,30 +169,19 @@
     --segmented-active-color: var(--accent);
   }
 
-  .segmented-tabs-indicator {
-    position: absolute;
+  .segmented-tabs .n-tabs-capsule {
     z-index: 0;
-    top: var(--segmented-padding);
-    bottom: var(--segmented-padding);
-    left: var(--segmented-padding);
-    width: calc((100% - (var(--segmented-padding) * 2) - (var(--segmented-gap) * (var(--segmented-tab-count) - 1))) / var(--segmented-tab-count));
-    border-radius: inherit;
     background: var(--segmented-active-bg);
-    transform: translateX(calc(var(--segmented-active-index) * (100% + var(--segmented-gap))));
-    transition:
-      transform 0.28s var(--ease-standard),
-      background-color 0.28s var(--ease-standard);
-    pointer-events: none;
   }
 
-  .segmented-tabs > .segmented-tab {
+  .segmented-tabs .segmented-tab {
     position: relative;
     z-index: 1;
     color: var(--segmented-text-color);
     background: transparent;
   }
 
-  .segmented-tabs > .segmented-tab:hover:not(:disabled) {
+  .segmented-tabs .segmented-tab:hover:not(:disabled) {
     color: var(--segmented-hover-color);
     background: var(--segmented-hover-bg);
   }
@@ -209,45 +195,17 @@
     transform: translateY(-3px);
   }
 
-  .segmented-tabs > .segmented-tab.is-active {
+  .segmented-tabs .segmented-tab.is-active {
     color: var(--segmented-active-color);
     background: transparent !important;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .segmented-tabs-indicator {
+    .segmented-tabs .n-tabs-capsule {
       transition: none;
     }
   }
 
-  .primary-button {
-    color: var(--accent-foreground);
-    background: var(--accent);
-    box-shadow: none;
-  }
-
-  .primary-button:hover:not(:disabled) {
-    transform: none;
-    background: var(--accent-strong);
-  }
-
-  .ghost-button {
-    color: var(--text-soft);
-    background: var(--border-faint);
-    border-color: var(--border-overlay);
-  }
-
-  .ghost-button:hover:not(:disabled),
-  .page-action:hover:not(:disabled) {
-    color: var(--text);
-    transform: none;
-    border-color: var(--state-pressed-on-surface);
-    background: var(--state-hover-on-surface);
-  }
-
-  .primary-button:disabled,
-  .ghost-button:disabled,
-  .page-action:disabled,
   .row-action:disabled,
   .transport-button:disabled {
     opacity: 0.48;
@@ -297,7 +255,12 @@
     }
 
     .segmented-tabs {
-      display: none !important;
+      display: block !important;
+      width: 100%;
+    }
+
+    .segmented-tabs .n-tabs-nav {
+      display: none;
     }
 
     .segmented-tabs-select {
@@ -317,8 +280,9 @@
     color: var(--text-soft);
   }
 
-  .text-input,
-  .login-modal-cookie-input {
+  input.text-input,
+  select.text-input,
+  textarea.text-input {
     width: 100%;
     min-height: 34px;
     padding: 0 14px;
@@ -334,21 +298,21 @@
       background-color var(--duration-fast) var(--ease-standard);
   }
 
-  .text-input:focus,
-  .login-modal-cookie-input:focus {
+  input.text-input:focus,
+  select.text-input:focus,
+  textarea.text-input:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--color-primary-tonal-20);
   }
 
-  .text-input::placeholder,
-  .login-modal-cookie-input::placeholder {
+  input.text-input::placeholder,
+  textarea.text-input::placeholder {
     color: var(--muted);
   }
 
   .login-modal-cookie-input {
+    --n-height: 120px;
     min-height: 120px;
-    padding-block: 12px;
-    resize: vertical;
   }
 
   .create-playlist-modal {
@@ -371,13 +335,9 @@
     font-size: var(--text-sm);
   }
 
-  .create-playlist-switch input[type="checkbox"] {
-    accent-color: var(--accent);
-  }
-
   .create-playlist-description {
+    --n-height: 86px;
     min-height: 86px;
-    resize: vertical;
   }
 
   .create-playlist-feedback {
@@ -386,8 +346,4 @@
 
   .create-playlist-submit {
     width: 100%;
-  }
-
-  .login-modal-toggle input[type="radio"] {
-    accent-color: var(--accent);
   }

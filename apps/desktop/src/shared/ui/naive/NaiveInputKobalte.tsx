@@ -14,6 +14,11 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
   const [hovered, setHovered] = createSignal<boolean>(false);
   const [passwordRevealed, setPasswordRevealed] = createSignal<boolean>(false);
 
+  const assignInput = (element: HTMLInputElement | HTMLTextAreaElement): void => {
+    inputEl = element;
+    props.inputRef?.(element);
+  };
+
   const handleValueChange = (value: string): void => {
     if (props.allowInput && !props.allowInput(value)) {
       if (inputEl) inputEl.value = props.value;
@@ -87,9 +92,7 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
           {isNaiveInputTextarea(props) ? (
             <TextField.TextArea
               {...props.inputProps}
-              ref={(el: HTMLTextAreaElement) => {
-                inputEl = el;
-              }}
+              ref={assignInput}
               class={naiveInputElementClass(props)}
               placeholder={props.placeholder}
               rows={props.rows ?? 3}
@@ -113,9 +116,7 @@ export function NaiveInputKobalte(props: NaiveInputProps): JSX.Element {
           ) : (
             <TextField.Input
               {...props.inputProps}
-              ref={(el: HTMLInputElement) => {
-                inputEl = el;
-              }}
+              ref={assignInput}
               type={
                 props.type === "password"
                   ? passwordRevealed()

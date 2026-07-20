@@ -289,10 +289,6 @@
       align-items: stretch;
     }
 
-    .ncm-video-detail-head .ghost-button {
-      align-self: flex-start;
-    }
-
     .ncm-video-quality,
     .ncm-video-comments-head {
       align-self: stretch;

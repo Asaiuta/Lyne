@@ -120,7 +120,7 @@ test("discover tab and card interaction states stay neutral instead of primary r
     ".online-discover-mini-tabs.n-tabs",
     ".online-discover-mini-tabs .n-tabs-rail",
     ".online-page.is-discover-page .page-header-tabs .discover-primary-tabs.n-tabs",
-    ".media-sort-radio input",
+    ".media-sort-radio.n-radio",
     ".media-list-float-button",
     ".online-discover-section .album-card:hover",
     ".ncm-home-feed .album-card:hover",

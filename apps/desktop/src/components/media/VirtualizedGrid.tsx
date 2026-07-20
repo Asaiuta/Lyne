@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
+import "../../shared/styles/pages/album-grid.css";
 import { resolveNearestScrollRoot } from "../../shared/ui/scrollRoot";
 import {
   GRID_OVERSCAN_ROWS,

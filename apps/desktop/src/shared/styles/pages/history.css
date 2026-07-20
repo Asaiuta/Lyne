@@ -126,11 +126,6 @@
     margin-bottom: 12px;
   }
 
-  .history-page-menu .page-action {
-    height: 40px;
-    min-height: 40px;
-  }
-
   .history-page-play,
   .history-page-clear {
     padding-inline: 18px;

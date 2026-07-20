@@ -18,6 +18,7 @@ import {
   createAppearanceSignals,
   previewAppearanceSignalField
 } from "./appearanceSettingsModel";
+import { SIDEBAR_VISIBILITY_ITEMS } from "./appearanceConfig";
 
 const runtimeFromValues = (values: Record<string, string>): UISettingsRuntime => ({
   storage: {
@@ -45,6 +46,13 @@ test("appearance descriptor groups stay unique and intentionally scoped", () => 
   );
   assert.equal(APPEARANCE_SIGNAL_FIELDS.includes("themeFollowCover"), true);
   assert.equal(APPEARANCE_SIGNAL_FIELDS.includes("fullPlayerShowCommentCount"), true);
+});
+
+test("sidebar visibility exposes independent local library switches", () => {
+  const keys = SIDEBAR_VISIBILITY_ITEMS.map((item) => item.key);
+  for (const key of ["library", "libraryAlbums", "libraryArtists", "libraryFolders"] as const) {
+    assert.equal(keys.includes(key), true);
+  }
 });
 
 test("appearance signal factory creates accessors and returned setter aliases", () => {

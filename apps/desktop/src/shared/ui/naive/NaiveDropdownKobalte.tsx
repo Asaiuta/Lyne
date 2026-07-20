@@ -19,16 +19,7 @@ const HOVER_OPEN_DELAY = 100;
 const HOVER_CLOSE_DELAY = 200;
 const DROPDOWN_LEAVE_PRESENCE_MS = 180;
 
-let cascadeWarnLogged = false;
 let virtualVsTriggerWarnLogged = false;
-
-const warnCascadeOnce = (): void => {
-  if (cascadeWarnLogged) return;
-  cascadeWarnLogged = true;
-  console.warn(
-    "[NaiveDropdown] cascade children deferred — flatten options or use Popover"
-  );
-};
 
 const warnVirtualVsTriggerOnce = (): void => {
   if (virtualVsTriggerWarnLogged) return;
@@ -41,6 +32,8 @@ const warnVirtualVsTriggerOnce = (): void => {
 interface DropdownOptionRowProps {
   option: NaiveDropdownOption;
   onSelect: (option: NaiveDropdownOption) => void;
+  mountTarget?: HTMLElement;
+  menuClass: string;
 }
 
 function DropdownDividerRow(): JSX.Element {
@@ -49,10 +42,29 @@ function DropdownDividerRow(): JSX.Element {
   );
 }
 
-function DropdownOptionRow(props: DropdownOptionRowProps): JSX.Element {
-  const disabled = (): boolean => props.option.disabled === true;
+function DropdownOptionContent(props: { option: NaiveDropdownOption }): JSX.Element {
   const hasIcon = (): boolean => props.option.icon != null;
   const hasSuffix = (): boolean => props.option.suffix != null;
+
+  return (
+    <>
+      <Show when={hasIcon()}>
+        <span class={naiveDropdownOptionPrefixClass({ hasIcon: true })} aria-hidden="true">
+          {props.option.icon}
+        </span>
+      </Show>
+      <span class={naiveDropdownOptionLabelClass()}>{props.option.label}</span>
+      <Show when={hasSuffix()}>
+        <span class={naiveDropdownOptionSuffixClass()} aria-hidden="true">
+          {props.option.suffix}
+        </span>
+      </Show>
+    </>
+  );
+}
+
+function DropdownLeafOptionRow(props: DropdownOptionRowProps): JSX.Element {
+  const disabled = (): boolean => props.option.disabled === true;
 
   return (
     <DropdownMenu.Item
@@ -68,19 +80,53 @@ function DropdownOptionRow(props: DropdownOptionRowProps): JSX.Element {
         props.onSelect(props.option);
       }}
     >
-      <Show when={hasIcon()}>
-        <span class={naiveDropdownOptionPrefixClass({ hasIcon: true })} aria-hidden="true">
-          {props.option.icon}
-        </span>
-      </Show>
-      <span class={naiveDropdownOptionLabelClass()}>{props.option.label}</span>
-      <Show when={hasSuffix()}>
-        <span class={naiveDropdownOptionSuffixClass()} aria-hidden="true">
-          {props.option.suffix}
-        </span>
-      </Show>
+      <DropdownOptionContent option={props.option} />
     </DropdownMenu.Item>
   );
+}
+
+function DropdownSubmenuOptionRow(props: DropdownOptionRowProps): JSX.Element {
+  const disabled = (): boolean => props.option.disabled === true;
+
+  return (
+    <DropdownMenu.Sub gutter={4}>
+      <DropdownMenu.SubTrigger
+        textValue={props.option.label}
+        disabled={disabled()}
+        data-key={props.option.key}
+        class={naiveDropdownOptionClass({
+          disabled: disabled(),
+          className: props.option.class
+        })}
+      >
+        <DropdownOptionContent option={props.option} />
+      </DropdownMenu.SubTrigger>
+      <DropdownMenu.Portal mount={props.mountTarget}>
+        <DropdownMenu.SubContent
+          class={joinClassNames(props.menuClass, "n-dropdown-submenu")}
+        >
+          <For each={props.option.children}>
+            {(option) => (
+              <DropdownOptionTreeRow
+                option={option}
+                onSelect={props.onSelect}
+                mountTarget={props.mountTarget}
+                menuClass={props.menuClass}
+              />
+            )}
+          </For>
+        </DropdownMenu.SubContent>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Sub>
+  );
+}
+
+function DropdownOptionTreeRow(props: DropdownOptionRowProps): JSX.Element {
+  if (props.option.type === "divider") return <DropdownDividerRow />;
+  if (props.option.children && props.option.children.length > 0) {
+    return <DropdownSubmenuOptionRow {...props} />;
+  }
+  return <DropdownLeafOptionRow {...props} />;
 }
 
 export function NaiveDropdownKobalte(props: NaiveDropdownProps): JSX.Element {
@@ -313,18 +359,16 @@ export function NaiveDropdownKobalte(props: NaiveDropdownProps): JSX.Element {
               : undefined
           }
         >
+          {props.header}
           <For each={props.options}>
-            {(option) => {
-              // Cascade `children` is deferred in PR2; warn once and skip rendering
-              // the submenu surface, but still render the option row inline.
-              if (option.children && option.children.length > 0) {
-                warnCascadeOnce();
-              }
-              if (option.type === "divider") {
-                return <DropdownDividerRow />;
-              }
-              return <DropdownOptionRow option={option} onSelect={handleSelect} />;
-            }}
+            {(option) => (
+              <DropdownOptionTreeRow
+                option={option}
+                onSelect={handleSelect}
+                mountTarget={mountTarget()}
+                menuClass={menuClass()}
+              />
+            )}
           </For>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 import { createApiClient, type ApiClient } from "../../shared/api/client";
 import { revealPathInFolder } from "../../shared/api/os";
@@ -26,8 +26,14 @@ import { createLibraryControllerViewState } from "./libraryControllerViewState";
 import {
   loadLocalPlaylistsCached,
   refreshLocalPlaylistsCache,
-  subscribeLocalPlaylists
+  subscribeLocalPlaylists,
+  updateLocalPlaylistSummaryCache
 } from "./localPlaylistSummaryCache";
+import {
+  createLocalPlaylistRequestCoordinator,
+  isLocalPlaylistNotFoundError,
+  type LocalPlaylistRequestState
+} from "./localPlaylistRequestState";
 
 export type LibraryDataControllerApi = Pick<
   ApiClient,
@@ -122,6 +128,9 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     readErrorMessage,
     setRawFeedback
   });
+  const [localPlaylistsReady, setLocalPlaylistsReady] = createSignal<boolean>(false);
+  const [localPlaylistRequestState, setLocalPlaylistRequestState] =
+    createSignal<LocalPlaylistRequestState>({ status: "idle", playlistId: null });
 
   const scanPoller = createLibraryScanPoller({
     getTask: (taskId) => api.getLibraryScanTask(taskId),
@@ -193,20 +202,44 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     }
   };
 
+  const playlistRequestCoordinator = createLocalPlaylistRequestCoordinator();
+  const deactivateLocalPlaylistRoute = () => {
+    playlistRequestCoordinator.invalidate();
+  };
+  onCleanup(deactivateLocalPlaylistRoute);
   const refreshSelectedPlaylist = async (playlistId = viewState.selectedPlaylistId()) => {
+    const request = playlistRequestCoordinator.begin(playlistId);
     if (!playlistId) {
       viewState.setSelectedPlaylistItems([]);
+      setLocalPlaylistRequestState({ status: "idle", playlistId: null });
       return;
     }
 
+    setLocalPlaylistRequestState({ status: "loading", playlistId });
     try {
       const detail = await api.getLocalPlaylist(playlistId);
+      if (!playlistRequestCoordinator.isCurrent(request, viewState.selectedPlaylistId())) return;
       viewState.setSelectedPlaylistId(detail.playlist.playlist_id);
       viewState.setSelectedPlaylistItems(detail.items.map(adaptItem));
+      setLocalPlaylistRequestState({ status: "success", playlistId });
     } catch (error) {
-      viewState.setSelectedPlaylistId(null);
-      viewState.setSelectedPlaylistItems([]);
-      setRawFeedback("error", readErrorMessage(error));
+      if (!playlistRequestCoordinator.isCurrent(request, viewState.selectedPlaylistId())) return;
+      const message = readErrorMessage(error);
+      if (isLocalPlaylistNotFoundError(error)) {
+        viewState.setSelectedPlaylistItems([]);
+        const cached = updateLocalPlaylistSummaryCache((playlists) =>
+          playlists.filter((playlist) => playlist.playlist_id !== playlistId)
+        );
+        if (cached === null) {
+          viewState.setLocalPlaylists(
+            viewState.localPlaylists().filter((playlist) => playlist.playlist_id !== playlistId)
+          );
+        }
+        setLocalPlaylistRequestState({ status: "not-found", playlistId });
+        return;
+      }
+      setLocalPlaylistRequestState({ status: "error", playlistId, message });
+      setRawFeedback("error", message);
     }
   };
 
@@ -228,6 +261,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
         ? await refreshLocalPlaylistsCache(api)
         : await loadLocalPlaylistsCached(api);
       await applyLocalPlaylists(playlists);
+      setLocalPlaylistsReady(true);
     } catch (error) {
       setRawFeedback("error", readErrorMessage(error));
     }
@@ -235,7 +269,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
 
   onMount(() => {
     const unsubscribe = subscribeLocalPlaylists((playlists) => {
-      void applyLocalPlaylists(playlists);
+      void applyLocalPlaylists(playlists).then(() => setLocalPlaylistsReady(true));
     });
     void refreshRoots();
     void refreshItems();
@@ -357,7 +391,11 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     if (!playlistId) {
       viewState.setSelectedPlaylistId(null);
       viewState.setSelectedPlaylistItems([]);
+      await refreshSelectedPlaylist(null);
       return;
+    }
+    if (viewState.selectedPlaylistId() !== playlistId) {
+      viewState.setSelectedPlaylistItems([]);
     }
     viewState.setSelectedPlaylistId(playlistId);
     await refreshSelectedPlaylist(playlistId);
@@ -517,6 +555,8 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     loadedVirtualRange: viewState.loadedVirtualRange,
     setVirtualRange: viewState.setVirtualRange,
     localPlaylists: viewState.localPlaylists,
+    localPlaylistsReady,
+    localPlaylistRequestState,
     selectedPlaylistId: viewState.selectedPlaylistId,
     selectedPlaylistItems: viewState.selectedPlaylistItems,
     selectedPlaylistSortedItems: viewState.selectedPlaylistSortedItems,
@@ -551,6 +591,7 @@ export function useLibraryDataController(options: UseLibraryDataControllerOption
     playCurrentSongView,
     enqueueItem,
     enqueueItems,
+    deactivateLocalPlaylistRoute,
     selectLocalPlaylist,
     createLocalPlaylist,
     deleteLocalPlaylist,

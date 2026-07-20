@@ -25,6 +25,7 @@ import {
   type ManagerConfig
 } from "./appearanceConfig";
 import type { AppearanceSettings } from "./useAppearanceSettings";
+import { NaiveButton } from "../../../shared/ui/naive";
 
 interface AppearanceSubPanelProps {
   manager: ManagerConfig;
@@ -144,9 +145,13 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
     <>
       <Show when={props.showHeader !== false}>
         <div class="settings-subpage-head">
-          <button type="button" class="ghost-button settings-subpage-back" onClick={props.onBack}>
+          <NaiveButton
+            variant="tertiary"
+            class="settings-subpage-back"
+            onClick={props.onBack}
+          >
             {t("settings.appearance.back")}
-          </button>
+          </NaiveButton>
           <div class="settings-subpage-copy">
             <h2>{t(props.manager.labelKey)}</h2>
             <p>{t(props.manager.descriptionKey)}</p>
@@ -320,11 +325,11 @@ export function AppearanceSubPanel(props: AppearanceSubPanelProps) {
             highlighted={isHi("hiddenCovers.all")}
             index={props.nextIndex()}
           >
-            <button type="button" class="ghost-button" onClick={props.settings.handleToggleAllCovers}>
+            <NaiveButton variant="tertiary" onClick={props.settings.handleToggleAllCovers}>
               {props.settings.allCoversHidden()
                 ? t("settings.appearance.coverManager.showAll")
                 : t("settings.appearance.coverManager.hideAll")}
-            </button>
+            </NaiveButton>
           </SettingItem>
 
           <For each={COVER_DISPLAY_ITEMS}>

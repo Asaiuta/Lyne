@@ -1,14 +1,3 @@
-/* Uno's unlayered button reset is imported after component CSS. Keep this
-   sidebar-only rule unlayered so the source trigger matches NaiveUI's button shell. */
-.sidebar .sidebar-section-action-icon {
-  background: var(--state-hover-on-surface);
-}
-
-.sidebar .sidebar-section-action-icon:hover,
-.sidebar .sidebar-section-action-icon.is-open {
-  background: var(--state-pressed-on-surface);
-}
-
 /* Menus are NaiveUI surfaces rendered through portals. Keep this unlayered so
    the app-wide focus rule cannot change their radius during close animation. */
 .n-popover.n-popover-shared:focus-visible,
@@ -17,4 +6,18 @@
 .sidebar-playlist-source-popover:focus-visible {
   border-radius: var(--n-border-radius, 8px);
   outline: none;
+}
+
+/* These compatibility surfaces intentionally outrank layered component rules.
+   Keep the historical cascade while route-owned CSS leaves the startup graph. */
+.player-bar-cover,
+.player-progress-edge,
+.full-player-progress,
+.library-root,
+.queue-item,
+.history-item,
+.online-playlist-card,
+.login-modal-feedback {
+  background: color-mix(in oklch, var(--surface-2) 80%, transparent);
+  border: 1px solid var(--border-overlay);
 }

@@ -1,63 +1,32 @@
-import {
-  createContext,
-  createEffect,
-  createMemo,
-  createSignal,
-  useContext
-} from "solid-js";
+import { createContext, createSignal, useContext } from "solid-js";
 import type { Accessor, JSX } from "solid-js";
 import { interpolate } from "./format";
-import { en, type TranslationDict, type TranslationKey } from "./locales/en";
-import { zhCN } from "./locales/zh-CN";
+import {
+  LOCALE_STORAGE_KEY,
+  SUPPORTED_LOCALES,
+  createLocaleCommitter,
+  loadLocale,
+  type LoadedLocale
+} from "./locale";
+import type { TranslationKey } from "./locales/en";
 import type { Locale, TranslationParams } from "./types";
 
-const DICTIONARIES: Record<Locale, TranslationDict> = {
-  en,
-  "zh-CN": zhCN
+const updateDocumentLanguage = (locale: Locale): void => {
+  if (typeof document !== "undefined") document.documentElement.lang = locale;
 };
 
-const SUPPORTED_LOCALES: ReadonlyArray<Locale> = ["en", "zh-CN"];
-const DEFAULT_LOCALE: Locale = "en";
-const STORAGE_KEY = "audio-desktop.locale";
-
-const isLocale = (value: string | null | undefined): value is Locale =>
-  value !== null && value !== undefined && (SUPPORTED_LOCALES as ReadonlyArray<string>).includes(value);
-
-const detectLocale = (): Locale => {
-  if (typeof window === "undefined") {
-    return DEFAULT_LOCALE;
-  }
-
+const persistLocale = (locale: Locale): void => {
+  if (typeof window === "undefined") return;
   try {
-    const stored = window.localStorage?.getItem(STORAGE_KEY);
-    if (isLocale(stored)) {
-      return stored;
-    }
+    window.localStorage?.setItem(LOCALE_STORAGE_KEY, locale);
   } catch {
-    // localStorage may be unavailable (private mode, sandbox); fall through.
+    // Locale switching remains usable when persistence is unavailable.
   }
-
-  const candidates: Array<string | undefined> = [];
-  if (typeof navigator !== "undefined") {
-    candidates.push(navigator.language);
-    if (Array.isArray(navigator.languages)) {
-      candidates.push(...navigator.languages);
-    }
-  }
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const lower = candidate.toLowerCase();
-    if (lower.startsWith("zh")) return "zh-CN";
-    if (lower.startsWith("en")) return "en";
-  }
-
-  return DEFAULT_LOCALE;
 };
 
 interface I18nContextValue {
   locale: Accessor<Locale>;
-  setLocale: (locale: Locale) => Locale;
+  setLocale: (locale: Locale) => Promise<Locale>;
   t: (key: TranslationKey, params?: TranslationParams) => string;
   /**
    * Tagged-string variant for callers that build keys at runtime (eg. by
@@ -65,46 +34,42 @@ interface I18nContextValue {
    * translation is registered, matching the behaviour of `t`.
    */
   td: (key: string, params?: TranslationParams) => string;
-  supportedLocales: ReadonlyArray<Locale>;
+  supportedLocales: readonly Locale[];
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 interface I18nProviderProps {
+  initial: LoadedLocale;
   children: JSX.Element;
 }
 
 export function I18nProvider(props: I18nProviderProps) {
-  const [locale, setLocaleState] = createSignal<Locale>(detectLocale());
+  const [loadedLocale, setLoadedLocale] = createSignal<LoadedLocale>(props.initial);
+  updateDocumentLanguage(props.initial.locale);
 
-  createEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.lang = locale();
+  const locale: Accessor<Locale> = () => loadedLocale().locale;
+  const dictionary = (): Readonly<Record<string, string>> => loadedLocale().dictionary;
+  const setLocale = createLocaleCommitter({
+    load: loadLocale,
+    updateDocumentLanguage,
+    persistLocale,
+    commit: (loaded) => {
+      setLoadedLocale(loaded);
     }
   });
 
-  const setLocale = (next: Locale): Locale => {
-    setLocaleState(next);
-    try {
-      window.localStorage?.setItem(STORAGE_KEY, next);
-    } catch {
-      // ignore storage errors
-    }
-    return next;
-  };
-
-  const dictionary = createMemo(() => DICTIONARIES[locale()] as Record<string, string>);
-  const fallback = en as Record<string, string>;
-
-  const td = (key: string, params?: TranslationParams) => {
-    const template = dictionary()[key] ?? fallback[key] ?? key;
+  const td = (key: string, params?: TranslationParams): string => {
+    const template = dictionary()[key] ?? key;
     return interpolate(template, params);
   };
 
-  const t = (key: TranslationKey, params?: TranslationParams) => td(key, params);
+  const t = (key: TranslationKey, params?: TranslationParams): string => td(key, params);
 
   return (
-    <I18nContext.Provider value={{ locale, setLocale, t, td, supportedLocales: SUPPORTED_LOCALES }}>
+    <I18nContext.Provider
+      value={{ locale, setLocale, t, td, supportedLocales: SUPPORTED_LOCALES }}
+    >
       {props.children}
     </I18nContext.Provider>
   );

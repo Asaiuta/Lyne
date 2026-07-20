@@ -87,6 +87,46 @@ export interface PersistentSettingsUpdate {
   use_next_prefetch?: boolean;
 }
 
+export interface AudioSettingsPreviewPatch {
+  volume?: number;
+  eq_bands?: Record<string, number>;
+}
+
+export type AudioSettingsApplyState =
+  | "applied"
+  | "next_track"
+  | "restart_output"
+  | "failed";
+
+export interface AudioSettingApplyStatus {
+  state: AudioSettingsApplyState;
+  revision: number;
+  message: string | null;
+}
+
+export interface ActiveAudioSettingsPreview {
+  session_id: string;
+  seq: number;
+  volume: number | null;
+  eq_bands: Readonly<Record<string, number>> | null;
+}
+
+export interface AudioSettingsSnapshot {
+  revision: number;
+  state_revision: number;
+  desired: PersistentSettings;
+  effective: PersistentSettings;
+  apply_status: Readonly<Record<string, AudioSettingApplyStatus>>;
+  active_preview: ActiveAudioSettingsPreview | null;
+}
+
+export interface AudioSettingsPreviewResult {
+  accepted: boolean;
+  sessionId: string;
+  seq: number;
+  snapshot: AudioSettingsSnapshot;
+}
+
 export interface PlayerState {
   is_playing: boolean;
   is_paused: boolean;

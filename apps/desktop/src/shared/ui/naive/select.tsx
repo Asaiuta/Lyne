@@ -1,4 +1,4 @@
-import { Show, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createSignal, type JSX } from "solid-js";
 import type {
   NaiveSelectComponent,
   NaiveSelectProps,
@@ -10,6 +10,7 @@ import {
   naiveSelectHasValue,
   naiveSelectRootClass
 } from "./select-core";
+import { NaiveSelectFocusHandoffContext } from "./select-focus-handoff";
 import { createLazyNaive } from "./lazy-naive";
 
 export type {
@@ -34,6 +35,9 @@ const lazyNaiveSelect = createLazyNaive<NaiveSelectComponent>(() =>
 type NaiveSelectFallbackProps<TValue extends NaiveSelectValue> =
   NaiveSelectProps<TValue> & {
     onWarmup: () => void;
+    onRequestOpen: () => void;
+    onFocusIntentChange: (focused: boolean) => void;
+    onTriggerRef: (element: HTMLButtonElement) => void;
   };
 
 function NaiveSelectFallback<TValue extends NaiveSelectValue>(
@@ -52,6 +56,7 @@ function NaiveSelectFallback<TValue extends NaiveSelectValue>(
         <button
           type="button"
           class="n-base-selection-label"
+          ref={props.onTriggerRef}
           disabled={props.disabled}
           aria-label={props.ariaLabel}
           aria-labelledby={props.ariaLabelledBy}
@@ -59,15 +64,17 @@ function NaiveSelectFallback<TValue extends NaiveSelectValue>(
           onClick={(event) => {
             if (!props.disabled && !props.readonly) {
               event.preventDefault();
-              props.onWarmup();
+              props.onRequestOpen();
             }
           }}
           onFocus={(event) => {
             setFocused(true);
+            props.onFocusIntentChange(true);
             props.onFocus?.(event);
           }}
           onBlur={(event) => {
             setFocused(false);
+            props.onFocusIntentChange(false);
             props.onBlur?.(event);
           }}
         >
@@ -108,19 +115,62 @@ export function NaiveSelect<TValue extends NaiveSelectValue = string>(
 ): JSX.Element {
   const [LoadedSelect, setLoadedSelect] =
     createSignal<NaiveSelectComponent | null>(lazyNaiveSelect.getLoaded());
+  const [openOnLoad, setOpenOnLoad] = createSignal<boolean>(false);
+  const [focusRequested, setFocusRequested] = createSignal<boolean>(false);
+  const [focusOnLoad, setFocusOnLoad] = createSignal<boolean>(false);
+  let fallbackTrigger: HTMLButtonElement | undefined;
+  let loading = false;
 
   const ensureLoaded = (): void => {
-    void lazyNaiveSelect.load().then((component) => setLoadedSelect(() => component));
+    if (loading || LoadedSelect()) return;
+    loading = true;
+    void lazyNaiveSelect.load().then((component) => {
+      setFocusOnLoad(
+        focusRequested() &&
+          typeof document !== "undefined" &&
+          document.activeElement === fallbackTrigger
+      );
+      setLoadedSelect(() => component);
+    });
   };
+  const requestOpen = (): void => {
+    if (props.disabled || props.readonly) return;
+    if (props.open === undefined) setOpenOnLoad(true);
+    props.onOpenChange?.(true);
+    ensureLoaded();
+  };
+
+  createEffect(() => {
+    if (props.open === true || (props.open === undefined && props.defaultOpen === true)) {
+      ensureLoaded();
+    }
+  });
 
   return (
     <Show
       when={LoadedSelect()}
-      fallback={<NaiveSelectFallback {...props} onWarmup={ensureLoaded} />}
+      fallback={
+        <NaiveSelectFallback
+          {...props}
+          onWarmup={ensureLoaded}
+          onRequestOpen={requestOpen}
+          onFocusIntentChange={setFocusRequested}
+          onTriggerRef={(element) => {
+            fallbackTrigger = element;
+          }}
+        />
+      }
     >
       {(Loaded) => {
         const LoadedComponent = Loaded();
-        return <LoadedComponent {...props} />;
+        return (
+          <NaiveSelectFocusHandoffContext.Provider value={focusOnLoad}>
+            <LoadedComponent
+              {...props}
+              defaultOpen={props.open === undefined && openOnLoad() ? true : props.defaultOpen}
+            />
+          </NaiveSelectFocusHandoffContext.Provider>
+        );
       }}
     </Show>
   );

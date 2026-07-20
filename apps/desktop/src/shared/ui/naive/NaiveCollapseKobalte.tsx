@@ -1,6 +1,7 @@
 import { Accordion as KobalteAccordion } from "@kobalte/core/accordion";
-import { Show, createSignal, type JSX } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 import type { NaiveCollapseItemProps, NaiveCollapseProps } from "./collapse.shared";
+import { NaiveCollapseTransition } from "./collapse-transition";
 import {
   NaiveCollapseContext,
   createNaiveCollapseContext,
@@ -66,6 +67,7 @@ export function NaiveCollapseItemKobalte(
     <KobalteAccordion.Item
       value={itemName()}
       disabled={props.disabled}
+      forceMount
       class={naiveCollapseItemClass(props, {
         active: active(),
         disabled: props.disabled ?? false,
@@ -80,10 +82,14 @@ export function NaiveCollapseItemKobalte(
           </span>
         </KobalteAccordion.Trigger>
       </KobalteAccordion.Header>
-      <KobalteAccordion.Content class="n-collapse-item__content-wrapper">
-        <Show when={active()}>
+      <KobalteAccordion.Content
+        class="n-collapse-item__content-wrapper"
+        aria-hidden={collapsed()}
+        inert={collapsed()}
+      >
+        <NaiveCollapseTransition show={active()}>
           <div class="n-collapse-item__content-inner">{props.children}</div>
-        </Show>
+        </NaiveCollapseTransition>
       </KobalteAccordion.Content>
     </KobalteAccordion.Item>
   );

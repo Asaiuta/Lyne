@@ -30,6 +30,13 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
   const [hovered, setHovered] = createSignal<boolean>(false);
   const [passwordRevealed, setPasswordRevealed] = createSignal<boolean>(false);
 
+  const assignFallbackInput = (
+    element: HTMLInputElement | HTMLTextAreaElement
+  ): void => {
+    fallbackInput = element;
+    props.inputRef?.(element);
+  };
+
   const ensureLoaded = (): void => {
     void lazyNaiveInput.load().then((component) => setLoadedInput(() => component));
   };
@@ -100,9 +107,7 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
                 fallback={
                   <input
                     {...props.inputProps}
-                    ref={(el) => {
-                      fallbackInput = el;
-                    }}
+                    ref={assignFallbackInput}
                     type={
                       props.type === "password"
                         ? passwordRevealed()
@@ -146,9 +151,7 @@ export function NaiveInput(props: NaiveInputProps): JSX.Element {
               >
                 <textarea
                   {...props.inputProps}
-                  ref={(el) => {
-                    fallbackInput = el;
-                  }}
+                  ref={assignFallbackInput}
                   class={naiveInputElementClass(props)}
                   value={props.value}
                   placeholder={props.placeholder}

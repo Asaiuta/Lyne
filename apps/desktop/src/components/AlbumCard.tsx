@@ -1,4 +1,5 @@
 import { Show } from "solid-js";
+import "../shared/styles/pages/album-grid.css";
 import { IconArtist, IconPlay } from "./icons";
 import { SImage } from "./SImage";
 import { coverSizeUrl } from "../shared/ui/coverSize";

@@ -235,7 +235,7 @@
     min-width: 116px;
     border-radius: 8px;
     border: 1px solid var(--full-player-meta-popover-bg);
-    padding: 4px;
+    padding: 4px 0;
     color: var(--full-player-meta-popover-ink);
     background: var(--full-player-meta-popover-bg);
     box-shadow: 0 16px 38px rgb(0 0 0 / 0.22);

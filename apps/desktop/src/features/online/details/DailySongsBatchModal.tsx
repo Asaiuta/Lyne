@@ -7,7 +7,14 @@ import { createApiClient } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
 import type { NcmPlaylistSummary } from "../../../shared/api/client";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
-import { NaiveList, NaiveListItem, NaiveThing } from "../../../shared/ui/naive";
+import {
+  NaiveButton,
+  NaiveCheckbox,
+  NaiveInputNumber,
+  NaiveList,
+  NaiveListItem,
+  NaiveThing
+} from "../../../shared/ui/naive";
 import type { FeedbackSetter } from "../shared/feedback";
 import { createErrorMessageReader } from "../shared/feedback";
 import type { PlaybackController } from "../shared/playback";
@@ -37,8 +44,8 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
   const readErrorMessage = createErrorMessageReader(t);
   const [checkedIds, setCheckedIds] = createSignal<string[]>([]);
   const [rangeOpen, setRangeOpen] = createSignal<boolean>(false);
-  const [rangeStart, setRangeStart] = createSignal<string>("");
-  const [rangeEnd, setRangeEnd] = createSignal<string>("");
+  const [rangeStart, setRangeStart] = createSignal<number | null>(null);
+  const [rangeEnd, setRangeEnd] = createSignal<number | null>(null);
   const [playlists, setPlaylists] = createSignal<NcmPlaylistSummary[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = createSignal<boolean>(false);
   const [submittingPlaylistId, setSubmittingPlaylistId] = createSignal<number | null>(null);
@@ -50,8 +57,8 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
     if (props.open) return;
     setCheckedIds([]);
     setRangeOpen(false);
-    setRangeStart("");
-    setRangeEnd("");
+    setRangeStart(null);
+    setRangeEnd(null);
     setSubmittingPlaylistId(null);
     setEnqueueing(false);
     setDeleting(false);
@@ -140,9 +147,9 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
   };
 
   const applyRange = () => {
-    const startValue = Number(rangeStart());
-    const endValue = Number(rangeEnd());
-    if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) return;
+    const startValue = rangeStart();
+    const endValue = rangeEnd();
+    if (startValue === null || endValue === null) return;
     const start = Math.max(1, Math.min(Math.floor(startValue), props.items.length));
     const end = Math.max(1, Math.min(Math.floor(endValue), props.items.length));
     if (start > end) return;
@@ -220,11 +227,11 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
         <div class="local-batch-table" role="table" aria-label={t("ncm.daily.batch")}>
           <div class="local-batch-row local-batch-head" role="row">
             <span class="local-batch-cell local-batch-check" role="columnheader">
-              <input
-                type="checkbox"
-                aria-label={t("library.batch.selectAll")}
+              <NaiveCheckbox
+                size="small"
+                ariaLabel={t("library.batch.selectAll")}
                 checked={allChecked()}
-                onChange={toggleAll}
+                onUpdateChecked={toggleAll}
               />
             </span>
             <span class="local-batch-cell local-batch-index" role="columnheader">#</span>
@@ -235,13 +242,13 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
           <div class="local-batch-body" role="rowgroup">
             <For each={props.items}>
               {(item, index) => (
-                <label class="local-batch-row" role="row">
+                <div class="local-batch-row" role="row">
                   <span class="local-batch-cell local-batch-check" role="cell">
-                    <input
-                      type="checkbox"
-                      aria-label={t("media.selection.item", { title: displayTitle(item) })}
+                    <NaiveCheckbox
+                      size="small"
+                      ariaLabel={t("media.selection.item", { title: displayTitle(item) })}
                       checked={checkedSet().has(item.id)}
-                      onChange={() => toggleItem(item.id)}
+                      onUpdateChecked={() => toggleItem(item.id)}
                     />
                   </span>
                   <span class="local-batch-cell local-batch-index" role="cell">{index() + 1}</span>
@@ -254,7 +261,7 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
                   <span class="local-batch-cell" role="cell">
                     {displayText(item.album, t("library.group.unknownAlbum"))}
                   </span>
-                </label>
+                </div>
               )}
             </For>
           </div>
@@ -266,57 +273,58 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
               {t("library.selection.count", { count: selectedItems().length })}
             </span>
             <div class="local-batch-range">
-              <button type="button" class="ghost-button" onClick={() => setRangeOpen((open) => !open)}>
+              <NaiveButton variant="tertiary" onClick={() => setRangeOpen((open) => !open)}>
                 {t("library.batch.advancedFilter")}
-              </button>
+              </NaiveButton>
               <Show when={rangeOpen()}>
                 <div class="local-batch-range-popover">
-                  <input
-                    class="text-input"
-                    type="number"
-                    min="1"
+                  <NaiveInputNumber
+                    class="local-batch-range-input"
+                    size="small"
+                    min={1}
                     max={props.items.length}
                     value={rangeStart()}
                     placeholder={t("library.batch.rangeStart")}
-                    onInput={(event) => setRangeStart(event.currentTarget.value)}
+                    onUpdateValue={setRangeStart}
+                    ariaLabel={t("library.batch.rangeStart")}
                   />
                   <span>-</span>
-                  <input
-                    class="text-input"
-                    type="number"
-                    min="1"
+                  <NaiveInputNumber
+                    class="local-batch-range-input"
+                    size="small"
+                    min={1}
                     max={props.items.length}
                     value={rangeEnd()}
                     placeholder={t("library.batch.rangeEnd")}
-                    onInput={(event) => setRangeEnd(event.currentTarget.value)}
+                    onUpdateValue={setRangeEnd}
+                    ariaLabel={t("library.batch.rangeEnd")}
                   />
-                  <button type="button" class="ghost-button" onClick={applyRange}>
+                  <NaiveButton size="small" secondary onClick={applyRange}>
                     {t("library.batch.rangeSelect")}
-                  </button>
+                  </NaiveButton>
                 </div>
               </Show>
             </div>
           </div>
           <div class="local-batch-actions">
             <Show when={props.sourcePlaylistId !== undefined}>
-              <button
-                type="button"
-                class="ghost-button"
+              <NaiveButton
+                variant="tertiary"
                 disabled={selectedItems().length === 0 || busy()}
                 onClick={() => void deleteSelectedFromPlaylist()}
               >
                 <span>{deleting() ? t("ncm.playlist.removing") : t("media.context.deleteFromPlaylist")}</span>
-              </button>
+              </NaiveButton>
             </Show>
-            <button
-              type="button"
-              class="primary-button"
+            <NaiveButton
+              variant="primary"
+              strong
               disabled={selectedItems().length === 0 || busy()}
               onClick={() => void enqueueSelected()}
             >
               <IconQueueAdd />
               <span>{t("ncm.daily.batchEnqueue")}</span>
-            </button>
+            </NaiveButton>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { useTranslation } from "../../shared/i18n";
+import "../../shared/styles/pages/media-list.css";
 import { copyToClipboard } from "../../shared/utils/clipboard";
 import { useUISettings } from "../../shared/state/useUISettings";
 import { IconChevronDown } from "../icons";

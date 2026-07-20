@@ -25,6 +25,7 @@ import {
   type RouteAnimation,
   type SearchInputBehavior,
   type ShareUrlFormat,
+  type SidebarHiddenItems,
   type UISettings,
   type UISettingsBooleanFieldName,
   type UISettingsFieldName,
@@ -213,6 +214,18 @@ function createBoolRecordField<T extends Record<string, boolean>>(
   );
 }
 
+function createSidebarHiddenItemsField(
+  key: string,
+  defaultValue: SidebarHiddenItems
+): UISettingField<SidebarHiddenItems> {
+  return createField(
+    key,
+    defaultValue,
+    (runtime) => readSidebarHiddenItems(runtime, key, defaultValue),
+    (value) => JSON.stringify(value)
+  );
+}
+
 function createHomeSectionsField(
   key: string,
   defaultValue: HomeSectionConfig[]
@@ -372,7 +385,7 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   dynamicCover: createBoolField("ui.player.dynamicCover", false),
   playerFollowCoverColor: createBoolField("ui.player.followCoverColor", true),
   hiddenCovers: createBoolRecordField("ui.cover.hiddenCovers", DEFAULT_HIDDEN_COVERS),
-  sidebarHiddenItems: createBoolRecordField(
+  sidebarHiddenItems: createSidebarHiddenItemsField(
     "ui.sidebar.hiddenItems",
     DEFAULT_SIDEBAR_HIDDEN_ITEMS
   ),
@@ -732,6 +745,53 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function normalizeBoolRecord<T extends Record<string, boolean>>(
+  parsed: Readonly<Record<string, unknown>>,
+  fallback: T
+): T {
+  const next = { ...fallback };
+  (Object.keys(fallback) as Array<keyof T>).forEach((field) => {
+    const value = parsed[String(field)];
+    if (typeof value === "boolean") {
+      next[field] = value as T[typeof field];
+    }
+  });
+  return next;
+}
+
+const LEGACY_LIBRARY_VISIBILITY_KEYS = [
+  "libraryAlbums",
+  "libraryArtists",
+  "libraryFolders"
+] as const satisfies readonly (keyof SidebarHiddenItems)[];
+
+function readSidebarHiddenItems(
+  runtime: UISettingsRuntime,
+  key: string,
+  fallback: SidebarHiddenItems
+): SidebarHiddenItems {
+  try {
+    const raw = runtime.storage.getItem(key);
+    if (!raw) return { ...fallback };
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainRecord(parsed)) {
+      reportReadError(runtime, key, "invalid_json");
+      return { ...fallback };
+    }
+
+    const next = normalizeBoolRecord(parsed, fallback);
+    const legacyLibraryHidden =
+      typeof parsed.library === "boolean" ? parsed.library : fallback.library;
+    LEGACY_LIBRARY_VISIBILITY_KEYS.forEach((field) => {
+      if (typeof parsed[field] !== "boolean") next[field] = legacyLibraryHidden;
+    });
+    return next;
+  } catch {
+    reportReadError(runtime, key, "invalid_json");
+    return { ...fallback };
+  }
+}
+
 function readBoolRecord<T extends Record<string, boolean>>(
   runtime: UISettingsRuntime,
   key: string,
@@ -746,14 +806,7 @@ function readBoolRecord<T extends Record<string, boolean>>(
       return { ...fallback };
     }
 
-    const next = { ...fallback };
-    (Object.keys(fallback) as Array<keyof T>).forEach((field) => {
-      const value = parsed[String(field)];
-      if (typeof value === "boolean") {
-        next[field] = value as T[typeof field];
-      }
-    });
-    return next;
+    return normalizeBoolRecord(parsed, fallback);
   } catch {
     reportReadError(runtime, key, "invalid_json");
     return { ...fallback };

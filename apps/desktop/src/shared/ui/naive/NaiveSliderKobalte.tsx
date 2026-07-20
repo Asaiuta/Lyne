@@ -1,5 +1,6 @@
 import { Slider as KobalteSlider } from "@kobalte/core/slider";
 import { For, Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { usePresenceTransition } from "../usePresenceTransition";
 import type { NaiveSliderProps } from "./slider.shared";
 import {
   createNaiveSliderMarkModels,
@@ -13,6 +14,8 @@ import {
 } from "./slider.shared";
 import { isNaiveSliderStepKey, resolveNaiveSliderThumbStyle } from "./slider-logic";
 import { joinClassNames } from "./utils";
+
+const SLIDER_TOOLTIP_TRANSITION_MS = 200;
 
 const firstSliderValue = (values: readonly number[], fallback: number): number => {
   const [value] = values;
@@ -30,6 +33,9 @@ export function NaiveSliderKobalte(props: NaiveSliderProps): JSX.Element {
   const marks = () => createNaiveSliderMarkModels(props);
   const currentValue = () => values().value;
   const showIndicator = () => props.tooltip !== false && (props.showTooltip || hovered() || dragging());
+  const indicatorPresence = usePresenceTransition(showIndicator, {
+    durationMs: SLIDER_TOOLTIP_TRANSITION_MS
+  });
   const rootClass = () =>
     joinClassNames(naiveSliderClass(props, values(), hasMarks()), dragging() ? "is-dragging" : false);
   const thumbStyle = (): JSX.CSSProperties => ({ ...resolveNaiveSliderThumbStyle(values().orientation) });
@@ -123,13 +129,18 @@ export function NaiveSliderKobalte(props: NaiveSliderProps): JSX.Element {
               onPointerDown={handlePointerDown}
             >
               <span class={naiveSliderHandleClass()} />
-              <Show when={showIndicator()}>
+              <Show when={indicatorPresence.rendered()}>
                 <span
                   class={joinClassNames(
                     "n-slider-handle-indicator",
+                    "is-naive-slider-indicator-transition",
                     values().orientation === "vertical"
                       ? "n-slider-handle-indicator--right"
-                      : "n-slider-handle-indicator--top"
+                      : "n-slider-handle-indicator--top",
+                    indicatorPresence.visible() && !indicatorPresence.closing()
+                      ? "is-open"
+                      : false,
+                    indicatorPresence.closing() ? "is-closing" : false
                   )}
                 >
                   {formatNaiveSliderTooltip(currentValue(), props.formatTooltip)}

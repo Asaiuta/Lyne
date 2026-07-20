@@ -4,6 +4,18 @@ import type { ApiEnvelope } from "./types";
 
 export type ParseApiEnvelope = (value: unknown) => ApiEnvelope;
 
+export class ApiHttpError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(status: number, message: string, body: unknown) {
+    super(message);
+    this.name = "ApiHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 const readFetchFailureMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -50,8 +62,9 @@ export const requestJson = async (baseUrl: string, path: string, init?: RequestI
 
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
+    let body: unknown = null;
     try {
-      const body = (await response.json()) as unknown;
+      body = (await response.json()) as unknown;
       if (
         typeof body === "object" &&
         body !== null &&
@@ -64,7 +77,7 @@ export const requestJson = async (baseUrl: string, path: string, init?: RequestI
     } catch {
       // Keep the status-only fallback when the server did not return JSON.
     }
-    throw new Error(message);
+    throw new ApiHttpError(response.status, message, body);
   }
 
   return (await response.json()) as unknown;

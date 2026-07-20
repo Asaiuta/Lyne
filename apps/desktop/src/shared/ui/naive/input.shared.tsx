@@ -22,6 +22,7 @@ export type NativeInputPassthroughProps = Record<string, NativeInputPassthroughV
 
 export interface NaiveInputProps {
   value: string;
+  inputRef?: (element: HTMLInputElement | HTMLTextAreaElement) => void;
   onUpdateValue?: (value: string) => void;
   onInput?: (value: string) => void;
   onChange?: (value: string) => void;
@@ -40,6 +41,7 @@ export interface NaiveInputProps {
   readonly?: boolean;
   required?: boolean;
   clearable?: boolean;
+  clearAriaLabel?: string;
   round?: boolean;
   bordered?: boolean;
   loading?: boolean;
@@ -155,7 +157,7 @@ export function NaiveInputShell(props: {
               <button
                 type="button"
                 class="n-base-clear"
-                aria-label="Clear"
+                aria-label={inputProps().clearAriaLabel ?? "Clear"}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => props.onClear?.(event)}
               >

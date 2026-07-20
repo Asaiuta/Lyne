@@ -12,6 +12,12 @@ import {
 } from "./collapse-logic";
 import { joinClassNames } from "./utils";
 
+const COLLAPSE_TRANSITION_FALLBACK_MS = 200;
+
+const prefersReducedMotion = (): boolean =>
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export interface NaiveCollapseTransitionProps {
   show: boolean;
   appear?: boolean;
@@ -22,9 +28,8 @@ export interface NaiveCollapseTransitionProps {
 export function NaiveCollapseTransition(
   props: NaiveCollapseTransitionProps
 ): JSX.Element {
-  const initialPhase: NaiveCollapseTransitionPhase = props.show
-    ? "entered"
-    : "exited";
+  const initialPhase: NaiveCollapseTransitionPhase =
+    props.show && !props.appear ? "entered" : "exited";
   const [phase, setPhase] = createSignal<NaiveCollapseTransitionPhase>(initialPhase);
   const [maxHeight, setMaxHeight] = createSignal<string>(
     createCollapseTransitionSnapshot(initialPhase, 0).maxHeight
@@ -33,43 +38,86 @@ export function NaiveCollapseTransition(
   let mounted = false;
   let frameOne = 0;
   let frameTwo = 0;
+  let settleFrame = 0;
+  let settleTimer: number | undefined;
   let runId = 0;
 
   const cancelFrames = (): void => {
     if (typeof window === "undefined") return;
     window.cancelAnimationFrame(frameOne);
     window.cancelAnimationFrame(frameTwo);
+    window.cancelAnimationFrame(settleFrame);
     frameOne = 0;
     frameTwo = 0;
+    settleFrame = 0;
+  };
+
+  const cancelSettlement = (): void => {
+    if (typeof window === "undefined") return;
+    if (settleTimer !== undefined) window.clearTimeout(settleTimer);
+    settleTimer = undefined;
   };
 
   const measuredHeight = (): number => wrapperRef?.scrollHeight ?? 0;
 
   const finishEntered = (id: number): void => {
     if (id !== runId) return;
+    cancelSettlement();
     setPhase("entered");
     setMaxHeight("");
   };
 
   const finishExited = (id: number): void => {
     if (id !== runId) return;
+    cancelSettlement();
     setPhase("exited");
     setMaxHeight("0px");
   };
 
+  const scheduleSettlement = (
+    id: number,
+    finish: (activeRunId: number) => void
+  ): void => {
+    if (typeof window === "undefined") {
+      finish(id);
+      return;
+    }
+    if (prefersReducedMotion()) {
+      settleFrame = window.requestAnimationFrame(() => finish(id));
+      return;
+    }
+    settleTimer = window.setTimeout(
+      () => finish(id),
+      COLLAPSE_TRANSITION_FALLBACK_MS
+    );
+  };
+
   const animateOpen = (): void => {
     const id = ++runId;
+    const startsFromExited = phase() === "exited";
     cancelFrames();
-    setPhase("entering");
-    setMaxHeight("0px");
+    cancelSettlement();
+    if (startsFromExited) {
+      setMaxHeight("0px");
+    } else {
+      setPhase("entering");
+      setMaxHeight(`${measuredHeight()}px`);
+    }
     if (typeof window === "undefined") {
       finishEntered(id);
       return;
     }
+    if (prefersReducedMotion()) {
+      scheduleSettlement(id, finishEntered);
+      return;
+    }
     frameOne = window.requestAnimationFrame(() => {
+      if (startsFromExited) void wrapperRef?.offsetHeight;
       frameTwo = window.requestAnimationFrame(() => {
         if (id !== runId) return;
+        setPhase("entering");
         setMaxHeight(`${measuredHeight()}px`);
+        scheduleSettlement(id, finishEntered);
       });
     });
   };
@@ -77,16 +125,22 @@ export function NaiveCollapseTransition(
   const animateClose = (): void => {
     const id = ++runId;
     cancelFrames();
+    cancelSettlement();
     setPhase("exiting");
     setMaxHeight(`${measuredHeight()}px`);
     if (typeof window === "undefined") {
       finishExited(id);
       return;
     }
+    if (prefersReducedMotion()) {
+      scheduleSettlement(id, finishExited);
+      return;
+    }
     frameOne = window.requestAnimationFrame(() => {
       frameTwo = window.requestAnimationFrame(() => {
         if (id !== runId) return;
         setMaxHeight("0px");
+        scheduleSettlement(id, finishExited);
       });
     });
   };
@@ -108,6 +162,7 @@ export function NaiveCollapseTransition(
   onCleanup(() => {
     runId += 1;
     cancelFrames();
+    cancelSettlement();
   });
 
   const handleTransitionEnd = (event: TransitionEvent): void => {

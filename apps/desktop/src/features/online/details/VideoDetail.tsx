@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
-import { IconChevronLeft, IconChat, IconClock, IconEye, IconHeart, IconLink, IconShare } from "../../../components/icons";
+import { IconChat, IconClock, IconEye, IconHeart, IconLink, IconShare } from "../../../components/icons";
 import { BackToTop } from "../../../components/page/BackToTop";
+import { PageBackButton } from "../../../components/page/PageBackButton";
 import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageSurface } from "../../../components/page/PageSurface";
@@ -11,7 +12,7 @@ import { mvDetail, mvDetailInfo, mvUrl, videoDetail, videoDetailInfo, videoUrl }
 import { ncmMvPageUrl, ncmVideoPageUrl } from "../../../shared/api/ncm/urls";
 import { useTranslation } from "../../../shared/i18n";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
-import { NaiveH2, NaiveP } from "../../../shared/ui/naive";
+import { NaiveButton, NaiveH2, NaiveP } from "../../../shared/ui/naive";
 import type { FeedCardItem } from "../shared/types";
 import { parseVideoDetail, parseVideoSource, type VideoDetailInfo, type VideoSource } from "../videoParsers";
 import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
@@ -128,10 +129,11 @@ export function VideoDetail(props: VideoDetailProps) {
     <PageSurface class="ncm-video-detail" persistKey={`discover:video:${currentVideoId()}`} resetKey={currentVideoId()}>
       <PageHero size="md">
         <Show when={(props.showInlineBack ?? true) && props.onBack}>
-          <button type="button" class="ghost-button ncm-daily-detail-back" onClick={() => props.onBack?.()}>
-            <IconChevronLeft />
-            {t("ncm.video.backToFeed")}
-          </button>
+          <PageBackButton
+            ariaLabel={t("ncm.video.backToFeed")}
+            class="ncm-daily-detail-back"
+            onClick={() => props.onBack?.()}
+          />
         </Show>
 
         <header class="ncm-video-detail-head">
@@ -209,7 +211,7 @@ export function VideoDetail(props: VideoDetailProps) {
           <div class="ncm-video-actions">
             <span><IconHeart /> {formatNumber(detail()?.likedCount ?? null)}</span>
             <span><IconShare /> {formatNumber(detail()?.shareCount ?? null)}</span>
-            <button type="button" class="ghost-button" onClick={() => {
+            <NaiveButton variant="tertiary" onClick={() => {
               const id = currentVideoId() ?? 0;
               window.open(
                 currentVideoKind() === "mv" ? ncmMvPageUrl(id) : ncmVideoPageUrl(id),
@@ -219,7 +221,7 @@ export function VideoDetail(props: VideoDetailProps) {
             }}>
               <IconLink />
               {t("ncm.playlist.openSource")}
-            </button>
+            </NaiveButton>
           </div>
         </div>
 

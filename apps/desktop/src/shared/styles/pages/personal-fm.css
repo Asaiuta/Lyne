@@ -177,7 +177,7 @@
     box-shadow: none;
     transition:
       background-color 0.3s var(--ease-standard),
-      transform 0.3s var(--ease-standard);
+      color 0.3s var(--ease-standard);
   }
 
   .personal-fm-play {
@@ -212,14 +212,8 @@
 
   .personal-fm-play:hover:not(:disabled),
   .personal-fm-icon-button:hover:not(:disabled) {
-    transform: scale(1.1);
     background: var(--color-primary-tonal-12);
     color: var(--accent);
-  }
-
-  .personal-fm-play:active:not(:disabled),
-  .personal-fm-icon-button:active:not(:disabled) {
-    transform: scale(1);
   }
 
   .personal-fm-hero.is-cover-hidden .personal-fm-copy {

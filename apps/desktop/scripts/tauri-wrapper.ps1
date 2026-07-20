@@ -330,7 +330,7 @@ function Invoke-TauriDevFallback {
   $devServerLog = Join-Path $workspaceRoot ".tauri-dev-server.log"
   $devServerErrLog = Join-Path $workspaceRoot ".tauri-dev-server.err.log"
   $cargoManifest = Join-Path $workspaceRoot "src-tauri\Cargo.toml"
-  $cargoArgs = @("run", "--manifest-path", $cargoManifest)
+  $cargoArgs = @("run", "--manifest-path", $cargoManifest, "--bin", "audio-desktop")
   $sidecarProfile = "dev"
   $sidecarOutputProfile = "audio-dev"
 

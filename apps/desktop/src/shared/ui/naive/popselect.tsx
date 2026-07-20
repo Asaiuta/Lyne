@@ -200,6 +200,11 @@ export function NaivePopselect<TValue extends string>(
         >
           <NaiveButton
             class={triggerClass()}
+            variant={props.triggerButton?.variant}
+            size={props.triggerButton?.size}
+            round={props.triggerButton?.round}
+            secondary={props.triggerButton?.secondary}
+            strong={props.triggerButton?.strong}
             ariaLabel={props.label}
             ariaHasPopup="menu"
             ariaExpanded={props.open}

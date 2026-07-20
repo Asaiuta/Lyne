@@ -1,7 +1,8 @@
 import { Combobox } from "@kobalte/core/combobox";
 import { Select } from "@kobalte/core/select";
-import { For, Show, createSignal, type JSX } from "solid-js";
+import { For, Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import type { CollectionNode } from "@kobalte/core";
+import "./styles/select-kobalte.css";
 import { usePresenceTransition } from "../usePresenceTransition";
 import type { NaiveSelectOption, NaiveSelectProps, NaiveSelectValue } from "./select.types";
 import {
@@ -12,9 +13,30 @@ import {
   naiveSelectSelectedOption,
   naiveSelectSelectedOptions
 } from "./select-core";
+import { useNaiveSelectFocusHandoff } from "./select-focus-handoff";
 import { joinClassNames } from "./utils";
 
-const SELECT_MENU_TRANSITION_MS = 150;
+const SELECT_MENU_TRANSITION_MS = 200;
+
+const useInitialSelectFocus = (
+  shouldFocus: boolean
+): ((element: HTMLElement) => void) => {
+  let element: HTMLElement | undefined;
+  let frame = 0;
+
+  onMount(() => {
+    if (!shouldFocus || typeof window === "undefined") return;
+    frame = window.requestAnimationFrame(() => element?.focus());
+  });
+
+  onCleanup(() => {
+    if (typeof window !== "undefined") window.cancelAnimationFrame(frame);
+  });
+
+  return (nextElement: HTMLElement): void => {
+    element = nextElement;
+  };
+};
 
 const optionValue = <TValue extends NaiveSelectValue>(
   option: NaiveSelectOption<TValue>
@@ -220,7 +242,7 @@ function NaiveSelectTagsDisplay<TValue extends NaiveSelectValue>(props: {
 function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
   props: NaiveSelectProps<TValue>
 ): JSX.Element {
-  const [open, setOpen] = createSignal<boolean>(props.open ?? false);
+  const [open, setOpen] = createSignal<boolean>(props.open ?? props.defaultOpen ?? false);
   const [focused, setFocused] = createSignal<boolean>(false);
   const selectedOption = () => naiveSelectSelectedOption(props);
   const selected = () =>
@@ -229,8 +251,10 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
   const menuPresence = usePresenceTransition(currentOpen, {
     durationMs: SELECT_MENU_TRANSITION_MS
   });
-  const kobalteOpen = () => menuPresence.rendered();
+  const kobalteOpen = currentOpen;
   const menuClass = () => selectMenuClass(props, menuPresence);
+  const focusHandoff = useNaiveSelectFocusHandoff();
+  const setInitialFocusTarget = useInitialSelectFocus(focusHandoff?.() ?? false);
 
   const handleOpenChange = (nextOpen: boolean): void => {
     setOpen(nextOpen);
@@ -277,6 +301,7 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
       id={props.id}
       name={props.name}
       class={naiveSelectRootClass(props)}
+      forceMount
       multiple
       value={naiveSelectSelectedOptions(props)}
       options={[...props.options]}
@@ -303,6 +328,7 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
       <Select.HiddenSelect />
       <NaiveSelectShell selectProps={props} state={{ open: currentOpen(), focused: focused() }}>
         <Select.Trigger
+          ref={setInitialFocusTarget}
           class="n-base-selection-label n-base-selection-label--multiple"
           aria-label={props.ariaLabel}
           aria-labelledby={props.ariaLabelledBy}
@@ -329,7 +355,11 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
       </NaiveSelectShell>
       <Show when={menuPresence.rendered() && typeof document !== "undefined"}>
         <Select.Portal mount={document.body}>
-          <Select.Content class={menuClass()}>
+          <Select.Content
+            class={menuClass()}
+            aria-hidden={menuPresence.closing()}
+            inert={menuPresence.closing()}
+          >
             <Select.Listbox />
           </Select.Content>
         </Select.Portal>
@@ -340,6 +370,7 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
       id={props.id}
       name={props.name}
       class={naiveSelectRootClass(props)}
+      forceMount
       value={selectedOption()}
       options={[...props.options]}
       optionValue={optionValue}
@@ -364,6 +395,7 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
       <Select.HiddenSelect />
       <NaiveSelectShell selectProps={props} state={{ open: currentOpen(), focused: focused() }}>
         <Select.Trigger
+          ref={setInitialFocusTarget}
           class="n-base-selection-label"
           aria-label={props.ariaLabel}
           aria-labelledby={props.ariaLabelledBy}
@@ -387,7 +419,11 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
       </NaiveSelectShell>
       <Show when={menuPresence.rendered() && typeof document !== "undefined"}>
         <Select.Portal mount={document.body}>
-          <Select.Content class={menuClass()}>
+          <Select.Content
+            class={menuClass()}
+            aria-hidden={menuPresence.closing()}
+            inert={menuPresence.closing()}
+          >
             <Select.Listbox />
           </Select.Content>
         </Select.Portal>
@@ -399,7 +435,7 @@ function NaiveKobalteSelect<TValue extends NaiveSelectValue>(
 function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
   props: NaiveSelectProps<TValue>
 ): JSX.Element {
-  const [open, setOpen] = createSignal<boolean>(props.open ?? false);
+  const [open, setOpen] = createSignal<boolean>(props.open ?? props.defaultOpen ?? false);
   const [focused, setFocused] = createSignal<boolean>(false);
   const [pattern, setPattern] = createSignal<string>("");
   const selectedOption = () => naiveSelectSelectedOption(props);
@@ -409,8 +445,10 @@ function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
   const menuPresence = usePresenceTransition(currentOpen, {
     durationMs: SELECT_MENU_TRANSITION_MS
   });
-  const kobalteOpen = () => menuPresence.rendered();
+  const kobalteOpen = currentOpen;
   const menuClass = () => selectMenuClass(props, menuPresence);
+  const focusHandoff = useNaiveSelectFocusHandoff();
+  const setInitialFocusTarget = useInitialSelectFocus(focusHandoff?.() ?? false);
   const comboboxOptions = (): NaiveSelectOption<TValue>[] => {
     const options = [...props.options];
     const rawPattern = pattern().trim();
@@ -467,6 +505,7 @@ function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
       id={props.id}
       name={props.name}
       class={naiveSelectRootClass(props)}
+      forceMount
       multiple
       value={naiveSelectSelectedOptions(props)}
       options={comboboxOptions()}
@@ -508,6 +547,7 @@ function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
             input={
               <span class="n-base-selection-input-tag">
                 <Combobox.Input
+                  ref={setInitialFocusTarget}
                   class="n-base-selection-input-tag__input"
                   aria-label={props.ariaLabel}
                   aria-labelledby={props.ariaLabelledBy}
@@ -536,7 +576,11 @@ function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
       </NaiveSelectShell>
       <Show when={menuPresence.rendered() && typeof document !== "undefined"}>
         <Combobox.Portal mount={document.body}>
-          <Combobox.Content class={menuClass()}>
+          <Combobox.Content
+            class={menuClass()}
+            aria-hidden={menuPresence.closing()}
+            inert={menuPresence.closing()}
+          >
             <Combobox.Listbox />
           </Combobox.Content>
         </Combobox.Portal>
@@ -547,6 +591,7 @@ function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
       id={props.id}
       name={props.name}
       class={naiveSelectRootClass(props)}
+      forceMount
       value={selectedOption()}
       options={[...props.options]}
       optionValue={optionValue}
@@ -576,6 +621,7 @@ function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
         <Combobox.Control class="n-base-selection-label">
           <span class="n-base-selection-value">
             <Combobox.Input
+              ref={setInitialFocusTarget}
               class="n-base-selection-input"
               aria-label={props.ariaLabel}
               aria-labelledby={props.ariaLabelledBy}
@@ -601,7 +647,11 @@ function NaiveKobalteCombobox<TValue extends NaiveSelectValue>(
       </NaiveSelectShell>
       <Show when={menuPresence.rendered() && typeof document !== "undefined"}>
         <Combobox.Portal mount={document.body}>
-          <Combobox.Content class={menuClass()}>
+          <Combobox.Content
+            class={menuClass()}
+            aria-hidden={menuPresence.closing()}
+            inert={menuPresence.closing()}
+          >
             <Combobox.Listbox />
           </Combobox.Content>
         </Combobox.Portal>

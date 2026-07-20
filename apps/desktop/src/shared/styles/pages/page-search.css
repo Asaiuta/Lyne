@@ -1,0 +1,11 @@
+.page-search-input {
+  --n-height: 40px;
+  flex: none;
+  width: 130px;
+  min-width: 0;
+  transition: width var(--motion-duration-spatial) var(--motion-ease-standard);
+}
+
+.page-search-input.n-input--focus {
+  width: 200px;
+}

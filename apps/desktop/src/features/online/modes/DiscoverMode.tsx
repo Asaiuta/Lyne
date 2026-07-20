@@ -3,8 +3,10 @@ import type { Accessor } from "solid-js";
 import { Portal } from "solid-js/web";
 import { IconClose } from "../../../components/icons";
 import { PageHeader } from "../../../components/page/PageHeader";
+import { RouteContentTransition } from "../../../components/RouteContentTransition";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
+import { useUISettings } from "../../../shared/state/useUISettings";
 import { usePresenceTransition } from "../../../shared/ui/usePresenceTransition";
 import { NaiveP, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
 import { OnlineLikedPlaylistDetailRoute } from "../details/OnlineLikedPlaylistDetailRoute";
@@ -75,6 +77,7 @@ export interface DiscoverModeProps extends OnlineDetailViewReporterProps {
 
 export function DiscoverMode(props: DiscoverModeProps) {
   const { t } = useTranslation();
+  const uiSettings = useUISettings();
 
   const [discoverTab, setDiscoverTab] = createSignal<DiscoverTab>("playlists");
 
@@ -240,8 +243,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
   const discoverTabs = createMemo<ReadonlyArray<NaiveTabItem<DiscoverTab>>>(() =>
     DISCOVER_TABS.map((tab) => ({ value: tab, label: discoverTabLabel(tab) }))
   );
-  const discoverSectionTitle = createMemo(() => {
-    const tab = discoverTab();
+  const discoverSectionTitle = (tab: DiscoverTab): string => {
     switch (tab) {
       case "playlists": return t("ncm.discover.section.playlists");
       case "toplists": return t("ncm.discover.section.toplists");
@@ -249,7 +251,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
       case "new": return t("ncm.discover.section.new");
       default: { const _exhaustive: never = tab; return _exhaustive; }
     }
-  });
+  };
 
   const hasHqPlaylist = createMemo(() => {
     if (hqCatNames().size === 0) return false;
@@ -418,65 +420,74 @@ export function DiscoverMode(props: DiscoverModeProps) {
           </Show>
         </Match>
         <Match when={detailView().kind === "browse"}>
-          <div class="online-discover-view">
-            <Show when={discoverTab() === "playlists"}>
-              <DiscoverPlaylistShowcase
-                catName={catName()}
-                hasHqPlaylist={hasHqPlaylist()}
-                discoverPlaylistKind={discoverPlaylistKind()}
-                setDiscoverPlaylistKind={setDiscoverPlaylistKind}
-                setCatModalOpen={setCatModalOpen}
-                setCatButtonRef={(element) => {
-                  catButtonRef = element;
-                }}
-                discoverSectionTitle={discoverSectionTitle()}
-                allPlaylists={playlistCards.items()}
-                isLoadingPlaylists={playlistCards.isLoading()}
-                hasMorePlaylists={playlistCards.hasMore()}
-                onLoadPlaylist={(playlist) => props.onNavigateToPlaylistDetail?.(playlist)}
-                onLoadMore={() => { void playlistCards.loadMore(); }}
-              />
-            </Show>
-            <Show when={discoverTab() === "toplists"}>
-              <DiscoverToplistShowcase
-                discoverToplists={discoverToplists}
-                onLoadPlaylist={(playlist) => props.onNavigateToPlaylistDetail?.(playlist)}
-              />
-            </Show>
-            <Show when={discoverTab() === "artists"}>
-              <DiscoverArtistShowcase
-                artistInitials={DISCOVER_ARTIST_INITIALS}
-                artistAreas={DISCOVER_ARTIST_AREAS}
-                discoverArtistInitial={discoverArtistInitial()}
-                setDiscoverArtistInitial={setDiscoverArtistInitial}
-                discoverArtistAreaIndex={discoverArtistAreaIndex()}
-                setDiscoverArtistAreaIndex={setDiscoverArtistAreaIndex}
-                discoverSectionTitle={discoverSectionTitle()}
-                allArtists={artistCards.items()}
-                isLoadingArtists={artistCards.isLoading()}
-                hasMoreArtists={artistCards.hasMore()}
-                onLoadArtist={(artist) => props.onNavigateToArtistDetail?.(toFeedCardItem(artist))}
-                onLoadMore={() => { void artistCards.loadMore(); }}
-              />
-            </Show>
-            <Show when={discoverTab() === "new"}>
-              <DiscoverNewShowcase
-                newAreas={DISCOVER_NEW_AREAS}
-                discoverNewKind={discoverNewKind()}
-                setDiscoverNewKind={setDiscoverNewKind}
-                discoverNewAreaIndex={discoverNewAreaIndex()}
-                setDiscoverNewAreaIndex={setDiscoverNewAreaIndex}
-                discoverSectionTitle={discoverSectionTitle()}
-                allAlbums={albumCards.items()}
-                discoverSongs={discoverSongs}
-                isLoadingAlbums={albumCards.isLoading()}
-                hasMoreAlbums={albumCards.hasMore()}
-                onLoadMoreAlbums={() => { void albumCards.loadMore(); }}
-                onLoadAlbum={(album) => props.onNavigateToAlbumDetail?.(toFeedCardItem(album))}
-                playback={props.playback}
-              />
-            </Show>
-          </div>
+          <RouteContentTransition
+            value={discoverTab()}
+            transitionKey={discoverTab()}
+            animation={uiSettings.routeAnimation}
+            motionScope="discover-content"
+          >
+            {(displayedDiscoverTab) => (
+              <div class="online-discover-view" data-discover-tab={displayedDiscoverTab()}>
+                <Show when={displayedDiscoverTab() === "playlists"}>
+                  <DiscoverPlaylistShowcase
+                    catName={catName()}
+                    hasHqPlaylist={hasHqPlaylist()}
+                    discoverPlaylistKind={discoverPlaylistKind()}
+                    setDiscoverPlaylistKind={setDiscoverPlaylistKind}
+                    setCatModalOpen={setCatModalOpen}
+                    setCatButtonRef={(element) => {
+                      catButtonRef = element;
+                    }}
+                    discoverSectionTitle={discoverSectionTitle(displayedDiscoverTab())}
+                    allPlaylists={playlistCards.items()}
+                    isLoadingPlaylists={playlistCards.isLoading()}
+                    hasMorePlaylists={playlistCards.hasMore()}
+                    onLoadPlaylist={(playlist) => props.onNavigateToPlaylistDetail?.(playlist)}
+                    onLoadMore={() => { void playlistCards.loadMore(); }}
+                  />
+                </Show>
+                <Show when={displayedDiscoverTab() === "toplists"}>
+                  <DiscoverToplistShowcase
+                    discoverToplists={discoverToplists}
+                    onLoadPlaylist={(playlist) => props.onNavigateToPlaylistDetail?.(playlist)}
+                  />
+                </Show>
+                <Show when={displayedDiscoverTab() === "artists"}>
+                  <DiscoverArtistShowcase
+                    artistInitials={DISCOVER_ARTIST_INITIALS}
+                    artistAreas={DISCOVER_ARTIST_AREAS}
+                    discoverArtistInitial={discoverArtistInitial()}
+                    setDiscoverArtistInitial={setDiscoverArtistInitial}
+                    discoverArtistAreaIndex={discoverArtistAreaIndex()}
+                    setDiscoverArtistAreaIndex={setDiscoverArtistAreaIndex}
+                    discoverSectionTitle={discoverSectionTitle(displayedDiscoverTab())}
+                    allArtists={artistCards.items()}
+                    isLoadingArtists={artistCards.isLoading()}
+                    hasMoreArtists={artistCards.hasMore()}
+                    onLoadArtist={(artist) => props.onNavigateToArtistDetail?.(toFeedCardItem(artist))}
+                    onLoadMore={() => { void artistCards.loadMore(); }}
+                  />
+                </Show>
+                <Show when={displayedDiscoverTab() === "new"}>
+                  <DiscoverNewShowcase
+                    newAreas={DISCOVER_NEW_AREAS}
+                    discoverNewKind={discoverNewKind()}
+                    setDiscoverNewKind={setDiscoverNewKind}
+                    discoverNewAreaIndex={discoverNewAreaIndex()}
+                    setDiscoverNewAreaIndex={setDiscoverNewAreaIndex}
+                    discoverSectionTitle={discoverSectionTitle(displayedDiscoverTab())}
+                    allAlbums={albumCards.items()}
+                    discoverSongs={discoverSongs}
+                    isLoadingAlbums={albumCards.isLoading()}
+                    hasMoreAlbums={albumCards.hasMore()}
+                    onLoadMoreAlbums={() => { void albumCards.loadMore(); }}
+                    onLoadAlbum={(album) => props.onNavigateToAlbumDetail?.(toFeedCardItem(album))}
+                    playback={props.playback}
+                  />
+                </Show>
+              </div>
+            )}
+          </RouteContentTransition>
         </Match>
       </Switch>
     </>

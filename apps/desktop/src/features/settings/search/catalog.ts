@@ -243,6 +243,9 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "network", itemId: "socketEnabled", labelKey: "settings.network.socketEnabled", descriptionKey: "settings.network.socketEnabled.desc", keywords: ["websocket", "socket", "amll", "ws"] },
   { category: "network", itemId: "socketTest", labelKey: "settings.network.socketTest", keywords: ["websocket", "test", "测试"] },
 
+  // -- plugins ----------------------------------------------------------
+  { category: "plugins", itemId: "plugins", labelKey: "settings.nav.plugins", descriptionKey: "settings.plugins.description", keywords: ["plugin", "extension", "integration", "插件", "扩展", "集成"] },
+
   // ── about ────────────────────────────────────────────
   { category: "about", itemId: "appVersion", labelKey: "settings.nav.about", descriptionKey: "settings.about.appVersion.desc", keywords: ["version", "lyne", "about", "版本", "关于"] },
   { category: "about", itemId: "checkUpdate", labelKey: "settings.about.checkUpdate", descriptionKey: "settings.about.checkUpdate.desc", keywords: ["update", "check", "更新", "检查"] },

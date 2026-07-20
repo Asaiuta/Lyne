@@ -1,7 +1,7 @@
 import { For, Show, createSignal } from "solid-js";
 import type { LibraryRoot } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
-import { NaiveScrollbar } from "../../shared/ui/naive";
+import { NaiveButton, NaiveScrollbar } from "../../shared/ui/naive";
 import { Modal } from "../../components/Modal";
 import { IconDelete, IconFolder, IconFolderPlus } from "../../components/icons";
 
@@ -73,16 +73,16 @@ export function ManageRootsModal(props: ManageRootsModalProps) {
                   <span class="local-directory-path" title={root.source_path}>
                     {root.source_path}
                   </span>
-                  <button
-                    type="button"
+                  <NaiveButton
+                    variant="tertiary"
                     class="local-directory-delete"
                     onClick={() => void handleDelete(root)}
                     disabled={props.isScanning || submitting()}
-                    aria-label={t("library.roots.delete")}
+                    ariaLabel={t("library.roots.delete")}
                     title={t("library.roots.delete")}
                   >
                     <IconDelete />
-                  </button>
+                  </NaiveButton>
                 </div>
               )}
             </For>
@@ -90,15 +90,15 @@ export function ManageRootsModal(props: ManageRootsModalProps) {
           </div>
         </NaiveScrollbar>
         <div class="local-directory-footer">
-          <button
-            class="ghost-button local-directory-add"
-            type="button"
+          <NaiveButton
+            variant="tertiary"
+            class="local-directory-add"
             onClick={() => void handleAdd()}
             disabled={props.isScanning || submitting()}
           >
             <IconFolderPlus />
             <span>{t("library.add.folder")}</span>
-          </button>
+          </NaiveButton>
         </div>
       </div>
     </Modal>

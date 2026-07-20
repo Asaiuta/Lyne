@@ -6,7 +6,7 @@ import {
 } from "../shared/api/ncm/user";
 import { useTranslation } from "../shared/i18n";
 import { useNcmAccount, type NcmAccount } from "../shared/state/NcmAccountContext";
-import { useDismissibleOverlay } from "../shared/ui/useDismissibleOverlay";
+import { NaivePopover } from "../shared/ui/naive";
 import { SImage } from "./SImage";
 import {
   IconAlbum,
@@ -52,8 +52,6 @@ export function TopNavAccountMenu(props: TopNavAccountMenuProps) {
   const [accountStatsUserId, setAccountStatsUserId] = createSignal<number | null>(null);
   const [isLoadingAccountStats, setIsLoadingAccountStats] = createSignal(false);
   const [validatedAccountUserId, setValidatedAccountUserId] = createSignal<number | null>(null);
-  let accountMenuRef: HTMLDivElement | undefined;
-  let accountTriggerRef: HTMLButtonElement | undefined;
 
   const accountOtherAccounts = createMemo(() => {
     const currentId = account()?.userId ?? null;
@@ -225,40 +223,48 @@ export function TopNavAccountMenu(props: TopNavAccountMenuProps) {
     }
   });
 
-  useDismissibleOverlay(accountMenuOpen, {
-    isInside: (target) => !!accountMenuRef && accountMenuRef.contains(target),
-    onDismiss: () => setAccountMenuOpen(false),
-    onEscapeDismiss: () => accountTriggerRef?.focus()
-  });
-
   return (
-    <div class="top-nav-account-wrap" ref={accountMenuRef}>
-      <button
-        ref={accountTriggerRef}
-        type="button"
-        class={`top-nav-account${accountMenuOpen() ? " is-open" : ""}`}
-        data-no-drag
-        aria-haspopup="menu"
-        aria-expanded={accountMenuOpen()}
-        aria-label={t("nav.account.aria", { name: accountName() })}
-        onClick={handleAccountClick}
+    <div class="top-nav-account-wrap">
+      <NaivePopover
+        triggerMode="manual"
+        placement="bottom-end"
+        gutter={8}
+        showArrow={false}
+        raw
+        open={accountMenuOpen()}
+        onOpenChange={setAccountMenuOpen}
+        class="top-nav-account-popover"
+        rootClass="top-nav-account-popover-trigger"
+        ariaLabel={t("nav.account.aria", { name: accountName() })}
+        role="dialog"
+        trigger={
+          <button
+            type="button"
+            class={`top-nav-account${accountMenuOpen() ? " is-open" : ""}`}
+            data-no-drag
+            aria-haspopup="dialog"
+            aria-expanded={accountMenuOpen()}
+            aria-label={t("nav.account.aria", { name: accountName() })}
+            onClick={handleAccountClick}
+          >
+            <span class="top-nav-account-avatar" aria-hidden="true">
+              <Show when={accountAvatar()} fallback={<IconArtist />}>
+                {(avatar) => <SImage src={avatar()} alt="" observeVisibility={false} shape="circle" aspect="square" />}
+              </Show>
+            </span>
+            <span class="top-nav-account-copy">
+              <span class="top-nav-account-name">{accountName()}</span>
+            </span>
+            <Show when={hasVipType(account()?.vipType)}>
+              <span class="top-nav-account-vip">VIP</span>
+            </Show>
+            <span class="top-nav-account-badge">
+              <IconChevronDown />
+            </span>
+          </button>
+        }
       >
-        <span class="top-nav-account-avatar" aria-hidden="true">
-          <Show when={accountAvatar()} fallback={<IconArtist />}>
-            {(avatar) => <SImage src={avatar()} alt="" observeVisibility={false} shape="circle" aspect="square" />}
-          </Show>
-        </span>
-        <span class="top-nav-account-copy">
-          <span class="top-nav-account-name">{accountName()}</span>
-        </span>
-        <Show when={hasVipType(account()?.vipType)}>
-          <span class="top-nav-account-vip">VIP</span>
-        </Show>
-        <span class="top-nav-account-badge">
-          <IconChevronDown />
-        </span>
-      </button>
-      <Show when={accountMenuOpen() && account()}>
+        <Show when={account()}>
         {(current) => (
           <AccountDropdown
             current={current()}
@@ -276,7 +282,8 @@ export function TopNavAccountMenu(props: TopNavAccountMenuProps) {
             onLogout={handleLogout}
           />
         )}
-      </Show>
+        </Show>
+      </NaivePopover>
     </div>
   );
 }
@@ -306,7 +313,7 @@ function AccountDropdown(props: AccountDropdownProps) {
   const { t } = useTranslation();
 
   return (
-    <div class="top-nav-account-menu" role="menu" data-no-drag>
+    <div class="top-nav-account-menu" data-no-drag>
       <section class="top-nav-account-menu-profile">
         <span class="top-nav-account-menu-name">{props.current.nickname ?? t("nav.account.unknown")}</span>
         <div class="top-nav-account-menu-tags">

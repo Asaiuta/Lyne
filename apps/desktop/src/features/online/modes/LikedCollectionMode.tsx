@@ -10,6 +10,7 @@ import {
   IconVolumeHigh
 } from "../../../components/icons";
 import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
+import { RouteContentTransition } from "../../../components/RouteContentTransition";
 import { createApiClient } from "../../../shared/api/client";
 import { isRecord, readArray, readNumber, readString } from "../../../shared/jsonReaders";
 import { useTranslation, type TranslationKey } from "../../../shared/i18n";
@@ -226,11 +227,6 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
   const currentPlaylists = createMemo(() =>
     playlistScope() === "created" ? visibleCreatedPlaylists() : collectedPlaylists()
   );
-  const activeTabLoading = createMemo<boolean>(() => loadState()[activeTab()] === "loading");
-  const activeCollectionLoading = createMemo<boolean>(() =>
-    activeTab() !== "playlists" && activeTabLoading()
-  );
-
   const totalPlaylistCount = createMemo(() => {
     if (loadState().playlists === "loaded") {
       return visibleCreatedPlaylists().length + collectedPlaylists().length;
@@ -459,6 +455,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
   };
 
   const renderCollectionGrid = (
+    tab: Exclude<CollectionTab, "playlists">,
     items: Accessor<FeedCardItem[]>,
     emptyKey: TranslationKey,
     onClick: (item: FeedCardItem) => void,
@@ -468,7 +465,7 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
       when={items().length > 0}
       fallback={
         <NaiveP class="panel-note">
-          {activeCollectionLoading() ? t("ncm.playlist.loading") : t(emptyKey)}
+          {loadState()[tab] === "loading" ? t("ncm.playlist.loading") : t(emptyKey)}
         </NaiveP>
       }
     >
@@ -538,86 +535,99 @@ export function LikedCollectionMode(props: LikedCollectionModeProps) {
               ariaLabel={t("ncm.collection.title")}
             />
 
-            <Switch>
-              <Match when={activeTab() === "playlists"}>
-                <section class="liked-collection-playlists">
-                  <div class="liked-collection-filter">
-                    <For
-                      each={[
-                        { value: "created" as const, label: t("ncm.collection.playlistFilter.created") },
-                        { value: "collected" as const, label: t("ncm.collection.playlistFilter.collected") }
-                      ]}
-                    >
-                      {(item) => (
-                        <button
-                          type="button"
-                          class={`liked-collection-chip${playlistScope() === item.value ? " is-active" : ""}`}
-                          onClick={() => setPlaylistScope(item.value)}
+            <RouteContentTransition
+              value={activeTab()}
+              transitionKey={activeTab()}
+              animation={uiSettings.routeAnimation}
+              motionScope="liked-content"
+            >
+              {(displayedCollectionTab) => (
+                <Switch>
+                  <Match when={displayedCollectionTab() === "playlists"}>
+                    <section class="liked-collection-playlists">
+                      <div class="liked-collection-filter">
+                        <For
+                          each={[
+                            { value: "created" as const, label: t("ncm.collection.playlistFilter.created") },
+                            { value: "collected" as const, label: t("ncm.collection.playlistFilter.collected") }
+                          ]}
                         >
-                          {item.label}
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                  <Show
-                    when={currentPlaylists().length > 0}
-                    fallback={
-                      <NaiveP class="panel-note">
-                        {activeTabLoading() ? t("ncm.playlist.loading") : t("ncm.empty.noUserPlaylists")}
-                      </NaiveP>
-                    }
-                  >
-                    <div class="album-grid content-fade-in">
-                      <For each={currentPlaylists()}>
-                        {(playlist) => (
-                          <AlbumCard
-                            title={playlist.name}
-                            subtitle={t("ncm.playlist.meta", {
-                              count: playlist.trackCount ?? 0,
-                              creator: playlist.creator ?? t("ncm.playlist.creatorUnknown")
-                            })}
-                            coverUrl={playlist.coverUrl}
-                            coverVisible={!uiSettings.hiddenCovers.like}
-                            size="md"
-                            onClick={() => handlePlaylistClick(playlist)}
-                          />
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                </section>
-              </Match>
-              <Match when={activeTab() === "albums"}>
-                {renderCollectionGrid(
-                  collectionAlbums,
-                  "ncm.collection.empty.albums",
-                  (item) => props.onNavigateToAlbumDetail?.(item)
-                )}
-              </Match>
-              <Match when={activeTab() === "artists"}>
-                {renderCollectionGrid(
-                  collectionArtists,
-                  "ncm.collection.empty.artists",
-                  (item) => props.onNavigateToArtistDetail?.(item),
-                  { shape: "round" }
-                )}
-              </Match>
-              <Match when={activeTab() === "videos"}>
-                {renderCollectionGrid(
-                  collectionVideos,
-                  "ncm.collection.empty.videos",
-                  (item) => props.onNavigateToVideoDetail?.(item),
-                  { video: true }
-                )}
-              </Match>
-              <Match when={activeTab() === "radios"}>
-                {renderCollectionGrid(
-                  collectionRadios,
-                  "ncm.collection.empty.radios",
-                  (item) => props.onNavigateToRadioDetail?.(item)
-                )}
-              </Match>
-            </Switch>
+                          {(item) => (
+                            <button
+                              type="button"
+                              class={`liked-collection-chip${playlistScope() === item.value ? " is-active" : ""}`}
+                              onClick={() => setPlaylistScope(item.value)}
+                            >
+                              {item.label}
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                      <Show
+                        when={currentPlaylists().length > 0}
+                        fallback={
+                          <NaiveP class="panel-note">
+                            {loadState().playlists === "loading" ? t("ncm.playlist.loading") : t("ncm.empty.noUserPlaylists")}
+                          </NaiveP>
+                        }
+                      >
+                        <div class="album-grid content-fade-in">
+                          <For each={currentPlaylists()}>
+                            {(playlist) => (
+                              <AlbumCard
+                                title={playlist.name}
+                                subtitle={t("ncm.playlist.meta", {
+                                  count: playlist.trackCount ?? 0,
+                                  creator: playlist.creator ?? t("ncm.playlist.creatorUnknown")
+                                })}
+                                coverUrl={playlist.coverUrl}
+                                coverVisible={!uiSettings.hiddenCovers.like}
+                                size="md"
+                                onClick={() => handlePlaylistClick(playlist)}
+                              />
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </section>
+                  </Match>
+                  <Match when={displayedCollectionTab() === "albums"}>
+                    {renderCollectionGrid(
+                      "albums",
+                      collectionAlbums,
+                      "ncm.collection.empty.albums",
+                      (item) => props.onNavigateToAlbumDetail?.(item)
+                    )}
+                  </Match>
+                  <Match when={displayedCollectionTab() === "artists"}>
+                    {renderCollectionGrid(
+                      "artists",
+                      collectionArtists,
+                      "ncm.collection.empty.artists",
+                      (item) => props.onNavigateToArtistDetail?.(item),
+                      { shape: "round" }
+                    )}
+                  </Match>
+                  <Match when={displayedCollectionTab() === "videos"}>
+                    {renderCollectionGrid(
+                      "videos",
+                      collectionVideos,
+                      "ncm.collection.empty.videos",
+                      (item) => props.onNavigateToVideoDetail?.(item),
+                      { video: true }
+                    )}
+                  </Match>
+                  <Match when={displayedCollectionTab() === "radios"}>
+                    {renderCollectionGrid(
+                      "radios",
+                      collectionRadios,
+                      "ncm.collection.empty.radios",
+                      (item) => props.onNavigateToRadioDetail?.(item)
+                    )}
+                  </Match>
+                </Switch>
+              )}
+            </RouteContentTransition>
           </Show>
       </section>
     </>

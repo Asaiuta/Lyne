@@ -1,10 +1,17 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal } from "solid-js";
 import { Modal } from "./Modal";
 import { IconPlus } from "./icons";
 import type { ApiClient } from "../shared/api/client";
 import type { LocalPlaylist } from "../shared/api/types";
 import { assertNcmOk, createPlaylist, type NcmCreatePlaylistType } from "../shared/api/ncm";
 import { useTranslation } from "../shared/i18n";
+import {
+  NaiveButton,
+  NaiveInput,
+  NaiveSelect,
+  NaiveSwitch,
+  type NaiveSelectOption
+} from "../shared/ui/naive";
 
 type FeedbackTone = "success" | "error";
 export type CreatePlaylistMode = "online" | "local";
@@ -38,6 +45,14 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
   const [privacy, setPrivacy] = createSignal<boolean>(false);
   const [submitting, setSubmitting] = createSignal<boolean>(false);
   const [feedback, setFeedback] = createSignal<{ tone: FeedbackTone; message: string } | null>(null);
+  const playlistTypeOptions = createMemo<ReadonlyArray<NaiveSelectOption<NcmCreatePlaylistType>>>(
+    () =>
+      PLAYLIST_TYPES.map((option) => ({
+        value: option.value,
+        label: t(option.labelKey),
+        disabled: option.disabled
+      }))
+  );
 
   createEffect(() => {
     if (props.open) return;
@@ -101,59 +116,56 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
           void handleSubmit();
         }}
       >
-        <label class="create-playlist-field">
+        <div class="create-playlist-field">
           <span class="field-label">{t("playlist.create.name")}</span>
-          <input
-            class="text-input"
+          <NaiveInput
             type="text"
             value={name()}
             placeholder={t("playlist.create.namePlaceholder")}
-            onInput={(event) => setName(event.currentTarget.value)}
+            onUpdateValue={setName}
+            ariaLabel={t("playlist.create.name")}
           />
-        </label>
+        </div>
 
         <Show
           when={props.mode === "local"}
           fallback={
             <>
-              <label class="create-playlist-field">
+              <div class="create-playlist-field">
                 <span class="field-label">{t("playlist.create.type")}</span>
-                <select
-                  class="text-input"
+                <NaiveSelect
                   value={type()}
-                  onChange={(event) => setType(event.currentTarget.value as NcmCreatePlaylistType)}
-                >
-                  <For each={PLAYLIST_TYPES}>
-                    {(option) => (
-                      <option value={option.value} disabled={option.disabled}>
-                        {t(option.labelKey)}
-                      </option>
-                    )}
-                  </For>
-                </select>
-              </label>
+                  options={playlistTypeOptions()}
+                  onUpdateValue={(value) => {
+                    if (value !== null) setType(value);
+                  }}
+                  ariaLabel={t("playlist.create.type")}
+                />
+              </div>
 
-              <label class="create-playlist-switch">
-                <input
-                  type="checkbox"
+              <div class="create-playlist-switch">
+                <NaiveSwitch
                   checked={privacy()}
-                  onChange={(event) => setPrivacy(event.currentTarget.checked)}
+                  onChange={setPrivacy}
+                  ariaLabel={t("playlist.create.privacy")}
                 />
                 <span>{t("playlist.create.privacy")}</span>
-              </label>
+              </div>
             </>
           }
         >
-          <label class="create-playlist-field">
+          <div class="create-playlist-field">
             <span class="field-label">{t("playlist.create.description")}</span>
-            <textarea
-              class="text-input create-playlist-description"
+            <NaiveInput
+              type="textarea"
+              class="create-playlist-description"
               value={description()}
               placeholder={t("playlist.create.descriptionPlaceholder")}
-              rows={3}
-              onInput={(event) => setDescription(event.currentTarget.value)}
+              autosize={{ minRows: 2, maxRows: 4 }}
+              onUpdateValue={setDescription}
+              ariaLabel={t("playlist.create.description")}
             />
-          </label>
+          </div>
         </Show>
 
         <Show when={feedback()}>
@@ -171,16 +183,19 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
           )}
         </Show>
 
-        <button
-          type="submit"
-          class="primary-button create-playlist-submit"
+        <NaiveButton
+          nativeType="submit"
+          variant="primary"
+          strong
+          block
+          class="create-playlist-submit"
           disabled={!name().trim() || submitting()}
         >
           <IconPlus />
           <span>
             {submitting() ? t("playlist.create.submitting") : t("playlist.create.submit")}
           </span>
-        </button>
+        </NaiveButton>
       </form>
     </Modal>
   );

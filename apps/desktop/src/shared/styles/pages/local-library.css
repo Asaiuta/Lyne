@@ -1,3 +1,18 @@
+  .local-library-title-fade-enter-active {
+    transition:
+      opacity var(--motion-duration-subtle) var(--motion-ease-balanced);
+  }
+
+  .local-library-title-fade-leave-active {
+    transition:
+      opacity var(--motion-duration-exit) var(--motion-ease-balanced);
+  }
+
+  .local-library-title-fade-enter-from,
+  .local-library-title-fade-leave-to {
+    opacity: 0;
+  }
+
   .local-library-head {
     display: flex;
     flex: none;
@@ -72,13 +87,6 @@
     justify-content: flex-end;
   }
 
-  .local-library-search svg {
-    display: block;
-    flex: none;
-    width: 18px;
-    height: 18px;
-  }
-
   .local-library-more-menu {
     --n-min-width: 136px;
     width: max-content;
@@ -86,44 +94,6 @@
 
   :root[data-theme="light"]:not([data-theme-global-color="true"]) .local-library-more-menu {
     --n-color: rgb(255 255 255);
-  }
-
-  .local-library-search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 130px;
-    height: 40px;
-    padding: 0 14px;
-    border-radius: var(--radius-pill);
-    color: var(--text-placeholder);
-    background: var(--border-overlay);
-    border: 1px solid var(--border-overlay);
-    transition:
-      width 0.3s var(--ease-standard),
-      background-color 0.3s var(--ease-standard),
-      border-color 0.3s var(--ease-standard);
-  }
-
-  .local-library-search:focus-within {
-    width: 200px;
-    color: var(--text-secondary);
-    background: var(--state-hover-on-surface);
-    border-color: var(--state-hover-on-surface);
-  }
-
-  .local-library-search input {
-    width: 100%;
-    min-width: 0;
-    border: 0;
-    outline: none;
-    background: transparent;
-    color: var(--text);
-    font-size: 13px;
-  }
-
-  .local-library-search input::placeholder {
-    color: var(--text-placeholder);
   }
 
   .local-library-view-trigger {
@@ -202,7 +172,7 @@
       min-width: 150px;
     }
 
-    .local-library-search:focus-within {
+    .local-library-search.n-input--focus {
       width: auto;
     }
 
@@ -859,8 +829,7 @@
     background: var(--color-primary-tonal-12);
   }
 
-  .local-playlist-target-icon svg,
-  .local-playlist-create-inline .primary-button svg {
+  .local-playlist-target-icon svg {
     width: 18px;
     height: 18px;
   }
@@ -1071,10 +1040,8 @@
     padding: 0;
   }
 
-  .local-batch-check input {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--accent);
+  .local-batch-check .naive-checkbox {
+    flex: none;
   }
 
   .local-batch-index {
@@ -1125,7 +1092,7 @@
     box-shadow: var(--floating-shadow);
   }
 
-  .local-batch-range-popover .text-input {
+  .local-batch-range-input {
     width: 96px;
   }
 
@@ -1151,8 +1118,8 @@
   }
 
   .ncm-update-playlist-desc {
+    --n-height: 96px;
     min-height: 96px;
-    resize: vertical;
     line-height: 1.5;
   }
 
@@ -1161,36 +1128,8 @@
     gap: 8px;
   }
 
-  .ncm-update-playlist-tag-grid {
-    display: flex;
-    max-height: 176px;
-    overflow: auto;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding-right: 4px;
-  }
-
-  .ncm-update-playlist-tag {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 30px;
-    padding: 0 12px;
-    border: 1px solid var(--border-faint);
-    border-radius: var(--radius-pill);
-    color: var(--muted);
-    background: var(--surface-1);
-    transition:
-      border-color var(--duration-fast) var(--ease-standard),
-      color var(--duration-fast) var(--ease-standard),
-      background var(--duration-fast) var(--ease-standard);
-  }
-
-  .ncm-update-playlist-tag:hover,
-  .ncm-update-playlist-tag.is-active {
-    border-color: var(--color-primary-tonal-58);
-    color: var(--accent);
-    background: var(--color-primary-tonal-12);
+  .ncm-update-playlist-tag-select {
+    width: 100%;
   }
 
   .ncm-cloud-match-modal {
@@ -1294,7 +1233,7 @@
     padding-top: 4px;
   }
 
-  .local-playlist-create-inline .primary-button {
+  .local-playlist-create-inline .naive-button {
     justify-self: flex-start;
   }
 

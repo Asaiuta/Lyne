@@ -22,7 +22,14 @@ import { useTranslation } from "../shared/i18n";
 import { completeNcmLogin } from "../shared/state/ncmLoginCompletion";
 import { useQrLoginSession } from "./login/useQrLoginSession";
 import { isNumber, isRecord, isString } from "../shared/jsonReaders";
-import { NaiveTabs, type NaiveTabItem } from "../shared/ui/naive";
+import {
+  NaiveButton,
+  NaiveInput,
+  NaiveRadio,
+  NaiveRadioGroup,
+  NaiveTabs,
+  type NaiveTabItem
+} from "../shared/ui/naive";
 
 type LoginTab = "qr" | "phone";
 type SpecialLoginMode = "uid" | "cookie" | null;
@@ -401,8 +408,8 @@ export function LoginModal(props: LoginModalProps) {
                     )}
                   </Show>
                 </div>
-                <button
-                  type="button"
+                <NaiveButton
+                  variant="tertiary"
                   class="login-modal-regenerate"
                   onClick={() => void qrLogin.start()}
                   disabled={qrLogin.isCreating()}
@@ -410,7 +417,7 @@ export function LoginModal(props: LoginModalProps) {
                   {qrLogin.session()
                     ? t("ncm.loginModal.qr.action.regenerate")
                     : t("ncm.loginModal.qr.action.start")}
-                </button>
+                </NaiveButton>
               </div>
             </section>
           </Show>
@@ -426,59 +433,56 @@ export function LoginModal(props: LoginModalProps) {
               >
                 <label class="login-modal-field">
                   <span>{t("ncm.loginModal.phone.label.country")}</span>
-                  <input
+                  <NaiveInput
                     type="text"
-                    class="text-input"
                     value={form.phoneCountryCode}
-                    onInput={(event) => setForm("phoneCountryCode", event.currentTarget.value)}
+                    onUpdateValue={(value) => setForm("phoneCountryCode", value)}
+                    ariaLabel={t("ncm.loginModal.phone.label.country")}
                   />
                 </label>
                 <label class="login-modal-field">
                   <span>{t("ncm.loginModal.phone.label.phone")}</span>
-                  <input
+                  <NaiveInput
                     type="tel"
-                    class="text-input"
                     value={form.phoneNumber}
                     placeholder={t("ncm.loginModal.phone.placeholder.phone")}
-                    onInput={(event) => setForm("phoneNumber", event.currentTarget.value)}
+                    onUpdateValue={(value) => setForm("phoneNumber", value)}
+                    ariaLabel={t("ncm.loginModal.phone.label.phone")}
                   />
                 </label>
 
-                <div class="login-modal-toggle" role="radiogroup">
-                  <label>
-                    <input
-                      type="radio"
-                      name="phone-mode"
-                      checked={form.phoneMode === "captcha"}
-                      onChange={() => setForm("phoneMode", "captcha")}
-                    />
-                    <span>{t("ncm.loginModal.phone.mode.captcha")}</span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="phone-mode"
-                      checked={form.phoneMode === "password"}
-                      onChange={() => setForm("phoneMode", "password")}
-                    />
-                    <span>{t("ncm.loginModal.phone.mode.password")}</span>
-                  </label>
-                </div>
+                <NaiveRadioGroup
+                  class="login-modal-toggle"
+                  name="phone-mode"
+                  orientation="horizontal"
+                  value={form.phoneMode}
+                  onUpdateValue={(value) => {
+                    if (value === "captcha" || value === "password") {
+                      setForm("phoneMode", value);
+                    }
+                  }}
+                >
+                  <NaiveRadio value="captcha">
+                    {t("ncm.loginModal.phone.mode.captcha")}
+                  </NaiveRadio>
+                  <NaiveRadio value="password">
+                    {t("ncm.loginModal.phone.mode.password")}
+                  </NaiveRadio>
+                </NaiveRadioGroup>
 
                 <Show when={form.phoneMode === "captcha"}>
                   <label class="login-modal-field">
                     <span>{t("ncm.loginModal.phone.label.captcha")}</span>
                     <div class="login-modal-row">
-                      <input
+                      <NaiveInput
                         type="text"
-                        class="text-input"
                         value={form.phoneCaptcha}
                         placeholder={t("ncm.loginModal.phone.placeholder.captcha")}
-                        onInput={(event) => setForm("phoneCaptcha", event.currentTarget.value)}
+                        onUpdateValue={(value) => setForm("phoneCaptcha", value)}
+                        ariaLabel={t("ncm.loginModal.phone.label.captcha")}
                       />
-                      <button
-                        type="button"
-                        class="ghost-button"
+                      <NaiveButton
+                        variant="tertiary"
                         onClick={() => void handleSendCaptcha()}
                         disabled={form.isSendingCaptcha || captchaCooldown() > 0}
                       >
@@ -489,7 +493,7 @@ export function LoginModal(props: LoginModalProps) {
                                 seconds: captchaCooldown()
                               })
                             : t("ncm.loginModal.phone.action.sendCaptcha")}
-                      </button>
+                      </NaiveButton>
                     </div>
                   </label>
                 </Show>
@@ -497,52 +501,63 @@ export function LoginModal(props: LoginModalProps) {
                 <Show when={form.phoneMode === "password"}>
                   <label class="login-modal-field">
                     <span>{t("ncm.loginModal.phone.label.password")}</span>
-                    <input
+                    <NaiveInput
                       type="password"
-                      class="text-input"
                       value={form.phonePassword}
                       placeholder={t("ncm.loginModal.phone.placeholder.password")}
-                      onInput={(event) => setForm("phonePassword", event.currentTarget.value)}
+                      onUpdateValue={(value) => setForm("phonePassword", value)}
+                      ariaLabel={t("ncm.loginModal.phone.label.password")}
                     />
                   </label>
                 </Show>
 
-                <button
-                  type="submit"
-                  class="primary-button login-modal-submit"
+                <NaiveButton
+                  nativeType="submit"
+                  variant="primary"
+                  strong
+                  block
+                  class="login-modal-submit"
                   disabled={form.isSubmittingPhone}
                 >
                   {form.isSubmittingPhone
                     ? t("ncm.loginModal.phone.action.submitting")
                     : t("ncm.loginModal.phone.action.submit")}
-                </button>
+                </NaiveButton>
               </form>
             </section>
           </Show>
 
           <div class="login-modal-other">
-            <button
-              hidden={props.disableUid === true}
-              type="button"
-              class="login-modal-link-button"
-              onClick={() => openSpecialLogin("uid")}
-            >
-              {t("ncm.loginModal.tab.uid")}
-            </button>
-            <span hidden={props.disableUid === true} class="login-modal-divider" aria-hidden="true" />
-            <button
-              type="button"
+            <Show when={props.disableUid !== true}>
+              <NaiveButton
+                variant="tertiary"
+                class="login-modal-link-button"
+                onClick={() => openSpecialLogin("uid")}
+              >
+                {t("ncm.loginModal.tab.uid")}
+              </NaiveButton>
+              <span class="login-modal-divider" aria-hidden="true" />
+            </Show>
+            <NaiveButton
+              variant="tertiary"
               class="login-modal-link-button"
               onClick={() => openSpecialLogin("cookie")}
             >
               {t("ncm.loginModal.tab.cookie")}
-            </button>
+            </NaiveButton>
           </div>
 
-          <button type="button" class="login-modal-cancel" onClick={props.onClose}>
+          <NaiveButton
+            class="login-modal-cancel"
+            onClick={props.onClose}
+            round
+            secondary
+            size="medium"
+            strong
+          >
             <IconClose />
             {t("ncm.loginModal.action.cancel")}
-          </button>
+          </NaiveButton>
         </div>
       </Modal>
 
@@ -572,24 +587,26 @@ export function LoginModal(props: LoginModalProps) {
                 void handleUidSubmit();
               }}
             >
-              <input
+              <NaiveInput
                 type="text"
-                inputmode="numeric"
-                class="text-input"
+                inputProps={{ inputmode: "numeric" }}
                 value={form.uidValue}
-                aria-label={t("ncm.loginModal.uid.label")}
+                ariaLabel={t("ncm.loginModal.uid.label")}
                 placeholder={t("ncm.loginModal.uid.placeholder")}
-                onInput={(event) => setForm("uidValue", event.currentTarget.value)}
+                onUpdateValue={(value) => setForm("uidValue", value)}
               />
-              <button
-                type="submit"
-                class="primary-button login-modal-submit login-modal-special-submit"
+              <NaiveButton
+                nativeType="submit"
+                variant="primary"
+                strong
+                block
+                class="login-modal-submit login-modal-special-submit"
                 disabled={form.isSubmittingUid}
               >
                 {form.isSubmittingUid
                   ? t("ncm.loginModal.uid.action.submitting")
                   : t("ncm.loginModal.uid.action.submit")}
-              </button>
+              </NaiveButton>
             </form>
           </section>
         </Show>
@@ -614,23 +631,27 @@ export function LoginModal(props: LoginModalProps) {
                 void handleCookieSubmit();
               }}
             >
-              <textarea
-                class="text-input login-modal-cookie-input"
+              <NaiveInput
+                type="textarea"
+                class="login-modal-cookie-input"
                 rows={4}
                 value={form.cookieValue}
-                aria-label={t("ncm.loginModal.cookie.label")}
+                ariaLabel={t("ncm.loginModal.cookie.label")}
                 placeholder={t("ncm.loginModal.cookie.placeholder")}
-                onInput={(event) => setForm("cookieValue", event.currentTarget.value)}
+                onUpdateValue={(value) => setForm("cookieValue", value)}
               />
-              <button
-                type="submit"
-                class="primary-button login-modal-submit login-modal-special-submit"
+              <NaiveButton
+                nativeType="submit"
+                variant="primary"
+                strong
+                block
+                class="login-modal-submit login-modal-special-submit"
                 disabled={form.isSubmittingCookie}
               >
                 {form.isSubmittingCookie
                   ? t("ncm.loginModal.cookie.action.submitting")
                   : t("ncm.loginModal.cookie.action.submit")}
-              </button>
+              </NaiveButton>
             </form>
           </section>
         </Show>

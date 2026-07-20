@@ -1,7 +1,6 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import {
   IconArtist,
-  IconChevronLeft,
   IconClock,
   IconDots,
   IconFavoriteBorderFilled,
@@ -10,17 +9,18 @@ import {
   IconLink,
   IconPlayFilled,
   IconRefreshFilled,
-  IconSearch,
   IconShare,
   IconTag
 } from "../../../components/icons";
 import type { MediaContextAction } from "../../../components/media/mediaContextActions";
 import { NcmMediaList } from "../NcmMediaList";
 import { BackToTop } from "../../../components/page/BackToTop";
+import { PageBackButton } from "../../../components/page/PageBackButton";
 import { PageBody } from "../../../components/page/PageBody";
 import { PageHero } from "../../../components/page/PageHero";
 import { PageStickyHeader } from "../../../components/page/PageStickyHeader";
 import { PageSurface } from "../../../components/page/PageSurface";
+import { PageSearchInput } from "../../../components/page/PageSearchInput";
 import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { SegmentedTabs, type SegmentedTabItem } from "../../../components/page/SegmentedTabs";
 import { SImage } from "../../../components/SImage";
@@ -269,15 +269,11 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                     <div class="playlist-detail-copy">
                       <div class="playlist-detail-title-row">
                         <Show when={props.onBack !== undefined}>
-                          <button
-                            type="button"
-                            class="ghost-button playlist-detail-back"
-                            aria-label={t("ncm.playlist.backToList")}
-                            title={t("ncm.playlist.backToList")}
+                          <PageBackButton
+                            ariaLabel={t("ncm.playlist.backToList")}
+                            class="playlist-detail-back"
                             onClick={() => props.onBack?.()}
-                          >
-                            <IconChevronLeft />
-                          </button>
+                          />
                         </Show>
                         <NaiveH2 title={playlist().name}>{playlist().name}</NaiveH2>
                       </div>
@@ -362,15 +358,12 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                           </NaiveDropdown>
                         </div>
                         <div class="playlist-detail-menu-right">
-                          <label class="playlist-detail-search">
-                            <IconSearch />
-                            <input
-                              type="search"
-                              value={props.filter}
-                              placeholder={t("ncm.playlist.search")}
-                              onInput={(event) => props.setFilter(event.currentTarget.value)}
-                            />
-                          </label>
+                          <PageSearchInput
+                            class="playlist-detail-search"
+                            value={props.filter}
+                            placeholder={t("ncm.playlist.search")}
+                            onUpdateValue={props.setFilter}
+                          />
                           <Show when={showCommentsTab()}>
                             <SegmentedTabs
                               class="playlist-detail-tabs"
