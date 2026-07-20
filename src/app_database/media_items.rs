@@ -2,6 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::decoder::TrackMetadata;
 
+use super::library_memberships::reconcile_library_membership_identity;
 use super::ncm_track_sources::ncm_track_source_from_row;
 use super::{
     media_id_for_path, media_item_from_row, now_epoch_secs_i64, AppDatabase, CoverArtRecord,
@@ -691,6 +692,8 @@ fn rename_media_identity(
         )
     })?;
     update_media_identity_references(conn, old_media_id, new_media_id)?;
+    reconcile_ncm_track_source_merge(conn, old_media_id, new_media_id, now)?;
+    reconcile_local_playlist_items_merge(conn, old_media_id, new_media_id)?;
     conn.execute(
         "DELETE FROM media_items WHERE media_id = ?1",
         params![old_media_id],
@@ -801,6 +804,8 @@ fn update_media_identity_references(
                 )
             })?;
     }
+
+    reconcile_library_membership_identity(conn, old_media_id, new_media_id)?;
 
     Ok(())
 }

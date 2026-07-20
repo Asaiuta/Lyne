@@ -4,8 +4,17 @@ use rusqlite::{params, Connection};
 
 const BASELINE_SQL: &str = include_str!("../migrations/001_baseline.sql");
 const INDEXES_SQL: &str = include_str!("../migrations/003_indexes.sql");
+const LIBRARY_ROOT_MEMBERSHIPS_SQL: &str =
+    include_str!("../migrations/012_library_root_memberships.sql");
 
 pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
+    run_migrations_with_webdav_fallback(conn, None)
+}
+
+pub(crate) fn run_migrations_with_webdav_fallback(
+    conn: &mut Connection,
+    webdav_fallback_base_url: Option<&str>,
+) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_version (
             version INTEGER PRIMARY KEY,
@@ -48,6 +57,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
     }
     if current < 11 {
         apply_cover_art_file_cache_migration(conn)?;
+    }
+    if current < 12 {
+        apply_library_root_memberships_migration(conn, webdav_fallback_base_url)?;
     }
 
     Ok(())
@@ -157,6 +169,31 @@ fn apply_cover_art_file_cache_migration(conn: &mut Connection) -> Result<(), Str
             tx.execute_batch("ALTER TABLE cover_art_cache ADD COLUMN file_path TEXT")
                 .map_err(|e| format!("Failed to add cover_art_cache.file_path: {}", e))?;
         }
+        Ok(())
+    })
+}
+
+fn apply_library_root_memberships_migration(
+    conn: &mut Connection,
+    webdav_fallback_base_url: Option<&str>,
+) -> Result<(), String> {
+    apply_migration_tx(conn, 12, |tx| {
+        tx.execute_batch(LIBRARY_ROOT_MEMBERSHIPS_SQL)
+            .map_err(|e| format!("Failed to create library root memberships: {}", e))?;
+        let cleanup = crate::app_database::backfill_library_root_memberships_and_cleanup_tx(
+            tx,
+            webdav_fallback_base_url,
+        )?;
+        log::info!(
+            "Library membership migration removed media={}, analysis_tasks={}, history={}, sessions={}, queue_entries={}, playlist_items={}, cover_art={}",
+            cleanup.removed_media_count,
+            cleanup.removed_analysis_task_count,
+            cleanup.removed_history_count,
+            cleanup.removed_session_count,
+            cleanup.removed_queue_entry_count,
+            cleanup.removed_playlist_item_count,
+            cleanup.removed_cover_art_count,
+        );
         Ok(())
     })
 }
@@ -276,6 +313,17 @@ fn now_epoch_secs_i64() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn connection_at_v11() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute("DELETE FROM schema_version WHERE version = 12", [])
+            .unwrap();
+        conn.execute("DELETE FROM library_root_memberships", [])
+            .unwrap();
+        conn
+    }
 
     #[test]
     fn backfill_succeeds_when_source_key_is_missing() {
@@ -668,5 +716,298 @@ mod tests {
             })
             .unwrap();
         assert_eq!(version, 11);
+    }
+
+    #[test]
+    fn library_membership_migration_cleans_orphan_local_media_and_references() {
+        let mut conn = connection_at_v11();
+        let legacy_media_id = "//?/d:/music/legacy.flac";
+        let source_path = r"\\?\D:\Music\Legacy.flac";
+        conn.execute(
+            r#"
+            INSERT INTO media_items (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES (?1, ?2, 'local', 1, 1)
+            "#,
+            params![legacy_media_id, source_path],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO media_items (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES ('https://remote.example/keep.flac', 'https://remote.example/keep.flac', 'remote', 1, 1)
+            "#,
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO playback_sessions
+                (media_id, source_path, status, started_at, updated_at, exclusive_mode)
+            VALUES (?1, ?2, 'ended', 1, 1, 0)
+            "#,
+            params![legacy_media_id, source_path],
+        )
+        .unwrap();
+        let session_id = conn.last_insert_rowid();
+        conn.execute(
+            r#"
+            INSERT INTO playback_history
+                (session_id, media_id, source_path, event_type, event_at)
+            VALUES (?1, 'd:/music/legacy.flac', 'D:/Music/Legacy.flac', 'load_requested', 1)
+            "#,
+            params![session_id],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO playback_queue_entries
+                (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
+            VALUES ('active', 0, 'D:/Music/Legacy.flac', 'd:/music/legacy.flac', 'queued', 1, 1)
+            "#,
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO analysis_tasks
+                (task_id, task_type, source_path, status, created_at, updated_at)
+            VALUES (900, 'loudness', ?1, 'success', 1, 1)
+            "#,
+            params![source_path],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO local_playlists
+                (playlist_id, name, cover_media_id, created_at, updated_at)
+            VALUES ('legacy-list', 'Legacy', ?1, 1, 1)
+            "#,
+            params![legacy_media_id],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO local_playlist_items
+                (playlist_id, media_id, position_index, added_at)
+            VALUES ('legacy-list', ?1, 0, 1)
+            "#,
+            params![legacy_media_id],
+        )
+        .unwrap();
+
+        run_migrations(&mut conn).unwrap();
+
+        let local_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM media_items WHERE source_kind = 'local'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let remote_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM media_items WHERE source_kind = 'remote'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(local_count, 0);
+        assert_eq!(remote_count, 1);
+        for table in [
+            "playback_history",
+            "playback_sessions",
+            "playback_queue_entries",
+            "local_playlist_items",
+            "analysis_tasks",
+        ] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{} should be cleaned", table);
+        }
+        let playlist_cover: Option<String> = conn
+            .query_row(
+                "SELECT cover_media_id FROM local_playlists WHERE playlist_id = 'legacy-list'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(playlist_cover, None);
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 12);
+        let foreign_key_errors: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_errors, 0);
+    }
+
+    #[test]
+    fn library_membership_migration_backfills_overlapping_local_and_webdav_roots() {
+        let mut conn = connection_at_v11();
+        conn.execute_batch(
+            r#"
+            INSERT INTO webdav_sources
+                (source_key, display_name, base_url, is_default, created_at, updated_at)
+            VALUES ('primary', 'DAV', 'https://dav.example.test/dav', 1, 1, 1);
+            INSERT INTO library_roots
+                (root_id, source_path, source_kind, display_name, scan_status, updated_at)
+            VALUES (1, 'D:/Music', 'local', 'Music', 'completed', 1);
+            INSERT INTO library_roots
+                (root_id, source_path, source_kind, display_name, scan_status, updated_at)
+            VALUES (2, 'D:/Music/Album', 'local', 'Album', 'completed', 1);
+            INSERT INTO library_roots
+                (root_id, source_key, source_path, source_kind, display_name, scan_status, updated_at)
+            VALUES (3, 'primary', '/albums', 'webdav', 'DAV', 'completed', 1);
+            INSERT INTO library_roots
+                (root_id, source_path, source_kind, display_name, scan_status, updated_at)
+            VALUES (4, '/legacy', 'webdav', 'Legacy DAV', 'completed', 1);
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES ('d:/music/album/a.flac', 'D:/Music/Album/a.flac', 'local', 1, 1);
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES ('d:/outside.flac', 'D:/Outside.flac', 'local', 1, 1);
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES ('https://dav.example.test/dav/albums/a.flac', 'https://dav.example.test/dav/albums/a.flac', 'remote', 1, 1);
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES ('https://dav.example.test/dav/albums/ncm.flac', 'https://dav.example.test/dav/albums/ncm.flac', 'remote', 1, 1);
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES ('https://dav.example.test/dav/legacy/b.flac', 'https://dav.example.test/dav/legacy/b.flac', 'remote', 1, 1);
+            INSERT INTO ncm_track_sources
+                (media_id, source_path, song_id, resolved_at)
+            VALUES ('https://dav.example.test/dav/albums/ncm.flac', 'https://dav.example.test/dav/albums/ncm.flac', 42, 1);
+            "#,
+        )
+        .unwrap();
+
+        run_migrations(&mut conn).unwrap();
+
+        let local_memberships: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM library_root_memberships WHERE media_id = 'd:/music/album/a.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let webdav_memberships: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM library_root_memberships WHERE media_id = 'https://dav.example.test/dav/albums/a.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let ncm_memberships: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM library_root_memberships WHERE media_id = 'https://dav.example.test/dav/albums/ncm.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let default_webdav_memberships: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM library_root_memberships WHERE root_id = 4 AND media_id = 'https://dav.example.test/dav/legacy/b.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let outside_local: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM media_items WHERE media_id = 'd:/outside.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let ncm_media: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM media_items WHERE media_id = 'https://dav.example.test/dav/albums/ncm.flac'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(local_memberships, 2);
+        assert_eq!(webdav_memberships, 1);
+        assert_eq!(default_webdav_memberships, 1);
+        assert_eq!(ncm_memberships, 0);
+        assert_eq!(outside_local, 0);
+        assert_eq!(ncm_media, 1);
+    }
+
+    #[test]
+    fn library_membership_migration_failure_rolls_back_cleanup_and_version() {
+        let mut conn = connection_at_v11();
+        conn.execute_batch(
+            r#"
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES ('d:/music/fail.flac', 'D:/Music/fail.flac', 'local', 1, 1);
+            CREATE TRIGGER reject_media_cleanup
+            BEFORE DELETE ON media_items
+            BEGIN
+                SELECT RAISE(ABORT, 'cleanup rejected');
+            END;
+            "#,
+        )
+        .unwrap();
+
+        let error = run_migrations(&mut conn).unwrap_err();
+
+        assert!(error.contains("cleanup rejected"));
+        let media_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM media_items", [], |row| row.get(0))
+            .unwrap();
+        let version_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 12",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(media_count, 1);
+        assert_eq!(version_count, 0);
+    }
+
+    #[test]
+    fn library_membership_migration_uses_runtime_webdav_fallback_for_legacy_root() {
+        let mut conn = connection_at_v11();
+        conn.execute_batch(
+            r#"
+            INSERT INTO library_roots
+                (root_id, source_path, source_kind, display_name, scan_status, updated_at)
+            VALUES (1, '/albums', 'webdav', 'Legacy DAV', 'completed', 1);
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES (
+                'https://fallback.example.test/dav/albums/a.flac',
+                'https://fallback.example.test/dav/albums/a.flac',
+                'remote',
+                1,
+                1
+            );
+            "#,
+        )
+        .unwrap();
+
+        run_migrations_with_webdav_fallback(&mut conn, Some("https://fallback.example.test/dav"))
+            .unwrap();
+
+        let memberships: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM library_root_memberships WHERE root_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(memberships, 1);
     }
 }

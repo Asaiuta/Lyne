@@ -1,7 +1,7 @@
 use super::*;
 use crate::app_database::{
-    LibraryRootRecord, LibraryTrackGroupKind, LibraryTrackGroupsQuery, LibraryTrackViewQuery,
-    LibraryTrackViewRange, LibraryTrackViewSort, LibraryTrackViewSortField,
+    LibraryCleanupReport, LibraryRootRecord, LibraryTrackGroupKind, LibraryTrackGroupsQuery,
+    LibraryTrackViewQuery, LibraryTrackViewRange, LibraryTrackViewSort, LibraryTrackViewSortField,
     LibraryTrackViewSortOrder,
 };
 use actix_web::{web, HttpResponse};
@@ -507,11 +507,26 @@ pub(super) async fn delete_media_items(
         return bad_request_response("media_ids cannot be empty");
     }
 
-    match data.app_db.delete_media_items(&body.media_ids) {
-        Ok(deleted_count) => HttpResponse::Ok().json(serde_json::json!({
-            "status": "success",
-            "deleted_count": deleted_count
-        })),
+    match data
+        .app_db
+        .delete_media_items_with_cleanup_report(&body.media_ids)
+    {
+        Ok(cleanup) => {
+            reconcile_runtime_after_library_cleanup(&data, &cleanup);
+            HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "deleted_count": cleanup.removed_media_count,
+                "removed_analysis_task_count": cleanup.removed_analysis_task_count,
+                "removed_history_count": cleanup.removed_history_count,
+                "removed_session_count": cleanup.removed_session_count,
+                "removed_queue_entry_count": cleanup.removed_queue_entry_count,
+                "cleared_queue_state_count": cleanup.cleared_queue_state_count,
+                "removed_playlist_item_count": cleanup.removed_playlist_item_count,
+                "cleared_playlist_cover_count": cleanup.cleared_playlist_cover_count,
+                "removed_cover_art_count": cleanup.removed_cover_art_count,
+                "removed_ncm_source_count": cleanup.removed_ncm_source_count
+            }))
+        }
         Err(e) => internal_server_error_response(e),
     }
 }
@@ -533,12 +548,13 @@ pub(super) async fn delete_media_item_file(
     .await;
 
     match delete_result {
-        Ok(Ok((media_id, source_path, deleted_count))) => {
+        Ok(Ok((media_id, source_path, cleanup))) => {
+            reconcile_runtime_after_library_cleanup(&data, &cleanup);
             HttpResponse::Ok().json(serde_json::json!({
                 "status": "success",
                 "media_id": media_id,
                 "source_path": source_path,
-                "deleted_count": deleted_count
+                "deleted_count": cleanup.removed_media_count
             }))
         }
         Ok(Err(error)) => error.into_response(),
@@ -552,7 +568,7 @@ pub(super) async fn delete_media_item_file(
 fn delete_media_item_file_sync(
     data: &web::Data<Arc<AppState>>,
     media_id: &str,
-) -> Result<(String, String, u64), LibraryFileDeleteFailure> {
+) -> Result<(String, String, LibraryCleanupReport), LibraryFileDeleteFailure> {
     let item = data
         .app_db
         .media_metadata_for_path(media_id)
@@ -580,12 +596,12 @@ fn delete_media_item_file_sync(
         ))
     })?;
 
-    let deleted_count = data
+    let cleanup = data
         .app_db
-        .delete_media_items(std::slice::from_ref(&item.media_id))
+        .delete_media_items_with_cleanup_report(std::slice::from_ref(&item.media_id))
         .map_err(LibraryFileDeleteFailure::Internal)?;
 
-    Ok((item.media_id, item.source_path, deleted_count))
+    Ok((item.media_id, item.source_path, cleanup))
 }
 
 fn resolve_local_library_delete_target(
@@ -1021,15 +1037,69 @@ pub(super) async fn delete_library_root(
     data: web::Data<Arc<AppState>>,
     path: web::Path<LibraryRootPath>,
 ) -> HttpResponse {
+    match library_root_has_active_scan(&data, path.root_id) {
+        Ok(true) => {
+            return error_response(
+                actix_web::http::StatusCode::CONFLICT,
+                crate::app_database::LIBRARY_ROOT_SCAN_IN_PROGRESS_ERROR,
+            )
+        }
+        Ok(false) => {}
+        Err(e) => return internal_server_error_response(e),
+    }
     match data.app_db.delete_library_root(path.root_id) {
-        Ok(Some((root_path, removed_media_count))) => HttpResponse::Ok().json(serde_json::json!({
-            "status": "success",
-            "root_path": root_path,
-            "removed_media_count": removed_media_count
-        })),
+        Ok(Some(deleted)) => {
+            reconcile_runtime_after_library_cleanup(&data, &deleted.cleanup);
+            HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "root_path": deleted.root_path,
+                "removed_media_count": deleted.cleanup.removed_media_count,
+                "removed_analysis_task_count": deleted.cleanup.removed_analysis_task_count,
+                "removed_history_count": deleted.cleanup.removed_history_count,
+                "removed_session_count": deleted.cleanup.removed_session_count,
+                "removed_queue_entry_count": deleted.cleanup.removed_queue_entry_count,
+                "cleared_queue_state_count": deleted.cleanup.cleared_queue_state_count,
+                "removed_playlist_item_count": deleted.cleanup.removed_playlist_item_count,
+                "cleared_playlist_cover_count": deleted.cleanup.cleared_playlist_cover_count,
+                "removed_cover_art_count": deleted.cleanup.removed_cover_art_count,
+                "removed_ncm_source_count": deleted.cleanup.removed_ncm_source_count
+            }))
+        }
         Ok(None) => not_found_response("Library root not found"),
+        Err(e) if e == crate::app_database::LIBRARY_ROOT_SCAN_IN_PROGRESS_ERROR => {
+            error_response(actix_web::http::StatusCode::CONFLICT, e)
+        }
         Err(e) => internal_server_error_response(e),
     }
+}
+
+fn library_root_has_active_scan(
+    data: &web::Data<Arc<AppState>>,
+    root_id: i64,
+) -> Result<bool, String> {
+    let active_task_ids = data
+        .analysis
+        .scan_task_cancels
+        .lock()
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    for task_id in active_task_ids {
+        let Some(task) = data.app_db.get_analysis_task(task_id)? else {
+            continue;
+        };
+        if task.task_type == "library_scan"
+            && task
+                .result
+                .as_ref()
+                .and_then(|value| value.get("root_id"))
+                .and_then(serde_json::Value::as_i64)
+                == Some(root_id)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub(super) async fn get_library_scan_task(
@@ -1219,6 +1289,9 @@ pub(super) async fn scan_library_root(
         match result {
             Ok(outcome) => {
                 let finished_at = now_epoch_secs();
+                if outcome.removed_files > 0 {
+                    reconcile_runtime_after_library_cleanup(&data_for_task, &outcome.cleanup);
+                }
                 let payload = serde_json::json!({
                     "root_id": root_id,
                     "source_kind": source_kind_for_task,
@@ -1271,7 +1344,7 @@ pub(super) async fn scan_library_root(
             }
         }
         remove_scan_task_cancel(&data_for_task, scan_task_id);
-        clear_local_scan_seen_set(&data_for_task, scan_task_id);
+        clear_library_scan_seen_set(&data_for_task, scan_task_id);
     });
 
     HttpResponse::Ok().json(serde_json::json!({

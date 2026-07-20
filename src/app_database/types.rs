@@ -243,6 +243,44 @@ pub struct LibrarySummaryStatsRecord {
     pub revision: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryCleanupReport {
+    pub removed_media_count: u64,
+    pub removed_analysis_task_count: u64,
+    pub removed_history_count: u64,
+    pub removed_session_count: u64,
+    pub removed_queue_entry_count: u64,
+    pub cleared_queue_state_count: u64,
+    pub removed_playlist_item_count: u64,
+    pub cleared_playlist_cover_count: u64,
+    pub removed_cover_art_count: u64,
+    pub removed_ncm_source_count: u64,
+    #[serde(skip)]
+    pub(crate) removed_runtime_paths: Vec<String>,
+    #[serde(skip)]
+    pub(crate) removed_session_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryRootDeleteRecord {
+    pub root_path: String,
+    pub cleanup: LibraryCleanupReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryScanFinalizeRecord {
+    pub track_count: u64,
+    pub cleanup: LibraryCleanupReport,
+}
+
+#[derive(Debug, Clone)]
+pub struct LibraryScanSnapshotRecord {
+    pub media_id: String,
+    pub mtime: Option<f64>,
+    pub size_bytes: Option<u64>,
+    pub cover_file_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalPlaylistRecord {
     pub playlist_id: String,

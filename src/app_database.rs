@@ -12,6 +12,7 @@ use crate::migration;
 
 mod analysis_tasks;
 mod library_media;
+mod library_memberships;
 mod local_playlists;
 mod media_items;
 mod ncm_accounts;
@@ -24,6 +25,10 @@ mod webdav_sources;
 mod types;
 
 pub use types::*;
+
+pub(crate) use library_memberships::{
+    backfill_library_root_memberships_and_cleanup_tx, LIBRARY_ROOT_SCAN_IN_PROGRESS_ERROR,
+};
 
 pub struct AppDatabase {
     conn: Mutex<Connection>,
@@ -68,6 +73,13 @@ pub(super) fn media_item_from_row_with_offset(
 
 impl AppDatabase {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        Self::open_with_webdav_fallback(path, None)
+    }
+
+    pub(crate) fn open_with_webdav_fallback<P: AsRef<Path>>(
+        path: P,
+        webdav_fallback_base_url: Option<&str>,
+    ) -> Result<Self, String> {
         let db_path = path.as_ref().to_path_buf();
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
@@ -77,7 +89,7 @@ impl AppDatabase {
         let conn = Connection::open(&db_path)
             .map_err(|e| format!("Failed to open app database: {}", e))?;
         let mut conn = prepare_connection(conn, true)?;
-        migration::run_migrations(&mut conn)?;
+        migration::run_migrations_with_webdav_fallback(&mut conn, webdav_fallback_base_url)?;
 
         let db = Self {
             conn: Mutex::new(conn),
@@ -207,6 +219,8 @@ pub(crate) fn normalize_media_path_for_id(path: &str) -> &str {
         .or_else(|| path.strip_prefix("//?/UNC/").map(strip_leading_separator))
         .or_else(|| path.strip_prefix(r"\\?\"))
         .or_else(|| path.strip_prefix("//?/"))
+        .or_else(|| path.strip_prefix(r"\\").map(strip_leading_separator))
+        .or_else(|| path.strip_prefix("//").map(strip_leading_separator))
         .unwrap_or(path)
 }
 

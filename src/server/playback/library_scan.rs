@@ -22,6 +22,7 @@ pub(super) struct LibraryScanOutcome {
     pub(super) scanned_files: u64,
     pub(super) indexed_files: u64,
     pub(super) removed_files: u64,
+    pub(super) cleanup: crate::app_database::LibraryCleanupReport,
 }
 
 struct ParsedTrack {
@@ -50,7 +51,6 @@ struct ExternalCoverFile {
 }
 
 struct LocalScanWriteSummary {
-    indexed_count: u64,
     write_failures: Vec<String>,
 }
 
@@ -293,12 +293,12 @@ pub(super) fn scan_local_library(
 ) -> Result<LibraryScanOutcome, String> {
     cancel_token.check()?;
     data.app_db
-        .begin_local_scan_seen_set(scan_task_id)
+        .begin_library_scan_seen_set(scan_task_id)
         .map_err(|e| format!("Failed to prepare local library scan seen set: {}", e))?;
 
     let snapshot = Arc::new(
         data.app_db
-            .load_scan_snapshot()
+            .load_library_scan_snapshot(root_id)
             .map_err(|e| format!("Failed to load local library scan snapshot: {}", e))?,
     );
     let scanned_count = Arc::new(AtomicU64::new(0));
@@ -337,22 +337,22 @@ pub(super) fn scan_local_library(
     let writer_result = join_local_scan_writer(writer_handle);
 
     if let Err(e) = walk_result {
-        clear_local_scan_seen_set(data, scan_task_id);
+        clear_library_scan_seen_set(data, scan_task_id);
         return Err(e);
     }
     if let Err(e) = worker_result {
-        clear_local_scan_seen_set(data, scan_task_id);
+        clear_library_scan_seen_set(data, scan_task_id);
         return Err(e);
     }
     let write_summary = match writer_result {
         Ok(summary) => summary,
         Err(e) => {
-            clear_local_scan_seen_set(data, scan_task_id);
+            clear_library_scan_seen_set(data, scan_task_id);
             return Err(e);
         }
     };
     if !write_summary.write_failures.is_empty() {
-        clear_local_scan_seen_set(data, scan_task_id);
+        clear_library_scan_seen_set(data, scan_task_id);
         return Err(format!(
             "Failed to index {} local media item(s): {}",
             write_summary.write_failures.len(),
@@ -362,21 +362,11 @@ pub(super) fn scan_local_library(
 
     cancel_token.check()?;
     let final_scanned = scanned_count.load(Ordering::Relaxed);
-    let final_indexed = write_summary.indexed_count;
-    let removed = data
+    let finalize = data
         .app_db
-        .delete_local_media_not_seen_in_root(root_path, scan_task_id)
-        .map_err(|e| format!("Failed to remove stale local media: {}", e))?;
-
-    data.app_db
-        .update_library_root_scan_status(
-            root_id,
-            "completed",
-            Some(final_indexed),
-            None,
-            Some(now_epoch_secs()),
-        )
-        .map_err(|e| format!("Failed to finalize library scan state: {}", e))?;
+        .finalize_library_root_scan(root_id, scan_task_id, now_epoch_secs())
+        .map_err(|e| format!("Failed to finalize local library scan: {}", e))?;
+    let removed = finalize.cleanup.removed_media_count;
 
     persist_library_scan_task(
         data,
@@ -388,7 +378,7 @@ pub(super) fn scan_local_library(
         Some(&serde_json::json!({
             "root_id": root_id,
             "scanned_files": final_scanned,
-            "indexed_files": final_indexed,
+            "indexed_files": finalize.track_count,
             "removed_files": removed,
         })),
         None,
@@ -396,8 +386,9 @@ pub(super) fn scan_local_library(
 
     Ok(LibraryScanOutcome {
         scanned_files: final_scanned,
-        indexed_files: final_indexed,
+        indexed_files: finalize.track_count,
         removed_files: removed,
+        cleanup: finalize.cleanup,
     })
 }
 
@@ -430,7 +421,7 @@ fn spawn_local_scan_workers(
     worker_count: usize,
     path_rx: Receiver<PathBuf>,
     write_tx: Sender<LocalScanWriteItem>,
-    snapshot: Arc<HashMap<String, (Option<f64>, Option<u64>, Option<String>)>>,
+    snapshot: Arc<HashMap<String, crate::app_database::LibraryScanSnapshotRecord>>,
     scanned_count: Arc<AtomicU64>,
     cancel_token: AnalysisCancelToken,
     cover_max_bytes: u64,
@@ -466,7 +457,7 @@ fn spawn_local_scan_workers(
 
 fn process_local_scan_path(
     path: &Path,
-    snapshot: &HashMap<String, (Option<f64>, Option<u64>, Option<String>)>,
+    snapshot: &HashMap<String, crate::app_database::LibraryScanSnapshotRecord>,
     scanned_count: &AtomicU64,
     cancel_token: &AnalysisCancelToken,
     cover_max_bytes: u64,
@@ -485,7 +476,7 @@ fn process_local_scan_path(
                 canonical_path,
                 e
             );
-            return Ok(None);
+            return Ok(existing_scan_media(&canonical_path, snapshot));
         }
     };
     let size = file_meta.len();
@@ -499,14 +490,16 @@ fn process_local_scan_path(
         .map(|duration| duration.as_millis() as f64)
         .unwrap_or(0.0);
 
-    if let Some((old_mtime, old_size, cover_file_path)) = snapshot.get(&canonical_path) {
-        let mtime_unchanged = old_mtime.map_or(false, |old| (old - mtime).abs() < 1.0);
-        let size_unchanged = old_size.map_or(false, |old| old == size);
+    if let Some(existing) = snapshot.get(&canonical_path) {
+        let mtime_unchanged = existing
+            .mtime
+            .map_or(false, |old| (old - mtime).abs() < 1.0);
+        let size_unchanged = existing.size_bytes.map_or(false, |old| old == size);
         if mtime_unchanged
             && size_unchanged
-            && cached_cover_file_is_available(cover_file_path.as_deref())
+            && cached_cover_file_is_available(existing.cover_file_path.as_deref())
         {
-            return Ok(Some(LocalScanWriteItem::Seen(canonical_path)));
+            return Ok(Some(LocalScanWriteItem::Seen(existing.media_id.clone())));
         }
     }
 
@@ -514,7 +507,7 @@ fn process_local_scan_path(
         Ok(value) => value,
         Err(e) => {
             log::warn!("Skipping media file '{}': {}", canonical_path, e);
-            return Ok(None);
+            return Ok(existing_scan_media(&canonical_path, snapshot));
         }
     };
     let has_lofty_title = local_metadata.has_lofty_title;
@@ -579,9 +572,18 @@ fn process_local_scan_path(
     })))
 }
 
+fn existing_scan_media(
+    source_path: &str,
+    snapshot: &HashMap<String, crate::app_database::LibraryScanSnapshotRecord>,
+) -> Option<LocalScanWriteItem> {
+    snapshot
+        .get(source_path)
+        .map(|existing| LocalScanWriteItem::Seen(existing.media_id.clone()))
+}
+
 fn local_scan_source_path(
     path: &Path,
-    snapshot: &HashMap<String, (Option<f64>, Option<u64>, Option<String>)>,
+    snapshot: &HashMap<String, crate::app_database::LibraryScanSnapshotRecord>,
 ) -> String {
     let source_path = path.to_string_lossy().to_string();
     if snapshot.is_empty() || snapshot.contains_key(&source_path) {
@@ -669,10 +671,7 @@ fn spawn_local_scan_writer(
         }
 
         cancel_token.check()?;
-        Ok(LocalScanWriteSummary {
-            indexed_count,
-            write_failures,
-        })
+        Ok(LocalScanWriteSummary { write_failures })
     })
 }
 
@@ -683,7 +682,7 @@ fn write_local_scan_batch(
     cancel_token: &AnalysisCancelToken,
 ) -> Result<LocalScanBatchResult, String> {
     let mut failures = Vec::new();
-    let mut seen_paths = Vec::with_capacity(batch.len());
+    let mut seen_media_ids = Vec::with_capacity(batch.len());
     let mut indexed_delta = 0_u64;
     let mut parsed_paths = Vec::new();
     let mut parsed_records = Vec::new();
@@ -692,7 +691,7 @@ fn write_local_scan_batch(
         cancel_token.check()?;
         match item {
             LocalScanWriteItem::Seen(path) => {
-                seen_paths.push(path.clone());
+                seen_media_ids.push(path.clone());
                 indexed_delta += 1;
             }
             LocalScanWriteItem::Parsed(track) => {
@@ -730,8 +729,8 @@ fn write_local_scan_batch(
     }
     for (path, result) in parsed_paths.into_iter().zip(parsed_report.results) {
         match result {
-            Ok(_) => {
-                seen_paths.push(path.to_string());
+            Ok(media_id) => {
+                seen_media_ids.push(media_id);
                 indexed_delta += 1;
             }
             Err(e) => {
@@ -743,7 +742,7 @@ fn write_local_scan_batch(
     }
 
     cancel_token.check()?;
-    db.mark_local_scan_seen_paths(scan_task_id, &seen_paths)
+    db.mark_library_scan_seen_media_ids(scan_task_id, &seen_media_ids)
         .map_err(|e| format!("Failed to persist local scan seen set: {}", e))?;
 
     Ok(LocalScanBatchResult {
@@ -797,10 +796,10 @@ fn send_with_cancel<T>(
     }
 }
 
-pub(super) fn clear_local_scan_seen_set(data: &web::Data<Arc<AppState>>, scan_task_id: u64) {
-    if let Err(e) = data.app_db.clear_local_scan_seen_set(scan_task_id) {
+pub(super) fn clear_library_scan_seen_set(data: &web::Data<Arc<AppState>>, scan_task_id: u64) {
+    if let Err(e) = data.app_db.clear_library_scan_seen_set(scan_task_id) {
         log::warn!(
-            "Failed to clear local library scan seen set for task {}: {}",
+            "Failed to clear library scan seen set for task {}: {}",
             scan_task_id,
             e
         );
@@ -817,6 +816,13 @@ pub(super) fn scan_webdav_library(
     cancel_token: AnalysisCancelToken,
 ) -> Result<LibraryScanOutcome, String> {
     cancel_token.check()?;
+    data.app_db
+        .begin_library_scan_seen_set(scan_task_id)
+        .map_err(|e| format!("Failed to prepare WebDAV library scan seen set: {}", e))?;
+    let snapshot = data
+        .app_db
+        .load_library_scan_snapshot(root_id)
+        .map_err(|e| format!("Failed to load WebDAV library scan snapshot: {}", e))?;
     let webdav_cfg = if let Some(source_key) = source_key {
         data.app_db
             .load_webdav_source_config(source_key)?
@@ -834,6 +840,7 @@ pub(super) fn scan_webdav_library(
     let mut scanned = 0_u64;
     let mut indexed = 0_u64;
     let mut index_failures = Vec::new();
+    let mut seen_media_ids = Vec::new();
     let mut stack = vec![root_path.to_string()];
 
     while let Some(path) = stack.pop() {
@@ -881,14 +888,22 @@ pub(super) fn scan_webdav_library(
                         Some(info.sample_rate),
                         Some(info.channels),
                     ) {
-                        Ok(_) => indexed += 1,
+                        Ok(media_id) => {
+                            indexed += 1;
+                            seen_media_ids.push(media_id);
+                        }
                         Err(e) => {
                             log::warn!("Failed to index remote media '{}': {}", entry.url, e);
                             index_failures.push(format!("{} ({})", entry.url, e));
                         }
                     }
                 }
-                Err(e) => log::warn!("Skipping remote media '{}': {}", entry.url, e),
+                Err(e) => {
+                    if let Some(existing) = snapshot.get(&entry.url) {
+                        seen_media_ids.push(existing.media_id.clone());
+                    }
+                    log::warn!("Skipping remote media '{}': {}", entry.url, e);
+                }
             }
 
             if scanned % LOCAL_SCAN_PROGRESS_INTERVAL == 0 {
@@ -919,14 +934,12 @@ pub(super) fn scan_webdav_library(
     }
 
     data.app_db
-        .update_library_root_scan_status(
-            root_id,
-            "completed",
-            Some(indexed),
-            None,
-            Some(now_epoch_secs()),
-        )
-        .map_err(|e| format!("Failed to finalize remote library scan state: {}", e))?;
+        .mark_library_scan_seen_media_ids(scan_task_id, &seen_media_ids)
+        .map_err(|e| format!("Failed to persist WebDAV library scan seen set: {}", e))?;
+    let finalize = data
+        .app_db
+        .finalize_library_root_scan(root_id, scan_task_id, now_epoch_secs())
+        .map_err(|e| format!("Failed to finalize WebDAV library scan: {}", e))?;
 
     persist_library_scan_task(
         data,
@@ -938,15 +951,17 @@ pub(super) fn scan_webdav_library(
         Some(&serde_json::json!({
             "root_id": root_id,
             "scanned_files": scanned,
-            "indexed_files": indexed,
+            "indexed_files": finalize.track_count,
+            "removed_files": finalize.cleanup.removed_media_count,
         })),
         None,
     );
 
     Ok(LibraryScanOutcome {
         scanned_files: scanned,
-        indexed_files: indexed,
-        removed_files: 0,
+        indexed_files: finalize.track_count,
+        removed_files: finalize.cleanup.removed_media_count,
+        cleanup: finalize.cleanup,
     })
 }
 
@@ -957,6 +972,7 @@ mod tests {
         persist_local_scan_cover_art, process_local_scan_path, walk_supported_local_media_paths,
         LocalScanWriteItem, LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES, UNKNOWN_SONG_TITLE,
     };
+    use crate::app_database::LibraryScanSnapshotRecord;
     use crate::server::{analysis_cancelled_error, AnalysisCancelToken};
     use crossbeam::channel::bounded;
     use std::collections::HashMap;
@@ -1075,11 +1091,12 @@ mod tests {
         let mut snapshot = HashMap::new();
         snapshot.insert(
             canonical_path.clone(),
-            (
-                Some(mtime),
-                Some(metadata.len()),
-                Some(cover_path.to_string_lossy().to_string()),
-            ),
+            LibraryScanSnapshotRecord {
+                media_id: "stored-legacy-media-id".to_string(),
+                mtime: Some(mtime),
+                size_bytes: Some(metadata.len()),
+                cover_file_path: Some(cover_path.to_string_lossy().to_string()),
+            },
         );
 
         let scanned_count = AtomicU64::new(0);
@@ -1094,7 +1111,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(matches!(result, Some(LocalScanWriteItem::Seen(path)) if path == canonical_path));
+        assert!(
+            matches!(result, Some(LocalScanWriteItem::Seen(media_id)) if media_id == "stored-legacy-media-id")
+        );
         assert_eq!(scanned_count.load(Ordering::Relaxed), 1);
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -1122,7 +1141,15 @@ mod tests {
             .to_string_lossy()
             .to_string();
         let mut snapshot = HashMap::new();
-        snapshot.insert(canonical_path.clone(), (Some(0.0), Some(2048), None));
+        snapshot.insert(
+            canonical_path.clone(),
+            LibraryScanSnapshotRecord {
+                media_id: "stored-media-id".to_string(),
+                mtime: Some(0.0),
+                size_bytes: Some(2048),
+                cover_file_path: None,
+            },
+        );
 
         assert_eq!(
             local_scan_source_path(&track_path, &snapshot),
@@ -1133,7 +1160,7 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_local_scan_reprocesses_missing_file_backed_cover() {
+    fn metadata_refresh_failure_preserves_existing_library_membership() {
         let temp_dir = unique_temp_dir("cover_missing");
         fs::create_dir_all(&temp_dir).unwrap();
         let track_path = temp_dir.join("song.flac");
@@ -1153,11 +1180,12 @@ mod tests {
         let mut snapshot = HashMap::new();
         snapshot.insert(
             canonical_path,
-            (
-                Some(mtime),
-                Some(metadata.len()),
-                Some(temp_dir.join("missing.jpg").to_string_lossy().to_string()),
-            ),
+            LibraryScanSnapshotRecord {
+                media_id: "stored-media-id".to_string(),
+                mtime: Some(mtime),
+                size_bytes: Some(metadata.len()),
+                cover_file_path: Some(temp_dir.join("missing.jpg").to_string_lossy().to_string()),
+            },
         );
 
         let scanned_count = AtomicU64::new(0);
@@ -1172,7 +1200,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(result.is_none());
+        assert!(
+            matches!(result, Some(LocalScanWriteItem::Seen(media_id)) if media_id == "stored-media-id")
+        );
         assert_eq!(scanned_count.load(Ordering::Relaxed), 1);
         let _ = fs::remove_dir_all(temp_dir);
     }

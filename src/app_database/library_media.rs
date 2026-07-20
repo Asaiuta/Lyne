@@ -1,32 +1,17 @@
 use rusqlite::types::ValueRef;
 use rusqlite::{params, params_from_iter, OptionalExtension};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use super::{
-    media_id_for_path, media_item_from_row, media_item_from_row_with_offset,
-    normalize_media_path_for_id, AppDatabase, LibraryFolderSummaryRecord,
-    LibrarySummaryStatsRecord, LibraryTrackDetailRecord, LibraryTrackGroupKind,
-    LibraryTrackGroupSummaryRecord, LibraryTrackGroupsQuery, LibraryTrackGroupsRecord,
-    LibraryTrackSummaryRecord, LibraryTrackViewQuery, LibraryTrackViewRecord,
-    LibraryTrackViewSortField, LibraryTrackViewSortOrder, MediaItemRecord,
+use super::library_memberships::{
+    cleanup_media_targets_tx, resolve_cleanup_targets_for_media_ids_tx,
 };
-
-fn detach_playback_sessions_for_media_id(
-    conn: &rusqlite::Connection,
-    media_id: &str,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE playback_sessions SET media_id = NULL WHERE media_id = ?1",
-        params![media_id],
-    )
-    .map_err(|e| {
-        format!(
-            "Failed to detach playback sessions from stale media item '{}': {}",
-            media_id, e
-        )
-    })?;
-    Ok(())
-}
+use super::{
+    media_item_from_row, media_item_from_row_with_offset, normalize_media_path_for_id, AppDatabase,
+    LibraryFolderSummaryRecord, LibrarySummaryStatsRecord, LibraryTrackDetailRecord,
+    LibraryTrackGroupKind, LibraryTrackGroupSummaryRecord, LibraryTrackGroupsQuery,
+    LibraryTrackGroupsRecord, LibraryTrackSummaryRecord, LibraryTrackViewQuery,
+    LibraryTrackViewRecord, LibraryTrackViewSortField, LibraryTrackViewSortOrder, MediaItemRecord,
+};
 
 fn library_track_summary_from_row(
     row: &rusqlite::Row<'_>,
@@ -363,9 +348,14 @@ impl AppDatabase {
         conn.query_row(
             r#"
             SELECT COUNT(*),
-                   COALESCE(SUM(COALESCE(size_bytes, 0)), 0),
+            COALESCE(SUM(COALESCE(size_bytes, 0)), 0),
                    COALESCE(MAX(updated_at), 0)
-            FROM media_items
+             FROM media_items
+             WHERE EXISTS (
+                 SELECT 1
+                 FROM library_root_memberships
+                 WHERE library_root_memberships.media_id = media_items.media_id
+             )
             "#,
             [],
             |row| {
@@ -398,8 +388,13 @@ impl AppDatabase {
                        ) AS has_cover_art,
                        external_artwork_url,
                        size_bytes
-                FROM media_items
-                ORDER BY lower(COALESCE(NULLIF(title, ''), source_path)), media_id
+                 FROM media_items
+                 WHERE EXISTS (
+                     SELECT 1
+                     FROM library_root_memberships
+                     WHERE library_root_memberships.media_id = media_items.media_id
+                 )
+                 ORDER BY lower(COALESCE(NULLIF(title, ''), source_path)), media_id
                 "#,
             )
             .map_err(|e| format!("Failed to prepare library summaries query: {}", e))?;
@@ -580,8 +575,13 @@ impl AppDatabase {
                    ) AS has_cover_art,
                    external_artwork_url,
                    size_bytes
-            FROM media_items
-            WHERE rowid = ?1
+             FROM media_items
+             WHERE rowid = ?1
+               AND EXISTS (
+                   SELECT 1
+                   FROM library_root_memberships
+                   WHERE library_root_memberships.media_id = media_items.media_id
+               )
             LIMIT 1
             "#,
             params![track_key],
@@ -599,7 +599,17 @@ impl AppDatabase {
     pub fn media_id_for_track_key(&self, track_key: i64) -> Result<Option<String>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT media_id FROM media_items WHERE rowid = ?1 LIMIT 1",
+            r#"
+            SELECT media_id
+            FROM media_items
+            WHERE rowid = ?1
+              AND EXISTS (
+                  SELECT 1
+                  FROM library_root_memberships
+                  WHERE library_root_memberships.media_id = media_items.media_id
+              )
+            LIMIT 1
+            "#,
             params![track_key],
             |row| row.get(0),
         )
@@ -622,7 +632,7 @@ impl AppDatabase {
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(
-                "SELECT media_id, source_path FROM media_items WHERE media_id IN ({})",
+                "SELECT media_id, source_path FROM media_items WHERE media_id IN ({}) AND EXISTS (SELECT 1 FROM library_root_memberships WHERE library_root_memberships.media_id = media_items.media_id)",
                 placeholders
             );
             let mut stmt = conn
@@ -650,284 +660,24 @@ impl AppDatabase {
     }
 
     pub fn delete_media_items(&self, media_ids: &[String]) -> Result<u64, String> {
+        Ok(self
+            .delete_media_items_with_cleanup_report(media_ids)?
+            .removed_media_count)
+    }
+
+    pub fn delete_media_items_with_cleanup_report(
+        &self,
+        media_ids: &[String],
+    ) -> Result<super::LibraryCleanupReport, String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn
             .transaction()
-            .map_err(|e| format!("Failed to start media delete transaction: {}", e))?;
-        let mut removed = 0_u64;
-        let mut seen = HashSet::new();
-
-        for media_id in media_ids {
-            let trimmed = media_id.trim();
-            if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
-                continue;
-            }
-            detach_playback_sessions_for_media_id(&tx, trimmed)?;
-            let changed = tx
-                .execute(
-                    "DELETE FROM media_items WHERE media_id = ?1",
-                    params![trimmed],
-                )
-                .map_err(|e| format!("Failed to delete media item '{}': {}", trimmed, e))?;
-            removed += changed as u64;
-        }
+            .map_err(|e| format!("Failed to start complete media delete transaction: {}", e))?;
+        let targets = resolve_cleanup_targets_for_media_ids_tx(&tx, media_ids)?;
+        let report = cleanup_media_targets_tx(&tx, &targets)?;
 
         tx.commit()
-            .map_err(|e| format!("Failed to commit media delete transaction: {}", e))?;
-        Ok(removed)
+            .map_err(|e| format!("Failed to commit complete media delete transaction: {}", e))?;
+        Ok(report)
     }
-
-    /// Load a snapshot of existing local media items for incremental scanning.
-    /// Returns a map of source_path -> (mtime, size_bytes, file-backed cover path).
-    pub fn load_scan_snapshot(
-        &self,
-    ) -> Result<HashMap<String, (Option<f64>, Option<u64>, Option<String>)>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare(
-                r#"
-                SELECT source_path, mtime, size_bytes,
-                       (
-                           SELECT file_path FROM cover_art_cache
-                           WHERE cover_art_cache.media_id = media_items.media_id
-                             AND file_path IS NOT NULL
-                           ORDER BY created_at DESC, cover_art_id DESC
-                           LIMIT 1
-                       ) AS cover_file_path
-                FROM media_items
-                WHERE source_kind = 'local'
-                "#,
-            )
-            .map_err(|e| format!("Failed to prepare scan snapshot query: {}", e))?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                let path: String = row.get(0)?;
-                let mtime: Option<f64> = row.get(1)?;
-                let size: Option<i64> = row.get(2)?;
-                let cover_file_path: Option<String> = row.get(3)?;
-                Ok((path, (mtime, size.map(|v| v as u64), cover_file_path)))
-            })
-            .map_err(|e| format!("Failed to query scan snapshot: {}", e))?;
-
-        let records = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to decode scan snapshot: {}", e))?;
-        let mut map = HashMap::with_capacity(records.len());
-        for row in records {
-            map.insert(row.0, row.1);
-        }
-        Ok(map)
-    }
-
-    pub fn delete_local_media_not_in_root(
-        &self,
-        root_path: &str,
-        keep_paths: &[String],
-    ) -> Result<u64, String> {
-        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("Failed to start media cleanup transaction: {}", e))?;
-        let mut stmt = tx
-            .prepare(
-                r#"
-                SELECT source_path
-                FROM media_items
-                WHERE source_kind = 'local'
-                "#,
-            )
-            .map_err(|e| format!("Failed to prepare media cleanup query: {}", e))?;
-        let candidates = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| format!("Failed to query media cleanup candidates: {}", e))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to decode media cleanup candidates: {}", e))?;
-        drop(stmt);
-
-        let root_media_id = media_id_for_path(root_path)
-            .trim_end_matches('/')
-            .to_string();
-        let root_id_prefix = format!("{}/", root_media_id);
-        let keep = keep_paths
-            .iter()
-            .map(|path| media_id_for_path(path))
-            .collect::<HashSet<_>>();
-        let mut removed = 0_u64;
-        for source_path in candidates {
-            let media_id = media_id_for_path(&source_path);
-            if media_id != root_media_id && !media_id.starts_with(&root_id_prefix) {
-                continue;
-            }
-            if keep.contains(&media_id) {
-                continue;
-            }
-            detach_playback_sessions_for_media_id(&tx, &media_id)?;
-            let changed = tx
-                .execute(
-                    "DELETE FROM media_items WHERE media_id = ?1",
-                    params![media_id],
-                )
-                .map_err(|e| {
-                    format!("Failed to delete stale media item '{}': {}", source_path, e)
-                })?;
-            removed += changed as u64;
-        }
-
-        tx.commit()
-            .map_err(|e| format!("Failed to commit media cleanup transaction: {}", e))?;
-        Ok(removed)
-    }
-
-    pub fn begin_local_scan_seen_set(&self, scan_task_id: u64) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        ensure_local_scan_seen_table(&conn)?;
-        conn.execute(
-            "DELETE FROM temp.local_scan_seen WHERE task_id = ?1",
-            params![scan_task_id as i64],
-        )
-        .map_err(|e| format!("Failed to reset local scan seen set: {}", e))?;
-        Ok(())
-    }
-
-    pub fn mark_local_scan_seen_paths(
-        &self,
-        scan_task_id: u64,
-        source_paths: &[String],
-    ) -> Result<(), String> {
-        if source_paths.is_empty() {
-            return Ok(());
-        }
-
-        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
-        ensure_local_scan_seen_table(&conn)?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("Failed to start local scan seen transaction: {}", e))?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    r#"
-                    INSERT OR IGNORE INTO temp.local_scan_seen (task_id, media_id)
-                    VALUES (?1, ?2)
-                    "#,
-                )
-                .map_err(|e| format!("Failed to prepare local scan seen insert: {}", e))?;
-            for source_path in source_paths {
-                stmt.execute(params![scan_task_id as i64, media_id_for_path(source_path)])
-                    .map_err(|e| {
-                        format!(
-                            "Failed to mark local scan path '{}' seen: {}",
-                            source_path, e
-                        )
-                    })?;
-            }
-        }
-        tx.commit()
-            .map_err(|e| format!("Failed to commit local scan seen paths: {}", e))?;
-        Ok(())
-    }
-
-    pub fn clear_local_scan_seen_set(&self, scan_task_id: u64) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        ensure_local_scan_seen_table(&conn)?;
-        conn.execute(
-            "DELETE FROM temp.local_scan_seen WHERE task_id = ?1",
-            params![scan_task_id as i64],
-        )
-        .map_err(|e| format!("Failed to clear local scan seen set: {}", e))?;
-        Ok(())
-    }
-
-    pub fn delete_local_media_not_seen_in_root(
-        &self,
-        root_path: &str,
-        scan_task_id: u64,
-    ) -> Result<u64, String> {
-        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
-        ensure_local_scan_seen_table(&conn)?;
-        let tx = conn
-            .transaction()
-            .map_err(|e| format!("Failed to start media cleanup transaction: {}", e))?;
-
-        let root_media_id = media_id_for_path(root_path)
-            .trim_end_matches('/')
-            .to_string();
-        let root_id_prefix = format!("{}/", root_media_id);
-        tx.execute(
-            r#"
-                UPDATE playback_sessions
-                SET media_id = NULL
-                WHERE media_id IN (
-                    SELECT media_id
-                    FROM media_items
-                    WHERE source_kind = 'local'
-                      AND (
-                        media_id = ?1
-                        OR substr(media_id, 1, ?2) = ?3
-                      )
-                      AND NOT EXISTS (
-                        SELECT 1
-                        FROM temp.local_scan_seen seen
-                        WHERE seen.task_id = ?4
-                          AND seen.media_id = media_items.media_id
-                      )
-                )
-                "#,
-            params![
-                root_media_id,
-                root_id_prefix.len() as i64,
-                root_id_prefix,
-                scan_task_id as i64,
-            ],
-        )
-        .map_err(|e| format!("Failed to detach stale media playback sessions: {}", e))?;
-        let removed = tx
-            .execute(
-                r#"
-                DELETE FROM media_items
-                WHERE source_kind = 'local'
-                  AND (
-                    media_id = ?1
-                    OR substr(media_id, 1, ?2) = ?3
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM temp.local_scan_seen seen
-                    WHERE seen.task_id = ?4
-                      AND seen.media_id = media_items.media_id
-                  )
-                "#,
-                params![
-                    root_media_id,
-                    root_id_prefix.len() as i64,
-                    root_id_prefix,
-                    scan_task_id as i64,
-                ],
-            )
-            .map_err(|e| format!("Failed to delete stale local media: {}", e))?;
-
-        tx.execute(
-            "DELETE FROM temp.local_scan_seen WHERE task_id = ?1",
-            params![scan_task_id as i64],
-        )
-        .map_err(|e| format!("Failed to clear local scan seen set: {}", e))?;
-
-        tx.commit()
-            .map_err(|e| format!("Failed to commit media cleanup transaction: {}", e))?;
-        Ok(removed as u64)
-    }
-}
-
-fn ensure_local_scan_seen_table(conn: &rusqlite::Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        CREATE TEMP TABLE IF NOT EXISTS local_scan_seen (
-            task_id INTEGER NOT NULL,
-            media_id TEXT NOT NULL,
-            PRIMARY KEY (task_id, media_id)
-        );
-        "#,
-    )
-    .map_err(|e| format!("Failed to prepare local scan seen table: {}", e))
 }

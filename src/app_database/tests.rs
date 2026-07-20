@@ -1,7 +1,28 @@
 use super::*;
 use crate::decoder::TrackMetadata;
 use crate::webdav::WebDavConfig;
+use std::collections::HashSet;
 use std::fs;
+
+fn add_library_membership(db: &AppDatabase, root_id: i64, media_id: &str) {
+    let conn = db.conn.lock().unwrap();
+    conn.execute(
+        r#"
+        INSERT INTO library_root_memberships (root_id, media_id, created_at, updated_at)
+        VALUES (?1, ?2, 1, 1)
+        "#,
+        params![root_id, media_id],
+    )
+    .unwrap();
+}
+
+fn table_row_count(db: &AppDatabase, table: &str) -> i64 {
+    let conn = db.conn.lock().unwrap();
+    conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+        row.get(0)
+    })
+    .unwrap()
+}
 
 #[test]
 fn persists_webdav_and_history() {
@@ -587,7 +608,12 @@ fn media_item_queries_do_not_stat_files_when_size_is_missing() {
     fs::write(&file_path, [1_u8, 2, 3, 4]).unwrap();
     let source_path = file_path.to_string_lossy().to_string();
 
-    db.record_media_stub(&source_path).unwrap();
+    let media_id = db.record_media_stub(&source_path).unwrap();
+    let root_path = file_path.parent().unwrap().to_string_lossy().to_string();
+    let root_id = db
+        .upsert_library_root(None, &root_path, "local", "Temp", "completed")
+        .unwrap();
+    add_library_membership(&db, root_id, &media_id);
 
     let item = db.media_metadata_for_path(&source_path).unwrap().unwrap();
     assert_eq!(item.size_bytes, None);
@@ -618,6 +644,15 @@ fn record_media_stub_normalizes_legacy_media_id_for_existing_source_path() {
     let canonical_media_id = media_id_for_path(path);
     let legacy_media_id = "https://music.example.test/stream.mp3?legacy";
     let now = now_epoch_secs_i64();
+    let root_id = db
+        .upsert_library_root(
+            None,
+            "https://music.example.test",
+            "webdav",
+            "Web",
+            "completed",
+        )
+        .unwrap();
 
     {
         let conn = db.conn.lock().unwrap();
@@ -628,6 +663,14 @@ fn record_media_stub_normalizes_legacy_media_id_for_existing_source_path() {
                 VALUES (?1, ?2, 'remote', 'Legacy Title', 'Legacy Artist', ?3, ?3)
                 "#,
             params![legacy_media_id, path, now],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO library_root_memberships (root_id, media_id, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?3)
+            "#,
+            params![root_id, legacy_media_id, now],
         )
         .unwrap();
         conn.execute(
@@ -694,6 +737,13 @@ fn record_media_stub_normalizes_legacy_media_id_for_existing_source_path() {
             |row| row.get(0),
         )
         .unwrap();
+    let membership_media_id: String = conn
+        .query_row(
+            "SELECT media_id FROM library_root_memberships WHERE root_id = ?1",
+            params![root_id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(legacy_count, 0);
     assert_eq!(
         session_media_id.as_deref(),
@@ -703,6 +753,7 @@ fn record_media_stub_normalizes_legacy_media_id_for_existing_source_path() {
         history_media_id.as_deref(),
         Some(canonical_media_id.as_str())
     );
+    assert_eq!(membership_media_id, canonical_media_id);
 }
 
 #[test]
@@ -1002,6 +1053,9 @@ fn migrations_create_schema_version_and_expected_columns() {
     assert!(db.has_column("media_items", "bitrate_bps").unwrap());
     assert!(db.has_column("media_items", "bits_per_sample").unwrap());
     assert!(db.has_column("cover_art_cache", "file_path").unwrap());
+    assert!(db
+        .has_column("library_root_memberships", "media_id")
+        .unwrap());
 
     let conn = db.conn.lock().unwrap();
     let versions = conn
@@ -1011,7 +1065,7 @@ fn migrations_create_schema_version_and_expected_columns() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 
     let index_count: i64 = conn
             .query_row(
@@ -1098,6 +1152,8 @@ fn deleting_library_root_removes_local_media_and_playlist_refs() {
     let media_a = db.record_media_stub("D:/music/a.flac").unwrap();
     let media_b = db.record_media_stub("D:/music/nested/b.flac").unwrap();
     let outside_media = db.record_media_stub("D:/other/c.flac").unwrap();
+    add_library_membership(&db, root_id, &media_a);
+    add_library_membership(&db, root_id, &media_b);
     let playlist = db.create_local_playlist("Road", None).unwrap();
 
     db.add_media_to_local_playlist(
@@ -1108,7 +1164,9 @@ fn deleting_library_root_removes_local_media_and_playlist_refs() {
 
     let deleted = db.delete_library_root(root_id).unwrap();
 
-    assert_eq!(deleted, Some(("D:/music".to_string(), 2)));
+    let deleted = deleted.unwrap();
+    assert_eq!(deleted.root_path, "D:/music");
+    assert_eq!(deleted.cleanup.removed_media_count, 2);
     assert!(db.source_path_for_media_id(&media_a).unwrap().is_none());
     assert!(db.source_path_for_media_id(&media_b).unwrap().is_none());
     assert_eq!(
@@ -1130,6 +1188,9 @@ fn deleting_library_root_removes_local_media_and_playlist_refs() {
 #[test]
 fn local_scan_seen_set_deletes_only_unseen_media_under_root() {
     let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/music", "local", "Music", "scanning")
+        .unwrap();
     let metadata = TrackMetadata {
         title: Some("Kept".to_string()),
         ..TrackMetadata::default()
@@ -1152,6 +1213,8 @@ fn local_scan_seen_set_deletes_only_unseen_media_under_root() {
         .unwrap();
     let stale_media = db.record_media_stub(stale_path).unwrap();
     let outside_media = db.record_media_stub(outside_path).unwrap();
+    add_library_membership(&db, root_id, &kept_media);
+    add_library_membership(&db, root_id, &stale_media);
 
     let stale_session_id = {
         let conn = db.conn.lock().unwrap();
@@ -1167,14 +1230,12 @@ fn local_scan_seen_set_deletes_only_unseen_media_under_root() {
         conn.last_insert_rowid()
     };
 
-    db.begin_local_scan_seen_set(99).unwrap();
-    db.mark_local_scan_seen_paths(99, &[kept_path.to_string()])
+    db.begin_library_scan_seen_set(99).unwrap();
+    db.mark_library_scan_seen_media_ids(99, std::slice::from_ref(&kept_media))
         .unwrap();
-    let removed = db
-        .delete_local_media_not_seen_in_root("D:/music", 99)
-        .unwrap();
+    let finalized = db.finalize_library_root_scan(root_id, 99, 10).unwrap();
 
-    assert_eq!(removed, 1);
+    assert_eq!(finalized.cleanup.removed_media_count, 1);
     assert_eq!(
         db.source_path_for_media_id(&kept_media).unwrap().as_deref(),
         Some(kept_path)
@@ -1182,14 +1243,14 @@ fn local_scan_seen_set_deletes_only_unseen_media_under_root() {
     assert!(db.source_path_for_media_id(&stale_media).unwrap().is_none());
     {
         let conn = db.conn.lock().unwrap();
-        let detached_media_id: Option<String> = conn
+        let remaining_sessions: i64 = conn
             .query_row(
-                "SELECT media_id FROM playback_sessions WHERE session_id = ?1",
+                "SELECT COUNT(*) FROM playback_sessions WHERE session_id = ?1",
                 params![stale_session_id],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(detached_media_id, None);
+        assert_eq!(remaining_sessions, 0);
     }
     assert_eq!(
         db.source_path_for_media_id(&outside_media)
@@ -1684,9 +1745,15 @@ fn mark_queue_entry_status_by_path_supports_dynamic_status_filters() {
 #[test]
 fn library_track_key_lookup_preserves_order_and_keeps_summaries_light() {
     let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/music", "local", "Music", "completed")
+        .unwrap();
     let media_a = db.record_media_stub("D:/music/a.flac").unwrap();
     let media_b = db.record_media_stub("D:/music/b.flac").unwrap();
-    db.record_media_stub("D:/music/nested/c.flac").unwrap();
+    let media_c = db.record_media_stub("D:/music/nested/c.flac").unwrap();
+    add_library_membership(&db, root_id, &media_a);
+    add_library_membership(&db, root_id, &media_b);
+    add_library_membership(&db, root_id, &media_c);
 
     let summaries = db.list_library_track_summaries().unwrap();
     let missing_media_id = "deadbeefcafebabe".to_string();
@@ -1720,6 +1787,9 @@ fn library_track_key_lookup_preserves_order_and_keeps_summaries_light() {
 #[test]
 fn library_track_view_filters_sorts_paginates_and_returns_media_ids() {
     let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/music", "local", "Music", "completed")
+        .unwrap();
     let media_a = db
         .record_external_media_metadata(
             "D:/music/root/a.flac",
@@ -1740,7 +1810,7 @@ fn library_track_view_filters_sorts_paginates_and_returns_media_ids() {
             None,
         )
         .unwrap();
-    let _media_c = db
+    let media_c = db
         .record_external_media_metadata(
             "D:/music/other/c.flac",
             Some("Beta"),
@@ -1750,6 +1820,9 @@ fn library_track_view_filters_sorts_paginates_and_returns_media_ids() {
             None,
         )
         .unwrap();
+    add_library_membership(&db, root_id, &media_a);
+    add_library_membership(&db, root_id, &media_b);
+    add_library_membership(&db, root_id, &media_c);
 
     let view = db
         .library_track_view(LibraryTrackViewQuery {
@@ -1780,6 +1853,9 @@ fn library_track_view_filters_sorts_paginates_and_returns_media_ids() {
 #[test]
 fn library_track_groups_split_artists_and_return_selected_rows() {
     let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/music", "local", "Music", "completed")
+        .unwrap();
     let media_a = db
         .record_external_media_metadata(
             "D:/music/root/a.flac",
@@ -1790,7 +1866,7 @@ fn library_track_groups_split_artists_and_return_selected_rows() {
             None,
         )
         .unwrap();
-    let _media_b = db
+    let media_b = db
         .record_external_media_metadata(
             "D:/music/root/b.flac",
             Some("Alpha"),
@@ -1800,7 +1876,7 @@ fn library_track_groups_split_artists_and_return_selected_rows() {
             None,
         )
         .unwrap();
-    let _media_c = db
+    let media_c = db
         .record_external_media_metadata(
             "D:/music/other/c.flac",
             Some("Beta"),
@@ -1810,6 +1886,9 @@ fn library_track_groups_split_artists_and_return_selected_rows() {
             None,
         )
         .unwrap();
+    add_library_membership(&db, root_id, &media_a);
+    add_library_membership(&db, root_id, &media_b);
+    add_library_membership(&db, root_id, &media_c);
 
     let artists = db
         .library_track_groups(LibraryTrackGroupsQuery {
@@ -1860,4 +1939,363 @@ fn library_track_groups_split_artists_and_return_selected_rows() {
     );
     assert_eq!(albums.rows.len(), 1);
     assert_eq!(albums.rows[0].title.as_deref(), Some("Alpha"));
+}
+
+#[test]
+fn library_queries_are_empty_without_root_memberships() {
+    let db = AppDatabase::in_memory().unwrap();
+    let local_media = db.record_media_stub("D:/music/orphan.flac").unwrap();
+    let remote_media = db
+        .record_external_media_metadata(
+            "https://stream.example.test/orphan.flac",
+            Some("Remote orphan"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let local_track_key = {
+        let conn = db.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT rowid FROM media_items WHERE media_id = ?1",
+            params![local_media],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+
+    assert_eq!(db.list_media_items().unwrap().len(), 2);
+    assert_eq!(db.library_summary_stats().unwrap().total_count, 0);
+    assert!(db.list_library_track_summaries().unwrap().is_empty());
+    assert!(db.library_track_detail(local_track_key).unwrap().is_none());
+    assert!(db
+        .media_id_for_track_key(local_track_key)
+        .unwrap()
+        .is_none());
+    assert!(db
+        .source_paths_for_media_ids(&[local_media, remote_media])
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn explicit_memberships_include_webdav_media_but_not_ncm_metadata() {
+    let db = AppDatabase::in_memory().unwrap();
+    let local_root = db
+        .upsert_library_root(None, "D:/music", "local", "Music", "completed")
+        .unwrap();
+    let webdav_root = db
+        .upsert_library_root(Some("primary"), "/albums", "webdav", "WebDAV", "completed")
+        .unwrap();
+    let local_media = db.record_media_stub("D:/music/local.flac").unwrap();
+    let webdav_media = db
+        .record_external_media_metadata(
+            "https://dav.example.test/music/albums/remote.flac",
+            Some("WebDAV track"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let ncm_media = db
+        .record_external_media_metadata(
+            "https://music.example.test/song/42",
+            Some("NCM track"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    db.record_ncm_track_source("https://music.example.test/song/42", 42, None)
+        .unwrap();
+    add_library_membership(&db, local_root, &local_media);
+    add_library_membership(&db, webdav_root, &webdav_media);
+
+    let webdav_snapshot = db.load_library_scan_snapshot(webdav_root).unwrap();
+    assert_eq!(
+        webdav_snapshot
+            .get("https://dav.example.test/music/albums/remote.flac")
+            .map(|record| record.media_id.as_str()),
+        Some(webdav_media.as_str())
+    );
+
+    let summaries = db.list_library_track_summaries().unwrap();
+    let ids = summaries
+        .iter()
+        .map(|track| track.media_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(summaries.len(), 2);
+    assert!(ids.contains(&local_media.as_str()));
+    assert!(ids.contains(&webdav_media.as_str()));
+    assert!(!ids.contains(&ncm_media.as_str()));
+}
+
+#[test]
+fn deleting_library_root_fully_cleans_legacy_media_references() {
+    let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/Music", "local", "Music", "completed")
+        .unwrap();
+    let actual_media_id = "//?/d:/music/legacy.flac";
+    let canonical_media_id = "d:/music/legacy.flac";
+    let source_path = r"\\?\D:\Music\Legacy.flac";
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO media_items
+                (media_id, source_path, source_kind, added_at, updated_at)
+            VALUES (?1, ?2, 'local', 1, 1)
+            "#,
+            params![actual_media_id, source_path],
+        )
+        .unwrap();
+    }
+    add_library_membership(&db, root_id, actual_media_id);
+
+    let playlist = db.create_local_playlist("Legacy", None).unwrap();
+    db.add_media_to_local_playlist(&playlist.playlist_id, &[actual_media_id.to_string()])
+        .unwrap();
+    let session_id = {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE local_playlists SET cover_media_id = ?1 WHERE playlist_id = ?2",
+            params![actual_media_id, playlist.playlist_id],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO cover_art_cache
+                (cover_art_id, media_id, mime_type, image_bytes, byte_len, created_at)
+            VALUES ('legacy-cover', ?1, 'image/jpeg', X'0102', 2, 1)
+            "#,
+            params![actual_media_id],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO playback_sessions
+                (media_id, source_path, status, started_at, updated_at, exclusive_mode)
+            VALUES (?1, ?2, 'ended', 1, 1, 0)
+            "#,
+            params![actual_media_id, source_path],
+        )
+        .unwrap();
+        let session_id = conn.last_insert_rowid();
+        conn.execute(
+            r#"
+            INSERT INTO playback_history
+                (session_id, media_id, source_path, event_type, event_at)
+            VALUES (?1, ?2, 'D:/Music/Legacy.flac', 'load_requested', 1)
+            "#,
+            params![session_id, canonical_media_id],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO playback_queue_entries
+                (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
+            VALUES ('active', 0, 'D:/Music/Legacy.flac', ?1, 'queued', 1, 1)
+            "#,
+            params![canonical_media_id],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO analysis_tasks
+                (task_id, task_type, source_path, status, created_at, updated_at)
+            VALUES (900, 'loudness', ?1, 'success', 1, 1)
+            "#,
+            params![source_path],
+        )
+        .unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO ncm_track_sources
+                (media_id, source_path, song_id, resolved_at)
+            VALUES (?1, ?2, 42, 1)
+            "#,
+            params![actual_media_id, source_path],
+        )
+        .unwrap();
+        session_id
+    };
+    db.upsert_queue_snapshot(
+        Some("D:/Music/Legacy.flac"),
+        Some(r"\\?\D:\Music\Legacy.flac"),
+        true,
+        true,
+    )
+    .unwrap();
+
+    let deleted = db.delete_library_root(root_id).unwrap().unwrap();
+
+    assert_eq!(deleted.root_path, "D:/Music");
+    assert_eq!(deleted.cleanup.removed_media_count, 1);
+    assert_eq!(deleted.cleanup.removed_analysis_task_count, 1);
+    assert_eq!(deleted.cleanup.removed_history_count, 1);
+    assert_eq!(deleted.cleanup.removed_session_count, 1);
+    assert_eq!(deleted.cleanup.removed_queue_entry_count, 1);
+    assert_eq!(deleted.cleanup.removed_playlist_item_count, 1);
+    assert_eq!(deleted.cleanup.cleared_playlist_cover_count, 1);
+    assert_eq!(deleted.cleanup.removed_cover_art_count, 1);
+    assert_eq!(deleted.cleanup.removed_ncm_source_count, 1);
+    assert_eq!(deleted.cleanup.cleared_queue_state_count, 1);
+    assert_eq!(
+        deleted.cleanup.removed_runtime_paths,
+        vec![source_path.to_string()]
+    );
+    assert_eq!(deleted.cleanup.removed_session_ids, vec![session_id]);
+    assert_eq!(table_row_count(&db, "media_items"), 0);
+    assert_eq!(table_row_count(&db, "analysis_tasks"), 0);
+    assert_eq!(table_row_count(&db, "playback_history"), 0);
+    assert_eq!(table_row_count(&db, "playback_sessions"), 0);
+    assert_eq!(table_row_count(&db, "playback_queue_entries"), 0);
+    assert_eq!(table_row_count(&db, "local_playlist_items"), 0);
+    assert_eq!(table_row_count(&db, "cover_art_cache"), 0);
+    assert_eq!(table_row_count(&db, "ncm_track_sources"), 0);
+    let snapshot = db.get_queue_snapshot().unwrap().unwrap();
+    assert!(snapshot.current_track_path.is_none());
+    assert!(snapshot.pending_track_path.is_none());
+    let conn = db.conn.lock().unwrap();
+    let foreign_key_errors = conn
+        .prepare("PRAGMA foreign_key_check")
+        .unwrap()
+        .query_map([], |_| Ok(()))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(foreign_key_errors.is_empty());
+    assert!(session_id > 0);
+}
+
+#[test]
+fn deleting_overlapping_root_preserves_media_owned_by_another_root() {
+    let db = AppDatabase::in_memory().unwrap();
+    let parent_root = db
+        .upsert_library_root(None, "D:/Music", "local", "Music", "completed")
+        .unwrap();
+    let child_root = db
+        .upsert_library_root(None, "D:/Music/Album", "local", "Album", "completed")
+        .unwrap();
+    let media_id = db.record_media_stub("D:/Music/Album/track.flac").unwrap();
+    add_library_membership(&db, parent_root, &media_id);
+    add_library_membership(&db, child_root, &media_id);
+    assert_eq!(db.list_library_track_summaries().unwrap().len(), 1);
+
+    let child_delete = db.delete_library_root(child_root).unwrap().unwrap();
+    assert_eq!(child_delete.cleanup.removed_media_count, 0);
+    assert_eq!(
+        db.source_path_for_media_id(&media_id).unwrap().as_deref(),
+        Some("D:/Music/Album/track.flac")
+    );
+
+    let parent_delete = db.delete_library_root(parent_root).unwrap().unwrap();
+    assert_eq!(parent_delete.cleanup.removed_media_count, 1);
+    assert!(db.source_path_for_media_id(&media_id).unwrap().is_none());
+}
+
+#[test]
+fn clearing_failed_scan_seen_set_preserves_committed_memberships() {
+    let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/Music", "local", "Music", "completed")
+        .unwrap();
+    let old_media = db.record_media_stub("D:/Music/old.flac").unwrap();
+    let new_media = db.record_media_stub("D:/Music/new.flac").unwrap();
+    add_library_membership(&db, root_id, &old_media);
+
+    db.begin_library_scan_seen_set(100).unwrap();
+    db.mark_library_scan_seen_media_ids(100, std::slice::from_ref(&new_media))
+        .unwrap();
+    db.clear_library_scan_seen_set(100).unwrap();
+
+    let summaries = db.list_library_track_summaries().unwrap();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].media_id, old_media);
+
+    db.begin_library_scan_seen_set(101).unwrap();
+    db.mark_library_scan_seen_media_ids(101, std::slice::from_ref(&new_media))
+        .unwrap();
+    let finalized = db.finalize_library_root_scan(root_id, 101, 10).unwrap();
+    assert_eq!(finalized.track_count, 1);
+    assert_eq!(finalized.cleanup.removed_media_count, 1);
+    let summaries = db.list_library_track_summaries().unwrap();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].media_id, new_media);
+}
+
+#[test]
+fn scan_finalize_enforces_root_source_kind_and_excludes_ncm_media() {
+    let db = AppDatabase::in_memory().unwrap();
+    let local_root = db
+        .upsert_library_root(None, "D:/Music", "local", "Music", "scanning")
+        .unwrap();
+    let webdav_root = db
+        .upsert_library_root(Some("primary"), "/albums", "webdav", "WebDAV", "scanning")
+        .unwrap();
+    let local_media = db.record_media_stub("D:/Music/local.flac").unwrap();
+    let webdav_media = db
+        .record_external_media_metadata(
+            "https://dav.example.test/albums/remote.flac",
+            Some("Remote"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let ncm_path = "https://dav.example.test/albums/ncm.flac";
+    let ncm_media = db
+        .record_external_media_metadata(ncm_path, Some("NCM"), None, None, None, None)
+        .unwrap();
+    db.record_ncm_track_source(ncm_path, 42, None).unwrap();
+
+    db.begin_library_scan_seen_set(201).unwrap();
+    db.mark_library_scan_seen_media_ids(201, &[local_media.clone(), webdav_media.clone()])
+        .unwrap();
+    let local_finalize = db.finalize_library_root_scan(local_root, 201, 10).unwrap();
+    assert_eq!(local_finalize.track_count, 1);
+
+    db.begin_library_scan_seen_set(202).unwrap();
+    db.mark_library_scan_seen_media_ids(
+        202,
+        &[local_media.clone(), webdav_media.clone(), ncm_media.clone()],
+    )
+    .unwrap();
+    let webdav_finalize = db.finalize_library_root_scan(webdav_root, 202, 10).unwrap();
+    assert_eq!(webdav_finalize.track_count, 1);
+
+    let summaries = db.list_library_track_summaries().unwrap();
+    let ids = summaries
+        .iter()
+        .map(|track| track.media_id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(local_media.as_str()));
+    assert!(ids.contains(webdav_media.as_str()));
+    assert!(!ids.contains(ncm_media.as_str()));
+    assert_eq!(
+        db.source_path_for_media_id(&ncm_media).unwrap().as_deref(),
+        Some(ncm_path)
+    );
+}
+
+#[test]
+fn deleting_scanning_library_root_is_rejected_without_mutation() {
+    let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/Music", "local", "Music", "scanning")
+        .unwrap();
+    let media_id = db.record_media_stub("D:/Music/track.flac").unwrap();
+    add_library_membership(&db, root_id, &media_id);
+
+    let error = db.delete_library_root(root_id).unwrap_err();
+
+    assert_eq!(error, LIBRARY_ROOT_SCAN_IN_PROGRESS_ERROR);
+    assert_eq!(db.list_library_roots().unwrap().len(), 1);
+    assert_eq!(db.list_library_track_summaries().unwrap().len(), 1);
 }

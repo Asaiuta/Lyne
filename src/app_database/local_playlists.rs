@@ -2,6 +2,7 @@ use rand::Rng;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use std::collections::HashSet;
 
+use super::library_memberships::reindex_local_playlist_items_in_conn;
 use super::{
     media_item_from_row, now_epoch_secs_i64, AppDatabase, LocalPlaylistDetailRecord,
     LocalPlaylistRecord,
@@ -140,47 +141,6 @@ fn read_local_playlist_by_id(
     )
     .optional()
     .map_err(|e| format!("Failed to read local playlist '{}': {}", playlist_id, e))
-}
-
-fn reindex_local_playlist_items_tx(
-    tx: &rusqlite::Transaction<'_>,
-    playlist_id: &str,
-) -> Result<(), String> {
-    let media_ids = {
-        let mut stmt = tx
-            .prepare(
-                r#"
-                SELECT media_id
-                FROM local_playlist_items
-                WHERE playlist_id = ?1
-                ORDER BY position_index ASC, added_at DESC, media_id ASC
-                "#,
-            )
-            .map_err(|e| format!("Failed to prepare local playlist reindex query: {}", e))?;
-        let rows = stmt
-            .query_map(params![playlist_id], |row| row.get::<_, String>(0))
-            .map_err(|e| format!("Failed to query local playlist item order: {}", e))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to decode local playlist item order: {}", e))?
-    };
-
-    for (index, media_id) in media_ids.iter().enumerate() {
-        tx.execute(
-            r#"
-            UPDATE local_playlist_items
-            SET position_index = ?3
-            WHERE playlist_id = ?1 AND media_id = ?2
-            "#,
-            params![playlist_id, media_id, index as i64],
-        )
-        .map_err(|e| {
-            format!(
-                "Failed to reindex local playlist item '{}': {}",
-                media_id, e
-            )
-        })?;
-    }
-    Ok(())
 }
 
 impl AppDatabase {
@@ -493,7 +453,7 @@ impl AppDatabase {
         }
 
         if removed > 0 {
-            reindex_local_playlist_items_tx(&tx, playlist_id)?;
+            reindex_local_playlist_items_in_conn(&tx, playlist_id)?;
             tx.execute(
                 "UPDATE local_playlists SET updated_at = ?2 WHERE playlist_id = ?1",
                 params![playlist_id, now_epoch_secs_i64()],
