@@ -10,94 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app_database::{AppDatabase, PlaybackRuntimeSnapshot};
-use crate::config::EngineSettings;
 use crate::player::{AudioPlayer, PlayerState};
 
 use super::{AppState, ScanTaskRecord, StateResponse};
-
-const EQ_BAND_INDEXES: [(&str, usize); 10] = [
-    ("31", 0),
-    ("62", 1),
-    ("125", 2),
-    ("250", 3),
-    ("500", 4),
-    ("1000", 5),
-    ("2000", 6),
-    ("4000", 7),
-    ("8000", 8),
-    ("16000", 9),
-];
-
-pub(crate) fn eq_band_name_to_index(name: &str) -> Option<usize> {
-    EQ_BAND_INDEXES
-        .iter()
-        .find_map(|(band, index)| (*band == name).then_some(*index))
-}
-
-/// Apply persisted settings to player after runtime settings updates.
-pub(crate) fn apply_settings_to_player(player: &mut AudioPlayer, settings: &EngineSettings) {
-    // Volume
-    player.set_volume(settings.volume as f64);
-
-    // Device settings are applied separately via configure_output API
-
-    // EQ
-    if settings.eq_type == "FIR" {
-        let taps = settings.fir_taps.unwrap_or(1023);
-        let _ = player.enable_fir_eq(taps);
-    } else {
-        *player.shared_state().eq_type.write() = "IIR".to_string();
-    }
-
-    if let Some(ref bands) = settings.eq_bands {
-        if player.is_fir_eq_enabled() {
-            let mut gains = [0.0_f64; 10];
-            for (name, &gain) in bands {
-                if let Some(idx) = eq_band_name_to_index(name.as_str()) {
-                    gains[idx] = gain;
-                }
-            }
-            let _ = player.set_fir_bands(&gains);
-        } else {
-            // IIR EQ (lock-free)
-            for (name, &gain) in bands {
-                if let Some(idx) = eq_band_name_to_index(name.as_str()) {
-                    player.lockfree_eq_params.set_band_gain(idx, gain);
-                }
-            }
-        }
-    }
-
-    // Dither / noise shaping (lock-free DSP path)
-    player.dither_enabled = settings.dither.enabled;
-    player.set_output_bits(settings.output_bits);
-    let _ = player.set_noise_shaper_curve(settings.dither.noise_shaper_curve);
-
-    // Loudness
-    player.set_loudness_enabled(settings.loudness.enabled);
-    player.set_target_lufs(settings.loudness.target_lufs);
-    player.set_preamp_gain(settings.dynamic_loudness.pre_gain_db);
-    player.set_normalization_mode(settings.loudness.mode);
-
-    // Saturation
-    player.set_saturation_enabled(settings.saturation.enabled);
-    player.set_saturation_drive(settings.saturation.drive);
-    player.set_saturation_mix(settings.saturation.mix);
-
-    // Crossfeed
-    player.set_crossfeed_enabled(settings.crossfeed.enabled);
-    player.set_crossfeed_mix(settings.crossfeed.mix);
-
-    // Dynamic Loudness
-    player.set_dynamic_loudness_enabled(settings.dynamic_loudness.enabled);
-    player.set_dynamic_loudness_strength(settings.dynamic_loudness.strength);
-
-    // Resampling
-    player.target_sample_rate = settings.target_samplerate;
-    player.set_resample_quality(settings.resample_quality);
-    player.set_use_cache(settings.use_cache);
-    player.set_preemptive_resample(settings.preemptive_resample);
-}
 
 pub(crate) fn get_player_state(player: &AudioPlayer) -> StateResponse {
     let shared = player.shared_state();
@@ -183,7 +98,7 @@ pub(crate) fn get_player_state(player: &AudioPlayer) -> StateResponse {
         output_bits: player.get_output_bits(),
         noise_shaper_curve,
         // Resampling fields
-        target_samplerate: player.target_sample_rate,
+        target_samplerate: player.get_target_sample_rate(),
         resample_quality: player.get_resample_quality(),
         use_cache: player.get_use_cache(),
         preemptive_resample: player.get_preemptive_resample(),

@@ -101,7 +101,6 @@ pub struct AudioPlayer {
 
     // Config
     pub exclusive_mode: bool,
-    pub target_sample_rate: Option<u32>,
     pub dither_enabled: bool,
     pub replaygain_enabled: bool,
     pub loudness_enabled: bool,
@@ -137,6 +136,7 @@ impl AudioPlayer {
         config: EngineSettings,
         loudness_db: Option<Arc<LoudnessDatabase>>,
     ) -> Self {
+        let initial_config = config.clone();
         log::info!("Initializing AudioPlayer (lock-free mode)...");
         let shared_state = Arc::new(SharedState::new());
         let (cmd_tx, cmd_rx) = unbounded::<AudioCommand>();
@@ -193,11 +193,35 @@ impl AudioPlayer {
                 .set_ref_volume_db(config.dynamic_loudness.ref_volume_db);
         }
 
+        lockfree_volume_params.set_volume(config.volume as f64);
+        lockfree_dynamic_loudness_params.set_volume(config.volume as f64);
+
         {
             lockfree_noise_shaper_params.set_enabled(config.dither.enabled);
             lockfree_noise_shaper_params.set_bits(config.output_bits);
             lockfree_noise_shaper_params.set_curve(config.dither.noise_shaper_curve);
         }
+
+        shared_state.volume.store(
+            (config.volume.clamp(0.0, 1.0) * 1_000_000.0) as u64,
+            Ordering::Relaxed,
+        );
+        shared_state
+            .exclusive_mode
+            .store(config.exclusive_mode, Ordering::Relaxed);
+        shared_state
+            .prefer_default_output_config
+            .store(!config.preemptive_resample, Ordering::Relaxed);
+        shared_state.device_id.store(
+            config.device_id.map(|i| i as i64).unwrap_or(-1),
+            Ordering::Relaxed,
+        );
+        shared_state
+            .output_bits
+            .store(config.output_bits, Ordering::Relaxed);
+        shared_state.set_resample_quality(config.resample_quality);
+        *shared_state.noise_shaper_curve.write() = config.dither.noise_shaper_curve;
+        *shared_state.eq_type.write() = config.eq_type.clone();
 
         // ═══════════════════════════════════════════════════════════════
         // Spawn audio thread (lock-free only)
@@ -228,42 +252,19 @@ impl AudioPlayer {
                 dynamic_loudness_params: lf_dl,
                 dynamic_loudness_telemetry: lf_dl_telemetry,
                 loudness_state: lf_loudness_state,
-                noise_shaper_bits: config.output_bits, // M-1 fix: read from config instead of hardcoded 24
                 spectrum_tx,
                 phase_response,
-                resample_quality: config.resample_quality,
                 target_lufs,
                 replaygain_reference_lufs,
             });
         });
 
-        shared_state.volume.store(
-            (config.volume.clamp(0.0, 1.0) * 1_000_000.0) as u64,
-            Ordering::Relaxed,
-        );
-        shared_state
-            .exclusive_mode
-            .store(config.exclusive_mode, Ordering::Relaxed);
-        shared_state
-            .prefer_default_output_config
-            .store(!config.preemptive_resample, Ordering::Relaxed);
-        shared_state.device_id.store(
-            config.device_id.map(|i| i as i64).unwrap_or(-1),
-            Ordering::Relaxed,
-        );
-        let eq_type = config.eq_type.clone();
         let exclusive_mode = config.exclusive_mode;
-        let target_sample_rate = config.target_samplerate;
         let dither_enabled = config.dither.enabled;
         let fir_taps = config.fir_taps.unwrap_or(1023);
         let device_id = config.device_id;
-        shared_state
-            .output_bits
-            .store(config.output_bits, Ordering::Relaxed);
-        *shared_state.noise_shaper_curve.write() = config.dither.noise_shaper_curve;
-        *shared_state.eq_type.write() = eq_type;
 
-        Self {
+        let mut player = Self {
             shared_state,
             cmd_tx,
             audio_thread: Some(audio_thread),
@@ -278,7 +279,6 @@ impl AudioPlayer {
             lockfree_dynamic_loudness_params,
             dynamic_loudness_telemetry,
             exclusive_mode,
-            target_sample_rate,
             dither_enabled,
             replaygain_enabled: true,
             loudness_enabled,
@@ -292,7 +292,11 @@ impl AudioPlayer {
             device_id,
             current_load_cancel: None,
             loudness_db,
+        };
+        if let Err(error) = player.synchronize_engine_settings(&initial_config) {
+            log::error!("Failed to hydrate initial audio settings: {}", error);
         }
+        player
     }
 
     pub fn list_devices(&self) -> Vec<AudioDeviceInfo> {
@@ -328,6 +332,7 @@ impl AudioPlayer {
 
     pub fn select_device(&mut self, device_id: Option<usize>) -> Result<(), String> {
         self.device_id = device_id;
+        self.config.device_id = device_id;
         let id_value = device_id.map(|i| i as i64).unwrap_or(-1);
         self.shared_state
             .device_id
@@ -683,6 +688,7 @@ impl AudioPlayer {
 
     pub fn set_volume(&mut self, vol: f64) {
         let clamped_vol = vol.clamp(0.0, 1.0);
+        self.config.volume = clamped_vol as f32;
         self.shared_state
             .volume
             .store((clamped_vol * 1_000_000.0) as u64, Ordering::Relaxed);

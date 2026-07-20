@@ -1,5 +1,5 @@
 use super::*;
-use crate::app_database::{media_id_for_path, QueueEntryRecord};
+use crate::app_database::{media_id_for_path, LibraryCleanupReport, QueueEntryRecord};
 use crate::player::{
     pending_promotion_readiness, PendingPromotionReadiness, RepeatMode, SharedState,
 };
@@ -27,6 +27,84 @@ pub(super) fn sync_queue_snapshot_from_shared(
     ) {
         log::warn!("Failed to persist queue snapshot: {}", e);
     }
+}
+
+pub(super) fn reconcile_runtime_after_library_cleanup(
+    data: &web::Data<Arc<AppState>>,
+    cleanup: &LibraryCleanupReport,
+) {
+    let path_was_removed = |candidate: &str| {
+        cleanup
+            .removed_runtime_paths
+            .iter()
+            .any(|removed| same_media_identity(candidate, removed))
+    };
+
+    let shared_state = {
+        let mut player = data.player.lock();
+        let shared = player.shared_state();
+        let current_path = shared.current_track_path.read().clone();
+        let file_path = shared.file_path.read().clone();
+        let pending_path = shared.pending_file_path.read().clone();
+        let current_was_removed = current_path
+            .as_deref()
+            .or(file_path.as_deref())
+            .is_some_and(path_was_removed);
+        let pending_was_removed = pending_path.as_deref().is_some_and(path_was_removed);
+
+        if pending_was_removed {
+            player.cancel_preload();
+        }
+        if current_was_removed {
+            let stopped_loading = shared.is_loading.load(Ordering::Acquire);
+            if stopped_loading {
+                player.stop();
+            }
+            {
+                let mut current = shared.current_track_path.write();
+                if current.as_deref().is_some_and(path_was_removed) {
+                    *current = None;
+                }
+            }
+            if stopped_loading {
+                let mut file = shared.file_path.write();
+                if file.as_deref().is_some_and(path_was_removed) {
+                    *file = None;
+                }
+            }
+        }
+        shared
+    };
+
+    if !cleanup.removed_session_ids.is_empty() {
+        let mut active_session_id = data.playback.active_session_id.lock();
+        if active_session_id.is_some_and(|session_id| {
+            cleanup
+                .removed_session_ids
+                .binary_search(&session_id)
+                .is_ok()
+        }) {
+            active_session_id.take();
+        }
+        drop(active_session_id);
+
+        data.playback
+            .ncm_scrobble
+            .lock()
+            .sessions
+            .retain(|session_id, _| {
+                cleanup
+                    .removed_session_ids
+                    .binary_search(session_id)
+                    .is_err()
+            });
+    }
+
+    sync_queue_snapshot_from_shared(data, &shared_state);
+    shared_state.event_flags.fetch_or(
+        crate::player::EVENT_QUEUE_UPDATED | crate::player::EVENT_PLAYBACK_HISTORY_UPDATED,
+        Ordering::Release,
+    );
 }
 
 pub(super) fn emit_queue_updated(data: &web::Data<Arc<AppState>>) {
@@ -519,7 +597,29 @@ pub(crate) fn append_validated_paths_to_persistent_queue(
 
 #[cfg(test)]
 mod tests {
-    use super::same_media_identity;
+    use super::{reconcile_runtime_after_library_cleanup, same_media_identity};
+    use crate::app_database::LibraryCleanupReport;
+    use crate::player::PlayerState;
+    use crate::server::{test_app_state_for_analysis, AppState};
+    use actix_web::web;
+    use std::path::PathBuf;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn cleanup_test_state(name: &str) -> (web::Data<Arc<AppState>>, PathBuf) {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "audio-player-library-cleanup-{name}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let data = web::Data::new(test_app_state_for_analysis(&temp_dir, 1, 1));
+        (data, temp_dir)
+    }
 
     #[test]
     fn same_media_identity_normalizes_windows_paths() {
@@ -527,5 +627,88 @@ mod tests {
             r"D:\Music\Artist\Track.FLAC",
             r"\\?\D:\Music\Artist\Track.flac"
         ));
+    }
+
+    #[test]
+    fn library_cleanup_detaches_removed_runtime_queue_and_session_state() {
+        let (data, temp_dir) = cleanup_test_state("runtime");
+        let removed_path = r"\\?\D:\Music\Legacy.flac";
+        let shared = {
+            let player = data.player.lock();
+            player.shared_state()
+        };
+        *shared.current_track_path.write() = Some(removed_path.to_string());
+        *shared.file_path.write() = Some(removed_path.to_string());
+        *shared.pending_file_path.write() = Some(r"D:\Music\Legacy.flac".to_string());
+        shared.needs_preload.store(true, Ordering::Release);
+        shared.pending_ready.store(true, Ordering::Release);
+        *data.playback.active_session_id.lock() = Some(42);
+        data.app_db
+            .upsert_queue_snapshot(
+                Some(removed_path),
+                Some(r"D:\Music\Legacy.flac"),
+                true,
+                true,
+            )
+            .unwrap();
+
+        let cleanup = LibraryCleanupReport {
+            removed_runtime_paths: vec![r"D:/Music/Legacy.flac".to_string()],
+            removed_session_ids: vec![42],
+            ..LibraryCleanupReport::default()
+        };
+        reconcile_runtime_after_library_cleanup(&data, &cleanup);
+
+        assert!(shared.current_track_path.read().is_none());
+        assert_eq!(shared.file_path.read().as_deref(), Some(removed_path));
+        assert!(shared.pending_file_path.read().is_none());
+        assert!(!shared.needs_preload.load(Ordering::Acquire));
+        assert!(!shared.pending_ready.load(Ordering::Acquire));
+        assert!(data.playback.active_session_id.lock().is_none());
+        let cleanup_events =
+            crate::player::EVENT_QUEUE_UPDATED | crate::player::EVENT_PLAYBACK_HISTORY_UPDATED;
+        assert_eq!(
+            shared.event_flags.load(Ordering::Acquire) & cleanup_events,
+            cleanup_events
+        );
+        let snapshot = data.app_db.get_queue_snapshot().unwrap().unwrap();
+        assert!(snapshot.current_track_path.is_none());
+        assert!(snapshot.pending_track_path.is_none());
+
+        drop(data);
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn library_cleanup_stops_a_matching_inflight_load() {
+        let (data, temp_dir) = cleanup_test_state("inflight-load");
+        let removed_path = r"D:\Music\Loading.flac";
+        let shared = {
+            let player = data.player.lock();
+            player.shared_state()
+        };
+        *shared.current_track_path.write() = Some(removed_path.to_string());
+        *shared.file_path.write() = Some(removed_path.to_string());
+        shared.state.store(PlayerState::Playing);
+        shared.is_loading.store(true, Ordering::Release);
+        let load_generation = shared.load_generation.load(Ordering::Acquire);
+
+        let cleanup = LibraryCleanupReport {
+            removed_runtime_paths: vec![removed_path.to_string()],
+            ..LibraryCleanupReport::default()
+        };
+        reconcile_runtime_after_library_cleanup(&data, &cleanup);
+
+        assert_eq!(shared.state.load(), PlayerState::Stopped);
+        assert!(!shared.is_loading.load(Ordering::Acquire));
+        assert_eq!(
+            shared.load_generation.load(Ordering::Acquire),
+            load_generation + 1
+        );
+        assert!(shared.current_track_path.read().is_none());
+        assert!(shared.file_path.read().is_none());
+
+        drop(data);
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

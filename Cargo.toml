@@ -121,7 +121,7 @@ parking_lot = "0.12"
 # --- WASAPI Exclusive Mode (Windows only) ---
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.22"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 # --- HTTP/WebSocket Server ---
 actix-cors = "0.7"

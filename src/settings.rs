@@ -141,8 +141,30 @@ impl SettingsManager {
     /// Create a new settings manager with the given file path
     pub fn new(file_path: PathBuf) -> Self {
         let settings = EngineSettings::load_from_file(&file_path).unwrap_or_else(|e| {
-            log::info!("Using default settings: {}", e);
-            EngineSettings::default()
+            log::error!("Failed to load settings; recovering with defaults: {}", e);
+            if file_path.exists() {
+                let backup_path = corrupt_backup_path(&file_path);
+                match std::fs::copy(&file_path, &backup_path) {
+                    Ok(_) => log::warn!(
+                        "Preserved unreadable settings as '{}'",
+                        backup_path.display()
+                    ),
+                    Err(copy_error) => log::warn!(
+                        "Failed to preserve unreadable settings '{}': {}",
+                        file_path.display(),
+                        copy_error
+                    ),
+                }
+            }
+            let defaults = EngineSettings::from_env_defaults();
+            if let Err(save_error) = defaults.save(&file_path) {
+                log::error!(
+                    "Failed to persist recovered default settings '{}': {}",
+                    file_path.display(),
+                    save_error
+                );
+            }
+            defaults
         });
 
         Self {
@@ -164,9 +186,21 @@ impl SettingsManager {
     }
 
     /// Update settings and save to file
-    pub fn update(&mut self, update: EngineSettingsUpdate) -> Result<(), String> {
-        self.settings.apply_update(update);
-        self.save()
+    pub fn update(&mut self, update: EngineSettingsUpdate) -> Result<EngineSettings, String> {
+        self.update_with_persist(update, |candidate, path| candidate.save(path))
+    }
+
+    fn update_with_persist(
+        &mut self,
+        update: EngineSettingsUpdate,
+        persist: impl FnOnce(&EngineSettings, &Path) -> Result<(), String>,
+    ) -> Result<EngineSettings, String> {
+        let mut candidate = self.settings.clone();
+        candidate.apply_update(update);
+        persist(&candidate, &self.file_path)?;
+        self.settings = candidate.clone();
+        log::debug!("Saved settings to {}", self.file_path.display());
+        Ok(candidate)
     }
 
     /// Get current engine settings
@@ -178,6 +212,18 @@ impl SettingsManager {
     pub fn get_persistent_settings(&self) -> PersistentSettings {
         self.settings.clone().into()
     }
+}
+
+fn corrupt_backup_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("settings.json");
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    path.with_file_name(format!("{}.{}.corrupt", file_name, timestamp))
 }
 
 /// Thread-safe settings manager wrapper
@@ -194,6 +240,18 @@ pub fn create_settings_manager(settings_path: &Path) -> SharedSettingsManager {
 mod tests {
     use super::*;
     use crate::config::MAX_STREAMING_PCM_WINDOW_LIMIT_MIB;
+
+    fn unique_test_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "audio-player-settings-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ))
+    }
 
     #[test]
     fn persistent_settings_round_trips_streaming_buffer_fields() {
@@ -268,5 +326,48 @@ mod tests {
                 (crate::diagnostics::decode_memory_budget().limit_bytes / (1024 * 1024)) as u64
             )
         );
+    }
+
+    #[test]
+    fn failed_update_keeps_in_memory_settings_unchanged() {
+        let blocking_parent = unique_test_path("blocked-parent");
+        std::fs::write(&blocking_parent, b"not a directory")
+            .expect("blocking file should be created");
+        let settings_path = blocking_parent.join("settings.json");
+        let mut manager = SettingsManager::new(settings_path);
+        let before = manager.get_settings();
+
+        let result = manager.update(EngineSettingsUpdate {
+            volume: Some(0.13),
+            ..EngineSettingsUpdate::default()
+        });
+
+        assert!(result.is_err());
+        assert!((manager.get().volume - before.volume).abs() < f32::EPSILON);
+        let _ = std::fs::remove_file(blocking_parent);
+    }
+
+    #[test]
+    fn failed_persist_keeps_existing_file_and_memory_unchanged() {
+        let settings_path = unique_test_path("injected-persist-failure");
+        let mut manager = SettingsManager::new(settings_path.clone());
+        let before_settings = manager.get_settings();
+        let before_file = std::fs::read(&settings_path).expect("settings file should exist");
+
+        let result = manager.update_with_persist(
+            EngineSettingsUpdate {
+                volume: Some(0.13),
+                ..EngineSettingsUpdate::default()
+            },
+            |_candidate, _path| Err("injected persistence failure".to_string()),
+        );
+
+        assert!(result.is_err());
+        assert!((manager.get().volume - before_settings.volume).abs() < f32::EPSILON);
+        assert_eq!(
+            std::fs::read(&settings_path).expect("previous file should remain"),
+            before_file
+        );
+        let _ = std::fs::remove_file(settings_path);
     }
 }

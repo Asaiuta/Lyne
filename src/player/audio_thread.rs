@@ -27,7 +27,7 @@ use super::streaming::producer::{PersistentProducerHandle, ProducerReaper};
 use super::streaming::session::PersistentStreamingSession;
 #[cfg(windows)]
 use super::wasapi_loop::{handle_wasapi_exclusive, WasapiPlaybackOutcome};
-use crate::config::{PhaseResponse, ResampleQuality};
+use crate::config::PhaseResponse;
 use crate::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
     AtomicEqParams, AtomicLoudnessState, AtomicNoiseShaperParams, AtomicPeakLimiterParams,
@@ -60,10 +60,8 @@ pub(super) struct AudioThreadStartup {
     pub dynamic_loudness_params: Arc<AtomicDynamicLoudnessParams>,
     pub dynamic_loudness_telemetry: Arc<AtomicDynamicLoudnessTelemetry>,
     pub loudness_state: Arc<AtomicLoudnessState>,
-    pub noise_shaper_bits: u32,
     pub spectrum_tx: Sender<SpectrumBatch>,
     pub phase_response: PhaseResponse,
-    pub resample_quality: ResampleQuality,
     pub target_lufs: f64,
     pub replaygain_reference_lufs: f64,
 }
@@ -97,10 +95,8 @@ struct AudioThreadRuntime {
     dsp_ctx: Arc<LockfreeDspContext>,
     dsp_params: AudioThreadDspParams,
     loudness_state: Arc<AtomicLoudnessState>,
-    noise_shaper_bits: u32,
     spectrum_tx: Sender<SpectrumBatch>,
     phase_response: PhaseResponse,
-    resample_quality: ResampleQuality,
     target_lufs: f64,
     replaygain_reference_lufs: f64,
     streaming_session: Option<PersistentStreamingSession>,
@@ -286,7 +282,7 @@ impl AudioThreadRuntime {
                 &self.spectrum_tx,
                 self.target_lufs,
                 self.replaygain_reference_lufs,
-                self.resample_quality,
+                self.shared_state.resample_quality(),
                 &self.dsp_params.dynamic_loudness_telemetry,
             ) {
                 WasapiPlaybackOutcome::Handled => return ThreadControl::Continue,
@@ -323,7 +319,7 @@ impl AudioThreadRuntime {
             &dsp_params,
             ResamplerConfig {
                 phase_response: self.phase_response,
-                quality: self.resample_quality,
+                quality: self.shared_state.resample_quality(),
             },
         )
         .and_then(|s| {
@@ -333,7 +329,8 @@ impl AudioThreadRuntime {
 
         match requested {
             Ok(()) => {
-                let detected_bits = detect_output_bits(&output_plan.device, self.noise_shaper_bits);
+                let output_bits = self.shared_state.output_bits.load(Ordering::Relaxed);
+                let detected_bits = detect_output_bits(&output_plan.device, output_bits);
 
                 self.shared_state
                     .output_bits
@@ -356,7 +353,7 @@ impl AudioThreadRuntime {
                     &dsp_params,
                     ResamplerConfig {
                         phase_response: self.phase_response,
-                        quality: self.resample_quality,
+                        quality: self.shared_state.resample_quality(),
                     },
                 )
                 .and_then(|s| {
@@ -366,8 +363,8 @@ impl AudioThreadRuntime {
 
                 match fallback {
                     Ok(()) => {
-                        let detected_bits =
-                            detect_output_bits(&output_plan.device, self.noise_shaper_bits);
+                        let output_bits = self.shared_state.output_bits.load(Ordering::Relaxed);
+                        let detected_bits = detect_output_bits(&output_plan.device, output_bits);
                         self.shared_state
                             .output_bits
                             .store(detected_bits, Ordering::Relaxed);
@@ -515,10 +512,8 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
         dynamic_loudness_params,
         dynamic_loudness_telemetry,
         loudness_state,
-        noise_shaper_bits,
         spectrum_tx,
         phase_response,
-        resample_quality,
         target_lufs,
         replaygain_reference_lufs,
     } = startup;
@@ -536,12 +531,11 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
     };
 
     // Keep a default output bit-depth hint for downstream components.
+    let initial_output_bits = shared_state.output_bits.load(Ordering::Relaxed).max(16);
     shared_state
         .output_bits
-        .store(noise_shaper_bits.max(16), Ordering::Relaxed);
-    dsp_params
-        .noise_shaper_params
-        .set_bits(noise_shaper_bits.max(16));
+        .store(initial_output_bits, Ordering::Relaxed);
+    dsp_params.noise_shaper_params.set_bits(initial_output_bits);
 
     let initial_channels = shared_state.channels.load(Ordering::Relaxed).max(1) as usize;
     let initial_sample_rate = shared_state.sample_rate.load(Ordering::Relaxed).max(1) as f64;
@@ -568,10 +562,8 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
         dsp_ctx: Arc::new(dsp_ctx),
         dsp_params,
         loudness_state,
-        noise_shaper_bits,
         spectrum_tx,
         phase_response,
-        resample_quality,
         target_lufs,
         replaygain_reference_lufs,
         streaming_session: None,

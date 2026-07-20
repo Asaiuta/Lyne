@@ -8,6 +8,7 @@ import {
   audioEngineFormFromSettings,
   defaultAudioEngineForm,
   eqBandsForSettingsUpdate,
+  rebaseAudioEngineForm,
   readAudioEngineFormScalarValue
 } from "./audioEngineSettingsModel";
 
@@ -144,4 +145,34 @@ test("audio engine EQ update payload preserves the canonical band order", () => 
   assert.deepEqual(Object.keys(update), [...EQ_BAND_KEYS]);
   assert.equal(update["31"], 1.5);
   assert.equal(update["125"], 0);
+});
+
+test("audio engine form rebases untouched fields while preserving dirty overrides", () => {
+  const current = audioEngineFormFromSettings(persistentSettingsFixture());
+  current.volume = "0.33";
+  current.eqBands["31"] = 6;
+  const latest = persistentSettingsFixture({
+    volume: 0.6,
+    output_bits: 16,
+    eq_bands: { "31": -3 }
+  });
+
+  const rebased = rebaseAudioEngineForm(
+    current,
+    latest,
+    new Set(["volume", "eqBands"])
+  );
+
+  assert.equal(rebased.volume, "0.33");
+  assert.equal(rebased.eqBands["31"], 6);
+  assert.equal(rebased.outputBits, "16");
+});
+
+test("audio engine volume uses the same normalized range as PlayerBar", () => {
+  assert.deepEqual(AUDIO_ENGINE_TEXT_ITEMS.volume.parser, {
+    kind: "rangedNumber",
+    fieldLabelKey: "settings.field.volume",
+    min: 0,
+    max: 1
+  });
 });

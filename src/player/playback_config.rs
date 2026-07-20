@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::{AudioCommand, AudioPlayer, GaplessManager};
+use crate::config::{EngineSettings, EngineSettingsUpdate};
 use crate::player::state::{
     PlayerState, SharedState, EVENT_NEEDS_PRELOAD_RESET, EVENT_PLAYBACK_STARTED,
     EVENT_TRACK_CHANGED,
@@ -16,6 +17,14 @@ use crate::player::state::{
 use crate::processor::AtomicLoudnessState;
 
 impl AudioPlayer {
+    pub fn get_target_sample_rate(&self) -> Option<u32> {
+        self.config.target_samplerate
+    }
+
+    pub fn set_target_sample_rate(&mut self, sample_rate: Option<u32>) {
+        self.config.target_samplerate = sample_rate;
+    }
+
     /// Get resample quality as string
     pub fn get_resample_quality(&self) -> String {
         crate::config::resample_quality_to_string(self.config.resample_quality)
@@ -34,6 +43,7 @@ impl AudioPlayer {
     /// Set resample quality
     pub fn set_resample_quality(&mut self, quality: crate::config::ResampleQuality) {
         self.config.resample_quality = quality;
+        self.shared_state.set_resample_quality(quality);
         log::info!("Resample quality set to: {:?}", quality);
     }
 
@@ -56,6 +66,202 @@ impl AudioPlayer {
             "Preemptive resample {}",
             if enabled { "enabled" } else { "disabled" }
         );
+    }
+
+    pub fn set_streaming_first_buffer(&mut self, enabled: bool) {
+        self.config.streaming_first_buffer = enabled;
+    }
+
+    pub fn set_streaming_pcm_window_limit_mib(&mut self, limit_mib: u64) {
+        self.config.streaming_pcm_window_limit_mib = limit_mib;
+    }
+
+    pub fn set_use_next_prefetch(&mut self, enabled: bool) {
+        self.config.use_next_prefetch = enabled;
+    }
+
+    pub fn set_exclusive_mode(&mut self, enabled: bool) {
+        self.exclusive_mode = enabled;
+        self.config.exclusive_mode = enabled;
+        self.shared_state
+            .exclusive_mode
+            .store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn set_dither_enabled(&mut self, enabled: bool) {
+        self.dither_enabled = enabled;
+        self.config.dither.enabled = enabled;
+        self.lockfree_noise_shaper_params.set_enabled(enabled);
+    }
+
+    pub fn synchronize_engine_settings(&mut self, settings: &EngineSettings) -> Result<(), String> {
+        self.set_volume(settings.volume as f64);
+        self.select_device(settings.device_id)?;
+        self.set_exclusive_mode(settings.exclusive_mode);
+        self.apply_eq_configuration(settings)?;
+        self.set_dither_enabled(settings.dither.enabled);
+        self.set_output_bits(settings.output_bits);
+        self.set_noise_shaper_curve(settings.dither.noise_shaper_curve)?;
+        self.set_loudness_enabled(settings.loudness.enabled);
+        self.set_target_lufs(settings.loudness.target_lufs);
+        self.set_preamp_gain(settings.dynamic_loudness.pre_gain_db);
+        self.set_normalization_mode(settings.loudness.mode);
+
+        self.lockfree_saturation_params
+            .set_sat_type(settings.saturation.sat_type.into());
+        self.lockfree_saturation_params
+            .set_quality(settings.saturation.quality.into());
+        self.lockfree_saturation_params
+            .set_drive(settings.saturation.drive);
+        self.lockfree_saturation_params
+            .set_threshold(settings.saturation.threshold);
+        self.lockfree_saturation_params
+            .set_mix(settings.saturation.mix);
+        self.lockfree_saturation_params
+            .set_input_gain(settings.saturation.input_gain_db);
+        self.lockfree_saturation_params
+            .set_output_gain(settings.saturation.output_gain_db);
+        self.lockfree_saturation_params
+            .set_enabled(settings.saturation.enabled);
+
+        self.set_crossfeed_enabled(settings.crossfeed.enabled);
+        self.set_crossfeed_mix(settings.crossfeed.mix);
+        self.set_dynamic_loudness_enabled(settings.dynamic_loudness.enabled);
+        self.set_dynamic_loudness_strength(settings.dynamic_loudness.strength);
+
+        self.set_target_sample_rate(settings.target_samplerate);
+        self.set_resample_quality(settings.resample_quality);
+        self.set_use_cache(settings.use_cache);
+        self.set_preemptive_resample(settings.preemptive_resample);
+        self.set_streaming_first_buffer(settings.streaming_first_buffer);
+        self.set_streaming_pcm_window_limit_mib(settings.streaming_pcm_window_limit_mib);
+        self.set_use_next_prefetch(settings.use_next_prefetch);
+        self.config = settings.clone();
+        Ok(())
+    }
+
+    pub fn apply_engine_settings_update(
+        &mut self,
+        update: &EngineSettingsUpdate,
+        desired: &EngineSettings,
+    ) -> Result<(), String> {
+        if update.device_id.is_some() {
+            self.select_device(desired.device_id)?;
+        }
+        if update.exclusive_mode.is_some() {
+            self.set_exclusive_mode(desired.exclusive_mode);
+        }
+        if update.volume.is_some() {
+            self.set_volume(desired.volume as f64);
+        }
+        if update.eq_type.is_some() || update.eq_bands.is_some() || update.fir_taps.is_some() {
+            self.apply_eq_configuration(desired)?;
+        }
+        if update.dither_enabled.is_some() {
+            self.set_dither_enabled(desired.dither.enabled);
+        }
+        if update.output_bits.is_some() {
+            self.set_output_bits(desired.output_bits);
+        }
+        if update.noise_shaper_curve.is_some() {
+            self.set_noise_shaper_curve(desired.dither.noise_shaper_curve)?;
+        }
+        if update.loudness_enabled.is_some() {
+            self.set_loudness_enabled(desired.loudness.enabled);
+        }
+        if update.target_lufs.is_some() {
+            self.set_target_lufs(desired.loudness.target_lufs);
+        }
+        if update.preamp_db.is_some() {
+            self.set_preamp_gain(desired.dynamic_loudness.pre_gain_db);
+        }
+        if update.loudness_mode.is_some() {
+            self.set_normalization_mode(desired.loudness.mode);
+        }
+        if update.saturation_enabled.is_some() {
+            self.set_saturation_enabled(desired.saturation.enabled);
+        }
+        if update.saturation_drive.is_some() {
+            self.set_saturation_drive(desired.saturation.drive);
+        }
+        if update.saturation_mix.is_some() {
+            self.set_saturation_mix(desired.saturation.mix);
+        }
+        if update.crossfeed_enabled.is_some() {
+            self.set_crossfeed_enabled(desired.crossfeed.enabled);
+        }
+        if update.crossfeed_mix.is_some() {
+            self.set_crossfeed_mix(desired.crossfeed.mix);
+        }
+        if update.dynamic_loudness_enabled.is_some() {
+            self.set_dynamic_loudness_enabled(desired.dynamic_loudness.enabled);
+        }
+        if update.dynamic_loudness_strength.is_some() {
+            self.set_dynamic_loudness_strength(desired.dynamic_loudness.strength);
+        }
+        if update.target_samplerate.is_some() {
+            self.set_target_sample_rate(desired.target_samplerate);
+        }
+        if update.resample_quality.is_some() {
+            self.set_resample_quality(desired.resample_quality);
+        }
+        if update.use_cache.is_some() {
+            self.set_use_cache(desired.use_cache);
+        }
+        if update.preemptive_resample.is_some() {
+            self.set_preemptive_resample(desired.preemptive_resample);
+        }
+        if update.streaming_first_buffer.is_some() {
+            self.set_streaming_first_buffer(desired.streaming_first_buffer);
+        }
+        if update.streaming_pcm_window_limit_mib.is_some() {
+            self.set_streaming_pcm_window_limit_mib(desired.streaming_pcm_window_limit_mib);
+        }
+        if update.use_next_prefetch.is_some() {
+            self.set_use_next_prefetch(desired.use_next_prefetch);
+        }
+        self.config = desired.clone();
+        Ok(())
+    }
+
+    pub fn apply_eq_settings(&mut self, settings: &EngineSettings) -> Result<(), String> {
+        self.apply_eq_configuration(settings)?;
+        self.config.eq_type = settings.eq_type.clone();
+        self.config.eq_bands = settings.eq_bands.clone();
+        self.config.fir_taps = settings.fir_taps;
+        Ok(())
+    }
+
+    fn apply_eq_configuration(&mut self, settings: &EngineSettings) -> Result<(), String> {
+        const BANDS: [&str; 10] = [
+            "31", "62", "125", "250", "500", "1000", "2000", "4000", "8000", "16000",
+        ];
+        let gains = std::array::from_fn(|index| {
+            settings
+                .eq_bands
+                .as_ref()
+                .and_then(|bands| bands.get(BANDS[index]))
+                .copied()
+                .unwrap_or(0.0)
+        });
+
+        if settings.eq_type.eq_ignore_ascii_case("FIR") {
+            if self.is_fir_eq_enabled() {
+                self.disable_fir_eq();
+            }
+            self.set_fir_bands(&gains)?;
+            self.enable_fir_eq(settings.fir_taps.unwrap_or(1023))?;
+        } else {
+            if self.is_fir_eq_enabled() {
+                self.disable_fir_eq();
+            }
+            for (index, gain) in gains.iter().enumerate() {
+                self.lockfree_eq_params.set_band_gain(index, *gain);
+            }
+            self.lockfree_eq_params.set_enabled(true);
+            *self.shared_state.eq_type.write() = "IIR".to_string();
+        }
+        Ok(())
     }
 
     pub fn load_ir(&mut self, path: &str) -> Result<(), String> {
@@ -148,10 +354,14 @@ impl AudioPlayer {
     }
 
     /// Set output bit depth for NoiseShaper
-    pub fn set_output_bits(&self, bits: u32) {
-        self.lockfree_noise_shaper_params.set_bits(bits);
-        self.shared_state.output_bits.store(bits, Ordering::Relaxed);
-        log::info!("Output bit depth set to {} bits", bits);
+    pub fn set_output_bits(&mut self, bits: u32) {
+        let clamped = bits.clamp(8, 32);
+        self.config.output_bits = clamped;
+        self.lockfree_noise_shaper_params.set_bits(clamped);
+        self.shared_state
+            .output_bits
+            .store(clamped, Ordering::Relaxed);
+        log::info!("Output bit depth set to {} bits", clamped);
     }
 
     /// Get output bit depth
@@ -346,6 +556,82 @@ fn clear_pending_after_manual_promote(shared: &SharedState) {
 mod tests {
     use super::*;
     use crate::processor::AtomicLoudnessState;
+    use std::collections::HashMap;
+
+    #[test]
+    fn player_construction_hydrates_engine_visible_audio_settings() {
+        let settings = EngineSettings {
+            volume: 0.23,
+            eq_type: "IIR".to_string(),
+            eq_bands: Some(HashMap::from([
+                ("31".to_string(), -1.5),
+                ("1000".to_string(), 2.5),
+            ])),
+            dither: crate::config::DitherConfig {
+                enabled: false,
+                noise_shaper_curve: crate::processor::NoiseShaperCurve::TpdfOnly,
+            },
+            output_bits: 32,
+            target_samplerate: Some(96_000),
+            resample_quality: crate::config::ResampleQuality::UltraHigh,
+            ..EngineSettings::default()
+        };
+
+        let player = AudioPlayer::new(settings);
+        let volume = player.lockfree_volume_params.read();
+        let eq = player.lockfree_eq_params.read();
+        let noise_shaper = player.lockfree_noise_shaper_params.read();
+
+        assert!((volume.volume - 0.23).abs() < 1e-6);
+        assert!((player.get_volume() - 0.23).abs() < 1e-6);
+        assert!(eq.enabled);
+        assert!((eq.gains[0] - -1.5).abs() < f64::EPSILON);
+        assert!((eq.gains[5] - 2.5).abs() < f64::EPSILON);
+        assert!(!noise_shaper.enabled);
+        assert_eq!(noise_shaper.bits, 32);
+        assert_eq!(
+            noise_shaper.curve,
+            crate::processor::NoiseShaperCurve::TpdfOnly
+        );
+        assert_eq!(player.get_output_bits(), 32);
+        assert_eq!(player.get_target_sample_rate(), Some(96_000));
+        assert_eq!(player.get_resample_quality(), "uhq");
+        assert_eq!(
+            player.shared_state().resample_quality(),
+            crate::config::ResampleQuality::UltraHigh
+        );
+    }
+
+    #[test]
+    fn switching_from_fir_to_iir_disables_fir_and_applies_iir_bands() {
+        let fir_settings = EngineSettings {
+            eq_type: "FIR".to_string(),
+            eq_bands: Some(HashMap::from([("1000".to_string(), 4.0)])),
+            fir_taps: Some(511),
+            ..EngineSettings::default()
+        };
+        let mut player = AudioPlayer::new(fir_settings.clone());
+        assert!(player.is_fir_eq_enabled());
+
+        let mut iir_settings = fir_settings;
+        iir_settings.eq_type = "IIR".to_string();
+        iir_settings.eq_bands = Some(HashMap::from([("1000".to_string(), -2.0)]));
+        player
+            .apply_engine_settings_update(
+                &EngineSettingsUpdate {
+                    eq_type: Some("IIR".to_string()),
+                    eq_bands: iir_settings.eq_bands.clone(),
+                    ..EngineSettingsUpdate::default()
+                },
+                &iir_settings,
+            )
+            .expect("FIR to IIR transition should apply");
+
+        assert!(!player.is_fir_eq_enabled());
+        let eq = player.lockfree_eq_params.read();
+        assert!(eq.enabled);
+        assert!((eq.gains[5] - -2.0).abs() < f64::EPSILON);
+    }
 
     #[test]
     fn manual_promote_moves_matching_pending_buffer_to_current_track() {

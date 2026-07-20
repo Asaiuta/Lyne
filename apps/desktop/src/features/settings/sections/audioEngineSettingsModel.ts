@@ -56,6 +56,8 @@ export interface SettingsFormState {
   eqBands: Record<EqBandKey, number>;
 }
 
+export type AudioEngineFormField = keyof SettingsFormState;
+
 type ScalarFormField = Exclude<keyof SettingsFormState, "eqBands">;
 type TextFormField = {
   [K in ScalarFormField]: SettingsFormState[K] extends string ? K : never;
@@ -251,6 +253,22 @@ export const audioEngineFormFromSettings = (settings: PersistentSettings): Setti
   return form as SettingsFormState;
 };
 
+export const rebaseAudioEngineForm = (
+  current: SettingsFormState,
+  settings: PersistentSettings,
+  dirtyFields: ReadonlySet<AudioEngineFormField>
+): SettingsFormState => {
+  const rebased = audioEngineFormFromSettings(settings);
+  for (const fieldName of dirtyFields) {
+    if (fieldName === "eqBands") {
+      rebased.eqBands = { ...current.eqBands };
+      continue;
+    }
+    assignField(rebased, fieldName, current[fieldName]);
+  }
+  return rebased;
+};
+
 export const readAudioEngineFormScalarValue = <K extends ScalarFormField>(
   settings: PersistentSettings | null | undefined,
   fieldName: K
@@ -409,7 +427,7 @@ export const AUDIO_ENGINE_TEXT_ITEMS = {
       kind: "rangedNumber",
       fieldLabelKey: "settings.field.volume",
       min: 0,
-      max: 4
+      max: 1
     }
   },
   upsampling: {
@@ -463,7 +481,7 @@ export const AUDIO_ENGINE_TEXT_ITEMS = {
       kind: "rangedNumber",
       fieldLabelKey: "settings.field.saturationDrive",
       min: 0,
-      max: 4
+      max: 2
     },
     disabledWhen: "saturationDisabled"
   },

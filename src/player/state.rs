@@ -2,6 +2,7 @@
 //!
 //! Contains shared state, commands, and device info.
 
+use crate::config::ResampleQuality;
 use crate::processor::{DspChain, NoiseShaperCurve};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use crossbeam::queue::ArrayQueue;
@@ -598,6 +599,9 @@ pub struct SharedState {
 
     // Output format info (Defect 37 fix: for NoiseShaper bit depth)
     pub output_bits: std::sync::atomic::AtomicU32,
+    /// Resampler quality consumed when a new output stream is built. This is
+    /// an actuator cache, not a persistence source of truth.
+    resample_quality: AtomicU8,
 
     // H-channel fix: signal callback to swap in a prebuilt DspChain when format changes
     pub dsp_needs_rebuild: AtomicBool,
@@ -756,11 +760,21 @@ impl SharedState {
             load_generation: AtomicU64::new(0),
             preload_generation: AtomicU64::new(0),
             output_bits: std::sync::atomic::AtomicU32::new(24), // Default 24-bit
+            resample_quality: AtomicU8::new(resample_quality_to_u8(ResampleQuality::default())),
             dsp_needs_rebuild: AtomicBool::new(false),
             pending_dsp_chain: ArrayQueue::new(1),
             retired_resources: ArrayQueue::new(256),
             retired_resource_drop_in_rt_count: AtomicU64::new(0),
         }
+    }
+
+    pub fn set_resample_quality(&self, quality: ResampleQuality) {
+        self.resample_quality
+            .store(resample_quality_to_u8(quality), Ordering::Release);
+    }
+
+    pub fn resample_quality(&self) -> ResampleQuality {
+        resample_quality_from_u8(self.resample_quality.load(Ordering::Acquire))
     }
 
     /// Hand a heap-backed resource to the non-realtime drop queue.
@@ -1615,6 +1629,24 @@ impl SharedState {
 
     pub fn set_shuffle_mode(&self, mode: ShuffleMode) {
         self.shuffle_mode.store(mode as u8, Ordering::Release);
+    }
+}
+
+fn resample_quality_to_u8(quality: ResampleQuality) -> u8 {
+    match quality {
+        ResampleQuality::Low => 0,
+        ResampleQuality::Standard => 1,
+        ResampleQuality::High => 2,
+        ResampleQuality::UltraHigh => 3,
+    }
+}
+
+fn resample_quality_from_u8(value: u8) -> ResampleQuality {
+    match value {
+        0 => ResampleQuality::Low,
+        1 => ResampleQuality::Standard,
+        3 => ResampleQuality::UltraHigh,
+        _ => ResampleQuality::High,
     }
 }
 

@@ -970,7 +970,9 @@ mod tests {
             ncm_client: Arc::new(ncm_api_rs::create_client(None)),
             repo: crate::server::repository::AsyncRepo::new(Arc::clone(&app_db)),
             app_db,
-            settings_manager: create_settings_manager(&runtime_paths.settings_path),
+            audio_settings: crate::audio_settings::AudioSettingsCoordinator::new(
+                create_settings_manager(&runtime_paths.settings_path),
+            ),
             analysis: AnalysisState {
                 loudness_db: None,
                 analysis_runtime: Arc::new(AnalysisRuntime::new(

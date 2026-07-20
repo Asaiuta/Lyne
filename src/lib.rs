@@ -4,6 +4,7 @@
 //! or communication with the JS frontend via the server module.
 
 pub mod app_database;
+pub mod audio_settings;
 pub mod config;
 pub mod diagnostics;
 pub mod metadata;

@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
-use std::fs;
-use std::path::Path;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use audio_engine_core::config::{
     CrossfeedConfig, DitherConfig, DynamicLoudnessConfig, LoudnessConfig, NormalizationMode,
@@ -13,6 +15,8 @@ pub const ENV_AUDIO_CACHE_MAX_BYTES: &str = "AUDIO_CACHE_MAX_BYTES";
 pub const DEFAULT_CACHE_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 pub const DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB: u64 = 256;
 pub const MAX_STREAMING_PCM_WINDOW_LIMIT_MIB: u64 = 4096;
+
+static SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn env_flag(name: &str, default: bool) -> bool {
     env::var(name)
@@ -214,15 +218,10 @@ impl EngineSettings {
             })?;
         }
 
-        let content = serde_json::to_string_pretty(&self.clone().normalized())
+        let mut content = serde_json::to_string_pretty(&self.clone().normalized())
             .map_err(|e| format!("Failed to serialize engine settings: {}", e))?;
-        fs::write(path, content).map_err(|e| {
-            format!(
-                "Failed to write engine settings '{}': {}",
-                path.display(),
-                e
-            )
-        })
+        content.push('\n');
+        atomic_write_settings(path, content.as_bytes())
     }
 
     pub fn from_env_defaults() -> Self {
@@ -470,6 +469,7 @@ pub struct EngineSettingsUpdate {
     /// - `None`: leave existing device selection unchanged
     /// - `Some(Some(id))`: select the given output device
     /// - `Some(None)`: clear the current device selection
+    #[serde(default, deserialize_with = "deserialize_present_optional")]
     pub device_id: Option<Option<usize>>,
     pub exclusive_mode: Option<bool>,
     pub eq_type: Option<String>,
@@ -493,6 +493,7 @@ pub struct EngineSettingsUpdate {
     /// - `None`: leave current target samplerate unchanged
     /// - `Some(Some(rate))`: set an explicit target samplerate
     /// - `Some(None)`: clear the target and follow source / device defaults
+    #[serde(default, deserialize_with = "deserialize_present_optional")]
     pub target_samplerate: Option<Option<u32>>,
     pub resample_quality: Option<String>,
     pub use_cache: Option<bool>,
@@ -501,6 +502,166 @@ pub struct EngineSettingsUpdate {
     #[serde(alias = "streaming_full_buffer_limit_mib")]
     pub streaming_pcm_window_limit_mib: Option<u64>,
     pub use_next_prefetch: Option<bool>,
+}
+
+impl EngineSettingsUpdate {
+    pub fn changed_fields(&self) -> Vec<&'static str> {
+        let mut fields = Vec::with_capacity(27);
+        macro_rules! push_if_present {
+            ($field:ident) => {
+                if self.$field.is_some() {
+                    fields.push(stringify!($field));
+                }
+            };
+        }
+
+        push_if_present!(volume);
+        push_if_present!(device_id);
+        push_if_present!(exclusive_mode);
+        push_if_present!(eq_type);
+        push_if_present!(eq_bands);
+        push_if_present!(fir_taps);
+        push_if_present!(dither_enabled);
+        push_if_present!(output_bits);
+        push_if_present!(noise_shaper_curve);
+        push_if_present!(loudness_enabled);
+        push_if_present!(loudness_mode);
+        push_if_present!(target_lufs);
+        push_if_present!(preamp_db);
+        push_if_present!(saturation_enabled);
+        push_if_present!(saturation_drive);
+        push_if_present!(saturation_mix);
+        push_if_present!(crossfeed_enabled);
+        push_if_present!(crossfeed_mix);
+        push_if_present!(dynamic_loudness_enabled);
+        push_if_present!(dynamic_loudness_strength);
+        push_if_present!(target_samplerate);
+        push_if_present!(resample_quality);
+        push_if_present!(use_cache);
+        push_if_present!(preemptive_resample);
+        push_if_present!(streaming_first_buffer);
+        push_if_present!(streaming_pcm_window_limit_mib);
+        push_if_present!(use_next_prefetch);
+        fields
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.changed_fields().is_empty()
+    }
+}
+
+fn deserialize_present_optional<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+fn atomic_write_settings(path: &Path, content: &[u8]) -> Result<(), String> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let temp_path = unique_settings_temp_path(path, parent);
+    let write_result = (|| -> Result<(), String> {
+        let mut temp = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .map_err(|e| {
+                format!(
+                    "Failed to create temporary settings file '{}': {}",
+                    temp_path.display(),
+                    e
+                )
+            })?;
+        temp.write_all(content).map_err(|e| {
+            format!(
+                "Failed to write temporary settings file '{}': {}",
+                temp_path.display(),
+                e
+            )
+        })?;
+        temp.sync_all().map_err(|e| {
+            format!(
+                "Failed to flush temporary settings file '{}': {}",
+                temp_path.display(),
+                e
+            )
+        })?;
+        drop(temp);
+        replace_settings_file(&temp_path, path).map_err(|e| {
+            format!(
+                "Failed to replace engine settings '{}' with '{}': {}",
+                path.display(),
+                temp_path.display(),
+                e
+            )
+        })?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+fn unique_settings_temp_path(path: &Path, parent: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("settings.json");
+    let nonce = SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(
+        ".{}.{}.{}.tmp",
+        file_name,
+        std::process::id(),
+        nonce
+    ))
+}
+
+#[cfg(not(windows))]
+fn replace_settings_file(temp_path: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(temp_path, destination)
+}
+
+#[cfg(windows)]
+fn replace_settings_file(temp_path: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        REPLACEFILE_WRITE_THROUGH,
+    };
+
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    let replacement = wide(temp_path);
+    let target = wide(destination);
+    let succeeded = unsafe {
+        if destination.exists() {
+            ReplaceFileW(
+                target.as_ptr(),
+                replacement.as_ptr(),
+                std::ptr::null(),
+                REPLACEFILE_WRITE_THROUGH,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        } else {
+            MoveFileExW(
+                replacement.as_ptr(),
+                target.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        }
+    };
+
+    if succeeded == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn default_streaming_pcm_window_limit_mib() -> u64 {
@@ -754,6 +915,26 @@ mod tests {
 
         assert!((loaded.volume - 0.42).abs() < f32::EPSILON);
         assert!(loaded.dynamic_loudness.enabled);
+    }
+
+    #[test]
+    fn engine_settings_update_distinguishes_missing_null_and_value() {
+        let missing: EngineSettingsUpdate =
+            serde_json::from_str("{}").expect("missing patch should parse");
+        assert_eq!(missing.device_id, None);
+        assert_eq!(missing.target_samplerate, None);
+
+        let cleared: EngineSettingsUpdate =
+            serde_json::from_str(r#"{"device_id":null,"target_samplerate":null}"#)
+                .expect("null patch should parse");
+        assert_eq!(cleared.device_id, Some(None));
+        assert_eq!(cleared.target_samplerate, Some(None));
+
+        let selected: EngineSettingsUpdate =
+            serde_json::from_str(r#"{"device_id":3,"target_samplerate":96000}"#)
+                .expect("value patch should parse");
+        assert_eq!(selected.device_id, Some(Some(3)));
+        assert_eq!(selected.target_samplerate, Some(Some(96_000)));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSettingsApiClient } from "./settings";
+import { AudioSettingsConflictError, createSettingsApiClient } from "./settings";
+import { ApiHttpError } from "./transport";
 import type { PersistentSettings } from "./types";
 
 const persistentSettingsFixture = (
@@ -102,4 +103,108 @@ test("settings API saves streaming buffer updates", async () => {
       streaming_pcm_window_limit_mib: 0
     }
   });
+});
+
+test("settings API parses a versioned desired/effective snapshot", async () => {
+  const settings = persistentSettingsFixture({ volume: 0.35 });
+  const client = createSettingsApiClient({
+    requestJson: async () => ({
+      status: "success",
+      snapshot: {
+        revision: 4,
+        state_revision: 6,
+        desired: settings,
+        effective: settings,
+        apply_status: {
+          volume: { state: "applied", revision: 4 }
+        }
+      }
+    })
+  });
+
+  const snapshot = await client.getAudioSettings();
+
+  assert.equal(snapshot.revision, 4);
+  assert.equal(snapshot.state_revision, 6);
+  assert.equal(snapshot.desired.volume, 0.35);
+  assert.equal(snapshot.apply_status.volume?.state, "applied");
+  assert.equal(snapshot.active_preview, null);
+});
+
+test("settings API sends preview and commit revision contracts", async () => {
+  const requests: Array<{ path: string; body: unknown }> = [];
+  const settings = persistentSettingsFixture();
+  const snapshot = {
+    revision: 3,
+    state_revision: 5,
+    desired: settings,
+    effective: settings,
+    apply_status: {}
+  };
+  const client = createSettingsApiClient({
+    requestJson: async (path, init) => {
+      requests.push({ path, body: JSON.parse(String(init?.body ?? "{}")) });
+      if (path.endsWith("/preview")) {
+        return {
+          status: "success",
+          accepted: true,
+          session_id: "playerbar",
+          seq: 7,
+          snapshot
+        };
+      }
+      return { status: "success", snapshot };
+    }
+  });
+
+  await client.previewAudioSettings("playerbar", 7, { volume: 0.2 });
+  await client.commitAudioSettings(2, { volume: 0.2 }, "playerbar");
+
+  assert.deepEqual(requests, [
+    {
+      path: "/audio_settings/preview",
+      body: { session_id: "playerbar", seq: 7, settings: { volume: 0.2 } }
+    },
+    {
+      path: "/audio_settings/commit",
+      body: {
+        base_revision: 2,
+        settings: { volume: 0.2 },
+        preview_session_id: "playerbar"
+      }
+    }
+  ]);
+});
+
+test("settings API preserves the current snapshot on an HTTP conflict", async () => {
+  const current = persistentSettingsFixture({ volume: 0.35 });
+  const client = createSettingsApiClient({
+    requestJson: async () => {
+      throw new ApiHttpError(409, "volume conflict", {
+        status: "error",
+        message: "volume conflict",
+        conflicting_fields: ["volume"],
+        snapshot: {
+          revision: 5,
+          state_revision: 8,
+          desired: current,
+          effective: current,
+          apply_status: {}
+        }
+      });
+    }
+  });
+
+  let captured: unknown = null;
+  try {
+    await client.commitAudioSettings(3, { volume: 0.8 });
+  } catch (error) {
+    captured = error;
+  }
+
+  assert.equal(captured instanceof AudioSettingsConflictError, true);
+  const conflict = captured as AudioSettingsConflictError;
+  assert.deepEqual(conflict.conflictingFields, ["volume"]);
+  assert.equal(conflict.snapshot.revision, 5);
+  assert.equal(conflict.snapshot.desired.volume, 0.35);
 });

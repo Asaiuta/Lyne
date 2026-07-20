@@ -17,6 +17,7 @@ use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
 use crate::app_database::{AppDatabase, PlaybackRuntimeSnapshot};
+use crate::audio_settings::AudioSettingsCoordinator;
 use crate::config::ResolvedConfig;
 use crate::player::AudioPlayer;
 pub(crate) use crate::player::PlayerState;
@@ -41,8 +42,8 @@ pub struct AppState {
     /// blocking thread pool. Shares the same `Arc<AppDatabase>` (no extra
     /// connection). Handlers should prefer this over `app_db` in request paths.
     pub repo: repository::AsyncRepo,
-    /// Persistent settings manager
-    pub settings_manager: SharedSettingsManager,
+    /// Single writer for persistent and runtime audio settings.
+    pub audio_settings: AudioSettingsCoordinator,
     /// Analysis and scan job state.
     pub analysis: AnalysisState,
     /// Playback-specific domain state.
@@ -228,8 +229,8 @@ pub mod auth;
 pub(crate) use path_security::validate_path;
 pub(crate) use request_types::*;
 pub(crate) use state_helpers::{
-    apply_settings_to_player, build_runtime_snapshot, enrich_player_state, get_player_state,
-    record_webdav_probe, restore_domain_state,
+    build_runtime_snapshot, enrich_player_state, get_player_state, record_webdav_probe,
+    restore_domain_state,
 };
 
 pub(crate) const ANALYSIS_TIMEOUT_JOIN_GRACE_MS: u64 = 500;
@@ -319,7 +320,9 @@ pub(crate) fn test_app_state_for_analysis(
         ncm_client: Arc::new(ncm_api_rs::create_client(None)),
         repo: repository::AsyncRepo::new(Arc::clone(&app_db)),
         app_db,
-        settings_manager: crate::settings::create_settings_manager(&runtime_paths.settings_path),
+        audio_settings: AudioSettingsCoordinator::new(crate::settings::create_settings_manager(
+            &runtime_paths.settings_path,
+        )),
         analysis: AnalysisState {
             loudness_db: None,
             analysis_runtime: Arc::new(AnalysisRuntime::new(
@@ -405,9 +408,17 @@ pub async fn run_server(
         shutdown_handle: Mutex::new(None),
     });
 
+    let migration_webdav_fallback = config
+        .server
+        .webdav_fallback
+        .as_ref()
+        .map(|fallback| fallback.base_url.as_str());
     let app_db = Arc::new(
-        AppDatabase::open(&runtime_paths.app_db_path)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
+        AppDatabase::open_with_webdav_fallback(
+            &runtime_paths.app_db_path,
+            migration_webdav_fallback,
+        )
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
     );
 
     // Load WebDAV config from domain database first, then env fallback.
@@ -493,7 +504,7 @@ pub async fn run_server(
         ncm_client: Arc::clone(&ncm_client),
         repo: repository::AsyncRepo::new(Arc::clone(&app_db)),
         app_db,
-        settings_manager,
+        audio_settings: AudioSettingsCoordinator::new(settings_manager),
         analysis: AnalysisState {
             loudness_db,
             analysis_runtime: Arc::new(AnalysisRuntime::new(analysis_runtime)),
@@ -529,6 +540,8 @@ pub async fn run_server(
     restore_domain_state(&state);
     let playback_supervisor = playback::spawn_playback_supervisor(&state);
     let websocket_event_coordinator = ws_handlers::spawn_websocket_event_coordinator(&state);
+    let audio_settings_preview_supervisor =
+        settings_handlers::spawn_audio_settings_preview_supervisor(&state);
 
     log::info!("Starting Audio Engine on http://127.0.0.1:{}", port);
     log::info!("Allowed UI origins: {}", allowed_origins.join(", "));
@@ -632,6 +645,7 @@ pub async fn run_server(
     let server_result = server.await;
     playback_supervisor.abort();
     websocket_event_coordinator.abort();
+    audio_settings_preview_supervisor.abort();
     drop(state);
     drop(server_control);
     server_result

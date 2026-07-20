@@ -1,4 +1,14 @@
-import type { PersistentSettings, PersistentSettingsUpdate } from "./types";
+import type {
+  ActiveAudioSettingsPreview,
+  AudioSettingApplyStatus,
+  AudioSettingsApplyState,
+  AudioSettingsPreviewPatch,
+  AudioSettingsPreviewResult,
+  AudioSettingsSnapshot,
+  PersistentSettings,
+  PersistentSettingsUpdate
+} from "./types";
+import { ApiHttpError } from "./transport";
 import {
   isBoolean,
   isInteger,
@@ -11,6 +21,30 @@ import {
 export interface SettingsApiClient {
   getSettings: () => Promise<PersistentSettings>;
   saveSettings: (settings: PersistentSettingsUpdate) => Promise<void>;
+  getAudioSettings: () => Promise<AudioSettingsSnapshot>;
+  previewAudioSettings: (
+    sessionId: string,
+    seq: number,
+    settings: AudioSettingsPreviewPatch
+  ) => Promise<AudioSettingsPreviewResult>;
+  commitAudioSettings: (
+    baseRevision: number,
+    settings: PersistentSettingsUpdate,
+    previewSessionId?: string
+  ) => Promise<AudioSettingsSnapshot>;
+  cancelAudioSettingsPreview: (sessionId: string) => Promise<AudioSettingsSnapshot>;
+}
+
+export class AudioSettingsConflictError extends Error {
+  readonly conflictingFields: readonly string[];
+  readonly snapshot: AudioSettingsSnapshot;
+
+  constructor(message: string, conflictingFields: readonly string[], snapshot: AudioSettingsSnapshot) {
+    super(message);
+    this.name = "AudioSettingsConflictError";
+    this.conflictingFields = conflictingFields;
+    this.snapshot = snapshot;
+  }
 }
 
 export type SettingsRequestJson = (path: string, init?: RequestInit) => Promise<unknown>;
@@ -87,7 +121,7 @@ const persistentSettingsStringFields = [
   "resample_quality"
 ] as const;
 
-const parsePersistentSettings = (value: unknown): PersistentSettings | null => {
+export const parsePersistentSettings = (value: unknown): PersistentSettings | null => {
   if (!isRecord(value)) {
     return null;
   }
@@ -138,6 +172,111 @@ const parsePersistentSettings = (value: unknown): PersistentSettings | null => {
   };
 };
 
+const AUDIO_SETTINGS_APPLY_STATES = [
+  "applied",
+  "next_track",
+  "restart_output",
+  "failed"
+] as const satisfies readonly AudioSettingsApplyState[];
+
+const parseApplyStatus = (value: unknown): AudioSettingApplyStatus | null => {
+  if (!isRecord(value) || !AUDIO_SETTINGS_APPLY_STATES.includes(value.state as AudioSettingsApplyState)) {
+    return null;
+  }
+  if (!isInteger(value.revision)) {
+    return null;
+  }
+  if (value.message !== undefined && value.message !== null && !isString(value.message)) {
+    return null;
+  }
+  return {
+    state: value.state as AudioSettingsApplyState,
+    revision: value.revision,
+    message: typeof value.message === "string" ? value.message : null
+  };
+};
+
+const parseActivePreview = (value: unknown): ActiveAudioSettingsPreview | null => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!isRecord(value) || !isString(value.session_id) || !isInteger(value.seq)) {
+    throw new Error("Invalid active audio settings preview");
+  }
+  const volume = value.volume === undefined || value.volume === null ? null : value.volume;
+  const eqBands = value.eq_bands === undefined || value.eq_bands === null ? null : value.eq_bands;
+  if ((volume !== null && !isNumber(volume)) || (eqBands !== null && !isNumberRecord(eqBands))) {
+    throw new Error("Invalid active audio settings preview values");
+  }
+  return {
+    session_id: value.session_id,
+    seq: value.seq,
+    volume,
+    eq_bands: eqBands
+  };
+};
+
+export const parseAudioSettingsSnapshot = (value: unknown): AudioSettingsSnapshot => {
+  if (
+    !isRecord(value) ||
+    !isInteger(value.revision) ||
+    !isInteger(value.state_revision) ||
+    !isRecord(value.apply_status)
+  ) {
+    throw new Error("Invalid audio settings snapshot");
+  }
+  const desired = parsePersistentSettings(value.desired);
+  const effective = parsePersistentSettings(value.effective);
+  if (!desired || !effective) {
+    throw new Error("Invalid audio settings snapshot payload");
+  }
+  const applyStatus: Record<string, AudioSettingApplyStatus> = {};
+  for (const [field, rawStatus] of Object.entries(value.apply_status)) {
+    const status = parseApplyStatus(rawStatus);
+    if (!status) {
+      throw new Error(`Invalid audio settings apply status: ${field}`);
+    }
+    applyStatus[field] = status;
+  }
+  return {
+    revision: value.revision,
+    state_revision: value.state_revision,
+    desired,
+    effective,
+    apply_status: applyStatus,
+    active_preview: parseActivePreview(value.active_preview)
+  };
+};
+
+const parseSnapshotResponse = (value: unknown): AudioSettingsSnapshot => {
+  if (!isRecord(value)) {
+    throw new Error("Invalid audio settings response shape");
+  }
+  if (parseStatus(value.status) === "error") {
+    throw new Error(typeof value.message === "string" ? value.message : "Audio settings request failed");
+  }
+  return parseAudioSettingsSnapshot(value.snapshot);
+};
+
+const parseConflictResponse = (value: unknown): AudioSettingsConflictError | null => {
+  if (!isRecord(value) || !Array.isArray(value.conflicting_fields)) {
+    return null;
+  }
+  const conflictingFields = value.conflicting_fields.filter(isString);
+  if (conflictingFields.length !== value.conflicting_fields.length) {
+    return null;
+  }
+  try {
+    return new AudioSettingsConflictError(
+      typeof value.message === "string" ? value.message : "Audio settings conflict",
+      conflictingFields,
+      parseAudioSettingsSnapshot(value.snapshot)
+    );
+  } catch {
+    return null;
+  }
+};
+
 const parseSettingsResponse = (value: unknown): PersistentSettings => {
   if (!isRecord(value)) {
     throw new Error("Invalid settings response shape");
@@ -170,5 +309,58 @@ export const createSettingsApiClient = (transport: SettingsApiTransport): Settin
     if (response.status === "error") {
       throw new Error(response.message ?? "Failed to save settings");
     }
-  }
+  },
+  getAudioSettings: async () =>
+    parseSnapshotResponse(await transport.requestJson("/audio_settings")),
+  previewAudioSettings: async (sessionId, seq, settings) => {
+    const value = await transport.requestJson(
+      "/audio_settings/preview",
+      postJson({ session_id: sessionId, seq, settings })
+    );
+    if (!isRecord(value) || parseStatus(value.status) === "error") {
+      throw new Error(
+        isRecord(value) && typeof value.message === "string"
+          ? value.message
+          : "Failed to preview audio settings"
+      );
+    }
+    if (!isBoolean(value.accepted) || !isString(value.session_id) || !isInteger(value.seq)) {
+      throw new Error("Invalid audio settings preview response");
+    }
+    return {
+      accepted: value.accepted,
+      sessionId: value.session_id,
+      seq: value.seq,
+      snapshot: parseAudioSettingsSnapshot(value.snapshot)
+    };
+  },
+  commitAudioSettings: async (baseRevision, settings, previewSessionId) => {
+    try {
+      return parseSnapshotResponse(
+        await transport.requestJson(
+          "/audio_settings/commit",
+          postJson({
+            base_revision: baseRevision,
+            settings,
+            ...(previewSessionId ? { preview_session_id: previewSessionId } : {})
+          })
+        )
+      );
+    } catch (error) {
+      if (error instanceof ApiHttpError && error.status === 409) {
+        const conflict = parseConflictResponse(error.body);
+        if (conflict) {
+          throw conflict;
+        }
+      }
+      throw error;
+    }
+  },
+  cancelAudioSettingsPreview: async (sessionId) =>
+    parseSnapshotResponse(
+      await transport.requestJson(
+        "/audio_settings/cancel",
+        postJson({ session_id: sessionId })
+      )
+    )
 });

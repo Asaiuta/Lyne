@@ -1,12 +1,7 @@
 use super::*;
 use crate::config::normalize_eq_bands;
-use crate::server::state_helpers::eq_band_name_to_index;
 use actix_web::{web, HttpResponse};
 use std::sync::Arc;
-
-fn not_implemented_error(err: &str) -> bool {
-    err.to_ascii_lowercase().contains("not yet implemented")
-}
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/set_eq", web::post().to(set_eq))
@@ -35,34 +30,6 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         );
 }
 
-fn persist_dsp_config_payload(
-    data: &web::Data<Arc<AppState>>,
-    key: &str,
-    payload: &serde_json::Value,
-) {
-    if let Err(e) = data.app_db.upsert_dsp_config(key, payload) {
-        log::warn!("Failed to persist {} config: {}", key, e);
-    }
-}
-
-fn eq_config_payload(player: &AudioPlayer) -> serde_json::Value {
-    let eq_snapshot = player.lockfree_eq_params.read();
-    serde_json::json!({
-        "eq_type": player.shared_state().eq_type.read().clone(),
-        "enabled": eq_snapshot.enabled,
-        "gains": eq_snapshot.gains,
-        "fir_enabled": player.is_fir_eq_enabled(),
-    })
-}
-
-fn noise_shaper_config_payload(player: &AudioPlayer) -> serde_json::Value {
-    serde_json::json!({
-        "curve": player.get_noise_shaper_curve(),
-        "output_bits": player.get_output_bits(),
-        "dither_enabled": player.dither_enabled
-    })
-}
-
 async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -> HttpResponse {
     let normalized_bands = body.bands.as_ref().map(|bands| {
         normalize_eq_bands(bands.clone(), |unknown| {
@@ -70,55 +37,29 @@ async fn set_eq(data: web::Data<Arc<AppState>>, body: web::Json<SetEqRequest>) -
         })
     });
 
-    let message = {
-        let mut player = data.player.lock();
-        let is_fir = player.is_fir_eq_enabled();
-
-        if is_fir {
-            if let Some(enabled) = body.enabled {
-                if !enabled {
-                    player.disable_fir_eq();
-                }
-            }
-
-            if let Some(ref bands) = normalized_bands {
-                let mut gains = [0.0_f64; 10];
-                let mut any_set = false;
-
-                for (name, &gain) in bands {
-                    if let Some(idx) = eq_band_name_to_index(name.as_str()) {
-                        gains[idx] = gain;
-                        any_set = true;
-                    }
-                }
-
-                if any_set {
-                    if let Err(e) = player.set_fir_bands(&gains) {
-                        return internal_server_error_response(e);
-                    }
-                }
-            }
-
-            "FIR EQ updated"
-        } else {
-            if let Some(enabled) = body.enabled {
-                player.lockfree_eq_params.set_enabled(enabled);
-            }
-
-            if let Some(ref bands) = normalized_bands {
-                for (name, &gain) in bands {
-                    if let Some(idx) = eq_band_name_to_index(name.as_str()) {
-                        player.lockfree_eq_params.set_band_gain(idx, gain);
-                    }
-                }
-            }
-
-            *player.shared_state().eq_type.write() = "IIR".to_string();
-            "EQ updated"
+    if let Some(bands) = normalized_bands {
+        let update = crate::config::EngineSettingsUpdate {
+            eq_bands: Some(bands),
+            ..crate::config::EngineSettingsUpdate::default()
+        };
+        if let Err(error) = crate::server::settings_handlers::commit_settings_update(&data, update)
+        {
+            return crate::server::settings_handlers::audio_settings_error_response(error);
         }
-    };
+    }
 
-    success_response(message)
+    if let Some(enabled) = body.enabled {
+        let mut player = data.player.lock();
+        if player.is_fir_eq_enabled() {
+            if !enabled {
+                player.disable_fir_eq();
+            }
+        } else {
+            player.lockfree_eq_params.set_enabled(enabled);
+        }
+    }
+
+    success_response("EQ updated")
 }
 
 async fn set_eq_type(
@@ -126,48 +67,23 @@ async fn set_eq_type(
     body: web::Json<SetEqTypeRequest>,
 ) -> HttpResponse {
     let eq_type_upper = body.eq_type.to_uppercase();
-
-    match eq_type_upper.as_str() {
-        "IIR" => {
-            let payload = {
-                let mut player = data.player.lock();
-                player.disable_fir_eq();
-                *player.shared_state().eq_type.write() = "IIR".to_string();
-                eq_config_payload(&player)
-            };
-            persist_dsp_config_payload(&data, "eq", &payload);
-            HttpResponse::Ok().json(ApiResponse::success("EQ type set to IIR"))
-        }
-        "FIR" => {
-            let num_taps = body.fir_taps.unwrap_or(1023);
-            let payload = {
-                let mut player = data.player.lock();
-                match player.enable_fir_eq(num_taps) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        return if not_implemented_error(&e) {
-                            HttpResponse::NotImplemented().json(ApiResponse::error(&e))
-                        } else {
-                            internal_server_error_response(e)
-                        };
-                    }
-                }
-
-                {
-                    *player.shared_state().eq_type.write() = "FIR".to_string();
-                    eq_config_payload(&player)
-                }
-            };
-            persist_dsp_config_payload(&data, "eq", &payload);
-            HttpResponse::Ok().json(ApiResponse::success(&format!(
-                "FIR EQ enabled with {} taps",
-                num_taps
-            )))
-        }
-        _ => bad_request_response(format!(
+    if !matches!(eq_type_upper.as_str(), "IIR" | "FIR") {
+        return bad_request_response(format!(
             "Unknown EQ type: '{}'. Supported types: IIR, FIR",
             body.eq_type
-        )),
+        ));
+    }
+    let update = crate::config::EngineSettingsUpdate {
+        eq_type: Some(eq_type_upper.clone()),
+        fir_taps: (eq_type_upper == "FIR").then_some(body.fir_taps.unwrap_or(1023)),
+        ..crate::config::EngineSettingsUpdate::default()
+    };
+    match crate::server::settings_handlers::commit_settings_update(&data, update) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::success(format!(
+            "EQ type set to {}",
+            eq_type_upper
+        ))),
+        Err(error) => crate::server::settings_handlers::audio_settings_error_response(error),
     }
 }
 
@@ -175,17 +91,18 @@ async fn configure_optimizations(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ConfigureOptimizationsRequest>,
 ) -> HttpResponse {
-    {
-        let mut player = data.player.lock();
-
-        if let Some(dither) = body.dither_enabled {
-            player.dither_enabled = dither;
-            player.lockfree_noise_shaper_params.set_enabled(dither);
+    if let Some(dither_enabled) = body.dither_enabled {
+        let update = crate::config::EngineSettingsUpdate {
+            dither_enabled: Some(dither_enabled),
+            ..crate::config::EngineSettingsUpdate::default()
+        };
+        if let Err(error) = crate::server::settings_handlers::commit_settings_update(&data, update)
+        {
+            return crate::server::settings_handlers::audio_settings_error_response(error);
         }
-
-        if let Some(rg) = body.replaygain_enabled {
-            player.replaygain_enabled = rg;
-        }
+    }
+    if let Some(replaygain_enabled) = body.replaygain_enabled {
+        data.player.lock().replaygain_enabled = replaygain_enabled;
     }
     success_response("Optimizations updated")
 }
@@ -194,14 +111,15 @@ async fn set_crossfeed(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetCrossfeedRequest>,
 ) -> HttpResponse {
-    {
-        let player = data.player.lock();
-
-        if let Some(enabled) = body.enabled {
-            player.set_crossfeed_enabled(enabled);
-        }
-        if let Some(mix) = body.mix {
-            player.set_crossfeed_mix(mix);
+    let update = crate::config::EngineSettingsUpdate {
+        crossfeed_enabled: body.enabled,
+        crossfeed_mix: body.mix,
+        ..crate::config::EngineSettingsUpdate::default()
+    };
+    if !update.is_empty() {
+        if let Err(error) = crate::server::settings_handlers::commit_settings_update(&data, update)
+        {
+            return crate::server::settings_handlers::audio_settings_error_response(error);
         }
     }
     success_response("Crossfeed updated")
@@ -224,20 +142,23 @@ async fn set_saturation(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetSaturationRequest>,
 ) -> HttpResponse {
+    let update = crate::config::EngineSettingsUpdate {
+        saturation_enabled: body.enabled,
+        saturation_drive: body.drive,
+        saturation_mix: body.mix,
+        ..crate::config::EngineSettingsUpdate::default()
+    };
+    if !update.is_empty() {
+        if let Err(error) = crate::server::settings_handlers::commit_settings_update(&data, update)
+        {
+            return crate::server::settings_handlers::audio_settings_error_response(error);
+        }
+    }
+
     {
         let player = data.player.lock();
-
-        if let Some(enabled) = body.enabled {
-            player.set_saturation_enabled(enabled);
-        }
-        if let Some(drive) = body.drive {
-            player.set_saturation_drive(drive);
-        }
         if let Some(threshold) = body.threshold {
             player.lockfree_saturation_params.set_threshold(threshold);
-        }
-        if let Some(mix) = body.mix {
-            player.set_saturation_mix(mix);
         }
         if let Some(input_gain_db) = body.input_gain_db {
             player
@@ -277,17 +198,20 @@ async fn set_dynamic_loudness(
     data: web::Data<Arc<AppState>>,
     body: web::Json<SetDynamicLoudnessRequest>,
 ) -> HttpResponse {
-    {
-        let player = data.player.lock();
-
-        if let Some(enabled) = body.enabled {
-            player.set_dynamic_loudness_enabled(enabled);
+    if let Some(strength) = body.strength {
+        if !(0.0..=1.0).contains(&strength) {
+            return bad_request_response("Strength must be between 0.0 and 1.0");
         }
-        if let Some(strength) = body.strength {
-            if !(0.0..=1.0).contains(&strength) {
-                return bad_request_response("Strength must be between 0.0 and 1.0");
-            }
-            player.set_dynamic_loudness_strength(strength);
+    }
+    let update = crate::config::EngineSettingsUpdate {
+        dynamic_loudness_enabled: body.enabled,
+        dynamic_loudness_strength: body.strength,
+        ..crate::config::EngineSettingsUpdate::default()
+    };
+    if !update.is_empty() {
+        if let Err(error) = crate::server::settings_handlers::commit_settings_update(&data, update)
+        {
+            return crate::server::settings_handlers::audio_settings_error_response(error);
         }
     }
     success_response("Dynamic Loudness updated")
@@ -325,19 +249,17 @@ async fn set_noise_shaper_curve(
         }
     };
 
-    let (payload, enabled, bits) = {
-        let player = data.player.lock();
-        if let Err(e) = player.set_noise_shaper_curve(curve) {
-            return internal_server_error_response(e);
-        }
-        (
-            noise_shaper_config_payload(&player),
-            player.dither_enabled,
-            player.get_output_bits(),
-        )
+    let update = crate::config::EngineSettingsUpdate {
+        noise_shaper_curve: Some(format!("{:?}", curve)),
+        ..crate::config::EngineSettingsUpdate::default()
     };
-
-    persist_dsp_config_payload(&data, "noise_shaper", &payload);
+    if let Err(error) = crate::server::settings_handlers::commit_settings_update(&data, update) {
+        return crate::server::settings_handlers::audio_settings_error_response(error);
+    }
+    let (enabled, bits) = {
+        let player = data.player.lock();
+        (player.dither_enabled, player.get_output_bits())
+    };
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
         "message": format!("Noise shaper curve set to {:?}", curve),
@@ -371,13 +293,13 @@ async fn configure_output_bits(
         return bad_request_response("Invalid bit depth. Supported: 16, 24, 32");
     }
 
-    let payload = {
-        let player = data.player.lock();
-        player.set_output_bits(body.bits);
-        noise_shaper_config_payload(&player)
+    let update = crate::config::EngineSettingsUpdate {
+        output_bits: Some(body.bits),
+        ..crate::config::EngineSettingsUpdate::default()
     };
-
-    persist_dsp_config_payload(&data, "noise_shaper", &payload);
+    if let Err(error) = crate::server::settings_handlers::commit_settings_update(&data, update) {
+        return crate::server::settings_handlers::audio_settings_error_response(error);
+    }
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
         "message": format!("Output bit depth set to {} bits", body.bits)

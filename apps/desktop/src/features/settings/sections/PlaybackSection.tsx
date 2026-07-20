@@ -1,5 +1,5 @@
-import { Show, createMemo, createSignal, onMount } from "solid-js";
-import { createApiClient } from "../../../shared/api/client";
+import { Show, createEffect, createMemo, createSignal } from "solid-js";
+import { usePlayback } from "../../../app/PlaybackContext";
 import type { TranslationKey } from "../../../shared/i18n";
 import { useTranslation } from "../../../shared/i18n";
 import {
@@ -20,8 +20,6 @@ import {
 import { settingsSectionClass } from "../components/SettingItem";
 import { SettingGroup } from "../components/SettingGroup";
 
-const api = createApiClient();
-
 interface PlaybackSectionProps {
   highlightId: string | null;
 }
@@ -39,10 +37,12 @@ const SONG_LEVEL_LABEL_KEYS: Record<NcmSongLevel, TranslationKey> = {
 
 export function PlaybackSection(props: PlaybackSectionProps) {
   const { t } = useTranslation();
+  const audioSettings = usePlayback().audioSettings;
   const initialSettings = readUISettingsSnapshot();
 
   const [autoPlay, setAutoPlay] = createSignal<boolean>(initialSettings.autoPlay);
   const [useNextPrefetch, setUseNextPrefetch] = createSignal<boolean>(true);
+  const [useNextPrefetchPending, setUseNextPrefetchPending] = createSignal<boolean>(false);
   const [volumeFade, setVolumeFade] = createSignal<boolean>(initialSettings.volumeFade);
   const [volumeFadeTime, setVolumeFadeTime] = createSignal<number>(initialSettings.volumeFadeTime);
   const [memoryLastSeek, setMemoryLastSeek] = createSignal<boolean>(initialSettings.memoryLastSeek);
@@ -66,12 +66,11 @@ export function PlaybackSection(props: PlaybackSectionProps) {
   let itemIndex = 0;
   const nextIndex = () => itemIndex++;
 
-  onMount(() => {
-    void api.getSettings().then((settings) => {
-      setUseNextPrefetch(settings.use_next_prefetch);
-    }).catch(() => {
-      setUseNextPrefetch(true);
-    });
+  createEffect(() => {
+    const desired = audioSettings.desired();
+    if (desired && !useNextPrefetchPending()) {
+      setUseNextPrefetch(desired.use_next_prefetch);
+    }
   });
 
   const handleAutoPlay = (checked: boolean) => {
@@ -79,10 +78,20 @@ export function PlaybackSection(props: PlaybackSectionProps) {
   };
   const handleUseNextPrefetch = (checked: boolean) => {
     const previous = useNextPrefetch();
+    const baseRevision = audioSettings.snapshot()?.revision;
     setUseNextPrefetch(checked);
-    void api.saveSettings({ use_next_prefetch: checked }).catch(() => {
-      setUseNextPrefetch(previous);
-    });
+    setUseNextPrefetchPending(true);
+    void audioSettings
+      .commit(
+        { use_next_prefetch: checked },
+        baseRevision === undefined ? undefined : { baseRevision }
+      )
+      .catch(() => {
+        setUseNextPrefetch(previous);
+      })
+      .finally(() => {
+        setUseNextPrefetchPending(false);
+      });
   };
   const handleVolumeFade = (checked: boolean) => {
     commitUISettingField("volumeFade", checked, volumeFade, setVolumeFade);
@@ -140,6 +149,7 @@ export function PlaybackSection(props: PlaybackSectionProps) {
           index={nextIndex()}
           checked={useNextPrefetch()}
           onChange={handleUseNextPrefetch}
+          disabled={useNextPrefetchPending()}
         />
 
         <BooleanSettingItem

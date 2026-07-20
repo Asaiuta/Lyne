@@ -8,7 +8,7 @@
 //! initialization during startup.
 
 use audio_engine::{
-    config::{EngineSettings, ResolvedConfig, RuntimeServerConfig},
+    config::{ResolvedConfig, RuntimeServerConfig},
     runtime, server, settings,
 };
 
@@ -43,14 +43,11 @@ async fn main() -> std::io::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(18083);
 
-    // Load config
-    let engine_settings = EngineSettings::load_from_file(&runtime_paths.settings_path)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    // Load settings once through the recovery-aware persistent owner.
+    let settings_manager = settings::create_settings_manager(&runtime_paths.settings_path);
+    let engine_settings = settings_manager.lock().get_settings();
     let server_config = RuntimeServerConfig::from_env();
     let config = ResolvedConfig::new(engine_settings, server_config);
-
-    // Create settings manager
-    let settings_manager = settings::create_settings_manager(&runtime_paths.settings_path);
 
     // Run the server
     server::run_server(port, config, settings_manager, runtime_paths).await
