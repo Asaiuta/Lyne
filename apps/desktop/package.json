@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "dev:tauri": "npm run build:sidecar:dev && vite",
-    "build": "npm run build:web",
+    "build": "npm run build:release-input",
     "build:web": "vite build",
-    "build:measure": "npm run build:web && npm run perf:bundle",
+    "build:release-input": "npm run build:web && npm run perf:bundle",
+    "build:measurement": "vite build --mode measurement",
+    "build:measure": "npm run build:release-input && npm run build:measurement",
     "build:sidecar:dev": "node ./scripts/build-sidecar.mjs dev",
     "build:sidecar": "node ./scripts/build-sidecar.mjs release",
     "build:sidecar:fast": "node ./scripts/build-sidecar.mjs fast",
-    "build:bundle": "npm run build:web && npm run build:sidecar",
+    "build:bundle": "npm run build:release-input && npm run build:sidecar",
     "preview": "vite preview",
     "perf:bundle": "node ./scripts/report-bundle-size.mjs",
     "perf:electron-webaudio": "electron ./scripts/electron-webaudio-baseline.cjs",
@@ -28,7 +30,8 @@
     "perf:splayer-library-benchmark": "node ./scripts/splayer-library-benchmark.cjs",
     "perf:routes": "node ./scripts/measure-route-loads.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node ./scripts/run-focused-tests.mjs",
+    "test": "node ./scripts/run-focused-tests.mjs && npm run test:bundle-policy",
+    "test:bundle-policy": "node --test ./scripts/bundle-size-policy.test.mjs",
     "tauri": "powershell -ExecutionPolicy Bypass -File ./scripts/tauri-wrapper.ps1"
   },
   "dependencies": {

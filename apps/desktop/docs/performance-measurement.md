@@ -12,18 +12,29 @@ npm test
 npm run build:measure
 ```
 
-`npm test` includes focused unit tests plus the MediaList 3000-row virtual-scroll smoke. `npm run build:measure` builds the web bundle and then prints a stable per-chunk raw/gzip report. The bundle report fails when a chunk exceeds its configured budget.
+`npm test` includes focused unit tests plus the MediaList 3000-row virtual-scroll smoke. `npm run build` builds and gates the standard release input. `npm run build:measure` reuses that release-input pipeline, then emits a separate source-mapped measurement build. Tauri's `build:bundle` entry point reuses the same gate before building the sidecar.
+
+The standard release input is always `dist/` and does not contain sourcemaps.
+`build:measure` gates that release input first, then creates an explicit
+source-mapped analysis build under `../../output/build-measurement/desktop/`.
+That ignored measurement directory is outside Tauri's `frontendDist` and must
+not be copied into release packaging.
 
 ## Bundle Budgets
 
-Use `npm run perf:bundle` after `npm run build:web` when you only need to re-check the existing `dist/` output.
+Use `npm run perf:bundle` after `npm run build:web` when you only need to re-check the existing `dist/` output. Use `npm run build:measurement` only when you need source maps for analysis.
 
-Budget groups are defined in `scripts/report-bundle-size.mjs`:
+Budget groups are defined in `scripts/bundle-size-policy.mjs`:
 
 - Startup JS: `index-*.js`
 - CSS: `*.css`
 - Large route chunks: `NeteasePage-*` and `SettingsPage-*`
 - Other JS route/helper chunks
+
+The report also recursively inventories every file under `dist/`, rejects
+source maps and native debug-symbol artifacts, and enforces the total raw
+frontend release-input budget. Non-JS/CSS files count toward that total even
+though they do not have per-chunk gzip budgets.
 
 If a task intentionally raises a budget, record the before/after chunk sizes in that task's notes and update the budget in the same change.
 

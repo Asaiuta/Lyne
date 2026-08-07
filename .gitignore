@@ -47,6 +47,7 @@ Desktop.ini
 # QA
 qa-screenshots/
 output/playwright/
+output/build-measurement/
 apps/desktop/output/
 test-results/
 
