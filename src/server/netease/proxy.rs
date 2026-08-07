@@ -12,7 +12,8 @@ use registry::{dispatch, DispatchError};
 #[cfg(test)]
 pub(super) use registry::{
     login_qr_check_payload, login_qr_key_payload, proxy_handler_method_names,
-    proxy_method_registry, proxy_route_group_for_method, ProxyRouteGroup,
+    proxy_method_registry, proxy_route_group_for_method, request_option_from_query,
+    ProxyRouteGroup,
 };
 #[cfg(test)]
 pub(super) use request::{apply_query_overrides, normalize_domain_override};

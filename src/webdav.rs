@@ -8,6 +8,9 @@ use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+const WEBDAV_BROWSE_PATH_MAX_LEN: usize = 4096;
+const WEBDAV_SOURCE_KEY_MAX_LEN: usize = 80;
+
 #[derive(Error, Debug)]
 pub enum WebDavError {
     #[error("HTTP error: {0}")]
@@ -54,6 +57,25 @@ pub struct DavEntry {
     pub content_type: Option<String>,
     /// Full playable URL (base_url + href, deduplicated)
     pub url: String,
+}
+
+pub(crate) fn normalize_source_key(source_key: &str) -> Result<String, String> {
+    let trimmed = source_key.trim();
+    if trimmed.is_empty() {
+        return Err("source_key is required".to_string());
+    }
+    if trimmed.len() > WEBDAV_SOURCE_KEY_MAX_LEN {
+        return Err("source_key is too long".to_string());
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err(
+            "source_key may only contain ASCII letters, numbers, '-', '_' or '.'".to_string(),
+        );
+    }
+    Ok(trimmed.to_string())
 }
 
 impl WebDavConfig {
@@ -191,8 +213,14 @@ impl WebDavConfig {
     }
 }
 
-fn validate_browse_path(path: &str) -> Result<(), WebDavError> {
+pub(crate) fn validate_browse_path(path: &str) -> Result<(), WebDavError> {
     let trimmed = path.trim();
+    if trimmed.len() > WEBDAV_BROWSE_PATH_MAX_LEN {
+        return Err(WebDavError::InvalidPath(format!(
+            "browse path must be at most {} bytes",
+            WEBDAV_BROWSE_PATH_MAX_LEN
+        )));
+    }
     let lower = trimmed.to_ascii_lowercase();
     if lower.starts_with("http://") || lower.starts_with("https://") || lower.contains("://") {
         return Err(WebDavError::InvalidPath(

@@ -9,7 +9,7 @@ use actix_web::{
     http::{header, header::HeaderMap, header::HeaderValue, Method, StatusCode},
     test as actix_test, App,
 };
-use ncm_api_rs::{ApiResponse, NcmError, Query};
+use ncm_api_rs::{ApiResponse, CryptoType, NcmError, Query};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
@@ -247,7 +247,7 @@ fn raw_proxy_method_registry_matches_handler_table() {
 #[test]
 fn merged_query_prefers_body_then_cookie_param() {
     let headers = header_map_with_cookie("foo=header; other=1");
-    let body = br#"{"foo":"body","cookie":"foo=param; traced=1","ua":"pc"}"#;
+    let body = br#"{"foo":"body","cookie":"foo=param; traced=1","ua":"pc","proxy":"http://127.0.0.1:9000"}"#;
     let query = extract_merged_query(
         &headers,
         Some("foo=query&realIP=1.2.3.4"),
@@ -259,6 +259,7 @@ fn merged_query_prefers_body_then_cookie_param() {
     assert_eq!(query.cookie.as_deref(), Some("foo=param; traced=1"));
     assert_eq!(query.real_ip.as_deref(), Some("1.2.3.4"));
     assert_eq!(query.ua.as_deref(), Some("pc"));
+    assert_eq!(query.proxy, None);
     assert_eq!(query.params.get("foo").map(String::as_str), Some("body"));
 }
 
@@ -267,16 +268,55 @@ fn apply_query_overrides_extracts_known_fields() {
     let mut query = Query::new()
         .param("randomCNIP", "true")
         .param("proxy", "http://127.0.0.1:9000")
+        .param("realIP", " 192.0.2.1 ")
+        .param("ua", " AudioPlayer/2.0 ")
         .param("e_r", "1")
         .param("domain", "https://music.163.com");
 
     apply_query_overrides(&mut query).expect("overrides should parse");
 
     assert!(query.random_cn_ip);
-    assert_eq!(query.proxy.as_deref(), Some("http://127.0.0.1:9000"));
+    assert_eq!(query.proxy, None);
+    assert_eq!(query.real_ip.as_deref(), Some("192.0.2.1"));
+    assert_eq!(query.ua.as_deref(), Some("AudioPlayer/2.0"));
     assert_eq!(query.e_r, Some(true));
     assert_eq!(query.domain.as_deref(), Some("https://music.163.com"));
     assert!(query.params.is_empty());
+}
+
+#[test]
+fn query_overrides_reject_invalid_real_ip_and_user_agent() {
+    for real_ip in ["localhost", "2001:db8::1", "999.1.1.1"] {
+        let mut query = Query::new().param("realIP", real_ip);
+        assert!(
+            apply_query_overrides(&mut query).is_err(),
+            "expected realIP {real_ip:?} to be rejected"
+        );
+    }
+
+    for ua in [
+        "line\nbreak".to_string(),
+        "non-ascii-\u{7528}\u{6237}".to_string(),
+        "a".repeat(513),
+    ] {
+        let mut query = Query::new().param("ua", &ua);
+        assert!(
+            apply_query_overrides(&mut query).is_err(),
+            "expected ua override to be rejected"
+        );
+    }
+}
+
+#[test]
+fn request_option_never_forwards_proxy_override() {
+    let mut query = Query::new();
+    query.proxy = Some("http://127.0.0.1:9000".to_string());
+    query.cookie = Some("MUSIC_U=session".to_string());
+
+    let option = proxy::request_option_from_query(&query, CryptoType::Weapi);
+
+    assert_eq!(option.proxy, None);
+    assert_eq!(option.cookie.as_deref(), Some("MUSIC_U=session"));
 }
 
 #[test]

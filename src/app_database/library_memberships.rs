@@ -11,6 +11,21 @@ use super::{
 pub(crate) const LIBRARY_ROOT_SCAN_IN_PROGRESS_ERROR: &str =
     "Library root cannot be deleted while a scan is in progress";
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LibraryScanFinalizeMode {
+    Complete,
+    Partial,
+}
+
+impl LibraryScanFinalizeMode {
+    fn root_status(self) -> &'static str {
+        match self {
+            Self::Complete => "completed",
+            Self::Partial => "partial",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct LibraryCleanupTarget {
     pub(super) media_id: String,
@@ -880,6 +895,35 @@ impl AppDatabase {
         scan_task_id: u64,
         finished_at: u64,
     ) -> Result<LibraryScanFinalizeRecord, String> {
+        self.finalize_library_root_scan_with_mode(
+            root_id,
+            scan_task_id,
+            finished_at,
+            LibraryScanFinalizeMode::Complete,
+        )
+    }
+
+    pub fn finalize_partial_library_root_scan(
+        &self,
+        root_id: i64,
+        scan_task_id: u64,
+        finished_at: u64,
+    ) -> Result<LibraryScanFinalizeRecord, String> {
+        self.finalize_library_root_scan_with_mode(
+            root_id,
+            scan_task_id,
+            finished_at,
+            LibraryScanFinalizeMode::Partial,
+        )
+    }
+
+    fn finalize_library_root_scan_with_mode(
+        &self,
+        root_id: i64,
+        scan_task_id: u64,
+        finished_at: u64,
+        mode: LibraryScanFinalizeMode,
+    ) -> Result<LibraryScanFinalizeRecord, String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         ensure_library_scan_seen_table(&conn)?;
         let tx = conn
@@ -897,7 +941,7 @@ impl AppDatabase {
             return Err(format!("Library root '{}' no longer exists", root_id));
         }
 
-        let stale_targets = {
+        let stale_targets = if mode == LibraryScanFinalizeMode::Complete {
             let mut stmt = tx
                 .prepare(
                     r#"
@@ -924,6 +968,8 @@ impl AppDatabase {
                 .map_err(|e| format!("Failed to query stale memberships: {}", e))?;
             rows.collect::<Result<Vec<_>, _>>()
                 .map_err(|e| format!("Failed to decode stale memberships: {}", e))?
+        } else {
+            Vec::new()
         };
         let now = now_epoch_secs_i64();
         tx.execute(
@@ -951,22 +997,26 @@ impl AppDatabase {
             params![root_id, scan_task_id as i64, now],
         )
         .map_err(|e| format!("Failed to commit seen library memberships: {}", e))?;
-        tx.execute(
-            r#"
-            DELETE FROM library_root_memberships
-            WHERE root_id = ?1
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM temp.library_scan_seen seen
-                  WHERE seen.task_id = ?2
-                    AND seen.media_id = library_root_memberships.media_id
-              )
-            "#,
-            params![root_id, scan_task_id as i64],
-        )
-        .map_err(|e| format!("Failed to remove stale library memberships: {}", e))?;
-        let orphaned_targets = targets_without_memberships(&tx, stale_targets)?;
-        let cleanup = cleanup_media_targets_tx(&tx, &orphaned_targets)?;
+        let cleanup = if mode == LibraryScanFinalizeMode::Complete {
+            tx.execute(
+                r#"
+                DELETE FROM library_root_memberships
+                WHERE root_id = ?1
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM temp.library_scan_seen seen
+                      WHERE seen.task_id = ?2
+                        AND seen.media_id = library_root_memberships.media_id
+                  )
+                "#,
+                params![root_id, scan_task_id as i64],
+            )
+            .map_err(|e| format!("Failed to remove stale library memberships: {}", e))?;
+            let orphaned_targets = targets_without_memberships(&tx, stale_targets)?;
+            cleanup_media_targets_tx(&tx, &orphaned_targets)?
+        } else {
+            LibraryCleanupReport::default()
+        };
         let track_count = tx
             .query_row(
                 "SELECT COUNT(*) FROM library_root_memberships WHERE root_id = ?1",
@@ -978,13 +1028,19 @@ impl AppDatabase {
         tx.execute(
             r#"
             UPDATE library_roots
-            SET scan_status = 'completed',
-                track_count = ?2,
-                last_scan_finished_at = ?3,
-                updated_at = ?4
+            SET scan_status = ?2,
+                track_count = ?3,
+                last_scan_finished_at = ?4,
+                updated_at = ?5
             WHERE root_id = ?1
             "#,
-            params![root_id, track_count as i64, finished_at as i64, now],
+            params![
+                root_id,
+                mode.root_status(),
+                track_count as i64,
+                finished_at as i64,
+                now
+            ],
         )
         .map_err(|e| format!("Failed to finalize library root scan state: {}", e))?;
         tx.execute(

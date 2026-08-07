@@ -2,6 +2,9 @@ use actix_web::http::header::{self, HeaderMap};
 use ncm_api_rs::Query;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
+
+const MAX_USER_AGENT_LENGTH: usize = 512;
 
 const ALLOWED_DOMAIN_OVERRIDES: &[&str] = &[
     "https://music.163.com",
@@ -107,13 +110,15 @@ pub(in crate::server::netease) fn apply_query_overrides(query: &mut Query) -> Re
         }
     }
 
-    if let Some(real_ip) = query
-        .params
-        .remove("realIP")
-        .or_else(|| query.params.remove("real_ip"))
-    {
-        if !real_ip.trim().is_empty() {
-            query.real_ip = Some(real_ip);
+    let camel_case_real_ip = query.params.remove("realIP");
+    let snake_case_real_ip = query.params.remove("real_ip");
+    if let Some(real_ip) = camel_case_real_ip.or(snake_case_real_ip) {
+        let real_ip = real_ip.trim();
+        if !real_ip.is_empty() {
+            let real_ip = real_ip
+                .parse::<Ipv4Addr>()
+                .map_err(|_| "realIP override must be a valid IPv4 address".to_string())?;
+            query.real_ip = Some(real_ip.to_string());
         }
     }
 
@@ -125,15 +130,22 @@ pub(in crate::server::netease) fn apply_query_overrides(query: &mut Query) -> Re
         query.random_cn_ip = parse_bool(&random_cn_ip);
     }
 
-    if let Some(proxy) = query.params.remove("proxy") {
-        if !proxy.trim().is_empty() {
-            query.proxy = Some(proxy);
-        }
-    }
+    query.params.remove("proxy");
+    query.proxy = None;
 
     if let Some(ua) = query.params.remove("ua") {
-        if !ua.trim().is_empty() {
-            query.ua = Some(ua);
+        let ua = ua.trim();
+        if !ua.is_empty() {
+            if ua.len() > MAX_USER_AGENT_LENGTH {
+                return Err(format!(
+                    "ua override must be at most {} bytes",
+                    MAX_USER_AGENT_LENGTH
+                ));
+            }
+            if !ua.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
+                return Err("ua override must contain printable ASCII only".to_string());
+            }
+            query.ua = Some(ua.to_string());
         }
     }
 

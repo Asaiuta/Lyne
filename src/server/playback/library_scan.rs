@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const UNKNOWN_SONG_TITLE: &str = "Unknown Song";
 const LOCAL_SCAN_CHANNEL_CAPACITY: usize = 64;
@@ -17,12 +17,40 @@ const LOCAL_SCAN_DB_BATCH_MAX_BYTES: usize = 64 * 1024 * 1024;
 const LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES: usize = 64 * 1024;
 const LOCAL_SCAN_PROGRESS_INTERVAL: u64 = 25;
 const LOCAL_SCAN_CHANNEL_RETRY_MS: u64 = 100;
+const WEBDAV_SCAN_LIMITS: WebDavTraversalLimits = WebDavTraversalLimits {
+    max_depth: 64,
+    max_listed_entries: 100_000,
+    max_duration: Duration::from_secs(60 * 60),
+};
 
 pub(super) struct LibraryScanOutcome {
     pub(super) scanned_files: u64,
     pub(super) indexed_files: u64,
     pub(super) removed_files: u64,
     pub(super) cleanup: crate::app_database::LibraryCleanupReport,
+    pub(super) partial_reason: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+struct WebDavTraversalLimits {
+    max_depth: usize,
+    max_listed_entries: u64,
+    max_duration: Duration,
+}
+
+impl WebDavTraversalLimits {
+    fn time_limit_reason(self) -> String {
+        format!(
+            "WebDAV scan reached time limit of {} seconds",
+            self.max_duration.as_secs()
+        )
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct WebDavTraversalResult {
+    listed_entries: u64,
+    partial_reason: Option<String>,
 }
 
 struct ParsedTrack {
@@ -389,6 +417,7 @@ pub(super) fn scan_local_library(
         indexed_files: finalize.track_count,
         removed_files: removed,
         cleanup: finalize.cleanup,
+        partial_reason: None,
     })
 }
 
@@ -806,13 +835,130 @@ pub(super) fn clear_library_scan_seen_set(data: &web::Data<Arc<AppState>>, scan_
     }
 }
 
+fn normalize_webdav_visit_path(href: &str) -> String {
+    let trimmed = href.trim();
+    let path = reqwest::Url::parse(trimmed)
+        .ok()
+        .filter(|url| url.has_host())
+        .map(|url| url.path().to_string())
+        .unwrap_or_else(|| trimmed.split(['?', '#']).next().unwrap_or("").to_string());
+    let decoded = percent_encoding::percent_decode_str(&path).decode_utf8_lossy();
+    let normalized_separators = decoded.replace('\\', "/");
+    let mut segments = Vec::new();
+    for segment in normalized_separators.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            value => segments.push(value.to_string()),
+        }
+    }
+
+    if segments.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}", segments.join("/"))
+    }
+}
+
+#[cfg(test)]
+fn normalize_webdav_visit_key(href: &str) -> String {
+    normalize_webdav_visit_path(href).to_ascii_lowercase()
+}
+
+fn traverse_webdav_tree<ListDirectory, VisitFile>(
+    root_path: &str,
+    cancel_token: &AnalysisCancelToken,
+    limits: WebDavTraversalLimits,
+    mut list_directory: ListDirectory,
+    mut visit_file: VisitFile,
+) -> Result<WebDavTraversalResult, String>
+where
+    ListDirectory: FnMut(&str) -> Result<Vec<crate::webdav::DavEntry>, String>,
+    VisitFile: FnMut(crate::webdav::DavEntry) -> Result<(), String>,
+{
+    let started_at = Instant::now();
+    let mut result = WebDavTraversalResult::default();
+    let mut visited = HashMap::new();
+    let root_visit_path = normalize_webdav_visit_path(root_path);
+    visited.insert(root_visit_path.to_ascii_lowercase(), root_visit_path);
+    let mut stack = vec![(root_path.to_string(), 0_usize)];
+
+    'walk: while let Some((path, depth)) = stack.pop() {
+        cancel_token.check()?;
+        if started_at.elapsed() >= limits.max_duration {
+            result.partial_reason = Some(limits.time_limit_reason());
+            break;
+        }
+
+        let entries = list_directory(&path)?;
+        if started_at.elapsed() >= limits.max_duration {
+            result.partial_reason = Some(limits.time_limit_reason());
+            break;
+        }
+
+        for entry in entries {
+            cancel_token.check()?;
+            if started_at.elapsed() >= limits.max_duration {
+                result.partial_reason = Some(limits.time_limit_reason());
+                break 'walk;
+            }
+            if result.listed_entries >= limits.max_listed_entries {
+                result.partial_reason = Some(format!(
+                    "WebDAV scan reached listing entry limit of {}",
+                    limits.max_listed_entries
+                ));
+                break 'walk;
+            }
+            result.listed_entries += 1;
+
+            if entry.is_dir {
+                if entry.href.is_empty() {
+                    continue;
+                }
+                let child_depth = depth.saturating_add(1);
+                if child_depth > limits.max_depth {
+                    result.partial_reason.get_or_insert_with(|| {
+                        format!("WebDAV scan reached maximum depth of {}", limits.max_depth)
+                    });
+                    continue;
+                }
+                let child_visit_path = normalize_webdav_visit_path(&entry.href);
+                let child_visit_key = child_visit_path.to_ascii_lowercase();
+                match visited.get(&child_visit_key) {
+                    None => {
+                        visited.insert(child_visit_key, child_visit_path);
+                        stack.push((entry.href, child_depth));
+                    }
+                    Some(existing_path) if existing_path != &child_visit_path => {
+                        result.partial_reason.get_or_insert_with(|| {
+                            "WebDAV scan skipped paths that differ only by ASCII case".to_string()
+                        });
+                    }
+                    Some(_) => {}
+                }
+                continue;
+            }
+
+            visit_file(entry)?;
+            if started_at.elapsed() >= limits.max_duration {
+                result.partial_reason = Some(limits.time_limit_reason());
+                break 'walk;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 pub(super) fn scan_webdav_library(
     data: &web::Data<Arc<AppState>>,
     scan_task_id: u64,
     started_at: u64,
     root_id: i64,
     root_path: &str,
-    source_key: Option<&str>,
+    source_key: &str,
     cancel_token: AnalysisCancelToken,
 ) -> Result<LibraryScanOutcome, String> {
     cancel_token.check()?;
@@ -823,14 +969,11 @@ pub(super) fn scan_webdav_library(
         .app_db
         .load_library_scan_snapshot(root_id)
         .map_err(|e| format!("Failed to load WebDAV library scan snapshot: {}", e))?;
-    let webdav_cfg = if let Some(source_key) = source_key {
-        data.app_db
-            .load_webdav_source_config(source_key)?
-            .map(|source| source.config)
-            .ok_or_else(|| format!("WebDAV source '{}' not found", source_key))?
-    } else {
-        data.webdav_config.lock().clone()
-    };
+    let webdav_cfg = data
+        .app_db
+        .load_webdav_source_config(source_key)?
+        .map(|source| source.config)
+        .ok_or_else(|| format!("WebDAV source '{}' not found", source_key))?;
 
     if !webdav_cfg.is_configured() {
         return Err("WebDAV source is not configured".to_string());
@@ -841,34 +984,23 @@ pub(super) fn scan_webdav_library(
     let mut indexed = 0_u64;
     let mut index_failures = Vec::new();
     let mut seen_media_ids = Vec::new();
-    let mut stack = vec![root_path.to_string()];
-
-    while let Some(path) = stack.pop() {
-        cancel_token.check()?;
-        let browse_started_at = std::time::Instant::now();
-        let entries = webdav_cfg.list(&path).map_err(|e| {
-            record_webdav_probe(data.as_ref().as_ref(), browse_started_at.elapsed(), false);
-            format!("Failed to browse WebDAV path '{}': {}", path, e)
-        })?;
-        record_webdav_probe(data.as_ref().as_ref(), browse_started_at.elapsed(), true);
-        cancel_token.check()?;
-
-        for entry in entries {
+    let traversal = traverse_webdav_tree(
+        root_path,
+        &cancel_token,
+        WEBDAV_SCAN_LIMITS,
+        |path| {
+            let browse_started_at = Instant::now();
+            let entries = webdav_cfg.list(path).map_err(|e| {
+                record_webdav_probe(data.as_ref().as_ref(), browse_started_at.elapsed(), false);
+                format!("Failed to browse WebDAV path '{}': {}", path, e)
+            })?;
+            record_webdav_probe(data.as_ref().as_ref(), browse_started_at.elapsed(), true);
+            Ok(entries)
+        },
+        |entry| {
             cancel_token.check()?;
-            if entry.is_dir {
-                let child_path = if entry.href.is_empty() {
-                    continue;
-                } else {
-                    entry.href.clone()
-                };
-                if child_path != path {
-                    stack.push(child_path);
-                }
-                continue;
-            }
-
             if !is_supported_media_href(&entry.url) {
-                continue;
+                return Ok(());
             }
 
             scanned += 1;
@@ -906,7 +1038,7 @@ pub(super) fn scan_webdav_library(
                 }
             }
 
-            if scanned % LOCAL_SCAN_PROGRESS_INTERVAL == 0 {
+            if scanned.is_multiple_of(LOCAL_SCAN_PROGRESS_INTERVAL) {
                 persist_library_scan_task(
                     data,
                     scan_task_id,
@@ -922,7 +1054,15 @@ pub(super) fn scan_webdav_library(
                     None,
                 );
             }
-        }
+            Ok(())
+        },
+    )?;
+    if let Some(reason) = traversal.partial_reason.as_deref() {
+        log::warn!(
+            "WebDAV library scan for root {} finished partially: {}",
+            root_id,
+            reason
+        );
     }
 
     if !index_failures.is_empty() {
@@ -936,10 +1076,14 @@ pub(super) fn scan_webdav_library(
     data.app_db
         .mark_library_scan_seen_media_ids(scan_task_id, &seen_media_ids)
         .map_err(|e| format!("Failed to persist WebDAV library scan seen set: {}", e))?;
-    let finalize = data
-        .app_db
-        .finalize_library_root_scan(root_id, scan_task_id, now_epoch_secs())
-        .map_err(|e| format!("Failed to finalize WebDAV library scan: {}", e))?;
+    let finalize = if traversal.partial_reason.is_some() {
+        data.app_db
+            .finalize_partial_library_root_scan(root_id, scan_task_id, now_epoch_secs())
+    } else {
+        data.app_db
+            .finalize_library_root_scan(root_id, scan_task_id, now_epoch_secs())
+    }
+    .map_err(|e| format!("Failed to finalize WebDAV library scan: {}", e))?;
 
     persist_library_scan_task(
         data,
@@ -953,6 +1097,8 @@ pub(super) fn scan_webdav_library(
             "scanned_files": scanned,
             "indexed_files": finalize.track_count,
             "removed_files": finalize.cleanup.removed_media_count,
+            "scan_status": if traversal.partial_reason.is_some() { "partial" } else { "completed" },
+            "partial_reason": traversal.partial_reason.as_deref(),
         })),
         None,
     );
@@ -962,6 +1108,7 @@ pub(super) fn scan_webdav_library(
         indexed_files: finalize.track_count,
         removed_files: finalize.cleanup.removed_media_count,
         cleanup: finalize.cleanup,
+        partial_reason: traversal.partial_reason,
     })
 }
 
@@ -969,16 +1116,19 @@ pub(super) fn scan_webdav_library(
 mod tests {
     use super::{
         external_cover_for_media, local_scan_source_path, metadata_with_external_cover,
-        persist_local_scan_cover_art, process_local_scan_path, walk_supported_local_media_paths,
-        LocalScanWriteItem, LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES, UNKNOWN_SONG_TITLE,
+        normalize_webdav_visit_key, persist_local_scan_cover_art, process_local_scan_path,
+        traverse_webdav_tree, walk_supported_local_media_paths, LocalScanWriteItem,
+        WebDavTraversalLimits, LOCAL_SCAN_EMBEDDED_COVER_FILE_CACHE_MIN_BYTES, UNKNOWN_SONG_TITLE,
     };
     use crate::app_database::LibraryScanSnapshotRecord;
     use crate::server::{analysis_cancelled_error, AnalysisCancelToken};
+    use crate::webdav::DavEntry;
     use crossbeam::channel::bounded;
     use std::collections::HashMap;
     use std::fs;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
         let suffix = std::time::SystemTime::now()
@@ -991,6 +1141,139 @@ mod tests {
             std::process::id(),
             suffix
         ))
+    }
+
+    fn dav_entry(href: &str, is_dir: bool) -> DavEntry {
+        DavEntry {
+            href: href.to_string(),
+            display_name: href.to_string(),
+            is_dir,
+            content_length: None,
+            content_type: None,
+            url: href.to_string(),
+        }
+    }
+
+    #[test]
+    fn webdav_visit_key_normalizes_url_encoding_case_and_path_shape() {
+        let expected = "/dav/music/a";
+        for href in [
+            "/DAV/music/%61/",
+            "https://nas.example.test/dav/music/A?token=1#fragment",
+            r"\dav\music\.\a",
+            "/dav/music/child/../a",
+        ] {
+            assert_eq!(normalize_webdav_visit_key(href), expected);
+        }
+        assert_eq!(normalize_webdav_visit_key("/dav/%2e%2e/music"), "/music");
+    }
+
+    #[test]
+    fn webdav_traversal_terminates_normalized_alias_cycle() {
+        let cancel_token = AnalysisCancelToken::new();
+        let limits = WebDavTraversalLimits {
+            max_depth: 8,
+            max_listed_entries: 100,
+            max_duration: Duration::from_secs(60),
+        };
+        let mut listed_paths = Vec::new();
+        let result = traverse_webdav_tree(
+            "/",
+            &cancel_token,
+            limits,
+            |path| {
+                listed_paths.push(path.to_string());
+                if normalize_webdav_visit_key(path) == "/" {
+                    Ok(vec![
+                        dav_entry("/A/", true),
+                        dav_entry("/%61", true),
+                        dav_entry("/a", true),
+                        dav_entry("https://nas.example.test/a/?token=1", true),
+                    ])
+                } else {
+                    Ok(vec![dav_entry("/", true)])
+                }
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(listed_paths, vec!["/".to_string(), "/A/".to_string()]);
+        assert_eq!(result.listed_entries, 5);
+        assert!(result
+            .partial_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("ASCII case")));
+    }
+
+    #[test]
+    fn webdav_traversal_reports_depth_entry_and_time_bounds() {
+        let cancel_token = AnalysisCancelToken::new();
+        let depth_result = traverse_webdav_tree(
+            "/",
+            &cancel_token,
+            WebDavTraversalLimits {
+                max_depth: 1,
+                max_listed_entries: 100,
+                max_duration: Duration::from_secs(60),
+            },
+            |path| match normalize_webdav_visit_key(path).as_str() {
+                "/" => Ok(vec![dav_entry("/a", true)]),
+                "/a" => Ok(vec![dav_entry("/a/b", true)]),
+                _ => panic!("depth-limited child must not be listed"),
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(depth_result
+            .partial_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("maximum depth")));
+
+        let mut visited_files = 0;
+        let entry_result = traverse_webdav_tree(
+            "/",
+            &cancel_token,
+            WebDavTraversalLimits {
+                max_depth: 8,
+                max_listed_entries: 2,
+                max_duration: Duration::from_secs(60),
+            },
+            |_| {
+                Ok(vec![
+                    dav_entry("/a.flac", false),
+                    dav_entry("/b.flac", false),
+                    dav_entry("/c.flac", false),
+                ])
+            },
+            |_| {
+                visited_files += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(visited_files, 2);
+        assert!(entry_result
+            .partial_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("entry limit")));
+
+        let time_result = traverse_webdav_tree(
+            "/",
+            &cancel_token,
+            WebDavTraversalLimits {
+                max_depth: 8,
+                max_listed_entries: 100,
+                max_duration: Duration::ZERO,
+            },
+            |_| panic!("expired traversal must not list a directory"),
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(time_result
+            .partial_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("time limit")));
     }
 
     #[test]

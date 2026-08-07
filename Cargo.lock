@@ -437,6 +437,7 @@ dependencies = [
  "ncm-api-rs",
  "numpy",
  "parking_lot",
+ "percent-encoding",
  "pyo3",
  "quick-xml",
  "rand 0.8.5",

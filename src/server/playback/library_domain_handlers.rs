@@ -310,7 +310,10 @@ pub(super) async fn enqueue_queue_from_media_ids(
 
 #[cfg(test)]
 mod tests {
-    use super::{media_ids_with_start, resolve_local_library_delete_target};
+    use super::{
+        classify_library_scan_root, media_ids_with_start, resolve_local_library_delete_target,
+        LibraryScanRoot,
+    };
     use crate::app_database::LibraryRootRecord;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -389,6 +392,60 @@ mod tests {
         let ids = media_ids_with_start(&["a".to_string(), "b".to_string(), "c".to_string()], None);
 
         assert_eq!(ids, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn library_scan_root_requires_source_identity_for_remote_inputs() {
+        let webdav = classify_library_scan_root(" /music ", Some(" archive "), true, |_| {
+            panic!("WebDAV roots must not use local path validation")
+        })
+        .unwrap();
+        assert_eq!(
+            webdav,
+            LibraryScanRoot::WebDav {
+                path: "/music".to_string(),
+                source_key: "archive".to_string(),
+            }
+        );
+
+        for path in ["http://127.0.0.1/music", "HTTPS://example.test/music"] {
+            let error = classify_library_scan_root(path, None, true, |value| Ok(value.to_string()))
+                .unwrap_err();
+            assert!(error.contains("configured WebDAV source"));
+        }
+
+        assert!(
+            classify_library_scan_root("/music", Some("archive"), true, |value| {
+                Ok(value.to_string())
+            })
+            .is_ok()
+        );
+        assert!(classify_library_scan_root(
+            "https://example.test/music",
+            Some("archive"),
+            true,
+            |value| Ok(value.to_string()),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn library_scan_root_keeps_platform_specific_local_path_semantics() {
+        let windows_error =
+            classify_library_scan_root("/music", None, true, |value| Ok(value.to_string()))
+                .unwrap_err();
+        assert!(windows_error.contains("on Windows"));
+
+        let unix_root = classify_library_scan_root("/music", None, false, |value| {
+            Ok(format!("validated:{value}"))
+        })
+        .unwrap();
+        assert_eq!(
+            unix_root,
+            LibraryScanRoot::Local {
+                path: "validated:/music".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -686,8 +743,81 @@ fn resolve_local_library_delete_target(
     Err("Refusing to delete a file outside configured local library roots".to_string())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum LibraryScanRoot {
+    Local { path: String },
+    WebDav { path: String, source_key: String },
+}
+
+impl LibraryScanRoot {
+    fn path(&self) -> &str {
+        match self {
+            Self::Local { path } | Self::WebDav { path, .. } => path,
+        }
+    }
+
+    fn source_kind(&self) -> &'static str {
+        match self {
+            Self::Local { .. } => "local",
+            Self::WebDav { .. } => "webdav",
+        }
+    }
+
+    fn source_key(&self) -> Option<&str> {
+        match self {
+            Self::Local { .. } => None,
+            Self::WebDav { source_key, .. } => Some(source_key),
+        }
+    }
+}
+
+fn classify_library_scan_root(
+    requested_path: &str,
+    requested_source_key: Option<&str>,
+    target_is_windows: bool,
+    validate_local_path: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<LibraryScanRoot, String> {
+    let requested_path = requested_path.trim();
+    if let Some(source_key) = requested_source_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let source_key = crate::webdav::normalize_source_key(source_key)?;
+        let path = if requested_path.is_empty() {
+            "/"
+        } else {
+            requested_path
+        };
+        crate::webdav::validate_browse_path(path).map_err(|error| error.to_string())?;
+        return Ok(LibraryScanRoot::WebDav {
+            path: path.to_string(),
+            source_key,
+        });
+    }
+
+    if requested_path.is_empty() {
+        return Err("Library scan path is required".to_string());
+    }
+    if is_http_url(requested_path) {
+        return Err("HTTP(S) library scan roots require a configured WebDAV source".to_string());
+    }
+    if target_is_windows && requested_path.starts_with('/') {
+        return Err(
+            "Leading-slash library scan roots require a configured WebDAV source on Windows"
+                .to_string(),
+        );
+    }
+
+    validate_local_path(requested_path).map(|path| LibraryScanRoot::Local { path })
+}
+
 fn is_http_url(value: &str) -> bool {
-    value.starts_with("http://") || value.starts_with("https://")
+    value
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || value
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
 }
 
 fn is_broad_filesystem_root(path: &Path) -> bool {
@@ -1190,18 +1320,32 @@ pub(super) async fn scan_library_root(
         .scan_task_counter
         .fetch_add(1, Ordering::Relaxed)
         + 1;
-    let requested_path = body.path.trim();
-    let is_remote = requested_path.starts_with("http://")
-        || requested_path.starts_with("https://")
-        || requested_path.starts_with('/');
-    let path = if is_remote {
-        requested_path.to_string()
-    } else {
-        match validate_path(requested_path) {
-            Ok(value) => value,
-            Err(e) => return bad_request_response(e),
-        }
+    let scan_root = match classify_library_scan_root(
+        &body.path,
+        body.source_key.as_deref(),
+        cfg!(windows),
+        validate_path,
+    ) {
+        Ok(value) => value,
+        Err(e) => return bad_request_response(e),
     };
+    let path = scan_root.path().to_string();
+    let source_kind = scan_root.source_kind();
+    let source_key = scan_root.source_key();
+
+    if let Some(source_key) = source_key {
+        match data.app_db.load_webdav_source_config(source_key) {
+            Ok(Some(source)) if source.config.is_configured() => {}
+            Ok(Some(_)) => return bad_request_response("WebDAV source is not configured"),
+            Ok(None) => {
+                return bad_request_response(format!(
+                    "WebDAV source '{}' was not found",
+                    source_key
+                ))
+            }
+            Err(e) => return internal_server_error_response(e),
+        }
+    }
 
     let display_name = body.display_name.clone().unwrap_or_else(|| {
         std::path::Path::new(&path)
@@ -1210,16 +1354,9 @@ pub(super) async fn scan_library_root(
             .map(|value| value.to_string())
             .unwrap_or_else(|| path.clone())
     });
-    let source_kind = if is_remote { "webdav" } else { "local" };
-    let source_key = body
-        .source_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
 
     let root_id = match data.app_db.upsert_library_root(
-        source_key.as_deref(),
+        source_key,
         &path,
         source_kind,
         &display_name,
@@ -1248,7 +1385,7 @@ pub(super) async fn scan_library_root(
         Some(&serde_json::json!({
             "root_id": root_id,
             "source_kind": source_kind,
-            "source_key": source_key.as_deref(),
+            "source_key": source_key,
             "display_name": display_name,
         })),
         None,
@@ -1260,30 +1397,28 @@ pub(super) async fn scan_library_root(
     let data_for_task = data.clone();
     let path_for_task = path.clone();
     let display_name_for_task = display_name.clone();
-    let source_kind_for_task = source_kind.to_string();
-    let source_key_for_task = source_key.clone();
+    let scan_root_for_task = scan_root.clone();
 
     actix_web::rt::task::spawn_blocking(move || {
         let _permit = permit;
-        let result = if source_kind_for_task == "local" {
-            scan_local_library(
+        let result = match &scan_root_for_task {
+            LibraryScanRoot::Local { .. } => scan_local_library(
                 &data_for_task,
                 scan_task_id,
                 started_at,
                 root_id,
                 &path_for_task,
                 cancel_token.clone(),
-            )
-        } else {
-            scan_webdav_library(
+            ),
+            LibraryScanRoot::WebDav { source_key, .. } => scan_webdav_library(
                 &data_for_task,
                 scan_task_id,
                 started_at,
                 root_id,
                 &path_for_task,
-                source_key_for_task.as_deref(),
+                source_key,
                 cancel_token.clone(),
-            )
+            ),
         };
 
         match result {
@@ -1294,12 +1429,14 @@ pub(super) async fn scan_library_root(
                 }
                 let payload = serde_json::json!({
                     "root_id": root_id,
-                    "source_kind": source_kind_for_task,
-                    "source_key": source_key_for_task.as_deref(),
+                    "source_kind": scan_root_for_task.source_kind(),
+                    "source_key": scan_root_for_task.source_key(),
                     "display_name": display_name_for_task,
                     "scanned_files": outcome.scanned_files,
                     "indexed_files": outcome.indexed_files,
                     "removed_files": outcome.removed_files,
+                    "scan_status": if outcome.partial_reason.is_some() { "partial" } else { "completed" },
+                    "partial_reason": outcome.partial_reason.as_deref(),
                 });
                 persist_library_scan_task(
                     &data_for_task,
@@ -1335,8 +1472,8 @@ pub(super) async fn scan_library_root(
                     finished_at,
                     Some(&serde_json::json!({
                         "root_id": root_id,
-                        "source_kind": source_kind_for_task,
-                        "source_key": source_key_for_task.as_deref(),
+                        "source_kind": scan_root_for_task.source_kind(),
+                        "source_key": scan_root_for_task.source_key(),
                         "display_name": display_name_for_task,
                     })),
                     Some(&e),

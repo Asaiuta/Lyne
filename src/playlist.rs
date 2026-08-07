@@ -184,9 +184,9 @@ fn validate_entry(
 ) -> Result<PlaylistEntry, String> {
     let path = entry.path.trim();
     if is_url(path) {
-        validate_url_scheme(path)?;
+        validate_playlist_url_scheme(path)?;
         let mut validated = entry.clone();
-        validated.path = playable_url(path);
+        validated.path = validate_path(path)?;
         return Ok(validated);
     }
 
@@ -240,7 +240,7 @@ fn is_url(path: &str) -> bool {
     path.contains("://")
 }
 
-fn validate_url_scheme(path: &str) -> Result<(), String> {
+fn validate_playlist_url_scheme(path: &str) -> Result<(), String> {
     let Some((scheme, rest)) = path.split_once("://") else {
         return Err("Invalid URL".into());
     };
@@ -248,18 +248,9 @@ fn validate_url_scheme(path: &str) -> Result<(), String> {
         return Err("Invalid URL: missing host".into());
     }
     match scheme.to_ascii_lowercase().as_str() {
-        "http" | "https" | "webdav" | "webdavs" => Ok(()),
+        "http" | "https" => Ok(()),
+        "webdav" | "webdavs" => Err("WebDAV playlist URLs require a configured source".into()),
         _ => Err(format!("URL scheme '{}' is not allowed", scheme)),
-    }
-}
-
-fn playable_url(path: &str) -> String {
-    if let Some(rest) = path.strip_prefix("webdav://") {
-        format!("http://{}", rest)
-    } else if let Some(rest) = path.strip_prefix("webdavs://") {
-        format!("https://{}", rest)
-    } else {
-        path.to_string()
     }
 }
 
@@ -333,17 +324,29 @@ Title1=First
     #[test]
     fn rejects_traversal_and_bad_url_schemes_without_failing_valid_entries() {
         let base = PathBuf::from("D:/music");
+        let validated = std::cell::RefCell::new(Vec::new());
         let result = load_playlist_content(
-            "../../../secret.flac\nftp://example.test/a.flac\nhttps://example.test/a.flac",
+            "../../../secret.flac\nftp://example.test/a.flac\nwebdav://example.test/a.flac\nhttps://example.test/a.flac",
             None,
             Some(&base),
-            accept_existing_for_test,
+            |path| {
+                validated.borrow_mut().push(path.to_string());
+                accept_existing_for_test(path)
+            },
         )
         .unwrap();
 
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].path, "https://example.test/a.flac");
-        assert_eq!(result.rejected.len(), 2);
+        assert_eq!(result.rejected.len(), 3);
+        assert!(result.rejected.iter().any(|entry| {
+            entry.path == "webdav://example.test/a.flac"
+                && entry.reason == "WebDAV playlist URLs require a configured source"
+        }));
+        assert!(validated
+            .borrow()
+            .iter()
+            .any(|path| path == "https://example.test/a.flac"));
     }
 
     #[test]
@@ -356,5 +359,21 @@ Title1=First
         );
 
         assert_eq!(result.unwrap_err(), "no valid entries in playlist");
+    }
+
+    #[test]
+    fn rejects_private_http_url_through_shared_path_policy() {
+        let result = load_playlist_content(
+            "http://127.0.0.1/private.flac\nhttps://example.com/public.flac",
+            None,
+            None,
+            crate::server::validate_path,
+        )
+        .unwrap();
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].path, "https://example.com/public.flac");
+        assert_eq!(result.rejected.len(), 1);
+        assert_eq!(result.rejected[0].path, "http://127.0.0.1/private.flac");
     }
 }

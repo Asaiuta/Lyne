@@ -1,11 +1,10 @@
 use super::*;
+use crate::webdav::normalize_source_key as normalize_webdav_source_key;
 use actix_web::{web, HttpResponse};
 use std::sync::Arc;
 use std::time::Instant;
 
-const WEBDAV_SOURCE_KEY_MAX_LEN: usize = 80;
 const WEBDAV_DISPLAY_NAME_MAX_LEN: usize = 120;
-const WEBDAV_BROWSE_PATH_MAX_LEN: usize = 4096;
 
 #[derive(serde::Deserialize)]
 struct WebDavSourcePath {
@@ -274,25 +273,6 @@ fn normalize_webdav_base_url(base_url: &str) -> Result<String, String> {
     Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
-fn normalize_webdav_source_key(source_key: &str) -> Result<String, String> {
-    let trimmed = source_key.trim();
-    if trimmed.is_empty() {
-        return Err("source_key is required".to_string());
-    }
-    if trimmed.len() > WEBDAV_SOURCE_KEY_MAX_LEN {
-        return Err("source_key is too long".to_string());
-    }
-    if !trimmed
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
-    {
-        return Err(
-            "source_key may only contain ASCII letters, numbers, '-', '_' or '.'".to_string(),
-        );
-    }
-    Ok(trimmed.to_string())
-}
-
 fn normalize_webdav_display_name(
     display_name: Option<&str>,
     fallback: &str,
@@ -315,19 +295,7 @@ fn normalize_webdav_browse_path(path: Option<&str>) -> Result<String, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("/");
-    if value.len() > WEBDAV_BROWSE_PATH_MAX_LEN {
-        return Err("WebDAV browse path is too long".to_string());
-    }
-    let lower = value.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") || lower.contains("://") {
-        return Err("WebDAV browse path must be relative to the configured source".to_string());
-    }
-    if value.contains('\\') || has_parent_path_segment(value) {
-        return Err("WebDAV browse path contains invalid path traversal characters".to_string());
-    }
-    if value.chars().any(char::is_control) {
-        return Err("WebDAV browse path contains control characters".to_string());
-    }
+    crate::webdav::validate_browse_path(value).map_err(|error| error.to_string())?;
     Ok(value.to_string())
 }
 

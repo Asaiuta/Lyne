@@ -298,12 +298,15 @@ pub(in crate::server::netease) fn proxy_handler_method_names() -> Vec<&'static s
     methods
 }
 
-fn request_option_from_query(query: &Query, crypto: CryptoType) -> RequestOption {
+pub(in crate::server::netease) fn request_option_from_query(
+    query: &Query,
+    crypto: CryptoType,
+) -> RequestOption {
     RequestOption {
         crypto,
         cookie: query.cookie.clone(),
         ua: query.ua.clone(),
-        proxy: query.proxy.clone(),
+        proxy: None,
         real_ip: query.real_ip.clone(),
         random_cn_ip: query.random_cn_ip,
         e_r: query.e_r,

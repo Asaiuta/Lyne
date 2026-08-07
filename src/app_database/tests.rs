@@ -2229,6 +2229,44 @@ fn clearing_failed_scan_seen_set_preserves_committed_memberships() {
 }
 
 #[test]
+fn partial_scan_finalize_preserves_unseen_memberships() {
+    let db = AppDatabase::in_memory().unwrap();
+    let root_id = db
+        .upsert_library_root(None, "D:/Music", "local", "Music", "scanning")
+        .unwrap();
+    let old_media = db.record_media_stub("D:/Music/old.flac").unwrap();
+    let seen_media = db.record_media_stub("D:/Music/seen.flac").unwrap();
+    add_library_membership(&db, root_id, &old_media);
+
+    db.begin_library_scan_seen_set(102).unwrap();
+    db.mark_library_scan_seen_media_ids(102, std::slice::from_ref(&seen_media))
+        .unwrap();
+    let finalized = db
+        .finalize_partial_library_root_scan(root_id, 102, 20)
+        .unwrap();
+
+    assert_eq!(finalized.track_count, 2);
+    assert_eq!(finalized.cleanup, LibraryCleanupReport::default());
+    assert!(db.source_path_for_media_id(&old_media).unwrap().is_some());
+    assert!(db.source_path_for_media_id(&seen_media).unwrap().is_some());
+    let roots = db.list_library_roots().unwrap();
+    let root = roots.iter().find(|root| root.root_id == root_id).unwrap();
+    assert_eq!(root.scan_status, "partial");
+    assert_eq!(root.track_count, 2);
+
+    let seen_count = {
+        let conn = db.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM temp.library_scan_seen WHERE task_id = ?1",
+            params![102_i64],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(seen_count, 0);
+}
+
+#[test]
 fn scan_finalize_enforces_root_source_kind_and_excludes_ncm_media() {
     let db = AppDatabase::in_memory().unwrap();
     let local_root = db
