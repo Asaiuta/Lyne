@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Contains the realtime benchmark gate contract section (PERF-001) and code quality rules; provenance contract will extend this file."}
+{"file": ".trellis/tasks/08-07-full-codebase-audit/research/06-performance.md", "reason": "PERF-005 evidence: Rust JSON reports omit git/toolchain/CPU/OS; Electron/Lyne add runtime versions but not git/binary/fixture identity; Tauri probes record gitHead only."}
+{"file": ".trellis/tasks/08-07-full-codebase-audit/research/07-final-matrix.md", "reason": "Wave 3 ordering: gate contract first (done), then provenance before performance-claims; cross-layer synthesis describes evidence trust chain."}
+{"file": ".trellis/tasks/08-07-realtime-benchmark-gate-contract/design.md", "reason": "Environment-class hook that provenance signs; gate verdict JSON is the primary consumer for provenance-bearing reports (archived 2026-08)."}
