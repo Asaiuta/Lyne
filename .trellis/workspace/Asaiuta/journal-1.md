@@ -520,3 +520,36 @@ PERF-005: shared provenance blocks. Rust src/bench_provenance.rs (collect + comp
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Source-seek benchmark hardened with gate contract (PERF-002)
+
+**Date**: 2026-08-08
+**Task**: Source-seek benchmark hardened with gate contract (PERF-002)
+**Branch**: `feat/desktop-lyric`
+
+### Summary
+
+Session summary was not supplied.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `18beb4d` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

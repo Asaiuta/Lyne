@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Gate contract semantics (exit codes, env class, unsupported vs failed), provenance block field contract, redaction policy"}
+{"file": ".trellis/tasks/08-07-full-codebase-audit/research/06-performance.md", "reason": "PERF-002 acceptance linkage: report-only must not assert timing; absolute vs relative criteria; fixture/local-only caveat"}
