@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "benchmark": "audio_resampler_streaming_perf",
+  "mode": "gate",
+  "warmup": 1,
+  "trials": 1,
+  "percentile": null,
+  "deadline": {
+    "frame_period_ns_provenance": "512 input frames at 44.1 kHz = 11_617 ms input period",
+    "target_miss_rate": 0.0,
+    "target_p9999_fraction_of_period": 1.0
+  },
+  "metrics": [
+    {
+      "name": "music_44k1_to_48k_borrowed_512_ns_per_input_sample",
+      "budget_ns": 1,
+      "source": "deliberately impossible budget to prove gate fails",
+      "host_sensitive": true
+    }
+  ],
+  "environment": {
+    "class": "lyne-dev-bench-gate",
+    "os": "windows",
+    "arch": "x86_64",
+    "profile": "release",
+    "requires_warmup": true
+  },
+  "budget_provenance": "over-budget fixture: budget below any real measurement; gate must fail with budget-exceeded reason",
+  "integrity_checks": ["finite"]
+}

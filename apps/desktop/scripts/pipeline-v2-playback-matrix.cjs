@@ -121,7 +121,15 @@ const runProcess = (command, args) =>
   });
 
 const classifyRow = (report, processResult) => {
-  if (report?.summary?.pass) return "passed";
+  // Defensive guard: if a report claims pass while carrying sub-gate failure
+  // reasons, treat it as failed (protects against summary.pass divergence).
+  if (report?.summary?.pass) {
+    const reasons = report?.summary?.failure_reasons || [];
+    if (Array.isArray(reasons) && reasons.length > 0) {
+      return "failed";
+    }
+    return "passed";
+  }
   const stderrHighlights = report?.server?.stderr_highlights || "";
   if (
     report?.parameters?.output_mode === "exclusive" &&

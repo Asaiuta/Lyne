@@ -1,3 +1,7 @@
+use audio_engine::bench_gate::{self, GateContext, GateMetric, GateMode};
+
+use std::path::Path;
+
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -64,7 +68,12 @@ fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let quick = args.iter().any(|arg| arg == "--quick");
     let heavy = args.iter().any(|arg| arg == "--heavy");
-    let enforce = args.iter().any(|arg| arg == "--enforce");
+    let (gate_mode, gate_spec, gate_self_test) = bench_gate::parse_args(&args);
+    if gate_self_test {
+        bench_gate::gate_self_test().expect("gate self-test failed");
+        println!("bench_gate self_test=passed");
+        return;
+    }
 
     let (iterations, trials) = if quick {
         (400, 1)
@@ -89,6 +98,7 @@ fn main() {
         "audio_resampler_streaming_note excludes=decoder,callback_dsp_chain,cpal_device_write,gapless_state_machine"
     );
 
+    let mut gate_candidate = None; // (ns_per_input_sample, from_rate)
     for scenario in SCENARIOS {
         for frames in BUFFER_FRAMES {
             let input = synthetic_buffer(frames, CHANNELS, scenario.from_rate);
@@ -110,17 +120,39 @@ fn main() {
                     report.elapsed.as_secs_f64() * 1_000.0
                 );
 
-                if enforce
-                    && scenario.name == "music_44k1_to_48k"
+                if scenario.name == "music_44k1_to_48k"
                     && matches!(api, ApiPath::Borrowed)
                     && frames == 512
                 {
-                    assert!(
-                        report.ns_per_input_sample.is_finite() && report.output_frames > 0,
-                        "resampler benchmark produced invalid timing or no output"
-                    );
+                    gate_candidate = Some((report.ns_per_input_sample, 44_100));
                 }
             }
+        }
+    }
+
+    if matches!(gate_mode, GateMode::Check | GateMode::Gate) {
+        let (ns_per_input_sample, from_rate) = gate_candidate.expect("gate scenario executed");
+        let metric = GateMetric {
+            name: "music_44k1_to_48k_borrowed_512_ns_per_input_sample",
+            value_ns: ns_per_input_sample,
+        };
+        let ctx = GateContext {
+            frame_period_ns: 512.0 * 1_000_000_000.0 / f64::from(from_rate),
+            deadline_miss_rate: None,
+            p9999_ns: None,
+        };
+        let exit_code = bench_gate::finish(
+            "audio_resampler_streaming_perf",
+            gate_mode,
+            gate_spec.as_deref().map(Path::new),
+            &[metric],
+            &ctx,
+        )
+        .0
+        .kind
+        .exit_code();
+        if exit_code != 0 {
+            std::process::exit(exit_code);
         }
     }
 }

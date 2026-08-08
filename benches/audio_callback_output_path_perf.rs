@@ -1,5 +1,7 @@
 use std::hint::black_box;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use audio_engine::bench_gate::{self, exit_for, GateContext, GateMetric, GateMode};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
@@ -95,7 +97,7 @@ struct LatencySummary {
     max: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct BenchmarkRow {
     scenario: &'static str,
     frames: usize,
@@ -108,7 +110,7 @@ struct BenchmarkRow {
     worst: Report,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct BenchmarkReport {
     schema_version: u32,
     benchmark: &'static str,
@@ -119,13 +121,28 @@ struct BenchmarkReport {
     iterations_per_trial: usize,
     trials: usize,
     rows: Vec<BenchmarkRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gate: Option<GateJson>,
+}
+
+#[derive(Clone, Serialize)]
+struct GateJson {
+    mode: &'static str,
+    verdict: &'static str,
+    reason: String,
+    exit_code: i32,
 }
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let quick = args.iter().any(|arg| arg == "--quick");
     let heavy = args.iter().any(|arg| arg == "--heavy");
-    let enforce = args.iter().any(|arg| arg == "--enforce");
+    let (gate_mode, gate_spec, gate_self_test) = bench_gate::parse_args(&args);
+    if gate_self_test {
+        bench_gate::gate_self_test().expect("gate self-test failed");
+        println!("bench_gate self_test=passed");
+        return;
+    }
     let report_path = args
         .windows(2)
         .find(|pair| pair[0] == "--report")
@@ -157,6 +174,7 @@ fn main() {
         "audio_callback_output_path_note includes=callback_state,loudness_gain_disabled,dsp_chain_empty,optional_resampler,optional_final_noise_shaper,spectrum_pack excludes=decoder,cpal_device_write"
     );
 
+    let mut gate_candidate: Option<(f64, f64, f64)> = None; // (buffer_ns, deadline_miss_rate, p99_99_ns)
     let mut rows = Vec::with_capacity(Scenario::all().len() * BUFFER_FRAMES.len());
     for &scenario in Scenario::all() {
         for &frames in &BUFFER_FRAMES {
@@ -186,14 +204,12 @@ fn main() {
                 latency.deadline_miss_rate
             );
 
-            if enforce && frames == 512 {
-                assert!(
-                    stats.best.ns_per_output_sample.is_finite()
-                        && stats.best.ns_per_output_sample > 0.0
-                        && stats.median.ns_per_output_sample.is_finite()
-                        && stats.median.ns_per_output_sample > 0.0,
-                    "callback output path benchmark produced invalid timing"
-                );
+            if matches!(scenario, Scenario::Full) && frames == 512 {
+                gate_candidate = Some((
+                    stats.median.ns_per_output_buffer,
+                    latency.deadline_miss_rate,
+                    latency.p99_99 as f64,
+                ));
             }
 
             rows.push(BenchmarkRow {
@@ -215,6 +231,41 @@ fn main() {
         }
     }
 
+    // Gate verdict (check or gate mode).
+    let gate_json = if matches!(gate_mode, GateMode::Check | GateMode::Gate) {
+        let (buffer_ns, miss_rate, p9999) =
+            gate_candidate.expect("gate scenario (full/512) executed");
+        let ctx = GateContext {
+            frame_period_ns: 512.0 * 1_000_000_000.0 / f64::from(OUTPUT_SAMPLE_RATE),
+            deadline_miss_rate: Some(miss_rate),
+            p9999_ns: Some(p9999),
+        };
+        let metrics = [GateMetric {
+            name: "full_512_buffer_ns",
+            value_ns: buffer_ns,
+        }];
+        let (verdict, _spec) = bench_gate::finish(
+            "audio_callback_output_path_perf",
+            gate_mode,
+            gate_spec.as_deref().map(Path::new),
+            &metrics,
+            &ctx,
+        );
+        let exit_code = exit_for(&verdict);
+        Some(GateJson {
+            mode: match gate_mode {
+                GateMode::Check => "check",
+                GateMode::Gate => "gate",
+                GateMode::Report => "report",
+            },
+            verdict: verdict.kind.as_str(),
+            reason: verdict.reason.clone(),
+            exit_code,
+        })
+    } else {
+        None
+    };
+
     if let Some(path) = report_path {
         write_report(
             path,
@@ -228,8 +279,15 @@ fn main() {
                 iterations_per_trial: iterations,
                 trials,
                 rows,
+                gate: gate_json.clone(),
             },
         );
+    }
+
+    if let Some(gate) = gate_json {
+        if gate.exit_code != 0 {
+            std::process::exit(gate.exit_code);
+        }
     }
 }
 

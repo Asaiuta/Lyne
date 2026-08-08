@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "benchmark": "audio_spectrum_handoff_perf",
+  "mode": "gate",
+  "warmup": 1,
+  "trials": 1,
+  "percentile": null,
+  "deadline": {
+    "frame_period_ns_provenance": "512 frames at 48 kHz callback period = 10_666_667 ns",
+    "target_miss_rate": 0.0,
+    "target_p9999_fraction_of_period": 1.0
+  },
+  "metrics": [
+    {
+      "name": "analyzer_2048_bins64_ns_per_buffer",
+      "budget_ns": 1,
+      "source": "deliberately impossible budget to prove gate fails",
+      "host_sensitive": true
+    }
+  ],
+  "environment": {
+    "class": "lyne-dev-bench-gate",
+    "os": "windows",
+    "arch": "x86_64",
+    "profile": "release",
+    "requires_warmup": true
+  },
+  "budget_provenance": "over-budget fixture: budget below any real measurement; gate must fail with budget-exceeded reason",
+  "integrity_checks": ["finite"]
+}

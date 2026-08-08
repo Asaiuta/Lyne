@@ -1,8 +1,10 @@
 use std::hint::black_box;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use audio_engine::bench_gate::{self, GateContext, GateMetric, GateMode};
 use audio_engine::player::{SharedState, SpectrumBatch};
 use audio_engine::processor::SpectrumAnalyzer;
 use crossbeam::channel;
@@ -23,7 +25,12 @@ fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let quick = args.iter().any(|arg| arg == "--quick");
     let heavy = args.iter().any(|arg| arg == "--heavy");
-    let enforce = args.iter().any(|arg| arg == "--enforce");
+    let (gate_mode, gate_spec, gate_self_test) = bench_gate::parse_args(&args);
+    if gate_self_test {
+        bench_gate::gate_self_test().expect("gate self-test failed");
+        println!("bench_gate self_test=passed");
+        return;
+    }
 
     let (callback_iterations, background_iterations, trials) = if quick {
         (1_000, 1_000, 1)
@@ -108,11 +115,29 @@ fn main() {
         analyze.elapsed.as_secs_f64() * 1_000.0
     );
 
-    if enforce {
-        assert!(
-            analyze.ns_per_buffer.is_finite() && analyze.ns_per_buffer > 0.0,
-            "spectrum analyzer benchmark produced invalid timing"
-        );
+    if matches!(gate_mode, GateMode::Check | GateMode::Gate) {
+        let metric = GateMetric {
+            name: "analyzer_2048_bins64_ns_per_buffer",
+            value_ns: analyze.ns_per_buffer,
+        };
+        let ctx = GateContext {
+            frame_period_ns: 512.0 * 1_000_000_000.0 / SAMPLE_RATE as f64,
+            deadline_miss_rate: None,
+            p9999_ns: None,
+        };
+        let exit_code = bench_gate::finish(
+            "audio_spectrum_handoff_perf",
+            gate_mode,
+            gate_spec.as_deref().map(Path::new),
+            &[metric],
+            &ctx,
+        )
+        .0
+        .kind
+        .exit_code();
+        if exit_code != 0 {
+            std::process::exit(exit_code);
+        }
     }
 }
 

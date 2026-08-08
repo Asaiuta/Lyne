@@ -1093,6 +1093,36 @@ const buildPipelineV2Evidence = (report) => {
   };
 };
 
+const measureSubGates = (stability, controlUpdates) => {
+  const stabilitySummary = stability ? stability.summary : null;
+  const stabilityPass =
+    !stability ||
+    stability.enabled !== true ||
+    (stabilitySummary.playback_false_samples === 0 &&
+      stabilitySummary.loading_samples === 0 &&
+      stabilitySummary.load_error_delta === 0 &&
+      stabilitySummary.recovery_delta === 0 &&
+      stabilitySummary.underrun_delta === 0 &&
+      stabilitySummary.streaming_output_shortfall_delta === 0 &&
+      stabilitySummary.current_time_monotonic_resets === 0);
+  const controlUpdatePass =
+    !controlUpdates ||
+    controlUpdates.enabled !== true ||
+    (controlUpdates.samples || []).every((sample) => sample.status === "success");
+  const failureReasons = [];
+  if (stability && stability.enabled === true && !stabilityPass) {
+    failureReasons.push("stability:sub-gate-failed");
+  }
+  if (controlUpdates && controlUpdates.enabled === true && !controlUpdatePass) {
+    failureReasons.push("control:sub-gate-failed");
+  }
+  return { stabilityPass, controlUpdatePass, failureReasons };
+};
+
+if (typeof module !== "undefined") {
+  module.exports = { measureSubGates };
+}
+
 const runBenchmark = async (options) => {
   const report = {
     probe: "lyne-playback-latency-benchmark",
@@ -1211,25 +1241,15 @@ const runBenchmark = async (options) => {
     report.stability = await collectStabilitySamples(options, duration);
 
     report.diagnostics.after = (await readRuntimeDiagnostics(options)).snapshot;
-    const stabilitySummary = report.stability ? report.stability.summary : null;
-    const stabilityPass =
-      !report.stability ||
-      report.stability.enabled !== true ||
-      (stabilitySummary.playback_false_samples === 0 &&
-        stabilitySummary.loading_samples === 0 &&
-        stabilitySummary.load_error_delta === 0 &&
-        stabilitySummary.recovery_delta === 0 &&
-        stabilitySummary.underrun_delta === 0 &&
-        stabilitySummary.streaming_output_shortfall_delta === 0 &&
-        stabilitySummary.current_time_monotonic_resets === 0);
-    const controlUpdatePass =
-      !report.control_updates ||
-      report.control_updates.enabled !== true ||
-      (report.control_updates.samples || []).every((sample) => sample.status === "success");
+    const { stabilityPass, controlUpdatePass, failureReasons } = measureSubGates(
+      report.stability,
+      report.control_updates
+    );
     report.summary = {
-      pass: true,
+      pass: stabilityPass && controlUpdatePass,
       stability_pass: stabilityPass,
       control_update_pass: controlUpdatePass,
+      failure_reasons: failureReasons,
       total_elapsed_ms: Number((performance.now() - startedAt).toFixed(3)),
       operations: summarizeOperations(report.measurements),
       diagnostics_delta: null,
@@ -1358,7 +1378,9 @@ const main = async () => {
   }
 };
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

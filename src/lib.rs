@@ -5,6 +5,8 @@
 
 pub mod app_database;
 pub mod audio_settings;
+#[doc(hidden)]
+pub mod bench_gate;
 pub mod config;
 pub mod diagnostics;
 pub mod metadata;

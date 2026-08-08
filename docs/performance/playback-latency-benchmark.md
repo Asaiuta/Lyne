@@ -277,13 +277,21 @@ Current test runs:
 | `cargo test processor::loudness --lib` | 27 passed | EBU R128 meter wiring, true peak, limiter queue, ramping, no-alloc steady-state tests |
 
 Quick runtime budget benches:
+> Gate contract (2026-08): canonical realtime benches use `--check` for
+> deterministic integrity and `--gate --gate-spec benches/gate-specs/<bench>.gate.json`
+> for real budget verdicts. `--enforce` is a deprecated alias of `--check`.
+> Exit codes: 0 passed, 1 budget failed, 2 unsupported/misconfigured env,
+> 3 integrity failed. Report mode (no flag) never fails on timing. Budget
+> verdicts are host-sensitive: the spec's `environment.class` must match
+> `BENCH_GATE_ENV_CLASS`, otherwise the verdict is `unsupported` (exit 2),
+> never passed.
 
 | Bench | Representative path | 512-frame result | Includes | Excludes |
 | --- | --- | ---: | --- | --- |
-| `audio_callback_output_path_perf --quick --enforce` | full output path | median 18.4 ns/output sample, 18.8 us/buffer | callback state, disabled loudness gain, empty DSP chain, resampler, final shaper, spectrum pack | decoder, CPAL device write |
-| `audio_callback_chain_perf --quick --enforce` | active DSP without convolver | 20.9 ns/sample, 21.4 us/buffer | EQ, saturation, crossfeed, limiter, volume, dynamic loudness, noise shaper | decoder, resampler, spectrum, CPAL device write |
-| `audio_callback_chain_perf --quick --enforce` | active DSP with convolver | 45.1 ns/sample, 46.2 us/buffer | same chain plus convolver | decoder, resampler, spectrum, CPAL device write |
-| `audio_resampler_streaming_perf --quick --enforce` | 44.1 kHz to 48 kHz streaming resampler | 9.4 ns/input sample, 9.6 us/input buffer | streaming resampler only | decoder, callback DSP chain, CPAL device write |
+| `audio_callback_output_path_perf --quick --check` | full output path | median 18.4 ns/output sample, 18.8 us/buffer | callback state, disabled loudness gain, empty DSP chain, resampler, final shaper, spectrum pack | decoder, CPAL device write |
+| `audio_callback_chain_perf --quick --check` | active DSP without convolver | 20.9 ns/sample, 21.4 us/buffer | EQ, saturation, crossfeed, limiter, volume, dynamic loudness, noise shaper | decoder, resampler, spectrum, CPAL device write |
+| `audio_callback_chain_perf --quick --check` | active DSP with convolver | 45.1 ns/sample, 46.2 us/buffer | same chain plus convolver | decoder, resampler, spectrum, CPAL device write |
+| `audio_resampler_streaming_perf --quick --check` | 44.1 kHz to 48 kHz streaming resampler | 9.4 ns/input sample, 9.6 us/input buffer | streaming resampler only | decoder, callback DSP chain, CPAL device write |
 
 Bench logs:
 

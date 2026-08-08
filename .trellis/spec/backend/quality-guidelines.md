@@ -577,6 +577,35 @@ mod tests {
 
 ---
 
+## Realtime benchmark gate contract
+
+Canonical realtime benches (`audio_callback_chain_perf`, `audio_callback_output_path_perf`,
+`audio_resampler_streaming_perf`, `audio_spectrum_handoff_perf`) follow the shared
+gate contract in `src/bench_gate.rs` (PERF-001 remediation):
+
+- **Report** (no flag): complete measurements, no verdict, never fails on timing.
+- **`--check`**: deterministic integrity (finite/positive/non-empty); failure = exit 3.
+  `--enforce` is a deprecated alias of `--check`.
+- **`--gate`**: budget gate against `benches/gate-specs/<bench>.gate.json`
+  (override with `--gate-spec <path>`). Exit 0 passed, 1 budget failed,
+  2 unsupported env / misconfigured spec, 3 integrity failed.
+- Budget verdicts are host-sensitive: the spec's `environment.class` must match
+  `BENCH_GATE_ENV_CLASS`; a mismatched host is `unsupported` (exit 2), never passed.
+- `--gate-self-test` runs canned pass/fail/unsupported verdicts without measuring.
+- Machine-readable verdicts: stdout line `bench_gate verdict=<v> bench=.. mode=.. reason=..`;
+  `audio_callback_output_path_perf --report <path>` embeds a `gate` object
+  `{mode, verdict, reason, exit_code}` in the JSON report.
+- Lyne latency benchmark folds enabled stability/control sub-gates into
+  `summary.pass` with `failure_reasons`; `pipeline-v2-playback-matrix.cjs`
+  classifies sub-gate failures as failed rows.
+
+Gate specs must declare measurable budgets (`metrics`) and a budget provenance;
+specs with empty metrics are rejected. Do not label report-only runs as gates:
+"the command proves reachability, not regression protection" unless run with
+an approved-env gate spec.
+
+---
+
 ## Dependencies
 
 | Crate | Purpose | When to use |

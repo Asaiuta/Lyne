@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use audio_engine::bench_gate::{self, exit_for, GateContext, GateMetric, GateMode};
 use audio_engine::player::LockfreeDspContext;
 use audio_engine::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
@@ -61,7 +62,12 @@ fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     let quick = args.iter().any(|arg| arg == "--quick");
     let heavy = args.iter().any(|arg| arg == "--heavy");
-    let enforce = args.iter().any(|arg| arg == "--enforce");
+    let (gate_mode, gate_spec, gate_self_test) = bench_gate::parse_args(&args);
+    if gate_self_test {
+        bench_gate::gate_self_test().expect("gate self-test failed");
+        println!("bench_gate self_test=passed");
+        return;
+    }
 
     let (iterations, trials) = if quick {
         (500, 1)
@@ -88,6 +94,8 @@ fn main() {
         "audio_callback_chain_note excludes=cpal_device_write,decoder,resampler,spectrum,loudness_normalization_pre_gain,gapless_state_machine"
     );
 
+    // Track the canonical gate candidate: 512-frame active-DSP-no-convolver.
+    let mut gate_buffer_ns: Option<f64> = None;
     for &scenario in Scenario::all() {
         for &frames in &BUFFER_FRAMES {
             let report = benchmark_scenario(scenario, frames, iterations, trials);
@@ -104,13 +112,37 @@ fn main() {
             );
             print_original_comparison(scenario, frames, &report);
 
-            if enforce && matches!(scenario, Scenario::ActiveDspNoConvolver) && frames == 512 {
-                assert!(
-                    report.ns_per_sample.is_finite() && report.ns_per_sample > 0.0,
-                    "callback chain benchmark produced invalid timing"
-                );
+            if matches!(scenario, Scenario::ActiveDspNoConvolver) && frames == 512 {
+                gate_buffer_ns = Some(report.ns_per_buffer);
             }
         }
+    }
+
+    let frame_period_ns = 512.0 * 1_000_000_000.0 / SAMPLE_RATE;
+    let ctx = GateContext {
+        frame_period_ns,
+        deadline_miss_rate: None,
+        p9999_ns: None,
+    };
+    let metrics = [GateMetric {
+        name: "active_dsp_no_convolver_512_buffer_ns",
+        value_ns: gate_buffer_ns.expect("gate scenario executed"),
+    }];
+    let exit_code = match gate_mode {
+        GateMode::Report => 0,
+        GateMode::Check | GateMode::Gate => {
+            let (verdict, _spec) = bench_gate::finish(
+                "audio_callback_chain_perf",
+                gate_mode,
+                gate_spec.as_deref().map(std::path::Path::new),
+                &metrics,
+                &ctx,
+            );
+            exit_for(&verdict)
+        }
+    };
+    if exit_code != 0 {
+        std::process::exit(exit_code);
     }
 }
 

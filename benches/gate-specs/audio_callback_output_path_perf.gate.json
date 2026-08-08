@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "benchmark": "audio_callback_output_path_perf",
+  "mode": "gate",
+  "warmup": 1,
+  "trials": 3,
+  "percentile": 99.99,
+  "deadline": {
+    "frame_period_ns_provenance": "512 frames at 48 kHz callback period = 10_666_667 ns",
+    "target_miss_rate": 0.0,
+    "target_p9999_fraction_of_period": 0.03
+  },
+  "metrics": [
+    {
+      "name": "full_512_buffer_ns",
+      "budget_fraction_of_period": 0.5,
+      "source": "measured median full-path output buffer, quick profile, schema_version=2 JSON",
+      "host_sensitive": true
+    }
+  ],
+  "environment": {
+    "class": "lyne-dev-bench-gate",
+    "os": "windows",
+    "arch": "x86_64",
+    "profile": "release",
+    "requires_warmup": true
+  },
+  "budget_provenance": "declared 512-frame callback period at 48 kHz; buffer budget half a period and callback tail p99.99 within 3% of period. See docs/performance/playback-latency-benchmark.md gate table.",
+  "integrity_checks": ["finite"]
+}
