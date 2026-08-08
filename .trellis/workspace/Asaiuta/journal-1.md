@@ -611,3 +611,13 @@ Session summary was not supplied.
 - 关键上限：DECODE_MAX_MEMORY_MB 默认 2048 MiB（仅兜底），PCM 窗口 streaming_pcm_window_limit_mib 默认 256 MiB（84% 大头）。
 - 优化空间合计 ~300–400 MB（最坏场景），全部为上限/策略裁剪（前工程项 library_track_view SQL 下推已在 backlog），无泄漏。
 **产物**：research/report.md + data/（tree-residence.csv、playback-cycle.json、tone-long-diagnostics.json）+ scripts/sample-memory.ps1。
+
+## 2026-08-09 — Browse-scenario memory audit (08-09-memory-browse-scenarios)
+
+**自动化**：WebView2 CDP（--remote-debugging-port=9222）+ 零依赖 Node CDP 客户端（cdp-drive.mjs，全局 WebSocket/fetch），
+WMI 5s 进程树采样并行。真实 UI 驱动：本地库滚动 4 轮、在线搜索往返 8 轮、混合播放。
+- 纯浏览：sidecar 恒定 31-35 MB（浏览零影响）；DOM 恒 1149 nodes、JS heap 无累积（虚拟列表合格）。
+- 搜索结果误触播放（长歌）：sidecar 31→222 MB（整曲缓冲）、整树 520→868 MB 峰值；20 分钟静置后 TOT WS −0.48 MB/min
+  回落，DOM 20059→19462、JS heap 41.6→31.0 MB；sidecar 保持 222 MB（设计保留）。
+- **判定：浏览路径无泄漏**；大头仍是播放整曲缓冲（256 MiB 窗口默认）与 WebView 基线（~545-605 MB）。
+- 产物：report-browse.md + browse-mem.csv/settle-mem.csv/scene-log + 可复跑脚本组；归档 08-08 报告 §5/§6 增补。

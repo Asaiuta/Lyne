@@ -1,0 +1,70 @@
+16:44:45 MARK start 0 nodes=1106 heap=5204KB
+16:44:45 A0 click 本地音乐 -> {"ok":true,"tag":"LI","text":"本地音乐"}
+16:44:49 A1 list h=4138 ch=710
+16:44:52 MARK library round1-bottom nodes=1149 heap=5483KB
+16:44:53 MARK library round1-top nodes=1149 heap=5509KB
+16:44:54 A2 list h=4138 ch=710
+16:44:56 MARK library round2-bottom nodes=1149 heap=6022KB
+16:44:58 MARK library round2-top nodes=1149 heap=6045KB
+16:44:58 A3 list h=4138 ch=710
+16:45:01 MARK library round3-bottom nodes=1149 heap=5929KB
+16:45:02 MARK library round3-top nodes=1149 heap=5951KB
+16:45:03 A4 list h=4138 ch=710
+16:45:05 MARK library round4-bottom nodes=1149 heap=5835KB
+16:45:07 MARK library round4-top nodes=1149 heap=5858KB
+16:45:07 B inputs: [{"ph":"搜索歌曲或歌单","cls":"n-input__input-el"}]
+B search input? true
+16:45:08 B1 fill "陈奕迅" ok=true
+16:45:10 MARK search round1-results nodes=1150 heap=6265KB
+16:45:10 B1 open result ok=true
+16:45:12 MARK B round1-detail nodes=1150 heap=6347KB
+16:45:12 B1 back ok=false
+16:45:14 MARK B round1-back nodes=1150 heap=6369KB
+16:45:14 B2 fill "钢琴" ok=true
+16:45:16 MARK search round2-results nodes=1282 heap=6516KB
+16:45:16 B2 open result ok=true
+16:45:18 MARK B round2-detail nodes=1282 heap=6565KB
+16:45:18 B2 back ok=false
+16:45:20 MARK B round2-back nodes=1282 heap=6590KB
+16:45:21 B3 fill "周杰伦" ok=true
+16:45:23 MARK search round3-results nodes=1310 heap=8137KB
+16:45:23 B3 open result ok=true
+16:45:25 MARK B round3-detail nodes=1310 heap=8181KB
+16:45:25 B3 back ok=false
+16:45:27 MARK B round3-back nodes=1310 heap=8204KB
+16:45:27 B4 fill "陈奕迅" ok=true
+16:45:29 MARK search round4-results nodes=1329 heap=7747KB
+16:45:29 B4 open result ok=true
+16:45:31 MARK B round4-detail nodes=1329 heap=7795KB
+16:45:31 B4 back ok=false
+16:45:33 MARK B round4-back nodes=1329 heap=7820KB
+16:45:35 B5 fill "钢琴" ok=true
+16:45:37 MARK search round5-results nodes=1282 heap=6397KB
+16:45:37 B5 open result ok=true
+16:45:39 MARK B round5-detail nodes=1282 heap=6444KB
+16:45:39 B5 back ok=false
+16:45:41 MARK B round5-back nodes=1282 heap=6469KB
+16:45:41 B6 fill "周杰伦" ok=true
+16:45:44 MARK search round6-results nodes=1310 heap=7993KB
+16:45:44 B6 open result ok=true
+16:45:46 MARK B round6-detail nodes=1310 heap=8037KB
+16:45:46 B6 back ok=false
+16:45:47 MARK B round6-back nodes=1310 heap=8061KB
+16:45:48 B7 fill "陈奕迅" ok=true
+16:45:50 MARK search round7-results nodes=1329 heap=7859KB
+16:45:50 B7 open result ok=true
+16:45:52 MARK B round7-detail nodes=1329 heap=7906KB
+16:45:52 B7 back ok=false
+16:45:54 MARK B round7-back nodes=1329 heap=7931KB
+16:45:54 B8 fill "钢琴" ok=true
+16:45:56 MARK search round8-results nodes=1282 heap=6527KB
+16:45:56 B8 open result ok=true
+16:45:58 MARK B round8-detail nodes=1282 heap=6574KB
+16:45:58 B8 back ok=false
+16:46:00 MARK B round8-back nodes=1282 heap=6599KB
+16:46:04 C played: true
+16:46:08 MARK C play-1 nodes=1430 heap=9076KB
+16:46:11 MARK C play-2 nodes=20059 heap=37789KB
+16:46:12 MARK C paused nodes=19465 heap=41604KB
+16:46:37 MARK settle after-30s-gc nodes=19462 heap=31033KB
+DONE scenes
