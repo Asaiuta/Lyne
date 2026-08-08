@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-08-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~489 | Active |
+| `journal-1.md` | ~522 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-08-08 | Performance artifact provenance implemented and archived | `c0c64a8` | `feat/desktop-lyric` |
 | 10 | 2026-08-08 | Bench gate contract implemented and archived | `60d1f34` | `feat/desktop-lyric` |
 | 9 | 2026-07-12 | Complete streaming playback pipeline v2 | `6dc2e9b`, `f5336db` | `feat/desktop-lyric` |
 | 8 | 2026-07-09 | SPlayer UI parity Trellis progress correction | - | `feat/desktop-lyric` |

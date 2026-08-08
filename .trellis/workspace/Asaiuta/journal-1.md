@@ -487,3 +487,36 @@ Completed 08-07-realtime-benchmark-gate-contract (PERF-001+PERF-004): shared src
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Performance artifact provenance implemented and archived
+
+**Date**: 2026-08-08
+**Task**: Performance artifact provenance implemented and archived
+**Branch**: `feat/desktop-lyric`
+
+### Summary
+
+PERF-005: shared provenance blocks. Rust src/bench_provenance.rs (collect + compare, 9 tests) wired into audio_callback_output_path_perf + pcm_window_perf JSON (additive, schema stable). Node provenance-utils.cjs mirror with attachReportProvenance (idempotent) + CRLF-normalized porcelain matching Rust cross-family fingerprints; 8 tests incl. redaction + temp-repo clean/dirty. All 10 report writers attach provenance; restart-tauri-cdp.ps1 merges --emit-git-fields into launch-meta. Spec PERF-005 contract + docs artifact identity. Suites: cargo 396, npm 539, typecheck, clippy clean for new code.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c0c64a8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
