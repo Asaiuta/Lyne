@@ -628,3 +628,10 @@ WMI 5s 进程树采样并行。真实 UI 驱动：本地库滚动 4 轮、在线
 **解码路径实测**（240s 曲目，sidecar）：legacy 全曲缓冲 208.8 WS/175.8 账本 → v2@128MiB 161.1/128.1 → v2@64MiB 96.9/64.1（省 48–112 MB）。v2 需 AUDIO_STREAMING_FIRST_BUFFER=true（env_flag 只认 "true" 字符串！"1" 无效——调试耗时点）。v2 默认化属行为变更，建议独立任务做全量播放回归。
 **WebView2 参数**：baseline 463.4 WS/307.4 PB @6 procs；--renderer-process-limit=1 负收益（492.6）弃用；--disable-gpu 446.1 WS/199.7 PB（PB 省 ~108 MB），像素差 0.7/255 不可感知，但合成走软件路径有性能风险 → 记录不默认。
 **结论**：当前默认路径下内存已无可无损裁剪项；真实大头（190 MB）为 legacy 全曲缓冲设计，切换 v2 窗口化才有质变。
+
+## 2026-08-09 — UI 架构决策报告 (08-09-ui-framework-migration-report)
+
+产出 architecture-comparison.md：4 方案矩阵 + 迁移成本估算（Avalonia 50–80 人日、egui/iced 65–120 人日，基于 106.4K 行/196 组件实测数），
+结论**保持 Tauri 为主**（WebView 基线为 Chromium 固有、播放缓冲与架构无关、前端为 Solid 全量重写成本高、CDP 自动化资产专属），
+混合方案为渐进路径；触发器：<300 MB 硬指标 / 完全原生视觉转向 / 技术栈偏好变化。已并入父任务结论。
+（journal 已含上一轮 entry：架构决策——本次为报告产出记录）
