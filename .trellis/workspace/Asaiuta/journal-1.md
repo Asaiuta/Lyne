@@ -621,3 +621,10 @@ WMI 5s 进程树采样并行。真实 UI 驱动：本地库滚动 4 轮、在线
   回落，DOM 20059→19462、JS heap 41.6→31.0 MB；sidecar 保持 222 MB（设计保留）。
 - **判定：浏览路径无泄漏**；大头仍是播放整曲缓冲（256 MiB 窗口默认）与 WebView 基线（~545-605 MB）。
 - 产物：report-browse.md + browse-mem.csv/settle-mem.csv/scene-log + 可复跑脚本组；归档 08-08 报告 §5/§6 增补。
+
+## 2026-08-09 — Memory trim delivery (08-09-memory-trim-delivery)
+
+**落地**：DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB 256→128（config.rs），401 测试全绿；默认路径零行为影响。
+**解码路径实测**（240s 曲目，sidecar）：legacy 全曲缓冲 208.8 WS/175.8 账本 → v2@128MiB 161.1/128.1 → v2@64MiB 96.9/64.1（省 48–112 MB）。v2 需 AUDIO_STREAMING_FIRST_BUFFER=true（env_flag 只认 "true" 字符串！"1" 无效——调试耗时点）。v2 默认化属行为变更，建议独立任务做全量播放回归。
+**WebView2 参数**：baseline 463.4 WS/307.4 PB @6 procs；--renderer-process-limit=1 负收益（492.6）弃用；--disable-gpu 446.1 WS/199.7 PB（PB 省 ~108 MB），像素差 0.7/255 不可感知，但合成走软件路径有性能风险 → 记录不默认。
+**结论**：当前默认路径下内存已无可无损裁剪项；真实大头（190 MB）为 legacy 全曲缓冲设计，切换 v2 窗口化才有质变。

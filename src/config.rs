@@ -13,7 +13,7 @@ pub use audio_engine_core::config::{
 
 pub const ENV_AUDIO_CACHE_MAX_BYTES: &str = "AUDIO_CACHE_MAX_BYTES";
 pub const DEFAULT_CACHE_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
-pub const DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB: u64 = 256;
+pub const DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB: u64 = 128;
 pub const MAX_STREAMING_PCM_WINDOW_LIMIT_MIB: u64 = 4096;
 
 static SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
