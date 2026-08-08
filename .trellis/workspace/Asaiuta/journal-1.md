@@ -408,3 +408,82 @@ Replaced the legacy streaming transport with a persistent preallocated PCM windo
 ### Next Steps
 
 - Track the strict workspace warning cleanup, isolated Cargo benchmark DLL launch, and repeated 44.1 -> 48 kHz device fallback stall outside this completed task.
+
+
+## Session 10: Discover route performance root-cause follow-up
+
+**Date**: 2026-07-23
+**Task**: `07-12-frontend-tauri-performance-trace`
+**Branch**: `feat/desktop-lyric`
+
+### Summary
+
+Removed the false playlists branch when Discover restores the persisted
+toplists tab, then reused the existing session cache for public Discover
+categories and toplists across route remounts. No visual or motion parameters
+changed.
+
+### Evidence
+
+- Wrong initial playlists request removed; renderer bytes fell from 80,141 to
+  38,248 in the directional trace comparison.
+- Controlled remount requests fell from four to two: only the first load
+  fetched categories and toplists; two later remounts added no requests.
+- Cache-hit trace contained no Discover backend Fetch and only 144 bytes of
+  renderer-visible SMTC IPC.
+- Residual `66.971 ms` renderer task remains attributable to keyed content
+  mount plus style/layout/paint, not the eliminated network work.
+- Full record: `research/tauri-perf/discover-route-optimization-20260723.md`.
+
+### Testing
+
+- [OK] Frontend focused tests: 501 passed
+- [OK] `npm run typecheck`
+- [OK] `npm run build`
+- [OK] Probe unit tests: 18 passed
+- [OK] Probe syntax: 8 Node modules and 2 PowerShell scripts passed
+- [OK] Discover artifact audit: 53 files, 0 sensitive hits, 0 read errors
+- [OK] Real Tauri cache-hit route screenshot and endpoint audit
+
+### Status
+
+[OK] **Network/remount lifetime hotspot fixed; residual visual mount cost kept open**
+
+### Next Steps
+
+- Do not trade card count, motion, or layout fidelity for the residual mount
+  task without a repeatable, pixel-equivalent candidate.
+- Run the full task quality gate before proposing a commit.
+
+
+## Session 10: Bench gate contract implemented and archived
+
+**Date**: 2026-08-08
+**Task**: Bench gate contract implemented and archived
+**Branch**: `feat/desktop-lyric`
+
+### Summary
+
+Completed 08-07-realtime-benchmark-gate-contract (PERF-001+PERF-004): shared src/bench_gate.rs with report/--check/--gate + --gate-self-test, machine-readable gate-specs for 4 canonical benches, Lyne summary.pass folding stability/control sub-gates with failure_reasons + pipeline matrix guard, docs/spec updated. Verified: cargo test 387, frontend 520, lyne-subgates 5/5, all bench gates green. Archived realtime-benchmark-gate-contract, 07-15-audio-settings-single-writer, 07-18-fix-orphaned-local-library-media.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `60d1f34` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
