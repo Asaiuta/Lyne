@@ -1,3 +1,0 @@
-{"file": ".trellis/tasks/archive/2026-06/05-31-prove-lyne-core-playback-library-value/research/electron-webaudio-baseline-results.md", "reason": "Lists commands run for script syntax, Electron fixture execution, typecheck, callback tests, processor tests, formal bench retries, and remaining evidence limits."}
-{"file": ".trellis/tasks/archive/2026-06/05-31-prove-lyne-core-playback-library-value/research/runtime-probe-results.md", "reason": "Summarizes the active playback control probe, deterministic fixture scan, and the remaining proof gaps."}
-{"file": ".trellis/tasks/archive/2026-06/05-31-prove-lyne-core-playback-library-value/research/final-verdict.md", "reason": "Contains the evidence table, direct verdict, and follow-up work used for final review."}

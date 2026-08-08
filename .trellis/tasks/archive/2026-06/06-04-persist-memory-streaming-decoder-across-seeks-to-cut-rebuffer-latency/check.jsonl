@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify RT-safety: no audio-thread allocation, correct ArrayQueue/backpressure/generation usage, recover semantics intact"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify worker decode/seek errors propagate as LoadError and never hang the command loop or audio thread"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify generation/state/queue contracts stay consistent across transport/player/decoder/resampler after the worker refactor"}
-{"file": ".trellis/tasks/archive/2026-07/06-03-reduce-false-playback-recovery/research/recovery-watchdog-results.md", "reason": "Check results against the acceptance targets: recovery stays 0, underrun no worse, shortfall down, progress_after_convergence_ms improved"}
