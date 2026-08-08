@@ -1,6 +1,6 @@
-{"file":".trellis/tasks/07-02-streaming-playback-pipeline-v2/prd.md","reason":"Verify user-value, maximum-performance requirements, exact seek behavior, memory ownership, and quantitative acceptance gates."}
-{"file":".trellis/tasks/07-02-streaming-playback-pipeline-v2/design.md","reason":"Verify slot safety proof, absolute-frame model, producer persistence, seek protection, source reuse, cache-line ownership, and rejected alternatives."}
-{"file":".trellis/tasks/07-02-streaming-playback-pipeline-v2/implement.md","reason":"Verify phase ordering proves the primitive and benchmarks before integration and deletes the old transport before completion."}
+{"file": ".trellis/tasks/archive/2026-07/07-02-streaming-playback-pipeline-v2/prd.md", "reason": "Verify user-value, maximum-performance requirements, exact seek behavior, memory ownership, and quantitative acceptance gates."}
+{"file": ".trellis/tasks/archive/2026-07/07-02-streaming-playback-pipeline-v2/design.md", "reason": "Verify slot safety proof, absolute-frame model, producer persistence, seek protection, source reuse, cache-line ownership, and rejected alternatives."}
+{"file": ".trellis/tasks/archive/2026-07/07-02-streaming-playback-pipeline-v2/implement.md", "reason": "Verify phase ordering proves the primitive and benchmarks before integration and deletes the old transport before completion."}
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Confirm no callback allocation/lock/I/O/logging/destruction and that the final spec replaces the obsolete queue/ring contract."}
 {"file":".trellis/spec/backend/error-handling.md","reason":"Confirm typed current-generation errors and stale generation/epoch/serial suppression across source, producer, window, and callback boundaries."}
 {"file":".trellis/spec/backend/logging-guidelines.md","reason":"Confirm callback/per-slot logging is absent and source errors sanitize credentials and signed URLs."}

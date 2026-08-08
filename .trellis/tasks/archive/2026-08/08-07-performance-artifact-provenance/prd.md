@@ -24,15 +24,15 @@
 
 ## Acceptance Criteria
 
-- [ ] New Rust, Electron, Lyne and Tauri JSON artifacts expose a versioned,
+- [x] New Rust, Electron, Lyne and Tauri JSON artifacts expose a versioned,
       machine-readable provenance block with the required applicable fields.
-- [ ] Two reports from different dirty trees or native binaries are detected as
+- [x] Two reports from different dirty trees or native binaries are detected as
       incomparable even when `gitHead` matches.
-- [ ] Clean-tree reports remain reproducible from commit, profile/toolchain,
+- [x] Clean-tree reports remain reproducible from commit, profile/toolchain,
       executable and fixture identity.
-- [ ] Tokens, credentials and unrestricted user file names are absent from the
+- [x] Tokens, credentials and unrestricted user file names are absent from the
       provenance block; redaction/fingerprint tests cover sensitive inputs.
-- [ ] Existing consumers tolerate or migrate to the new schema without losing
+- [x] Existing consumers tolerate or migrate to the new schema without losing
       previous measurement fields.
 
 ## Notes

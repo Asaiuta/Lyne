@@ -24,17 +24,17 @@
 
 ## Acceptance Criteria
 
-- [ ] A deliberately injected slowdown or over-budget fixture makes each
+- [x] A deliberately injected slowdown or over-budget fixture makes each
       applicable canonical realtime gate fail for the documented reason.
-- [ ] Callback/output gates evaluate declared deadline/tail metrics rather than
+- [x] Callback/output gates evaluate declared deadline/tail metrics rather than
       only finite positive timing.
-- [ ] Lyne latency exits nonzero when an enabled stability/control sub-gate is
+- [x] Lyne latency exits nonzero when an enabled stability/control sub-gate is
       false, and the pipeline-v2 row is classified failed.
-- [ ] Report-only mode still emits complete measurements without presenting a
+- [x] Report-only mode still emits complete measurements without presenting a
       latency-budget verdict.
-- [ ] Gate schema records mode, cases, metrics, budget source, profile and
+- [x] Gate schema records mode, cases, metrics, budget source, profile and
       environment class; focused tests cover pass/fail/unsupported outcomes.
-- [ ] Documentation and all Trellis callers use the same truthful command and
+- [x] Documentation and all Trellis callers use the same truthful command and
       do not label report-only evidence as a regression gate.
 
 ## Notes

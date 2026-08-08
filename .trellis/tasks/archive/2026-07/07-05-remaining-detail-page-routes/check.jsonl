@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Check SolidJS route/detail implementation against project frontend contracts."}
+{"file": ".trellis/tasks/07-04-splayer-ui-visual-audit/research/gap-list.md", "reason": "Verify screenshots address the confirmed daily/artist/video/radio composition gaps."}
+{"file": ".trellis/tasks/archive/2026-07/07-05-remaining-detail-page-routes/prd.md", "reason": "Acceptance criteria for remaining detail route independence."}

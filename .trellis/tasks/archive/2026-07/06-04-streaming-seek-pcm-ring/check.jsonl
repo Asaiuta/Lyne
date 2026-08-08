@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify RT-safety: no audio-thread alloc/free; retention eviction stays off-thread; ArrayQueue/backpressure/generation/cancel intact; recovery semantics unchanged"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify the window-miss fallback + decode/seek errors propagate as LoadError and never hang the command loop or audio thread"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify generation/position/queue/ring contracts stay consistent across player/loading/state/callback/decoder after the change"}
+{"file": ".trellis/tasks/archive/2026-07/06-03-reduce-false-playback-recovery/research/recovery-watchdog-results.md", "reason": "Check results against acceptance targets: in-window progress_after_convergence_ms drops to ~full-decode floor, shortfall->~0 in-window, out-of-window no worse, recovery==0, underrun no worse"}

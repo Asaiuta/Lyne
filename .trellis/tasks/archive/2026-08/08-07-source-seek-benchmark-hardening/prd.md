@@ -23,15 +23,15 @@
 
 ## Acceptance Criteria
 
-- [ ] Default/report mode prints and optionally writes measurements without a
+- [x] Default/report mode prints and optionally writes measurements without a
       noisy unconditional timing assertion.
-- [ ] `--enforce` evaluates documented absolute and relative criteria and exits
+- [x] `--enforce` evaluates documented absolute and relative criteria and exits
       nonzero on a deterministic over-budget regression.
-- [ ] Warmup, ordering and sample-count behavior has focused coverage or a
+- [x] Warmup, ordering and sample-count behavior has focused coverage or a
       deterministic harness test.
-- [ ] Structured output records fixture identity, profile/environment metadata,
+- [x] Structured output records fixture identity, profile/environment metadata,
       percentiles, criteria and verdict reasons.
-- [ ] Benchmark documentation states that local source-seek timing is not remote
+- [x] Benchmark documentation states that local source-seek timing is not remote
       or device-audible latency evidence.
 
 ## Notes

@@ -3,8 +3,8 @@
 {"file":".trellis/spec/backend/logging-guidelines.md","reason":"Window diagnostics are counter/histogram based and source errors are logged off-RT; callback and per-slot logging remain forbidden."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The redesign crosses player ownership, producer lifecycle, callback rendering, settings migration, diagnostics, remote source contracts, and process memory accounting."}
 {"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse the landed seek serial, playback clock direction, decoder seek capability, RT retire mechanism for whole resources, and existing benchmark infrastructure without preserving the inefficient PCM transport."}
-{"file":".trellis/tasks/07-02-player-seek-race/prd.md","reason":"The landed serial protocol is the ordering baseline for requested versus callback-applied window seeks."}
-{"file":".trellis/tasks/07-02-player-rt-retire/prd.md","reason":"Non-PCM and whole-window destruction remains off-RT while per-chunk PCM retirement is removed."}
+{"file": ".trellis/tasks/archive/2026-07/07-02-player-seek-race/prd.md", "reason": "The landed serial protocol is the ordering baseline for requested versus callback-applied window seeks."}
+{"file": ".trellis/tasks/archive/2026-07/07-02-player-rt-retire/prd.md", "reason": "Non-PCM and whole-window destruction remains off-RT while per-chunk PCM retirement is removed."}
 {"file":".trellis/tasks/06-08-shared-state-split/prd.md","reason":"PlaybackClock and cache-line-isolated StreamingRtView must be designed once with no duplicate position authority."}
 {"file":".trellis/tasks/07-02-remote-range-seek/design.md","reason":"OpenedSource capabilities, identity, recovery, policy, probe reuse, and persistent decoder/source behavior must satisfy the remote consumer task."}
 {"file":"src/player/buffer_budget.rs","reason":"The existing decode_memory_budget integration and current/pending ownership checks must migrate into one live reservation ledger rather than a second budget."}

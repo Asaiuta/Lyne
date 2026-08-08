@@ -553,3 +553,35 @@ Session summary was not supplied.
 ### Next Steps
 
 - None - task complete
+
+---
+
+## 2026-08-08 — Task metadata archive-integrity repair (08-08-task-metadata-archive-integrity)
+
+### Problem
+
+- Three archived performance tasks (08-07-performance-artifact-provenance, 08-07-realtime-benchmark-gate-contract, 08-07-source-seek-benchmark-hardening) archived with all PRD acceptance boxes unchecked despite completed validation evidence.
+- `task.py validate` failed on `08-07-performance-artifact-provenance/implement.jsonl:4`: it referenced `.trellis/tasks/08-07-realtime-benchmark-gate-contract/design.md`, which moved to archive when the sibling task was archived.
+- Full-repo scan found 17 dangling JSONL references across 6 archived tasks (self- and sibling-references), all caused by `task.py archive` moving directories without rewriting manifests; 19 more legacy archived tasks had no per-criterion acceptance evidence at all.
+
+### Fix
+
+- Checked PRD boxes with evidence: 3 performance tasks (all criteria, mapping to validation-evidence.md), 07-18-fix-orphaned-local-library-media (9/10; the frontend-empty-state criterion left unchecked with an explicit note — no archived evidence).
+- Rewrote all 17 dangling JSONL references to their archive locations (lossless; all targets verified to exist).
+- Added honest "归档一致性注记 (2026-08-08)" notes to 19 legacy archived PRDs whose boxes remain unchecked (no evidence → no fabricated acceptance).
+- Hardened `task.py`:
+  - `validate` (common/task_context.py): archive-aware resolution — `.trellis/tasks/<name>/...` missing → resolves through `archive/<YYYY-MM>/<name>/...`, prints "resolved via archive".
+  - `archive` (common/task_store.py): after the move, rewrites all JSONL entries pointing at the old active-task path to the archive path (staged in the same archive commit), and warns on unchecked PRD acceptance boxes.
+  - workflow.md: documented the new archive/validate behavior.
+
+### Verification
+
+- `task.py validate` across all 134 task dirs (active + archive): 0 failures.
+- Archive-fallback path exercised: reverted one reference to the stale active path → validate passes with "resolved via archive".
+- End-to-end regression: created a throwaway task with self-reference context, archived it → reference auto-rewritten, unchecked-box warning emitted, validate passed; probe removed afterwards.
+- No product code, bench, or runtime behavior touched; metadata + tooling only.
+
+### Notes
+
+- `.trellis/` is gitignored; only a subset is force-tracked. Commit stages the affected tracked files plus force-adds the scripts and repaired task metadata (same practice as prior archive commits). workflow.md remains untracked (Trellis-managed).
+- Legacy 2026-06/07-era tasks keep unchecked boxes + note; reconstructing evidence for them is a separate decision.
