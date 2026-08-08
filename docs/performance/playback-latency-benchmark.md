@@ -292,9 +292,19 @@ Quick runtime budget benches:
 > comparable only when `gitHead` AND `dirtyFingerprint` match — same commit on
 > a dirty tree is NOT comparable evidence. Dirty fingerprint is a SHA-256 of
 > the normalized `git status --porcelain` output; no paths leak into artifacts.
+>
+> Source-seek caveat (2026-08, PERF-002): `source_seek_perf` measures LOCAL
+> open/seek/probe latency on a deterministic generated WAV. It is NOT remote
+> fetch latency, NOT device-audible latency, and does NOT exercise the
+> latest-wins seek serialization (owned by the seek-race remediation task).
+> Its `--check` mode enforces the relative guard
+> `persistent p50 <= reopen p50 + 2 ms` (structural invariant) and `--gate`
+> evaluates the absolute budgets in `benches/gate-specs/source_seek_perf.gate.json`.
 
 | Bench | Representative path | 512-frame result | Includes | Excludes |
 | --- | --- | ---: | --- | --- |
+| `source_seek_perf --quick --check` | persistent session seek | p50 ~8 us, p99 ~60-115 us (quick) | in-process persistent seek spin-wait, local WAV fixture | remote fetch, device output, first-audible-frame, latest-wins serialization |
+| `source_seek_perf --quick --check` | reopen + probe | p50 ~150 us, p99 ~190-380 us | fresh local open + decoder probe | remote fetch, device output, first-audible-frame |
 | `audio_callback_output_path_perf --quick --check` | full output path | median 18.4 ns/output sample, 18.8 us/buffer | callback state, disabled loudness gain, empty DSP chain, resampler, final shaper, spectrum pack | decoder, CPAL device write |
 | `audio_callback_chain_perf --quick --check` | active DSP without convolver | 20.9 ns/sample, 21.4 us/buffer | EQ, saturation, crossfeed, limiter, volume, dynamic loudness, noise shaper | decoder, resampler, spectrum, CPAL device write |
 | `audio_callback_chain_perf --quick --check` | active DSP with convolver | 45.1 ns/sample, 46.2 us/buffer | same chain plus convolver | decoder, resampler, spectrum, CPAL device write |

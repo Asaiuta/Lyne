@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "benchmark": "source_seek_perf",
+  "mode": "gate",
+  "warmup": 20,
+  "trials": 1,
+  "percentile": null,
+  "deadline": null,
+  "metrics": [
+    {
+      "name": "persistent_seek_p99_ns",
+      "budget_ns": 750000.0,
+      "source": "measured persistent-session seek latency (local WAV, spin-wait on applied serial)",
+      "host_sensitive": true
+    },
+    {
+      "name": "reopen_probe_p99_ns",
+      "budget_ns": 950000.0,
+      "source": "measured reopen+probe latency (SourceSeekRecovery open + decoder probe), local WAV",
+      "host_sensitive": true
+    }
+  ],
+  "environment": {
+    "class": "lyne-dev-bench-gate",
+    "os": "windows",
+    "arch": "x86_64",
+    "profile": "release",
+    "requires_warmup": true
+  },
+  "budget_provenance": "full-mode baseline measured 2026-08-08 on developer host (feat/desktop-lyric): persistent p99 63.5 us, reopen p99 261.9 us; budgets are 3x observed tail with headroom. LOCAL ONLY: not remote fetch, not device-audible latency.",
+  "integrity_checks": ["finite"]
+}

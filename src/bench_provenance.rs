@@ -208,15 +208,33 @@ fn hash_file(path: &Path) -> Option<(String, String)> {
     Some((name, sha))
 }
 
-/// Repo-root-relative name when possible (privacy + reproducibility).
+/// Repo-root-relative name when possible (privacy + reproducibility). Uses
+/// `/` separators so Node/Rust fixture identities compare equal cross-family.
 fn repo_relative(path: &Path) -> String {
     if let Some(root) = run_git(&["rev-parse", "--show-toplevel"]) {
         let root = Path::new(root.trim());
-        if let Ok(rel) = path.strip_prefix(root) {
-            return rel.display().to_string();
+        // Normalize to absolute so relative inputs (e.g. `.tmp/x.wav`) still
+        // strip the absolute repo root.
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        };
+        if let Ok(rel) = absolute.strip_prefix(root) {
+            let joined = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            return joined;
         }
     }
-    path.display().to_string()
+    // Fallback: basename only — never an absolute user path (privacy).
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn rustc_toolchain() -> Option<String> {
@@ -385,5 +403,28 @@ mod tests {
         // Hashing never leaks raw lines; a different tree yields a different hash.
         let lines_2 = vec![" M src/a.rs".to_owned()];
         assert_ne!(h1, sha256_lines(&lines_2));
+    }
+
+    #[test]
+    fn repo_relative_falls_back_to_basename_outside_repo() {
+        // A path outside the repo (e.g. a temp fixture) must not leak an
+        // absolute user path into provenance; basename only.
+        let outside = std::env::temp_dir().join("lyne-source-seek-bench-12345.wav");
+        assert_eq!(repo_relative(&outside), "lyne-source-seek-bench-12345.wav");
+    }
+
+    #[test]
+    fn repo_relative_uses_forward_slashes_inside_repo() {
+        // Absolute path inside the repo -> repo-relative with '/' separators.
+        let absolute = std::env::current_dir()
+            .expect("cwd")
+            .join(".tmp")
+            .join("fixture.wav");
+        let relative = repo_relative(&absolute);
+        assert!(
+            !relative.contains('\\'),
+            "repo-relative names must use '/': {relative}"
+        );
+        assert_eq!(relative, ".tmp/fixture.wav");
     }
 }

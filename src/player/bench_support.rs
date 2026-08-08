@@ -26,9 +26,22 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 
-pub fn benchmark_persistent_source_seeks_for_bench(iterations: usize) -> (Vec<u64>, Vec<u64>) {
-    let path =
-        std::env::temp_dir().join(format!("lyne-source-seek-bench-{}.wav", std::process::id()));
+/// Bench wrapper around a persistent streaming session plus its local WAV
+/// fixture, so source-seek benchmark can interleave persistent-seek and
+/// reopen-probe measures on the SAME session.
+pub struct SourceSeekBench {
+    fixture: std::path::PathBuf,
+    session: PersistentStreamingSession,
+}
+
+fn seek_fixture_path() -> std::path::PathBuf {
+    std::path::Path::new(".tmp")
+        .join(format!("source-seek-bench-{}.wav", std::process::id()))
+}
+
+/// Open the fixture + persistent session. Caller is responsible for `finish()`.
+pub fn open_source_seek_bench() -> SourceSeekBench {
+    let path = seek_fixture_path();
     write_seek_bench_wav(&path);
     let cancel = || DecodeCancelToken::new(Arc::new(AtomicBool::new(false)));
     let opened = LocalFileSourceFactory
@@ -41,7 +54,7 @@ pub fn benchmark_persistent_source_seeks_for_bench(iterations: usize) -> (Vec<u6
             expected_identity: None,
             fetch_policy: StreamFetchPolicy::LocalOnly,
         })
-        .expect("open persistent seek benchmark source");
+        .expect("open source-seek benchmark source");
     let session = PersistentStreamingSession::start_local_with_capacity(
         opened,
         1 << 20,
@@ -53,38 +66,94 @@ pub fn benchmark_persistent_source_seeks_for_bench(iterations: usize) -> (Vec<u6
             resample_quality: ResampleQuality::High,
         },
     )
-    .expect("start persistent seek benchmark session");
-    let mut persistent = Vec::with_capacity(iterations);
-    for iteration in 0..iterations {
-        let target = if iteration % 2 == 0 { 10_000 } else { 80_000 };
+    .expect("start source-seek benchmark session");
+    SourceSeekBench { fixture: path, session }
+}
+
+/// Path to the fixture WAV (for provenance hashing, relative to repo root).
+pub fn source_seek_bench_fixture_path(seek_bench: &SourceSeekBench) -> &std::path::Path {
+    &seek_bench.fixture
+}
+
+impl SourceSeekBench {
+    /// Measure one persistent seek on the open session (alternating targets).
+    pub fn persistent_seek(&mut self, index: usize) -> u64 {
+        let target = if index.is_multiple_of(2) { 10_000 } else { 80_000 };
         let started = Instant::now();
-        let serial = session.producer.request_source_seek(target);
-        while session.producer.applied_source_seek_serial() < serial {
+        let serial = self.session.producer.request_source_seek(target);
+        while self.session.producer.applied_source_seek_serial() < serial {
             std::hint::spin_loop();
         }
-        persistent.push(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+        started.elapsed().as_nanos().min(u64::MAX as u128) as u64
     }
-    let mut reopen = Vec::with_capacity(iterations);
-    for _ in 0..iterations {
+
+    /// Measure one fresh reopen + probe on the same source.
+    pub fn reopen_probe(&mut self) -> u64 {
+        let cancel = || DecodeCancelToken::new(Arc::new(AtomicBool::new(false)));
         let started = Instant::now();
         let opened = LocalFileSourceFactory
             .open(OpenRequest {
                 generation: 1,
                 intent: StreamOpenIntent::SourceSeekRecovery,
-                path: &path,
+                path: &self.fixture,
                 cancel: cancel(),
                 credentials: None,
-                expected_identity: Some(&session.identity),
+                expected_identity: Some(&self.session.identity),
                 fetch_policy: StreamFetchPolicy::LocalOnly,
             })
-            .expect("reopen seek benchmark source");
+            .expect("reopen source-seek benchmark source");
         let _ = StreamingDecoder::probe_opened_source(opened.source, None)
-            .expect("probe reopened seek benchmark source");
-        reopen.push(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+            .expect("probe reopened source-seek benchmark source");
+        started.elapsed().as_nanos().min(u64::MAX as u128) as u64
     }
-    let _ = std::fs::remove_file(path);
-    (persistent, reopen)
+
+    /// Drop the session and remove the fixture.
+    pub fn finish(self) {
+        let _ = std::fs::remove_file(&self.fixture);
+    }
 }
+
+/// Right-ordered percentile rank for sorted sample slices.
+pub fn pct_rank(sorted: &[u64], rank: f64) -> u64 {
+    sorted[((sorted.len() - 1) as f64 * rank).ceil() as usize]
+}
+
+/// Relative guard: a persistent seek p50 exceeding reopen+probe p50 by more
+/// than `tolerance_ns` is a structural regression (deterministic check).
+pub fn relative_guard_violated(persistent_p50_ns: u64, reopen_p50_ns: u64, tolerance_ns: u64) -> bool {
+    i128::from(persistent_p50_ns) > i128::from(reopen_p50_ns) + i128::from(tolerance_ns)
+}
+
+#[cfg(test)]
+mod source_seek_bench_tests {
+    use super::{pct_rank, relative_guard_violated};
+
+    #[test]
+    fn pct_rank_returns_ranked_values() {
+        let values = vec![100, 200, 300, 400, 500];
+        assert_eq!(pct_rank(&values, 0.50), 300);
+        assert_eq!(pct_rank(&values, 0.95), 500);
+        assert_eq!(pct_rank(&values, 1.00), 500);
+    }
+
+    #[test]
+    fn pct_rank_tiny_sample_is_stable() {
+        let values = vec![42];
+        assert_eq!(pct_rank(&values, 0.50), 42);
+        assert_eq!(pct_rank(&values, 0.99), 42);
+    }
+
+    #[test]
+    fn relative_guard_boundary_is_inclusive() {
+        // Exactly at tolerance -> not violated.
+        assert!(!relative_guard_violated(150_000 + 2_000_000, 150_000, 2_000_000));
+        // One ns over -> violated.
+        assert!(relative_guard_violated(150_000 + 2_000_000 + 1, 150_000, 2_000_000));
+        // Normal healthy state (persistent much faster) -> not violated.
+        assert!(!relative_guard_violated(8_000, 150_000, 2_000_000));
+    }
+}
+
 
 fn write_seek_bench_wav(path: &std::path::Path) {
     const FRAMES: usize = 132_300;

@@ -579,9 +579,9 @@ mod tests {
 
 ## Realtime benchmark gate contract
 
-Canonical realtime benches (`audio_callback_chain_perf`, `audio_callback_output_path_perf`,
-`audio_resampler_streaming_perf`, `audio_spectrum_handoff_perf`) follow the shared
-gate contract in `src/bench_gate.rs` (PERF-001 remediation):
+Canonical real benches (`audio_callback_chain_perf`, `audio_callback_output_path_perf`,
+`audio_resampler_streaming_perf`, `audio_spectrum_handoff_perf`, `source_seek_perf`)
+follow the shared gate contract in `src/bench_gate.rs` (PERF-001 remediation):
 
 - **Report** (no flag): complete measurements, no verdict, never fails on timing.
 - **`--check`**: deterministic integrity (finite/positive/non-empty); failure = exit 3.
@@ -598,6 +598,12 @@ gate contract in `src/bench_gate.rs` (PERF-001 remediation):
 - Lyne latency benchmark folds enabled stability/control sub-gates into
   `summary.pass` with `failure_reasons`; `pipeline-v2-playback-matrix.cjs`
   classifies sub-gate failures as failed rows.
+- `source_seek_perf` (PERF-002) adds a deterministic **relative guard** inside
+  Check/Gate: `persistent p50 <= reopen p50 + 2 ms` — a structural invariant,
+  not a budget. `--gate` also evaluates absolute `budget_ns` for
+  `persistent_seek_p99_ns` / `reopen_probe_p99_ns` from its gate spec.
+  Local-only scope: never claim remote-fetch or device-audible latency
+  evidence from this bench.
 
 Gate specs must declare measurable budgets (`metrics`) and a budget provenance;
 specs with empty metrics are rejected. Do not label report-only runs as gates:
