@@ -1,0 +1,15 @@
+{
+ "method": "10x load/pause cycle on standalone instance",
+ "summary_mb": [
+  {
+   "cycle": 0,
+   "reserved_mb": 29.3,
+   "peak_mb": 51.3
+  },
+  {
+   "cycle": 1,
+   "reserved_mb": 22.0,
+   "peak_mb": 51.3
+  }
+ ]
+}

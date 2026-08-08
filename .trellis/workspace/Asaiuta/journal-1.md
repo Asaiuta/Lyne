@@ -601,3 +601,13 @@ Session summary was not supplied.
 **预防复发**：今后归档任务必须逐条记录验证证据（测试输出/commit/截图）后再 archive；`task.py archive` 的未勾选框警告即为此服务。
 
 **附带**：git 跟踪面回滚（aca5240，26 个旧归档文件移出 git，磁盘元数据保留）。
+
+## 2026-08-08 — Memory footprint & leak audit (08-08-memory-footprint-audit)
+
+**实测**：release 重建后启动真实应用，31 分钟进程树采样（WMI + 内建 /diagnostics/runtime）。
+- 整树空闲 ≈ 495–505 MB WS / ~298 MB private（WebView 树 ~420 MB 占 85%，壳 36 MB，sidecar 40 MB）。
+- 31 min 无泄漏：WS 斜率 −0.29 MB/min、PB −2.04 MB/min，净变化 −16.3/−24.8 MB；WebView 进程数恒定 6。
+- 播放场景（独立实例）：10×切歌循环账本 22–29 MB 交替、峰值 51 MB、释放路径完善；240s 曲目整曲缓冲 176 MB PCM → sidecar 单进程 221 MB WS。
+- 关键上限：DECODE_MAX_MEMORY_MB 默认 2048 MiB（仅兜底），PCM 窗口 streaming_pcm_window_limit_mib 默认 256 MiB（84% 大头）。
+- 优化空间合计 ~300–400 MB（最坏场景），全部为上限/策略裁剪（前工程项 library_track_view SQL 下推已在 backlog），无泄漏。
+**产物**：research/report.md + data/（tree-residence.csv、playback-cycle.json、tone-long-diagnostics.json）+ scripts/sample-memory.ps1。

@@ -1,0 +1,290 @@
+{
+ "status": "success",
+ "snapshot": {
+  "process": {
+   "memory": {
+    "available": true,
+    "working_set_bytes": 231579648,
+    "private_bytes": 211025920,
+    "source": "windows_process_status",
+    "error": null
+   },
+   "cpu": {
+    "available": true,
+    "kernel_time_ms": 10296,
+    "user_time_ms": 15562,
+    "total_time_ms": 25858,
+    "source": "windows_process_times",
+    "error": null
+   },
+   "process_tree": {
+    "available": true,
+    "root_pid": 6888,
+    "self_pid": 6888,
+    "root_source": "current_process",
+    "source": "windows_toolhelp",
+    "process_count": 1,
+    "skipped_process_count": 0,
+    "total_working_set_bytes": 231583744,
+    "total_private_bytes": 211030016,
+    "total_cpu_time_ms": 25874,
+    "processes": [
+     {
+      "pid": 6888,
+      "parent_pid": 27996,
+      "name": "audio_server.exe",
+      "working_set_bytes": 231583744,
+      "private_bytes": 211030016,
+      "cpu_total_time_ms": 25874
+     }
+    ],
+    "error": null
+   },
+   "startup_ready_ms": 68
+  },
+  "analysis": {
+   "concurrency_limit": 2,
+   "available_permits": 2,
+   "in_use_permits": 0,
+   "task_timeout_secs": 180,
+   "library_scan_concurrency_limit": 1,
+   "library_scan_available_permits": 1,
+   "library_scan_in_use_permits": 0,
+   "library_scan_max_workers": 2,
+   "library_scan_cover_max_bytes": 8388608,
+   "scan_task_records": 0,
+   "scan_task_record_limit": 512,
+   "scan_task_ttl_secs": 600
+  },
+  "webdav": {
+   "configured": false,
+   "request_count": 0,
+   "error_count": 0,
+   "last_latency_ms": null,
+   "max_latency_ms": null
+  },
+  "storage": {
+   "cache_dir": {
+    "available": true,
+    "bytes": 0,
+    "mib": 0,
+    "error": null
+   },
+   "cache_max_bytes": 10737418240,
+   "app_database": {
+    "available": true,
+    "bytes": 237568,
+    "mib": 0,
+    "error": null
+   },
+   "loudness_database": {
+    "available": true,
+    "bytes": 20480,
+    "mib": 0,
+    "error": null
+   },
+   "library_track_count": 2,
+   "library_total_size_bytes": 12348088,
+   "library_stats_error": null
+  },
+  "decode": {
+   "memory_budget": {
+    "limit_mb": 2048,
+    "limit_bytes": 2147483648,
+    "source": "default"
+   },
+   "memory_ledger": {
+    "limit_bytes": 2147483648,
+    "reserved_bytes": 184321024,
+    "peak_reserved_bytes": 207362048,
+    "rejection_count": 0,
+    "reserved_by_owner": [
+     {
+      "owner": "active window",
+      "reserved_bytes": 0
+     },
+     {
+      "owner": "pending playback",
+      "reserved_bytes": 0
+     },
+     {
+      "owner": "producer scratch",
+      "reserved_bytes": 0
+     },
+     {
+      "owner": "resampler carry",
+      "reserved_bytes": 0
+     },
+     {
+      "owner": "legacy current buffer",
+      "reserved_bytes": 184321024
+     },
+     {
+      "owner": "legacy pending buffer",
+      "reserved_bytes": 0
+     },
+     {
+      "owner": "loaded resample cache",
+      "reserved_bytes": 0
+     }
+    ]
+   },
+   "last_duration_ms": 619,
+   "last_input_frames": 10584000,
+   "last_output_samples": 23039426,
+   "last_chunk_count": 9188,
+   "last_throughput_frames_per_sec": 17098546,
+   "budget_rejection_count": 0
+  },
+  "playback_phases": {
+   "timestamps_ms": {
+    "load_request_started": 1103177,
+    "load_request_returned": 1103177,
+    "seek_request_started": null,
+    "seek_request_returned": null,
+    "seek_generation_applied": null,
+    "seek_decoder_open_started": null,
+    "seek_decoder_open_finished": null,
+    "seek_decoder_seek_started": null,
+    "seek_decoder_seek_finished": null,
+    "seek_first_chunk": null,
+    "seek_ready_sent": null,
+    "seek_ready": null,
+    "seek_first_position_advanced": null,
+    "decode_started": 1103177,
+    "decode_finished": 1103796,
+    "loudness_started": 1103797,
+    "loudness_finished": 1103797,
+    "background_loudness_started": 1103797,
+    "background_loudness_finished": 1104926,
+    "background_loudness_applied": 1104926,
+    "load_complete_applied": 1103797,
+    "output_prepare_started": null,
+    "output_prepare_finished": null,
+    "stream_build_started": null,
+    "stream_build_finished": null,
+    "stream_play_returned": 1103800,
+    "output_callback_after_play": 1103808,
+    "streaming_ready_play_requested": null,
+    "streaming_ready_play_completed": null,
+    "streaming_ready_play_start_playback": null,
+    "streaming_ready_play_skipped": null,
+    "first_callback_after_play": 1103808,
+    "first_position_advanced": 1103808,
+    "streaming_first_chunk": null,
+    "streaming_ready_sent": null,
+    "streaming_ready": null,
+    "streaming_finished": null,
+    "audio_command_stop_received": null,
+    "audio_command_stop_completed": null,
+    "audio_command_stop_for_load_received": 1103177,
+    "audio_command_stop_for_load_completed": 1103177,
+    "audio_command_streaming_ready_received": null,
+    "audio_command_streaming_ready_completed": null,
+    "audio_command_ensure_progress_received": null,
+    "audio_command_ensure_progress_completed": null,
+    "playback_recovery_requested": null
+   },
+   "durations_ms": {
+    "load_request_ms": 0,
+    "seek_request_ms": null,
+    "seek_request_returned_to_generation_applied_ms": null,
+    "seek_generation_applied_to_decoder_open_start_ms": null,
+    "seek_decoder_open_ms": null,
+    "seek_decoder_open_finished_to_decoder_seek_start_ms": null,
+    "seek_decoder_seek_ms": null,
+    "seek_decoder_seek_finished_to_first_chunk_ms": null,
+    "seek_first_chunk_to_ready_sent_ms": null,
+    "seek_ready_sent_to_ready_ms": null,
+    "seek_ready_to_first_position_advanced_ms": null,
+    "seek_request_started_to_first_position_advanced_ms": null,
+    "seek_request_returned_to_first_position_advanced_ms": null,
+    "seek_generation_applied_to_first_position_advanced_ms": null,
+    "seek_request_returned_to_streaming_ready_ms": null,
+    "request_returned_to_decode_start_ms": 0,
+    "decode_ms": 619,
+    "decode_finished_to_loudness_start_ms": 1,
+    "loudness_ms": 0,
+    "background_loudness_ms": 1129,
+    "background_loudness_finish_to_apply_ms": 0,
+    "loudness_finished_to_load_complete_applied_ms": 0,
+    "load_complete_applied_to_output_prepare_start_ms": null,
+    "output_prepare_ms": null,
+    "output_prepare_finished_to_stream_build_start_ms": null,
+    "load_complete_applied_to_stream_build_start_ms": null,
+    "stream_build_ms": null,
+    "stream_play_to_output_callback_ms": 8,
+    "stream_play_to_first_callback_ms": 8,
+    "stream_play_to_first_position_advanced_ms": 8,
+    "request_started_to_first_position_advanced_ms": 631,
+    "request_returned_to_first_position_advanced_ms": 631,
+    "decode_finished_to_first_position_advanced_ms": 12,
+    "request_returned_to_streaming_ready_ms": null,
+    "streaming_ready_to_first_position_advanced_ms": null,
+    "streaming_ready_to_decode_finished_ms": null
+   }
+  },
+  "playback": {
+   "is_playing": true,
+   "is_paused": false,
+   "is_loading": false,
+   "load_progress": 100,
+   "has_load_error": false,
+   "load_error_count": 0,
+   "underrun_count": 0,
+   "underrun_silence_frames": 0,
+   "audio_buffer_output_shortfall_count": 0,
+   "audio_buffer_output_shortfall_frames": 0,
+   "streaming_output_shortfall_count": 0,
+   "streaming_output_shortfall_frames": 0,
+   "duration_secs": 239.99402083333334,
+   "current_time_secs": 95.89,
+   "sample_rate": 48000,
+   "channels": 2,
+   "total_frames": 11519713,
+   "position_frames": 4602720,
+   "streaming_active": false,
+   "streaming_decode_finished": false,
+   "streaming_v2": null,
+   "active_stream_source_sample_rate": 48000,
+   "active_stream_output_sample_rate": 48000,
+   "active_stream_source_channels": 2,
+   "active_stream_channels": 2,
+   "active_stream_device_id": -1,
+   "active_stream_exclusive_mode": false,
+   "active_stream_prefer_default_output_config": false,
+   "active_stream_running": true,
+   "active_stream_matches_current": true,
+   "parked_output_stream_count": 0,
+   "parked_output_stream_release_count": 0,
+   "playback_recovery_count": 0,
+   "audio_command_received_count": 47,
+   "audio_command_completed_count": 47,
+   "audio_command_last_received_code": 2,
+   "audio_command_last_completed_code": 2,
+   "stream_play_generation": 47,
+   "playback_progress_generation": 47,
+   "output_callback_activity_count": 105434,
+   "output_callback_silenced_inactive_count": 85797,
+   "output_callback_silenced_loading_count": 381,
+   "output_callback_silenced_stream_mismatch_count": 0
+  },
+  "websocket": {
+   "tick_interval_ms": 50,
+   "idle_after_ticks": 40,
+   "idle_sleep_ms": 200,
+   "position_event_every_ticks": 20,
+   "spectrum_suppresses_unchanged_when_idle": true,
+   "spectrum_event_count": 0,
+   "position_event_count": 0
+  },
+  "policies": {
+   "sensitive_paths_redacted": true,
+   "cache_cleanup_policy": "resample cache writes prune oldest .bin files above AUDIO_CACHE_MAX_BYTES",
+   "database_cleanup_policy": "startup GC removes terminal analysis tasks/history and orphan cover art",
+   "webdav_degradation_policy": "WebDAV browse runs behind analysis concurrency and timeout limits",
+   "scan_degradation_policy": "scan task records are bounded by max entries and terminal-record TTL",
+   "spectrum_degradation_policy": "idle WebSocket loop sleeps and suppresses unchanged idle spectrum frames"
+  }
+ }
+}
