@@ -585,3 +585,19 @@ Session summary was not supplied.
 
 - `.trellis/` is gitignored; only a subset is force-tracked. Commit stages the affected tracked files plus force-adds the scripts and repaired task metadata (same practice as prior archive commits). workflow.md remains untracked (Trellis-managed).
 - Legacy 2026-06/07-era tasks keep unchecked boxes + note; reconstructing evidence for them is a separate decision.
+
+## 2026-08-08 — Archive acceptance evidence reconstruction (08-08-legacy-archive-evidence-reconstruction)
+
+**问题**：上一轮给 19 个 2026-06/07 归档任务写入模板式"归档一致性注记"，未判定验收点。
+**处理**：S1（任务内记录）→ S2（git 提交）→ S3（现行代码/测试/产物）三级证据重建。
+实测基准：typecheck、npm test 520+6+8+5、cargo test --lib 401、clippy（66 既有无新增）、npm build PASS、src-tauri cargo check。
+
+**结果（119 条未勾选 → 102 达成 / 11 部分 / 6 未达成）**：
+- 达成 102：逐条附【证据：S1/S2 hash/S3 复核】；未勾选 17 条附【判定：理由】。
+- 关键 S1：07-05-pass2 (result.md + 31 张截图)、seek-race bench 后测；S2：0f55d47/f51e9c5/e03103b/adfbb29/628dfabe/8003f62/43d143a/22d48de/9ba3dcf/9b242c8/b962568/eda3c20/2bd2de8/283807e/b8e60db/4f3147e/f8c3b91/05d589c 等。
+- 不可重建/未达成 6：madge 脚本缺失、SSRF resolved-IP（移交 07-02-server-fetch-hardening）、detail-routes 截图、color 截图、07-13 TBD 占位、07-18 前端空状态。
+- 部分 11：运行时验证缺失类（返回路径 6 条、overlay 运行时 2 条、no_alloc 断言、peer color 静态复核、06-03 单测）。
+
+**预防复发**：今后归档任务必须逐条记录验证证据（测试输出/commit/截图）后再 archive；`task.py archive` 的未勾选框警告即为此服务。
+
+**附带**：git 跟踪面回滚（aca5240，26 个旧归档文件移出 git，磁盘元数据保留）。
