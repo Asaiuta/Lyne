@@ -30,8 +30,9 @@
     "perf:splayer-library-benchmark": "node ./scripts/splayer-library-benchmark.cjs",
     "perf:routes": "node ./scripts/measure-route-loads.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node ./scripts/run-focused-tests.mjs && npm run test:bundle-policy && npm run test:lyne-subgates",
+    "test": "node ./scripts/run-focused-tests.mjs && npm run test:bundle-policy && npm run test:provenance-utils && npm run test:lyne-subgates",
     "test:bundle-policy": "node --test ./scripts/bundle-size-policy.test.mjs",
+    "test:provenance-utils": "node --test ./scripts/provenance-utils.test.cjs",
     "test:lyne-subgates": "node --test ./scripts/lyne-subgates.test.cjs",
     "tauri": "powershell -ExecutionPolicy Bypass -File ./scripts/tauri-wrapper.ps1"
   },

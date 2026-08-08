@@ -18,7 +18,8 @@ const {
   createProcessMonitor,
   summarizeProcessSamples,
   ensureAudioFile,
-  writeJsonReport
+  writeJsonReport,
+  attachReportProvenance
 } = require("./perf-utils.cjs");
 
 const defaultOutDir = path.join(appRoot, "output", "electron-real-file-playback-baseline");
@@ -592,6 +593,10 @@ const runSupervisor = async () => {
       summary: summarizeProcessTreeSamples(processTreeSamples),
       samples: processTreeSamples
     };
+    attachReportProvenance(report, {
+      workload: { script: "electron-real-file-playback-baseline", pass: true },
+      attribution: ["real-file-playback", "file-process-tree"]
+    });
     await writeJsonReport(options.outputDir, outputFileName, report);
     return;
   }
@@ -624,6 +629,10 @@ const runSupervisor = async () => {
     },
     worker_report: existingReportFromThisRun ? report : null
   };
+  attachReportProvenance(supervisorReport, {
+    workload: { script: "electron-real-file-playback-baseline", pass: false },
+    attribution: ["real-file-playback", "supervisor-failure-report"]
+  });
   const writtenPath = await writeJsonReport(options.outputDir, outputFileName, supervisorReport);
   console.error(`[electron-real-file] supervisor wrote failed report ${path.relative(appRoot, writtenPath)}`);
   process.exitCode = exit.code || 1;
@@ -1492,6 +1501,13 @@ const run = async () => {
   };
   report.pipeline_v2_evidence = buildPipelineV2ReferenceEvidence(report);
 
+  attachReportProvenance(report, {
+    workload: {
+      script: "electron-real-file-playback-baseline",
+      pass: Boolean(report.summary && report.summary.pass)
+    },
+    attribution: ["real-file-playback", "pipeline-v2-evidence"]
+  });
   const outputPath = await writeJsonReport(options.outputDir, outputFileName, report);
   console.log(`[electron-real-file] wrote ${path.relative(appRoot, outputPath)}`);
   console.log(`[electron-real-file] pass=${report.summary.pass}`);

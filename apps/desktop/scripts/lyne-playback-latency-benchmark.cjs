@@ -22,7 +22,8 @@ const {
   startAudioServer,
   waitForAudioServer,
   shutdownAudioServer,
-  writeJsonReport
+  writeJsonReport,
+  attachReportProvenance
 } = require("./perf-utils.cjs");
 
 const defaultOutDir = path.join(appRoot, "output", "lyne-evidence", "playback-latency");
@@ -1319,6 +1320,10 @@ const main = async () => {
     await ensureAudioFile(options.nextTrack, "next-track");
   }
   const report = await runBenchmark(options);
+  attachReportProvenance(report, {
+    workload: { script: "lyne-playback-latency-benchmark" },
+    attribution: ["lyne", "real-playback-latency", "sub-gate-evidence"]
+  });
   const outputPath = await writeJsonReport(options.outputDir, "playback-latency-benchmark.json", report);
   console.log(`[lyne-playback-latency] wrote ${path.relative(appRoot, outputPath)}`);
   console.log(

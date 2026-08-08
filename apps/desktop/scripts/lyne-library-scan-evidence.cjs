@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("node:fs/promises");
+const { attachReportProvenance } = require("./provenance-utils.cjs");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 
@@ -310,6 +311,10 @@ const waitForScan = async (options, taskId) => {
 };
 
 const writeReport = async (options, report) => {
+  attachReportProvenance(report, {
+    workload: { script: "lyne-library-scan-evidence" },
+    attribution: ["lyne-evidence"]
+  });
   await fs.mkdir(options.outputDir, { recursive: true });
   const outputPath = path.join(options.outputDir, "library-scan-evidence.json");
   const tempPath = `${outputPath}.tmp`;

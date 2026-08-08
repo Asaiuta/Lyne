@@ -6,6 +6,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
+use audio_engine::bench_provenance::{collect as collect_provenance, Provenance, ProvenanceRequest};
 use audio_engine::player::bench_support::{PcmWindow, PcmWindowAccessError, PcmWindowGeometry};
 use crossbeam::queue::ArrayQueue;
 use serde::Serialize;
@@ -100,6 +101,7 @@ struct BenchmarkReport {
     slot_payload_bytes: usize,
     current_queue: TransportReport,
     pcm_window: TransportReport,
+    provenance: Provenance,
 }
 
 fn main() {
@@ -150,6 +152,12 @@ fn main() {
     }
 
     if let Some(path) = report_path {
+        let provenance = collect_provenance(&ProvenanceRequest {
+            binary_path: None,
+            fixture_paths: Vec::new(),
+            profile: Some(mode),
+            attribution: vec!["in-process", "allocation-count-only", "no-latency-claim"],
+        });
         write_report(
             path,
             BenchmarkReport {
@@ -163,6 +171,7 @@ fn main() {
                 slot_payload_bytes: geometry.slot_payload_bytes(),
                 current_queue,
                 pcm_window,
+                provenance,
             },
         );
     }

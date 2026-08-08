@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("node:fs/promises");
+const { attachReportProvenance } = require("./provenance-utils.cjs");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 
@@ -280,6 +281,10 @@ const maybeLoadAndPlay = async (options, report) => {
 };
 
 const writeReport = async (options, report) => {
+  attachReportProvenance(report, {
+    workload: { script: "lyne-active-playback-control-probe" },
+    attribution: ["lyne-evidence"]
+  });
   await fs.mkdir(options.outputDir, { recursive: true });
   const outputPath = path.join(options.outputDir, "active-playback-control-probe.json");
   const tempPath = `${outputPath}.tmp`;

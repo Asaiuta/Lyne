@@ -2,6 +2,7 @@ use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
 use audio_engine::bench_gate::{self, exit_for, GateContext, GateMetric, GateMode};
+use audio_engine::bench_provenance::{self, ProvenanceRequest};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
@@ -123,6 +124,7 @@ struct BenchmarkReport {
     rows: Vec<BenchmarkRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     gate: Option<GateJson>,
+    provenance: bench_provenance::Provenance,
 }
 
 #[derive(Clone, Serialize)]
@@ -267,6 +269,12 @@ fn main() {
     };
 
     if let Some(path) = report_path {
+        let provenance = bench_provenance::collect(&ProvenanceRequest {
+            binary_path: None,
+            fixture_paths: Vec::new(),
+            profile: Some(mode),
+            attribution: vec!["in-process", "no-cpal-device-write", "no-audible-end-to-end"],
+        });
         write_report(
             path,
             BenchmarkReport {
@@ -280,6 +288,7 @@ fn main() {
                 trials,
                 rows,
                 gate: gate_json.clone(),
+                provenance,
             },
         );
     }

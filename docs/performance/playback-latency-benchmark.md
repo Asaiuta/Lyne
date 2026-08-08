@@ -285,6 +285,13 @@ Quick runtime budget benches:
 > verdicts are host-sensitive: the spec's `environment.class` must match
 > `BENCH_GATE_ENV_CLASS`, otherwise the verdict is `unsupported` (exit 2),
 > never passed.
+>
+> Artifact identity (2026-08, PERF-005): every report JSON embeds a versioned
+> `provenance` block (schemaVersion 1) with git HEAD, dirty-tree fingerprint,
+> branch, build profile/toolchain, host, and fixture hashes. Two artifacts are
+> comparable only when `gitHead` AND `dirtyFingerprint` match — same commit on
+> a dirty tree is NOT comparable evidence. Dirty fingerprint is a SHA-256 of
+> the normalized `git status --porcelain` output; no paths leak into artifacts.
 
 | Bench | Representative path | 512-frame result | Includes | Excludes |
 | --- | --- | ---: | --- | --- |

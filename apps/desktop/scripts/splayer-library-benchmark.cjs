@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("node:fs/promises");
+const { attachReportProvenance } = require("./provenance-utils.cjs");
 const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
@@ -367,6 +368,10 @@ const summarizeSamples = (samples) => {
 };
 
 const writeReport = async (options, report) => {
+  attachReportProvenance(report, {
+    workload: { script: "splayer-library-benchmark" },
+    attribution: ["lyne-evidence"]
+  });
   await fs.mkdir(options.outputDir, { recursive: true });
   const outputPath = path.join(options.outputDir, "splayer-library-benchmark.json");
   const tempPath = `${outputPath}.tmp`;

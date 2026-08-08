@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile, spawn } = require("node:child_process");
 const { performance } = require("node:perf_hooks");
+const provenance = require("./provenance-utils.cjs");
 
 const appRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(appRoot, "..", "..");
@@ -417,5 +418,8 @@ module.exports = {
   startAudioServer,
   waitForAudioServer,
   shutdownAudioServer,
-  writeJsonReport
+  writeJsonReport,
+  collectProvenance: provenance.collectProvenance,
+  attachReportProvenance: provenance.attachReportProvenance,
+  compareProvenance: provenance.compareProvenance
 };

@@ -14,7 +14,8 @@ const {
   summarizeNumeric,
   createProcessMonitor,
   summarizeProcessSamples,
-  writeJsonReport
+  writeJsonReport,
+  attachReportProvenance
 } = require("./perf-utils.cjs");
 
 const defaultOutDir = path.join(appRoot, "output", "electron-realtime-playback-baseline");
@@ -296,6 +297,10 @@ const runSupervisor = async () => {
     },
     worker_report: existingReportFromThisRun ? report : null
   };
+  attachReportProvenance(supervisorReport, {
+    workload: { script: "electron-realtime-playback-baseline", pass: false },
+    attribution: ["realtime-playback", "supervisor-failure-report"]
+  });
   const writtenPath = await writeJsonReport(options.outputDir, outputFileName, supervisorReport);
   console.error(`[electron-realtime] supervisor wrote failed report ${path.relative(appRoot, writtenPath)}`);
   process.exitCode = exit.code || 1;
@@ -640,6 +645,13 @@ const run = async () => {
     suspended_samples: report.stability ? report.stability.suspended_samples : null
   };
 
+  attachReportProvenance(report, {
+    workload: {
+      script: "electron-realtime-playback-baseline",
+      pass: !report.error
+    },
+    attribution: ["realtime-playback", "start-trial-control-update"]
+  });
   const outputPath = await writeJsonReport(options.outputDir, outputFileName, report);
   console.log(`[electron-realtime] wrote ${path.relative(appRoot, outputPath)}`);
   if (report.start_trials) {

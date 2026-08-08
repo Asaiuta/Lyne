@@ -3,6 +3,7 @@
 const { app, BrowserWindow } = require("electron");
 const { mkdir, rename, writeFile } = require("node:fs/promises");
 const path = require("node:path");
+const { attachReportProvenance } = require("./provenance-utils.cjs");
 
 const appRoot = path.resolve(__dirname, "..");
 const defaultOutDir = path.join(appRoot, "output", "electron-webaudio-baseline");
@@ -332,6 +333,10 @@ const run = async () => {
     }
   };
 
+  attachReportProvenance(report, {
+    workload: { script: "electron-webaudio-baseline" },
+    attribution: ["electron-webaudio", "rendering-ratio-baseline"]
+  });
   await mkdir(options.outputDir, { recursive: true });
   const outputPath = path.join(options.outputDir, "baseline.json");
   const tempOutputPath = `${outputPath}.tmp`;

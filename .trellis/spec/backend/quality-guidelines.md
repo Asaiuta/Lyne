@@ -604,6 +604,34 @@ specs with empty metrics are rejected. Do not label report-only runs as gates:
 "the command proves reachability, not regression protection" unless run with
 an approved-env gate spec.
 
+## Performance artifact provenance contract (PERF-005)
+
+Every machine-readable performance artifact (Rust bench JSON, Electron/Lyne
+report JSON, Tauri `launch-meta.json`) carries a versioned provenance block:
+
+- **Location**: Rust `src/bench_provenance.rs` · Node
+  `apps/desktop/scripts/provenance-utils.cjs` — implementations MUST stay field-
+  and semantics-identical; cross-family fingerprints are computed over the
+  same normalized `git status --porcelain` lines (CRLF-stripped, sorted).
+- **Schema**: `schemaVersion: 1` with `source {gitHead, dirty, dirtyFingerprint,
+  branch}`, `build {profile, toolchain, binary{path, sha256}}`, `host {os, arch,
+  cpuClass}`, `fixtures[{name, sha256}]`, `runtime` (Node-only, null in Rust),
+  `workload`, `attribution`. Additive evolution only: new fields may be added;
+  existing field VALUES must not change meaning within a schema version.
+- **Privacy**: `dirtyFingerprint` is a SHA-256 over normalized porcelain lines —
+  a hash, never an embedded path list. File paths are recorded repo-relative
+  only. No tokens, credentials, or unrestricted user paths in artifacts.
+- **Comparability**: two artifacts are comparable only when schemaVersion,
+  `gitHead`, and `dirtyFingerprint` all match (plus, when present, host
+  os/arch, binary SHA-256, and same-named fixture hashes). Same `gitHead` but
+  different `dirtyFingerprint` → `dirty-tree-differs` → incomparable.
+  `compareProvenance` (Rust + Node) implements this; do not hand-roll.
+- **Writing**: every report writer calls `attachReportProvenance(report,
+  {...})` (or `bench_provenance::collect` in Rust) before writing; Tauri
+  launcher merges `provenance-utils.cjs --emit-git-fields` output into
+  `launch-meta.json`.
+- Legacy `generated_at` fields are frozen and left untouched.
+
 ---
 
 ## Dependencies

@@ -21,7 +21,8 @@ const {
   startAudioServer,
   waitForAudioServer,
   shutdownAudioServer,
-  writeJsonReport
+  writeJsonReport,
+  attachReportProvenance
 } = require("./perf-utils.cjs");
 
 const defaultOutDir = path.join(appRoot, "output", "lyne-evidence", "playback-stability");
@@ -451,6 +452,10 @@ const main = async () => {
   options.baseUrlExplicit = process.argv.includes("--base-url") || Boolean(process.env.LYNE_AUDIO_SERVER_URL);
   await ensureAudioFile(options.track, "track");
   const report = await runBenchmark(options);
+  attachReportProvenance(report, {
+    workload: { script: "lyne-playback-stability-benchmark" },
+    attribution: ["lyne", "real-playback-stability", "underrun-evidence"]
+  });
   const outputPath = await writeJsonReport(options.outputDir, "playback-stability-benchmark.json", report);
   console.log(`[lyne-playback-stability] wrote ${path.relative(appRoot, outputPath)}`);
   const diagnostics = report.summary.diagnostics || {};

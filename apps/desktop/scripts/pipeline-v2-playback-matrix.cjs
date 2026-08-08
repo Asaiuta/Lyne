@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const { attachReportProvenance } = require("./provenance-utils.cjs");
 
 const appRoot = path.resolve(__dirname, "..");
 const DEFAULT_MANIFEST = path.join(
@@ -273,6 +274,10 @@ const main = async () => {
     },
     rows
   };
+  attachReportProvenance(report, {
+    workload: { script: "pipeline-v2-playback-matrix" },
+    attribution: ["pipeline-v2", "row-classification-matrix"]
+  });
   const reportPath = path.join(options.outputDir, "playback-matrix.json");
   await fs.promises.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   console.log(
