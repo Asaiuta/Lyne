@@ -49,3 +49,9 @@
 - `research/data/wv-*.png`（CDP 截图，像素对比依据）
 - `research/scripts/`（sample-webview.ps1、shot.mjs、cdp-drive.mjs、ui-utils.mjs 复用件）
 - v2 实验日志：`mem-trim-data/v2*.log`（进程已停，日志保留于本报告引用）
+## 6. 勘误（2026-08-09，由 08-09-webview2-process-memory 复核）
+
+§3 "WebView2 参数试验" 中 `--disable-gpu` 的收益结论**不成立**：
+- 复核证明：参数（`--disable-gpu`/`--disable-breakpad`/`--disable-crash-reporter`)均被 WebView2 忽略——命令行动员显示参数已注入，但 gpu-process 与 crashpad-handler 依然存在；
+- 当时观测的 PB 差异（200 vs 307 MB）为测量时机/页面状态差异，非参数效果；
+- **不要将 `--disable-gpu` 作为生产配置**。WebView2 进程树（browser + gpu + crashpad + 2×utility + renderer）6 进程为不可削减基线。

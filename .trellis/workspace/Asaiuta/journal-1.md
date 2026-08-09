@@ -635,3 +635,10 @@ WMI 5s 进程树采样并行。真实 UI 驱动：本地库滚动 4 轮、在线
 结论**保持 Tauri 为主**（WebView 基线为 Chromium 固有、播放缓冲与架构无关、前端为 Solid 全量重写成本高、CDP 自动化资产专属），
 混合方案为渐进路径；触发器：<300 MB 硬指标 / 完全原生视觉转向 / 技术栈偏好变化。已并入父任务结论。
 （journal 已含上一轮 entry：架构决策——本次为报告产出记录）
+
+## 2026-08-09 — WebView2 进程级优化：反证结论 (08-09-webview2-process-memory)
+
+- 验证 --disable-gpu / --disable-breakpad / --disable-crash-reporter：参数注入成功（命令行动员），但 gpu-process 与 crashpad-handler 均**未消失** → WebView2 忽略这些开关，6 进程树（browser+gpu+crashpad+2×utility+renderer）为不可削减基线。
+- 修正 trim 报告错误归因：−108 MB PB 乃采样时机/页面状态差异，非 disable-gpu 效果（勘误写入 trim 报告 §6）。
+- rAF 帧间隔三组 6.05→6.06ms 无差异；procs 恒定 6。
+- 结论：无可落地启动参数；剩余可变项仅歌词窗 renderer（已归 SMTC 路线）。无产品代码变更（不引入误导配置）。
