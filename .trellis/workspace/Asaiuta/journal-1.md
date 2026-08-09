@@ -648,3 +648,19 @@ WMI 5s 进程树采样并行。真实 UI 驱动：本地库滚动 4 轮、在线
 - 方法：真实鼠标事件（Input.dispatchMouseEvent，.click() 不触发 Solid 事件委托 → 反直觉调试点）驱动导航 + WMI renderer 采样 + 图元统计。
 - 关键发现：本地库歌曲列表为**全量渲染**（19,353 nodes / 598 imgs 全解码）而发现页虚拟化（1,155/63）；但 renderer PB 仅差 22–43 MB → renderer ~150 MB 为平台成本（V8/Blink/合成器），内容增量 ~25%。
 - 结论：优化上限 30–45 MB（切片列表虚拟化，已列入 07-16 任务）；图片专用优化 ≤20 MB 不单独立项。更新架构报告口径（renderer 产品本）。
+
+## 2026-08-09 — streaming-v2 窗口化默认化落地（含 gapless v2 换轨）
+
+**背景**：用户指出"可能没用最新构建" → 时间戳验证确认二进制确实最新，真正根因是 **serde `#[serde(default)]` 对 bool 得 false**：audio_settings.json 无 `streaming_first_buffer` 字段 → 反序列化静默回 legacy 全曲缓冲。
+
+**修复**：
+1. config.rs：`default_streaming_first_buffer()` + `load_from_file` env 显式覆盖（env=false 对已有配置文件也成立——此前 env 只影响文件缺失路径，回滚失效）。
+2. gapless v2：pending 会话槽（InstallPending/Cancel/abandon）+ callback EOF 换轨（Ready|EndOfStream 均可）+ supervisor `streaming_pending_ready` 节流 + pending metadata 交接。
+3. 记账：`PcmWindow::create(owner)` + `reown()` —— preload 窗口挂 pending playback，换轨时转 active window；EOF 队列尾 abandon 回收死窗口。
+
+**踩坑**：EOF 时 pending rt 状态是 EndOfStream(3) 而非 Ready(2)（短曲全量 < 窗口）→ 首批 swap 失败；debug 日志定位。
+
+**实测**：gapless PASS（30s→10s 无缝，无重 load）；480s tone legacy 399MB vs v2 175MB WS（ledger 351.6 vs 128.1 MiB）；seek 120s/5s ±0.2s；403 tests；clippy 无新增；npm build PASS。
+**决策**：窗口保 128 MiB（64 MiB 对超长曲有重复解码风险）。
+
+commit 106e417 · 任务 08-09-streaming-v2-window-default 待归档。
