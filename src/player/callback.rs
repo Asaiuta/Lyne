@@ -17,6 +17,7 @@ use super::state::{
 use super::streaming::callback_window::{
     render_window_frames, CallbackWindowCache, WindowRenderProgress,
 };
+use super::streaming::memory::DecodedMemoryOwner;
 use super::streaming::rt_view::{
     AppliedWindowSeek, StreamingRtView, WindowSeekKind, WindowSeekResult,
 };
@@ -292,7 +293,7 @@ pub(crate) fn benchmark_resident_window_seeks(iterations: usize) -> Vec<(&'stati
     const EPOCH: u64 = 1;
 
     let geometry = PcmWindowGeometry::for_slot_count(2, 2_048).expect("seek bench geometry");
-    let parts = PcmWindow::create(geometry, EPOCH, 0).expect("seek bench window");
+    let parts = PcmWindow::create(geometry, EPOCH, 0, DecodedMemoryOwner::ActiveWindow).expect("seek bench window");
     let mut writer = parts.writer;
     let base = SAMPLE_RATE * 60;
     let scenarios = [
@@ -929,15 +930,111 @@ fn reset_dsp_state_if_requested(
 fn request_gapless_preload_if_needed(shared: &SharedState, total: usize, current_pos: usize) {
     // Signal preload early enough to allow full decode + optional resampling
     // before EOF. Five seconds also covers slower remote streams.
+    // Works for both engines: legacy preload consumes `pending_ready`,
+    // streaming-v2 preload consumes `streaming_pending_ready`.
     let sr = shared.sample_rate.load(Ordering::Relaxed) as usize;
     let remaining_frames = total.saturating_sub(current_pos);
     if remaining_frames > 0
         && remaining_frames < sr * 5
         && !shared.pending_ready.load(Ordering::Relaxed)
+        && !shared.streaming_pending_ready.load(Ordering::Acquire)
         && !shared.needs_preload.load(Ordering::Acquire)
     {
         shared.needs_preload.store(true, Ordering::Release);
     }
+}
+
+/// Swap in a gapless-preloaded v2 streaming session at the current track's
+/// EOF, mirroring [`try_activate_pending_gapless`] for the windowed engine.
+///
+/// Protocol (single audio-callback thread):
+/// 1. Validate the pending slot still belongs to the current load generation.
+/// 2. Claim the pending RT exclusively and publish the swap signal to the
+///    audio thread BEFORE republishing the RT, so a concurrent
+///    `clear_pending_streaming` can never retire the session that is about to
+///    become active (`sync_pending_swap` owns it from now on).
+/// 3. Republish the RT into the active slot (displacing the finished session's
+///    RT into the retire queue) and reset track-position state.
+fn try_activate_pending_v2(
+    shared: &SharedState,
+    dsp_chain: &mut DspChain,
+    resampler: &mut Option<StreamingResampler>,
+    scratch: &mut CallbackScratch,
+) -> bool {
+    if shared
+        .streaming_pending_generation
+        .load(Ordering::Acquire)
+        != shared.load_generation.load(Ordering::Acquire)
+    {
+        log::debug!(
+            "v2 gapless: stale pending generation {} vs load {}",
+            shared.streaming_pending_generation.load(Ordering::Acquire),
+            shared.load_generation.load(Ordering::Acquire)
+        );
+        shared.streaming_pending_v2_rt.store(None);
+        shared.streaming_pending_ready.store(false, Ordering::Release);
+        return false;
+    }
+    let pending_guard = shared.streaming_pending_v2_rt.load();
+    let Some(pending_arc) = pending_guard.as_ref() else {
+        log::debug!("v2 gapless: no pending RT at EOF");
+        return false;
+    };
+    if pending_arc.producer().decode_state
+        == super::streaming::rt_view::StreamingDecodeState::Loading
+        || pending_arc.producer().decode_state
+            == super::streaming::rt_view::StreamingDecodeState::Inactive
+    {
+        log::debug!(
+            "v2 gapless: pending not ready (state {}), deferring",
+            pending_arc.producer().decode_state as u8
+        );
+        // Leave the preload in place; a later EOF frame will reap it.
+        return false;
+    }
+    let pending = Arc::clone(pending_arc);
+    drop(pending_guard);
+
+    shared.streaming_pending_v2_rt.store(None);
+    shared.streaming_pending_ready.store(false, Ordering::Release);
+    shared.streaming_swap_requested.store(true, Ordering::Release);
+
+    let displaced = shared.streaming_v2_rt.swap(Some(pending));
+    if let Some(old) = displaced {
+        shared.retire_audio_resource(RetiredAudioResource::StreamingRtView(old));
+    }
+
+    shared.request_seek_to_frame(0);
+    shared.dsp_reset_pending.store(true, Ordering::Release);
+    shared
+        .total_frames
+        .store(
+            shared.streaming_pending_total_frames.load(Ordering::Acquire),
+            Ordering::Release,
+        );
+    shared
+        .channels
+        .store(
+            shared.streaming_pending_channels.load(Ordering::Acquire),
+            Ordering::Release,
+        );
+    shared.needs_preload.store(false, Ordering::Relaxed);
+    shared.pending_ready.store(false, Ordering::Relaxed);
+    shared.gapless_swap_pending.store(true, Ordering::Release);
+    shared.event_flags.fetch_or(
+        EVENT_TRACK_CHANGED | EVENT_NEEDS_PRELOAD_RESET,
+        Ordering::Release,
+    );
+
+    // Format state stays as published by the active session: the preload
+    // session is built at the same target sample rate / channel count.
+    dsp_chain.reset();
+    if let Some(rs) = resampler.as_mut() {
+        rs.reset();
+    }
+    scratch.resample_leftover.clear();
+    scratch.resample_leftover_pos = 0;
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1382,6 +1479,13 @@ fn render_streaming_audio_output(
                     == super::streaming::rt_view::StreamingDecodeState::EndOfStream
                     && (*current_pos as u64) >= producer.produced_end_frame
             });
+            if v2_at_eof && try_activate_pending_v2(shared, dsp_chain, resampler, scratch) {
+                // Gapless: this callback emits silence for the final frames of
+                // the outgoing track; the next callback renders from the
+                // swapped-in pending window at frame 0.
+                data.fill(0.0);
+                return output_len;
+            }
             if v2_at_eof {
                 if shared.state.load() == PlayerState::Playing {
                     shared.state.store(PlayerState::Stopped);
@@ -1390,6 +1494,12 @@ fn render_streaming_audio_output(
                         .event_flags
                         .fetch_or(EVENT_TRACK_EOF, Ordering::Release);
                 }
+                // End-of-queue: no pending swap is coming. Tell the audio
+                // thread to retire the staged preload window so the ledger
+                // does not keep charging 128 MiB of dead pending playback.
+                shared
+                    .streaming_pending_abandon
+                    .store(true, Ordering::Release);
             } else if !shared.is_loading.load(Ordering::Acquire) {
                 let silence_frames = ((output_len - samples_written) / channels) as u64;
                 shared.audio_underrun_count.fetch_add(1, Ordering::Relaxed);
@@ -1615,7 +1725,11 @@ pub fn audio_callback_lockfree(
         .position_frames
         .load(Ordering::Relaxed) as usize;
     let streaming_active = shared.streaming_active.load(Ordering::Acquire);
-    if !streaming_active {
+    // Windowed-v2 playback also needs the gapless preload signal (its EOF swap
+    // consumes `streaming_pending_ready`), so the 5s-before-end trigger runs
+    // for both engines.
+    let streaming_v2 = shared.streaming_v2_enabled.load(Ordering::Acquire);
+    if !streaming_active || streaming_v2 {
         request_gapless_preload_if_needed(shared, total, current_pos);
     }
 
@@ -2759,7 +2873,7 @@ mod tests {
         use crate::player::streaming::rt_view::WindowIdentitySnapshot;
 
         let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
-        let first = PcmWindow::create(geometry, 1, 100).expect("first window");
+        let first = PcmWindow::create(geometry, 1, 100, DecodedMemoryOwner::ActiveWindow).expect("first window");
         let mut writer = first.writer;
         let mut slot = writer.try_claim_owned(1, 0, 0).expect("claim slot");
         let samples = vec![0.25; geometry.slot_samples()];
@@ -2780,7 +2894,7 @@ mod tests {
         assert_eq!(progress.rendered_frames, 4);
         assert_eq!(output, [0.25; 8]);
 
-        let second = PcmWindow::create(geometry, 2, 200).expect("second window");
+        let second = PcmWindow::create(geometry, 2, 200, DecodedMemoryOwner::ActiveWindow).expect("second window");
         rt.install_window(Some(Arc::clone(&second.window)));
         rt.publish_identity(WindowIdentitySnapshot {
             generation: 2,
@@ -2803,7 +2917,7 @@ mod tests {
         };
 
         let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
-        let parts = PcmWindow::create(geometry, 1, 100).expect("window");
+        let parts = PcmWindow::create(geometry, 1, 100, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut writer = parts.writer;
         let mut slot = writer.try_claim_owned(1, 0, 0).expect("claim slot");
         slot.append_interleaved(&vec![0.5; geometry.slot_samples()])
@@ -3113,5 +3227,237 @@ mod tests {
             0
         );
         assert!(shared.streaming_active.load(Ordering::Acquire));
+    }
+
+#[test]
+    fn v_gapless_swap_consumes_pending_rt_and_resets_position() {
+        use crate::player::streaming::pcm_window::{PcmWindow, PcmWindowGeometry};
+        use crate::player::streaming::rt_view::{
+            ProducerSnapshot, StreamingDecodeState, WindowIdentitySnapshot,
+        };
+
+        let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
+
+        // Active session at EOF.
+        let active_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("active window");
+        let mut active_writer = active_parts.writer;
+        let mut active_slot = active_writer.try_claim_owned(1, 0, 0).expect("active claim");
+        active_slot
+            .append_interleaved(&vec![0.5; geometry.slot_samples()])
+            .expect("append");
+        active_slot.publish().expect("publish");
+        let active_rt = Arc::new(StreamingRtView::new());
+        active_rt.install_window(Some(active_parts.window));
+        active_rt.publish_identity(WindowIdentitySnapshot {
+            generation: 1,
+            epoch: 1,
+            active: true,
+        });
+        active_rt.publish_producer(ProducerSnapshot {
+            retained_start_frame: 0,
+            produced_end_frame: geometry.slot_frames() as u64,
+            decode_state: StreamingDecodeState::EndOfStream,
+        });
+
+        // Pending preloaded session, Ready.
+        let pending_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("pending window");
+        let mut pending_writer = pending_parts.writer;
+        let mut pending_slot =
+            pending_writer.try_claim_owned(1, 0, 0).expect("pending claim");
+        pending_slot
+            .append_interleaved(&vec![0.25; geometry.slot_samples()])
+            .expect("pending append");
+        pending_slot.publish().expect("pending publish");
+        let pending_rt = Arc::new(StreamingRtView::new());
+        pending_rt.install_window(Some(pending_parts.window));
+        pending_rt.publish_identity(WindowIdentitySnapshot {
+            generation: 1,
+            epoch: 1,
+            active: true,
+        });
+        pending_rt.publish_producer(ProducerSnapshot {
+            retained_start_frame: 0,
+            produced_end_frame: geometry.slot_frames() as u64,
+            decode_state: StreamingDecodeState::Ready,
+        });
+
+        let shared = SharedState::new();
+        shared.streaming_generation.store(1, Ordering::Release);
+        shared.load_generation.store(1, Ordering::Release);
+        shared.streaming_active.store(true, Ordering::Release);
+        shared.streaming_v2_enabled.store(true, Ordering::Release);
+        shared.publish_streaming_v2_rt(Some(Arc::clone(&active_rt)));
+        shared.streaming_pending_v2_rt.store(Some(Arc::clone(&pending_rt)));
+        shared.streaming_pending_ready.store(true, Ordering::Release);
+        shared.streaming_pending_generation.store(1, Ordering::Release);
+        shared.streaming_pending_total_frames.store(2_000, Ordering::Release);
+        shared.streaming_pending_channels.store(2, Ordering::Release);
+        shared.total_frames.store(500, Ordering::Release);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(geometry.slot_frames() as u64, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+
+        let mut scratch = CallbackScratch::new(2);
+        let mut chain = DspChain::with_capacity(0, 44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        let mut current_pos = geometry.slot_frames();
+
+        // EOF frame: swap fires, this callback is silent.
+        let mut swap_frame = [1.0; 8];
+        let written = render_streaming_audio_output(
+            &mut swap_frame,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut None,
+            &mut scratch,
+            OutputPath::Direct,
+            &mut current_pos,
+            0,
+        );
+        assert_eq!(written, 8);
+        assert_eq!(swap_frame, [0.0; 8]);
+        assert!(shared.streaming_swap_requested.load(Ordering::Acquire));
+        assert!(!shared.streaming_pending_ready.load(Ordering::Acquire));
+        assert!(shared.streaming_pending_v2_rt.load_full().is_none());
+        assert!(
+            Arc::ptr_eq(
+                shared.streaming_v2_rt.load_full().as_ref().unwrap(),
+                &pending_rt
+            ),
+            "pending RT must be promoted to the active slot"
+        );
+        assert_eq!(shared.total_frames.load(Ordering::Acquire), 2_000);
+        assert_eq!(
+            shared
+                .playback_clock
+                .callback
+                .position_frames
+                .load(Ordering::Acquire),
+            0
+        );
+        assert!(shared.gapless_swap_pending.load(Ordering::Acquire));
+
+        // Next callback renders from the swapped-in pending window at frame 0.
+        shared.streaming_swap_requested.store(false, Ordering::Release);
+        let mut next_output = [0.0; 8];
+        let mut next_pos = 0;
+        let second_written = render_streaming_audio_output(
+            &mut next_output,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut None,
+            &mut scratch,
+            OutputPath::Direct,
+            &mut next_pos,
+            0,
+        );
+        assert_eq!(second_written, 8);
+        assert!(next_output.iter().all(|s| (*s - 0.25).abs() < 0.000_1));
+        assert_eq!(next_pos, 4);
+        assert!(shared.streaming_active.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn v_gapless_swap_ignores_stale_pending_generation() {
+        use crate::player::streaming::pcm_window::{PcmWindow, PcmWindowGeometry};
+        use crate::player::streaming::rt_view::{
+            ProducerSnapshot, StreamingDecodeState, WindowIdentitySnapshot,
+        };
+
+        let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
+        let active_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("active window");
+        let mut active_writer = active_parts.writer;
+        let mut active_slot = active_writer.try_claim_owned(1, 0, 0).expect("active claim");
+        active_slot
+            .append_interleaved(&vec![0.5; geometry.slot_samples()])
+            .expect("append");
+        active_slot.publish().expect("publish");
+        let active_rt = Arc::new(StreamingRtView::new());
+        active_rt.install_window(Some(active_parts.window));
+        active_rt.publish_identity(WindowIdentitySnapshot {
+            generation: 1,
+            epoch: 1,
+            active: true,
+        });
+        active_rt.publish_producer(ProducerSnapshot {
+            retained_start_frame: 0,
+            produced_end_frame: geometry.slot_frames() as u64,
+            decode_state: StreamingDecodeState::EndOfStream,
+        });
+
+        let pending_parts = PcmWindow::create(geometry, 2, 0, DecodedMemoryOwner::ActiveWindow).expect("pending window");
+        let mut pending_writer = pending_parts.writer;
+        let mut pending_slot =
+            pending_writer.try_claim_owned(2, 0, 0).expect("pending claim");
+        pending_slot
+            .append_interleaved(&vec![0.25; geometry.slot_samples()])
+            .expect("append");
+        pending_slot.publish().expect("publish");
+        let pending_rt = Arc::new(StreamingRtView::new());
+        pending_rt.install_window(Some(pending_parts.window));
+        pending_rt.publish_identity(WindowIdentitySnapshot {
+            generation: 1,
+            epoch: 1,
+            active: true,
+        });
+        pending_rt.publish_producer(ProducerSnapshot {
+            retained_start_frame: 0,
+            produced_end_frame: geometry.slot_frames() as u64,
+            decode_state: StreamingDecodeState::Ready,
+        });
+
+        let shared = SharedState::new();
+        shared.streaming_generation.store(1, Ordering::Release);
+        shared.load_generation.store(2, Ordering::Release); // track changed
+        shared.streaming_v2_enabled.store(true, Ordering::Release);
+        shared.publish_streaming_v2_rt(Some(Arc::clone(&active_rt)));
+        shared.streaming_pending_v2_rt.store(Some(Arc::clone(&pending_rt)));
+        shared.streaming_pending_ready.store(true, Ordering::Release);
+        shared.streaming_pending_generation.store(1, Ordering::Release);
+        shared.streaming_pending_total_frames.store(2_000, Ordering::Release);
+        shared.streaming_pending_channels.store(2, Ordering::Release);
+        shared
+            .playback_clock
+            .callback
+            .position_frames
+            .store(geometry.slot_frames() as u64, Ordering::Release);
+        shared.state.store(PlayerState::Playing);
+
+        let mut scratch = CallbackScratch::new(2);
+        let mut chain = DspChain::with_capacity(0, 44_100.0);
+        let loudness = Arc::new(AtomicLoudnessState::default());
+        let mut current_pos = geometry.slot_frames();
+        let mut output = [1.0; 8];
+        let written = render_streaming_audio_output(
+            &mut output,
+            &shared,
+            &mut chain,
+            &loudness,
+            2,
+            &mut None,
+            &mut scratch,
+            OutputPath::Direct,
+            &mut current_pos,
+            0,
+        );
+        assert_eq!(written, 0); // EOF path: no frames rendered
+        assert_eq!(output, [0.0; 8]);
+        // Stale pending is reaped, never swapped in.
+        assert!(!shared.streaming_swap_requested.load(Ordering::Acquire));
+        assert!(shared.streaming_pending_v2_rt.load_full().is_none());
+        assert!(
+            !Arc::ptr_eq(
+                shared.streaming_v2_rt.load_full().as_ref().unwrap(),
+                &pending_rt
+            )
+        );
+        assert_eq!(shared.state.load(), PlayerState::Stopped);
     }
 }

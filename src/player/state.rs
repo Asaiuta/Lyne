@@ -276,6 +276,14 @@ pub enum AudioCommand {
         autoplay: bool,
         session: Box<super::streaming::session::PersistentStreamingSession>,
     },
+    /// Install a gapless-preloaded v2 streaming session as a pending swap
+    /// target. The callback consumes it at the current track's EOF.
+    InstallPendingStreamingV2Session {
+        generation: u64,
+        session: Box<super::streaming::session::PersistentStreamingSession>,
+    },
+    /// Drop any pending v2 preload session without touching the active one.
+    CancelPendingStreamingV2Session,
     LoadError {
         generation: u64,
         message: String,
@@ -451,6 +459,35 @@ pub struct SharedState {
     pub(crate) streaming_v2_rt: ArcSwapOption<super::streaming::rt_view::StreamingRtView>,
     #[allow(dead_code)]
     pub(crate) streaming_v2_enabled: AtomicBool,
+    /// Realtime publication slot for a gapless-preloaded v2 streaming session.
+    /// The callback consumes it atomically at the track boundary; the audio
+    /// thread owns the backing `PersistentStreamingSession` until then.
+    #[allow(dead_code)]
+    pub(crate) streaming_pending_v2_rt: ArcSwapOption<super::streaming::rt_view::StreamingRtView>,
+    /// Mirrors `pending_ready` for the v2 preload slot.
+    #[allow(dead_code)]
+    pub(crate) streaming_pending_ready: AtomicBool,
+    /// Set by the callback after it swapped the pending v2 RT into the active
+    /// slot; the audio thread consumes it to swap `streaming_session` and
+    /// retire the displaced session on the non-RT side.
+    pub(crate) streaming_swap_requested: AtomicBool,
+    /// `total_frames` of the pending v2 session (published with the RT).
+    #[allow(dead_code)]
+    pub(crate) streaming_pending_total_frames: AtomicU64,
+    /// Load generation the pending v2 session was installed for. The callback
+    /// compares it against `load_generation` before swapping.
+    #[allow(dead_code)]
+    pub(crate) streaming_pending_generation: AtomicU64,
+    /// Set by the callback when v2 playback ends without a consumable pending
+    /// slot (end-of-queue); the audio thread then retires the staged preload
+    /// session so the ledger does not keep charging a dead 128 MiB window.
+    #[allow(dead_code)]
+    pub(crate) streaming_pending_abandon: AtomicBool,
+    /// Channel count of the pending v2 session (source-resolved). The callback
+    /// must publish it alongside the RT swap because the window engine renders
+    /// at the source channel count (no channel resampling).
+    #[allow(dead_code)]
+    pub(crate) streaming_pending_channels: AtomicU64,
     pub streaming_active: AtomicBool,
     pub streaming_decode_finished: AtomicBool,
     pub streaming_generation: AtomicU64,
@@ -635,6 +672,13 @@ impl SharedState {
             audio_buffer_reservation: ArcSwapOption::empty(),
             streaming_v2_rt: ArcSwapOption::empty(),
             streaming_v2_enabled: AtomicBool::new(false),
+            streaming_pending_v2_rt: ArcSwapOption::empty(),
+            streaming_pending_ready: AtomicBool::new(false),
+            streaming_swap_requested: AtomicBool::new(false),
+            streaming_pending_abandon: AtomicBool::new(false),
+            streaming_pending_total_frames: AtomicU64::new(0),
+            streaming_pending_generation: AtomicU64::new(0),
+            streaming_pending_channels: AtomicU64::new(0),
             streaming_active: AtomicBool::new(false),
             streaming_decode_finished: AtomicBool::new(false),
             streaming_generation: AtomicU64::new(0),

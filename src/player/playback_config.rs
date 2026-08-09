@@ -324,6 +324,13 @@ impl AudioPlayer {
         path: &str,
         credentials: Option<crate::decoder::HttpCredentials>,
     ) -> Result<(), String> {
+        // Streaming-v2 playback: preload through a second windowed session
+        // (gapless pending swap) instead of the legacy full-buffer decode.
+        if self.config.streaming_first_buffer
+            && self.shared_state.streaming_v2_enabled.load(Ordering::Acquire)
+        {
+            return self.queue_next_streaming_v2(path, credentials);
+        }
         let mode = self.config.loudness.mode;
         GaplessManager::queue_next(
             &self.shared_state,
@@ -337,8 +344,127 @@ impl AudioPlayer {
         )
     }
 
+    /// Gapless preload for the streaming-v2 engine: opens the next track as a
+    /// windowed session at the current output format and hands it to the audio
+    /// thread as the pending swap target (consumed at the current track's EOF).
+    fn queue_next_streaming_v2(
+        &self,
+        path: &str,
+        credentials: Option<crate::decoder::HttpCredentials>,
+    ) -> Result<(), String> {
+        if self
+            .shared_state
+            .streaming_pending_ready
+            .load(Ordering::Acquire)
+        {
+            log::debug!("Gapless(v2): pending already ready, ignoring queue_next");
+            return Ok(());
+        }
+        let path = path.to_string();
+        let generation = self.shared_state.load_generation.load(Ordering::Acquire);
+        let config = self.config.clone();
+        let cmd_tx = self.cmd_tx.clone();
+        let shared_state = Arc::clone(&self.shared_state);
+        // Hand the upcoming track path + metadata to the gapless chain early —
+        // the same slots legacy preload uses; the WS coordinator publishes them
+        // when the callback fires EVENT_TRACK_CHANGED at the swap. The lofty
+        // parse is blocking file I/O, so it runs inside the preload thread.
+        *shared_state.pending_file_path.write() = Some(path.clone());
+        // Force the preload session to the active output format (the callback
+        // does not channel-resample on swap; it only switches `channels`).
+        let active_sample_rate = self.shared_state.sample_rate.load(Ordering::Acquire) as u32;
+        let active_channels = self.shared_state.channels.load(Ordering::Acquire).max(1) as usize;
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        std::thread::spawn(move || {
+            use crate::player::streaming::source::{StreamSourceFactory, StreamFetchPolicy};
+            log::info!("Gapless preload(v2) started: {}", path);
+            let open_request = crate::player::streaming::source::OpenRequest {
+                generation,
+                intent: crate::player::streaming::source::StreamOpenIntent::GaplessPreload,
+                path: std::path::Path::new(&path),
+                cancel: crate::decoder::DecodeCancelToken::new(Arc::clone(&cancel)),
+                credentials: credentials.as_ref(),
+                expected_identity: None,
+                fetch_policy: if super::is_remote_http_path(&path) {
+                    StreamFetchPolicy::AllowRemote
+                } else {
+                    StreamFetchPolicy::LocalOnly
+                },
+            };
+            let result = if super::is_remote_http_path(&path) {
+                crate::player::streaming::source::RemoteHttpSourceFactory.open(open_request)
+            } else {
+                crate::player::streaming::source::LocalFileSourceFactory.open(open_request)
+            }
+            .map_err(|error| error.to_string());
+            let opened = match result {
+                Ok(opened) => opened,
+                Err(error) => {
+                    log::warn!("Gapless preload(v2) open failed: {}", error);
+                    return;
+                }
+            };
+            let capacity_bytes = usize::try_from(config.streaming_pcm_window_limit_mib)
+                .ok()
+                .and_then(|mib| mib.checked_mul(1024 * 1024))
+                .unwrap_or(64 * 1024 * 1024);
+            // Publish basic metadata for the upcoming track so the WS gapless
+            // chain can hand over title/artist instead of leaving stale data.
+            let mut preload_metadata = crate::decoder::TrackMetadata::default();
+            if let Some(lofty) = crate::metadata::extract_lofty_metadata(&path) {
+                crate::metadata::merge_lofty_into(&mut preload_metadata, &lofty);
+            }
+            if !preload_metadata.title.is_none() {
+                *shared_state.pending_metadata.write() = Some(preload_metadata);
+            }
+            let session = match crate::player::streaming::session::PersistentStreamingSession::
+                start_local_with_capacity(
+                    opened,
+                    capacity_bytes,
+                    crate::player::streaming::session::LocalSessionConfig {
+                        target_output_sample_rate: Some(active_sample_rate),
+                        epoch: 1,
+                        origin_frame: 0,
+                        phase_response: config.phase_response,
+                        resample_quality: config.resample_quality,
+                        window_owner: crate::player::streaming::memory::DecodedMemoryOwner::PendingPlayback,
+                    },
+                )
+            {
+                Ok(session) => session,
+                Err(error) => {
+                    log::warn!("Gapless preload(v2) session failed: {}", error);
+                    return;
+                }
+            };
+            if session.channels != active_channels {
+                log::warn!(
+                    "Gapless preload(v2) channel mismatch (pending {} vs active {}), dropping preload",
+                    session.channels,
+                    active_channels
+                );
+                return;
+            }
+            log::info!(
+                "Gapless preload(v2) installed: {} (gen {})",
+                path, generation
+            );
+            let _ = cmd_tx.send(AudioCommand::InstallPendingStreamingV2Session {
+                generation,
+                session: Box::new(session),
+            });
+        });
+        Ok(())
+    }
+
     pub fn cancel_preload(&self) {
         GaplessManager::cancel_preload(&self.shared_state);
+        // Streaming-v2 playback keeps its preload as a second windowed session;
+        // drop it alongside the legacy path.
+        let _ = self
+            .cmd_tx
+            .send(AudioCommand::CancelPendingStreamingV2Session);
     }
 
     /// Promote a preloaded gapless buffer for a manual next-track action.

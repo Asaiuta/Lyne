@@ -35,6 +35,9 @@ pub(crate) struct LocalSessionConfig {
     pub origin_frame: u64,
     pub phase_response: PhaseResponse,
     pub resample_quality: ResampleQuality,
+    /// Memory-ledger owner for the session window. Preload sessions charge
+    /// `PendingPlayback` so active + pending budgets stay visible separately.
+    pub window_owner: super::memory::DecodedMemoryOwner,
 }
 
 #[derive(Debug, Error)]
@@ -96,6 +99,12 @@ impl std::fmt::Debug for PersistentStreamingSession {
 }
 
 impl PersistentStreamingSession {
+    /// Promote the session's primary window to the active memory owner. Called
+    /// by the audio thread when a preloaded session becomes the active one.
+    pub(crate) fn reown_window(&self, owner: super::memory::DecodedMemoryOwner) {
+        self.window.reown(owner);
+    }
+
     pub(crate) fn start_local_with_capacity(
         opened: OpenedSource,
         capacity_bytes: usize,
@@ -112,7 +121,12 @@ impl PersistentStreamingSession {
             .map_err(|error| StreamingSessionError::Decoder(error.to_string()))?;
         let geometry = PcmWindowGeometry::for_capacity_bytes(builder.info.channels, capacity_bytes)
             .map_err(|error| StreamingSessionError::Reservation(error.to_string()))?;
-        let parts = PcmWindow::create(geometry, config.epoch, config.origin_frame)
+        let parts = PcmWindow::create(
+            geometry,
+            config.epoch,
+            config.origin_frame,
+            config.window_owner,
+        )
             .map_err(|error| StreamingSessionError::Reservation(error.to_string()))?;
         Self::start_local_from_builder(
             generation,
@@ -672,6 +686,7 @@ mod tests {
 
     fn config(output_sample_rate: u32) -> LocalSessionConfig {
         LocalSessionConfig {
+            window_owner: DecodedMemoryOwner::ActiveWindow,
             target_output_sample_rate: Some(output_sample_rate),
             epoch: 3,
             origin_frame: 17,
@@ -704,7 +719,7 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-        )
+            DecodedMemoryOwner::ActiveWindow)
         .expect("window");
         let mut session =
             PersistentStreamingSession::start_local(fixture.open(7), parts, config(44_100))
@@ -734,7 +749,7 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-        )
+            DecodedMemoryOwner::ActiveWindow)
         .expect("window");
         let mut session_config = config(44_100);
         session_config.target_output_sample_rate = None;
@@ -755,7 +770,7 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-        )
+            DecodedMemoryOwner::ActiveWindow)
         .expect("window");
         let session =
             PersistentStreamingSession::start_local(fixture.open(13), parts, config(44_100))
@@ -857,7 +872,7 @@ mod tests {
         let fixture = TempWav::pcm16(1, 44_100, &vec![1; geometry.slot_frames() * 3]);
         let baseline = process_decoded_memory_ledger().snapshot().reserved_by_owner
             [DecodedMemoryOwner::ProducerScratch as usize];
-        let parts = PcmWindow::create(geometry, 3, 17).expect("window");
+        let parts = PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
         let session =
             PersistentStreamingSession::start_local(fixture.open(8), parts, config(44_100))
                 .expect("start session");
@@ -899,7 +914,7 @@ mod tests {
         let fixture = TempWav::pcm16(1, 44_100, &vec![1; geometry.slot_frames() * 3]);
         let baseline = process_decoded_memory_ledger().snapshot().reserved_by_owner
             [DecodedMemoryOwner::ResamplerCarry as usize];
-        let parts = PcmWindow::create(geometry, 3, 17).expect("window");
+        let parts = PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut session =
             PersistentStreamingSession::start_local(fixture.open(10), parts, config(48_000))
                 .expect("start resampled session");
@@ -946,7 +961,7 @@ mod tests {
             .map(|frame| (frame % 30_000) as i16)
             .collect::<Vec<_>>();
         let fixture = TempWav::pcm16(1, 44_100, &samples);
-        let parts = PcmWindow::create(geometry, 3, 17).expect("window");
+        let parts = PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut session =
             PersistentStreamingSession::start_local(fixture.open(11), parts, config(44_100))
                 .expect("start session");
@@ -1039,7 +1054,7 @@ mod tests {
     fn backward_request_protects_reclaim_floor_until_applied() {
         let _guard = session_test_guard();
         let geometry = PcmWindowGeometry::for_slot_count(1, 4).expect("geometry");
-        let parts = PcmWindow::create(geometry, 3, 1_000).expect("window");
+        let parts = PcmWindow::create(geometry, 3, 1_000, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut publisher = WindowSlotPublisher::new(parts.writer, 3, 1_000);
         let rt = StreamingRtView::new();
         rt.publish_producer(ProducerSnapshot {
@@ -1092,7 +1107,7 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             0,
-        )
+            DecodedMemoryOwner::ActiveWindow)
         .expect("window");
         let session =
             PersistentStreamingSession::start_local(fixture.open(14), parts, config(44_100))
@@ -1156,7 +1171,7 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-        )
+            DecodedMemoryOwner::ActiveWindow)
         .expect("window");
         let error = PersistentStreamingSession::start_local(fixture.open(9), parts, config(44_100))
             .expect_err("reject mismatched channels");

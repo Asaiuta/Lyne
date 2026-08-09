@@ -100,6 +100,7 @@ struct AudioThreadRuntime {
     target_lufs: f64,
     replaygain_reference_lufs: f64,
     streaming_session: Option<PersistentStreamingSession>,
+    pending_streaming_session: Option<PersistentStreamingSession>,
     streaming_reaper: ProducerReaper,
     pending_streaming_retire: Vec<PersistentProducerHandle>,
     streaming_autoplay_pending: bool,
@@ -116,11 +117,17 @@ impl AudioThreadRuntime {
             };
             match self.cmd_rx.recv_timeout(timeout) {
                 Ok(command) => {
+                    self.sync_pending_swap();
+                    self.drain_abandoned_pending_streaming();
                     if matches!(self.handle_audio_command(command), ThreadControl::Shutdown) {
                         break;
                     }
                 }
-                Err(RecvTimeoutError::Timeout) => self.maintain_parked_streams(),
+                Err(RecvTimeoutError::Timeout) => {
+                    self.sync_pending_swap();
+                    self.drain_abandoned_pending_streaming();
+                    self.maintain_parked_streams();
+                }
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             // Free resources the audio callback retired (old buffers, replaced DSP
@@ -138,6 +145,7 @@ impl AudioThreadRuntime {
             .streaming_v2_enabled
             .store(false, Ordering::Release);
         self.shared_state.publish_streaming_v2_rt(None);
+        self.clear_pending_streaming(true);
         if let Some(session) = self.streaming_session.take() {
             self.retire_streaming_session(session);
         }
@@ -153,7 +161,17 @@ impl AudioThreadRuntime {
                 autoplay,
                 session,
             } => {
+                // A fresh active session supersedes any gapless preload target.
+                self.clear_pending_streaming(true);
                 self.install_streaming_session(generation, autoplay, *session);
+                return ThreadControl::Continue;
+            }
+            AudioCommand::InstallPendingStreamingV2Session { generation, session } => {
+                self.install_pending_streaming_session(generation, *session);
+                return ThreadControl::Continue;
+            }
+            AudioCommand::CancelPendingStreamingV2Session => {
+                self.clear_pending_streaming(true);
                 return ThreadControl::Continue;
             }
             AudioCommand::Seek(time) => {
@@ -230,6 +248,124 @@ impl AudioThreadRuntime {
         self.shared_state
             .streaming_active
             .store(true, Ordering::Release);
+    }
+
+    /// Install a gapless-preloaded v2 streaming session as the pending swap
+    /// target. The callback consumes `streaming_pending_v2_rt` at the current
+    /// track's EOF; until then the session is owned here (producer parks once
+    /// the window is full, session.rs backpressure).
+    fn install_pending_streaming_session(
+        &mut self,
+        generation: u64,
+        session: PersistentStreamingSession,
+    ) {
+        if self.shared_state.load_generation.load(Ordering::Acquire) != generation {
+            log::debug!(
+                "v2 gapless: pending install stale (gen {} vs load {}), retiring",
+                generation,
+                self.shared_state.load_generation.load(Ordering::Acquire)
+            );
+            self.retire_streaming_session(session);
+            self.shared_state
+                .streaming_pending_ready
+                .store(false, Ordering::Release);
+            return;
+        }
+        log::debug!("v2 gapless: pending session installed (gen {})", generation);
+        if let Some(previous) = self.pending_streaming_session.replace(session) {
+            self.retire_streaming_session(previous);
+        }
+        let pending = self
+            .pending_streaming_session
+            .as_ref()
+            .expect("pending session was just installed");
+        self.shared_state
+            .streaming_pending_total_frames
+            .store(pending.total_frames, Ordering::Release);
+        self.shared_state
+            .streaming_pending_generation
+            .store(generation, Ordering::Release);
+        self.shared_state
+            .streaming_pending_channels
+            .store(pending.channels as u64, Ordering::Release);
+        self.shared_state
+            .streaming_pending_v2_rt
+            .store(Some(Arc::clone(&pending.rt)));
+        self.shared_state
+            .streaming_pending_ready
+            .store(true, Ordering::Release);
+    }
+
+    /// Drop the pending gapless-preload session and its publication slot.
+    ///
+    /// If the callback already swapped the pending RT into the active slot
+    /// (`streaming_swap_requested`), the displaced active session is owned by
+    /// the swap-sync path and must NOT be retired here — retrying it would
+    /// kill freshly-swapped playback.
+    fn clear_pending_streaming(&mut self, retire_if_unswapped: bool) {
+        let had_pending = self.shared_state.streaming_pending_v2_rt.load_full().is_some();
+        self.shared_state.streaming_pending_v2_rt.store(None);
+        self.shared_state
+            .streaming_pending_ready
+            .store(false, Ordering::Release);
+        let Some(session) = self.pending_streaming_session.take() else {
+            if had_pending {
+                log::debug!("v2 gapless: clear_pending dropped slot without session");
+            }
+            return;
+        };
+        if retire_if_unswapped && self.shared_state.streaming_swap_requested.load(Ordering::Acquire)
+        {
+            log::debug!("v2 gapless: clear_pending deferred to swap-sync");
+            return;
+        }
+        log::debug!(
+            "v2 gapless: clear_pending retiring session (retire_if_unswapped={})",
+            retire_if_unswapped
+        );
+        self.retire_streaming_session(session);
+    }
+
+    /// Consume a callback-requested pending→active swap (one shot per swap).
+    /// The callback already republished the RT; here we only swap the
+    /// expensive owning session so seek/maintain/retire keep working, and
+    /// retire the displaced one.
+    /// Consume the callback's end-of-queue abandon signal and retire any
+    /// staged v2 preload session (ledger hygiene: no dead pending window).
+    fn drain_abandoned_pending_streaming(&mut self) {
+        if self
+            .shared_state
+            .streaming_pending_abandon
+            .swap(false, Ordering::AcqRel)
+        {
+            self.clear_pending_streaming(true);
+        }
+    }
+
+    fn sync_pending_swap(&mut self) {
+        if !self
+            .shared_state
+            .streaming_swap_requested
+            .swap(false, Ordering::AcqRel)
+        {
+            return;
+        }
+        let Some(pending) = self.pending_streaming_session.take() else {
+            return;
+        };
+        self.shared_state
+            .streaming_pending_ready
+            .store(false, Ordering::Release);
+        if let Some(previous) = self.streaming_session.replace(pending) {
+            self.retire_streaming_session(previous);
+        }
+        // The promoted window is now the live one: charge its bytes under the
+        // active owner so ledger balances mirror what is playing.
+        if let Some(session) = self.streaming_session.as_ref() {
+            session.reown_window(
+                crate::player::streaming::memory::DecodedMemoryOwner::ActiveWindow,
+            );
+        }
     }
 
     fn maintain_streaming_session(&mut self) -> bool {
@@ -559,6 +695,7 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
         parked_streams: Vec::new(),
         owned_dsp_chain: Some(initial_dsp_chain),
         shared_state,
+        pending_streaming_session: None,
         dsp_ctx: Arc::new(dsp_ctx),
         dsp_params,
         loudness_state,

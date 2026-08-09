@@ -3,6 +3,8 @@
 use std::sync::Arc;
 
 use super::pcm_window::{PcmWindow, PcmWindowAccessError, PcmWindowReader};
+#[cfg(test)]
+use super::memory::DecodedMemoryOwner;
 use super::rt_view::{StreamingRtView, WindowIdentitySnapshot};
 
 #[derive(Default)]
@@ -110,7 +112,7 @@ mod tests {
 
     fn published_window(slot_count: usize) -> (PcmWindowReader, usize) {
         let geometry = PcmWindowGeometry::for_slot_count(2, slot_count).expect("geometry");
-        let parts = PcmWindow::create(geometry, 5, 100).expect("window");
+        let parts = PcmWindow::create(geometry, 5, 100, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut writer = parts.writer;
         for sequence in 0..slot_count as u64 {
             let mut slot = writer
@@ -184,8 +186,8 @@ mod tests {
     #[test]
     fn cache_clones_only_on_generation_change_and_retires_displaced_window() {
         let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
-        let first = PcmWindow::create(geometry, 1, 0).expect("first window");
-        let second = PcmWindow::create(geometry, 2, 0).expect("second window");
+        let first = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("first window");
+        let second = PcmWindow::create(geometry, 2, 0, DecodedMemoryOwner::ActiveWindow).expect("second window");
         let rt = StreamingRtView::new();
         rt.install_window(Some(Arc::clone(&first.window)));
         rt.publish_identity(WindowIdentitySnapshot {

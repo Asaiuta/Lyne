@@ -15,6 +15,7 @@ pub fn benchmark_resident_window_seeks_for_bench(
     super::callback::benchmark_resident_window_seeks(iterations)
 }
 use super::spectrum::SpectrumBatch;
+use super::streaming::memory::DecodedMemoryOwner;
 use super::streaming::session::{LocalSessionConfig, PersistentStreamingSession};
 use super::streaming::source::{
     LocalFileSourceFactory, OpenRequest, StreamFetchPolicy, StreamOpenIntent, StreamSourceFactory,
@@ -64,6 +65,7 @@ pub fn open_source_seek_bench() -> SourceSeekBench {
             origin_frame: 0,
             phase_response: PhaseResponse::Linear,
             resample_quality: ResampleQuality::High,
+            window_owner: DecodedMemoryOwner::ActiveWindow,
         },
     )
     .expect("start source-seek benchmark session");

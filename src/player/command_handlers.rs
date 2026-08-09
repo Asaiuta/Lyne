@@ -260,7 +260,9 @@ pub(super) fn handle_audio_command<B: AudioCommandBackend>(
     context: &SharedAudioCommandContext<'_>,
 ) -> AudioCommandFlow {
     match command {
-        AudioCommand::InstallStreamingV2Session { .. } => {
+        AudioCommand::InstallStreamingV2Session { .. }
+        | AudioCommand::InstallPendingStreamingV2Session { .. }
+        | AudioCommand::CancelPendingStreamingV2Session => {
             log::error!("streaming v2 session install bypassed the audio runtime owner");
             AudioCommandFlow::Continue
         }

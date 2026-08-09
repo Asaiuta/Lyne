@@ -106,7 +106,7 @@ pub struct EngineSettings {
     pub phase_response: PhaseResponse,
     pub use_cache: bool,
     pub preemptive_resample: bool,
-    #[serde(default)]
+    #[serde(default = "default_streaming_first_buffer")]
     pub streaming_first_buffer: bool,
     #[serde(
         default = "default_streaming_pcm_window_limit_mib",
@@ -166,7 +166,7 @@ impl Default for EngineSettings {
             phase_response: PhaseResponse::default(),
             use_cache: false,
             preemptive_resample: true,
-            streaming_first_buffer: false,
+            streaming_first_buffer: true,
             streaming_pcm_window_limit_mib: DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB,
             use_next_prefetch: true,
             eq_type: "IIR".to_string(),
@@ -203,6 +203,14 @@ impl EngineSettings {
                 e
             )
         })?;
+        // Explicit env flags override persisted JSON (the file predates newer
+        // fields such as `streaming_first_buffer`; env is the dev rollback
+        // switch for the windowed decode default).
+        let mut settings = settings;
+        if std::env::var_os("AUDIO_STREAMING_FIRST_BUFFER").is_some() {
+            settings.streaming_first_buffer =
+                env_flag("AUDIO_STREAMING_FIRST_BUFFER", settings.streaming_first_buffer);
+        }
         log::info!("Loaded engine settings from {}", path.display());
         Ok(settings.normalized())
     }
@@ -236,7 +244,7 @@ impl EngineSettings {
         let use_cache = env_flag("AUDIO_USE_CACHE", false);
 
         let preemptive_resample = env_flag("AUDIO_PREEMPTIVE_RESAMPLE", true);
-        let streaming_first_buffer = env_flag("AUDIO_STREAMING_FIRST_BUFFER", false);
+        let streaming_first_buffer = env_flag("AUDIO_STREAMING_FIRST_BUFFER", true);
         let streaming_pcm_window_limit_mib = env_parse_clamped(
             "AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB",
             std::env::var("AUDIO_STREAMING_FULL_BUFFER_LIMIT_MIB")
@@ -666,6 +674,13 @@ fn replace_settings_file(temp_path: &Path, destination: &Path) -> std::io::Resul
 
 fn default_streaming_pcm_window_limit_mib() -> u64 {
     DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB
+}
+
+/// Serde default for the windowed-first decode switch. The JSON file predates
+/// the field, and a plain `#[serde(default)]` would resolve to `false` for an
+/// absent key — silently forcing legacy full-buffer decoding.
+fn default_streaming_first_buffer() -> bool {
+    true
 }
 
 fn clamp_streaming_pcm_window_limit_mib(value: u64) -> u64 {

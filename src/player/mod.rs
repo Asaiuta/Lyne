@@ -438,6 +438,7 @@ impl AudioPlayer {
                         origin_frame: 0,
                         phase_response: config.phase_response,
                         resample_quality: config.resample_quality,
+                        window_owner: crate::player::streaming::memory::DecodedMemoryOwner::ActiveWindow,
                     },
                 )
                 .map_err(|error| error.to_string())?;
@@ -654,13 +655,11 @@ impl AudioPlayer {
 
     pub fn seek(&mut self, time_secs: f64) -> Result<(), String> {
         self.shared_state.reset_seek_phase_timestamps();
-        let streaming_active = self.shared_state.streaming_active.load(Ordering::Acquire);
-        if streaming_active
-            && self
-                .shared_state
-                .streaming_v2_enabled
-                .load(Ordering::Acquire)
-        {
+        // V2 seeks are handled by the audio thread against the resident window
+        // session. Keep routing through that path while the engine is v2 even
+        // after a stop (the session is retained), so a stopped seek updates
+        // the position exactly like the legacy path does.
+        if self.shared_state.streaming_v2_enabled.load(Ordering::Acquire) {
             self.cmd_tx
                 .send(AudioCommand::Seek(time_secs))
                 .map_err(|error| format!("Failed to send v2 seek command: {error}"))?;

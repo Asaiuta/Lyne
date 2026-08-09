@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use crossbeam::channel::{bounded, Receiver, RecvTimeoutError, Sender, TrySendError};
 
+#[cfg(test)]
+use super::memory::DecodedMemoryOwner;
 use super::pcm_window::{OwnedWriteSlot, PcmWindowAccessError, PcmWindowWriter, PublishedSlot};
 
 const REAPER_QUEUE_CAPACITY: usize = 8;
@@ -587,7 +589,7 @@ mod tests {
     #[test]
     fn borrowed_spans_publish_directly_across_owned_slot_boundaries() {
         let geometry = PcmWindowGeometry::for_slot_count(2, 4).expect("geometry");
-        let mut parts = PcmWindow::create(geometry, 3, 1_000).expect("window");
+        let mut parts = PcmWindow::create(geometry, 3, 1_000, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut publisher = WindowSlotPublisher::new(parts.writer, 3, 1_000);
         let half_slot = geometry.slot_samples() / 2;
         let first = vec![1.0; half_slot];
@@ -625,7 +627,7 @@ mod tests {
     #[test]
     fn publisher_epoch_reset_reuses_window_and_restarts_absolute_coordinates() {
         let geometry = PcmWindowGeometry::for_slot_count(2, 4).expect("geometry");
-        let parts = PcmWindow::create(geometry, 3, 100).expect("window");
+        let parts = PcmWindow::create(geometry, 3, 100, DecodedMemoryOwner::ActiveWindow).expect("window");
         let window = Arc::clone(&parts.window);
         let mut reader = parts.reader;
         let mut publisher = WindowSlotPublisher::new(parts.writer, 3, 100);
@@ -655,7 +657,7 @@ mod tests {
     #[test]
     fn window_backpressure_reports_exact_unconsumed_progress() {
         let geometry = PcmWindowGeometry::for_slot_count(2, 2).expect("geometry");
-        let parts = PcmWindow::create(geometry, 1, 0).expect("window");
+        let parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut publisher = WindowSlotPublisher::new(parts.writer, 1, 0);
         let two_slots = vec![0.5; geometry.slot_samples() * 2];
         let progress = publisher.append_borrowed(&two_slots).expect("fill window");
