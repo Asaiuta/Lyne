@@ -664,3 +664,14 @@ WMI 5s 进程树采样并行。真实 UI 驱动：本地库滚动 4 轮、在线
 **决策**：窗口保 128 MiB（64 MiB 对超长曲有重复解码风险）。
 
 commit 106e417 · 任务 08-09-streaming-v2-window-default 待归档。
+## 2026-08-09 — 64 MiB 窗口对照实测 + v2 seek 排障
+
+- A/B：128 vs 64 MiB（env AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB），480s 曲 20 次跨窗 seek + gapless。
+  64 MiB 零 rejection/零欠载，seek 误差与 128 完全一致（settle 1.6s 后 ~1.62s，实际位置偏差 ~0.02s），
+  WorkingSet 174.4→110.3 MB（−64 MB，−37%）。结论入 verification-report.md §3.1；§4 补 swap 后
+  ledger 记账滞留实测（64 轮 active=128.1 = 旧 64.1+新 64.1）。
+- 排障插曲：20 次 seek 全失效 -> 加 6 处埋点 -> 发现端点错误：`/domain/queue/seek` 未注册路由，
+  命中 cors_preflight（default_service）返回空体 200；真实端点是 legacy `/seek`。v2 跨窗 seek 本身
+  一直正常（apply_source_seek 链路完整）。保留 info 级 seek telemetry（entry/command/publish/apply/warn）。
+- 顺带修复：load_from_file 缺 AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB env 显式覆盖（与 first_buffer 对齐），
+  低内存档位切换对已存在配置文件生效。
