@@ -1,0 +1,5 @@
+{"phase":"start","nodes":1155,"imgs":63,"loadedImgs":63,"decodedPx":2320000,"imgTexMB":8.9,"resImgs":34,"imgBytesMB":0.01,"heapMB":18.72,"rendererWSMB":260.8,"rendererPBMB":180.3,"wvProcs":12,"t":1786271408294}
+{"phase":"library-list","nodes":19353,"imgs":598,"loadedImgs":598,"decodedPx":16005100,"imgTexMB":61.1,"resImgs":40,"imgBytesMB":0.01,"heapMB":42.52,"rendererWSMB":301.8,"rendererPBMB":223.6,"wvProcs":12,"t":1786271416118}
+{"phase":"library-albums-grid","nodes":19353,"imgs":598,"loadedImgs":598,"decodedPx":16005100,"imgTexMB":61.1,"resImgs":40,"imgBytesMB":0.01,"heapMB":41.71,"rendererWSMB":278.5,"rendererPBMB":199.1,"wvProcs":12,"t":1786271423952}
+{"phase":"discover","nodes":1155,"imgs":63,"loadedImgs":63,"decodedPx":2320000,"imgTexMB":8.9,"resImgs":50,"imgBytesMB":0.01,"heapMB":24.13,"rendererWSMB":283.3,"rendererPBMB":201.5,"wvProcs":12,"t":1786271428713}
+{"phase":"settings-baseline","nodes":1155,"imgs":63,"loadedImgs":63,"decodedPx":2320000,"imgTexMB":8.9,"resImgs":50,"imgBytesMB":0.01,"heapMB":24.26,"rendererWSMB":277.7,"rendererPBMB":195.5,"wvProcs":12,"t":1786271432549}
