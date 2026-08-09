@@ -642,3 +642,9 @@ WMI 5s 进程树采样并行。真实 UI 驱动：本地库滚动 4 轮、在线
 - 修正 trim 报告错误归因：−108 MB PB 乃采样时机/页面状态差异，非 disable-gpu 效果（勘误写入 trim 报告 §6）。
 - rAF 帧间隔三组 6.05→6.06ms 无差异；procs 恒定 6。
 - 结论：无可落地启动参数；剩余可变项仅歌词窗 renderer（已归 SMTC 路线）。无产品代码变更（不引入误导配置）。
+
+## 2026-08-09 — 图片位图内存审计 (08-09-frontend-image-bitmap-audit)
+
+- 方法：真实鼠标事件（Input.dispatchMouseEvent，.click() 不触发 Solid 事件委托 → 反直觉调试点）驱动导航 + WMI renderer 采样 + 图元统计。
+- 关键发现：本地库歌曲列表为**全量渲染**（19,353 nodes / 598 imgs 全解码）而发现页虚拟化（1,155/63）；但 renderer PB 仅差 22–43 MB → renderer ~150 MB 为平台成本（V8/Blink/合成器），内容增量 ~25%。
+- 结论：优化上限 30–45 MB（切片列表虚拟化，已列入 07-16 任务）；图片专用优化 ≤20 MB 不单独立项。更新架构报告口径（renderer 产品本）。
