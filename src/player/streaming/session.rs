@@ -307,9 +307,14 @@ fn run_worker(
         }
         let mut handled_command = false;
         if let Some(command) = pending_command.take().or_else(|| control.take_latest()) {
-            if command.kind == ProducerCommandKind::SourceSeek
-                && command.generation == rt.identity().generation
-            {
+            if command.kind == ProducerCommandKind::SourceSeek {
+                if command.generation != rt.identity().generation {
+                    log::warn!(
+                        "v2 src-seek: drop gen {} vs identity {}",
+                        command.generation,
+                        rt.identity().generation
+                    );
+                } else {
                 apply_source_seek(
                     command,
                     &mut decoder,
@@ -323,11 +328,18 @@ fn run_worker(
                     &mut activation_target,
                     rt,
                 )?;
+                log::info!(
+                    "v2 src-seek: applied serial={} target={} epoch={}",
+                    command.serial,
+                    command.target_frame,
+                    epoch
+                );
                 control.publish_source_seek_applied(command.serial);
                 rt.record_source_seek_applied();
                 park = MIN_BACKPRESSURE_PARK;
                 at_eof = false;
                 handled_command = true;
+                }
             }
         }
         if at_eof && !handled_command {

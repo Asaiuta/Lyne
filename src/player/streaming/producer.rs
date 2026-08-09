@@ -349,11 +349,16 @@ impl PersistentProducerHandle {
     }
 
     pub(crate) fn request_source_seek(&self, target_frame: u64) -> u64 {
-        self.control.publish(
+        let serial = self.control.publish(
             self.generation,
             target_frame,
             ProducerCommandKind::SourceSeek,
-        )
+        );
+        log::info!(
+            "v2 src-seek: published serial={serial} gen={} target={target_frame}",
+            self.generation
+        );
+        serial
     }
 
     pub(crate) fn applied_source_seek_serial(&self) -> u64 {

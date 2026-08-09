@@ -46,14 +46,45 @@ gapless 换轨记账：preload 窗口挂 `pending playback`（128.1 MiB），**�
   给 seek 远距跳跃留足重解码窗口，避免 rejection 风险（每次 reject 会重置 producer → 重复解码）。
 - 决策：**128 MiB 保持默认**（数据依据：见上）。
 
+## 3.1 64 MiB 对照实测（2026-08-09）
+
+同机同曲（480 s tone + 10 s tone 队列）对照一轮：20 次跨窗 seek（随机远距，map 到 `/seek`
+真实端点）+ gapless 换轨，128 与 64（`AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB=64`）各一遍：
+
+| 指标 | 128 MiB | 64 MiB |
+|---|---|---|
+| 480s 曲稳态 WorkingSet | 174.4 → 175.6 MB | 110.3 → 111.5 MB（**−64 MB，−37%**）|
+| active 窗口记账 | 128.1 MiB | 64.1 MiB |
+| 20× 跨窗 seek 误差（1.6s settle 后）| max 1.64 s / mean 1.62 s | max 1.63 s / mean 1.61 s |
+| ledger rejection / budget rejection | 0 / 0 | **0 / 0** |
+| gapless 换轨（480→10 s）| 成功 | 成功 |
+| gapless 双窗口峰值记账 | 256.3 MiB* | active 64.1 + pending 64.1 = 128.1 MiB |
+
+\* 128 轮早期记账口径（owner 参数落地前），64 轮为 owner 修复后读数。
+
+关键结论：
+1. **64 MiB 完全可用**：20 次满窗状态下的跨窗 seek 零 rejection、零欠载，重解码换窗在
+   settle 窗口（1.6 s）内完成；误差差值与 settle 时间一致（实际位置偏差 ~0.02–0.03 s）。
+2. 物理内存与窗口容量 1:1 对齐：窗口减半 → WS 减 ~64 MB，说明 128 MiB 槽位正是物理
+   占用主体（server 基线 ~42 MB + 窗口页 + 杂项）。
+3. 64 MiB 窗口 ≈ 87 s（44.1/16 f64 立体声），>150 min 无损 24bit 的超长曲滑动窗口
+   边缘理论仍在；但 rejection（=producer 重置重复解码）风险实测未发生——64 轮 20 次
+   跨窗 seek 无一次 reject。默认保 128 不变（保守 + 远跳留余量），64 已可作为低内存
+   档位一行切换（见 §5）。
+
 ## 4. 已知残留（非本任务引入）
 
 - v2 会话在 stop 后保留窗口占位（可复用播放路径的设计使然），不再是本次新增泄漏；
   `pending` 槽的换轨/EOF 清理已完整。
+- 换轨/stop 后 ledger 记账滞留已实测确认（64 轮）：swap 后 `active window` 显示 128.1 MiB
+  （= 旧 64.1 + 新 64.1 双窗口滞留，物理 WS 119.4 MB），因缺乏 owner-transfer API 无法
+  在 swap 时释放，属既有 v2 stop 行为而非回归。
 - 换轨后 metadata 交接：lofty 粗提取写入 pending_metadata（title/artist），详细 tag 后端异步 enrichment 同 legacy。
 
-## 5. 回滚
+## 5. 回滚与档位切换
 
 - 单命令：`AUDIO_STREAMING_FIRST_BUFFER=false`（对已存在 settings 文件也生效，本次已修env覆盖）；
 - 或在 audio_settings.json 写入 `"streaming_first_buffer": false`；
+- 低内存档位：`AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB=64`（本次对照中顺带补齐 `load_from_file`
+  的 env 显式覆盖，此前与 first_buffer 一样只对文件缺失路径生效——已存在配置文件时被静默忽略）；
 - 代码级：config.rs 两处默认改回 `false`。

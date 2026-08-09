@@ -654,6 +654,10 @@ impl AudioPlayer {
     }
 
     pub fn seek(&mut self, time_secs: f64) -> Result<(), String> {
+        log::info!(
+            "v2 src-seek: player.seek entry t={time_secs} v2={}",
+            self.shared_state.streaming_v2_enabled.load(Ordering::Acquire)
+        );
         self.shared_state.reset_seek_phase_timestamps();
         // V2 seeks are handled by the audio thread against the resident window
         // session. Keep routing through that path while the engine is v2 even

@@ -175,6 +175,10 @@ impl AudioThreadRuntime {
                 return ThreadControl::Continue;
             }
             AudioCommand::Seek(time) => {
+                log::info!(
+                    "v2 src-seek: Seek cmd time={time} v2_session={}",
+                    self.streaming_session.is_some()
+                );
                 if let Some(session) = self.streaming_session.as_ref() {
                     if request_resident_window_seek(&self.shared_state, session, time).is_none() {
                         request_persistent_source_seek(session, time);
@@ -616,6 +620,7 @@ pub(crate) fn request_persistent_source_seek(
     session: &PersistentStreamingSession,
     time_secs: f64,
 ) -> u64 {
+    log::info!("v2 src-seek: persistent path time={time_secs}");
     let identity = session.rt.identity();
     let target_frame = (time_secs.max(0.0) * f64::from(session.output_sample_rate)) as u64;
     session

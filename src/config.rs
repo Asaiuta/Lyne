@@ -211,6 +211,14 @@ impl EngineSettings {
             settings.streaming_first_buffer =
                 env_flag("AUDIO_STREAMING_FIRST_BUFFER", settings.streaming_first_buffer);
         }
+        if std::env::var_os("AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB").is_some() {
+            settings.streaming_pcm_window_limit_mib = env_parse_clamped(
+                "AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB",
+                settings.streaming_pcm_window_limit_mib,
+                0,
+                MAX_STREAMING_PCM_WINDOW_LIMIT_MIB,
+            );
+        }
         log::info!("Loaded engine settings from {}", path.display());
         Ok(settings.normalized())
     }
