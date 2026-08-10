@@ -941,10 +941,7 @@ impl SharedState {
                         );
                         deferred_rt_views.push(rt);
                     } else {
-                        log::debug!(
-                            "retired rt drop (gen {})",
-                            rt.identity().generation
-                        );
+                        log::debug!("retired rt drop (gen {})", rt.identity().generation);
                     }
                 }
             }

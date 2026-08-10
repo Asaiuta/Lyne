@@ -442,10 +442,7 @@ impl PcmWindow {
         }
 
         let reservation = process_decoded_memory_ledger()
-            .try_reserve(
-                owner,
-                geometry.reservation_bytes(),
-            )
+            .try_reserve(owner, geometry.reservation_bytes())
             .map_err(|error| PcmWindowError::MemoryReservation(error.to_string()))?;
 
         let storage = AlignedPcmStorage::new(geometry.payload_samples)?;
@@ -478,10 +475,9 @@ impl PcmWindow {
         let Ok(mut held) = self._reservation.write() else {
             return;
         };
-        if let Ok(new_lease) = process_decoded_memory_ledger().try_reserve(
-            new_owner,
-            self.geometry.reservation_bytes(),
-        ) {
+        if let Ok(new_lease) = process_decoded_memory_ledger()
+            .try_reserve(new_owner, self.geometry.reservation_bytes())
+        {
             let old = std::mem::replace(&mut *held, new_lease);
             drop(old);
         }
@@ -1281,7 +1277,8 @@ mod tests {
 
     #[test]
     fn payload_is_aligned_without_eager_initialization() {
-        let parts = PcmWindow::create(geometry(2, 4), 7, 100, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let parts = PcmWindow::create(geometry(2, 4), 7, 100, DecodedMemoryOwner::ActiveWindow)
+            .expect("window allocation");
         assert_eq!(parts.window.storage.address() % PCM_ALIGNMENT, 0);
         assert_eq!(std::mem::align_of::<PcmSlotMeta>(), PCM_ALIGNMENT);
         assert_eq!(size_of::<PcmSlotMeta>() % PCM_ALIGNMENT, 0);
@@ -1289,7 +1286,9 @@ mod tests {
 
     #[test]
     fn publishes_and_reads_first_and_partial_final_slots() {
-        let mut parts = PcmWindow::create(geometry(2, 4), 3, 1_000, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let mut parts =
+            PcmWindow::create(geometry(2, 4), 3, 1_000, DecodedMemoryOwner::ActiveWindow)
+                .expect("window allocation");
         let slot_frames = parts.window.geometry.slot_frames();
 
         let first_samples = samples(slot_frames, 2, 10.0);
@@ -1338,7 +1337,8 @@ mod tests {
 
     #[test]
     fn owned_writer_can_span_calls_without_borrowing_writer_handle() {
-        let mut parts = PcmWindow::create(geometry(2, 4), 6, 100, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let mut parts = PcmWindow::create(geometry(2, 4), 6, 100, DecodedMemoryOwner::ActiveWindow)
+            .expect("window allocation");
         let slot_samples = parts.writer.geometry().slot_samples();
         let first_half = vec![1.0; slot_samples / 2];
         let second_half = vec![2.0; slot_samples / 2];
@@ -1370,7 +1370,8 @@ mod tests {
 
     #[test]
     fn dropping_unpublished_owned_writer_vacates_slot() {
-        let mut parts = PcmWindow::create(geometry(2, 2), 1, 0, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let mut parts = PcmWindow::create(geometry(2, 2), 1, 0, DecodedMemoryOwner::ActiveWindow)
+            .expect("window allocation");
         {
             let mut owned = parts.writer.try_claim_owned(1, 0, 0).expect("owned claim");
             owned
@@ -1383,7 +1384,8 @@ mod tests {
 
     #[test]
     fn wrap_rejects_unreclaimable_sequence_and_stale_reader() {
-        let mut parts = PcmWindow::create(geometry(2, 4), 1, 0, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let mut parts = PcmWindow::create(geometry(2, 4), 1, 0, DecodedMemoryOwner::ActiveWindow)
+            .expect("window allocation");
         let slot_frames = parts.window.geometry.slot_frames();
         let payload = samples(slot_frames, 2, 1.0);
 
@@ -1420,7 +1422,8 @@ mod tests {
 
     #[test]
     fn reading_slot_blocks_writer_overwrite() {
-        let mut parts = PcmWindow::create(geometry(2, 2), 1, 0, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let mut parts = PcmWindow::create(geometry(2, 2), 1, 0, DecodedMemoryOwner::ActiveWindow)
+            .expect("window allocation");
         let payload = samples(parts.window.geometry.slot_frames(), 2, 1.0);
         let mut slot = parts
             .writer
@@ -1443,7 +1446,8 @@ mod tests {
 
     #[test]
     fn reader_never_exposes_uninitialized_tail() {
-        let mut parts = PcmWindow::create(geometry(2, 2), 1, 50, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let mut parts = PcmWindow::create(geometry(2, 2), 1, 50, DecodedMemoryOwner::ActiveWindow)
+            .expect("window allocation");
         let payload = samples(3, 2, 5.0);
         let mut slot = parts.writer.try_claim(1, 0, 0).expect("writer claim");
         slot.append_interleaved(&payload)
@@ -1464,7 +1468,8 @@ mod tests {
 
     #[test]
     fn reset_refuses_reader_then_invalidates_old_epoch() {
-        let mut parts = PcmWindow::create(geometry(2, 2), 4, 100, DecodedMemoryOwner::ActiveWindow).expect("window allocation");
+        let mut parts = PcmWindow::create(geometry(2, 2), 4, 100, DecodedMemoryOwner::ActiveWindow)
+            .expect("window allocation");
         let payload = samples(8, 2, 2.0);
         let mut slot = parts.writer.try_claim(4, 0, 0).expect("writer claim");
         slot.append_interleaved(&payload).expect("write slot");

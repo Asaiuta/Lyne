@@ -36,8 +36,7 @@ pub struct SourceSeekBench {
 }
 
 fn seek_fixture_path() -> std::path::PathBuf {
-    std::path::Path::new(".tmp")
-        .join(format!("source-seek-bench-{}.wav", std::process::id()))
+    std::path::Path::new(".tmp").join(format!("source-seek-bench-{}.wav", std::process::id()))
 }
 
 /// Open the fixture + persistent session. Caller is responsible for `finish()`.
@@ -69,7 +68,10 @@ pub fn open_source_seek_bench() -> SourceSeekBench {
         },
     )
     .expect("start source-seek benchmark session");
-    SourceSeekBench { fixture: path, session }
+    SourceSeekBench {
+        fixture: path,
+        session,
+    }
 }
 
 /// Path to the fixture WAV (for provenance hashing, relative to repo root).
@@ -80,7 +82,11 @@ pub fn source_seek_bench_fixture_path(seek_bench: &SourceSeekBench) -> &std::pat
 impl SourceSeekBench {
     /// Measure one persistent seek on the open session (alternating targets).
     pub fn persistent_seek(&mut self, index: usize) -> u64 {
-        let target = if index.is_multiple_of(2) { 10_000 } else { 80_000 };
+        let target = if index.is_multiple_of(2) {
+            10_000
+        } else {
+            80_000
+        };
         let started = Instant::now();
         let serial = self.session.producer.request_source_seek(target);
         while self.session.producer.applied_source_seek_serial() < serial {
@@ -122,7 +128,11 @@ pub fn pct_rank(sorted: &[u64], rank: f64) -> u64 {
 
 /// Relative guard: a persistent seek p50 exceeding reopen+probe p50 by more
 /// than `tolerance_ns` is a structural regression (deterministic check).
-pub fn relative_guard_violated(persistent_p50_ns: u64, reopen_p50_ns: u64, tolerance_ns: u64) -> bool {
+pub fn relative_guard_violated(
+    persistent_p50_ns: u64,
+    reopen_p50_ns: u64,
+    tolerance_ns: u64,
+) -> bool {
     i128::from(persistent_p50_ns) > i128::from(reopen_p50_ns) + i128::from(tolerance_ns)
 }
 
@@ -148,14 +158,21 @@ mod source_seek_bench_tests {
     #[test]
     fn relative_guard_boundary_is_inclusive() {
         // Exactly at tolerance -> not violated.
-        assert!(!relative_guard_violated(150_000 + 2_000_000, 150_000, 2_000_000));
+        assert!(!relative_guard_violated(
+            150_000 + 2_000_000,
+            150_000,
+            2_000_000
+        ));
         // One ns over -> violated.
-        assert!(relative_guard_violated(150_000 + 2_000_000 + 1, 150_000, 2_000_000));
+        assert!(relative_guard_violated(
+            150_000 + 2_000_000 + 1,
+            150_000,
+            2_000_000
+        ));
         // Normal healthy state (persistent much faster) -> not violated.
         assert!(!relative_guard_violated(8_000, 150_000, 2_000_000));
     }
 }
-
 
 fn write_seek_bench_wav(path: &std::path::Path) {
     const FRAMES: usize = 132_300;

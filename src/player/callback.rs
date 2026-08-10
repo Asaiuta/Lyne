@@ -293,7 +293,8 @@ pub(crate) fn benchmark_resident_window_seeks(iterations: usize) -> Vec<(&'stati
     const EPOCH: u64 = 1;
 
     let geometry = PcmWindowGeometry::for_slot_count(2, 2_048).expect("seek bench geometry");
-    let parts = PcmWindow::create(geometry, EPOCH, 0, DecodedMemoryOwner::ActiveWindow).expect("seek bench window");
+    let parts = PcmWindow::create(geometry, EPOCH, 0, DecodedMemoryOwner::ActiveWindow)
+        .expect("seek bench window");
     let mut writer = parts.writer;
     let base = SAMPLE_RATE * 60;
     let scenarios = [
@@ -961,9 +962,7 @@ fn try_activate_pending_v2(
     resampler: &mut Option<StreamingResampler>,
     scratch: &mut CallbackScratch,
 ) -> bool {
-    if shared
-        .streaming_pending_generation
-        .load(Ordering::Acquire)
+    if shared.streaming_pending_generation.load(Ordering::Acquire)
         != shared.load_generation.load(Ordering::Acquire)
     {
         log::debug!(
@@ -972,7 +971,9 @@ fn try_activate_pending_v2(
             shared.load_generation.load(Ordering::Acquire)
         );
         shared.streaming_pending_v2_rt.store(None);
-        shared.streaming_pending_ready.store(false, Ordering::Release);
+        shared
+            .streaming_pending_ready
+            .store(false, Ordering::Release);
         return false;
     }
     let pending_guard = shared.streaming_pending_v2_rt.load();
@@ -996,8 +997,12 @@ fn try_activate_pending_v2(
     drop(pending_guard);
 
     shared.streaming_pending_v2_rt.store(None);
-    shared.streaming_pending_ready.store(false, Ordering::Release);
-    shared.streaming_swap_requested.store(true, Ordering::Release);
+    shared
+        .streaming_pending_ready
+        .store(false, Ordering::Release);
+    shared
+        .streaming_swap_requested
+        .store(true, Ordering::Release);
 
     let displaced = shared.streaming_v2_rt.swap(Some(pending));
     if let Some(old) = displaced {
@@ -1006,18 +1011,16 @@ fn try_activate_pending_v2(
 
     shared.request_seek_to_frame(0);
     shared.dsp_reset_pending.store(true, Ordering::Release);
-    shared
-        .total_frames
-        .store(
-            shared.streaming_pending_total_frames.load(Ordering::Acquire),
-            Ordering::Release,
-        );
-    shared
-        .channels
-        .store(
-            shared.streaming_pending_channels.load(Ordering::Acquire),
-            Ordering::Release,
-        );
+    shared.total_frames.store(
+        shared
+            .streaming_pending_total_frames
+            .load(Ordering::Acquire),
+        Ordering::Release,
+    );
+    shared.channels.store(
+        shared.streaming_pending_channels.load(Ordering::Acquire),
+        Ordering::Release,
+    );
     shared.needs_preload.store(false, Ordering::Relaxed);
     shared.pending_ready.store(false, Ordering::Relaxed);
     shared.gapless_swap_pending.store(true, Ordering::Release);
@@ -2881,7 +2884,8 @@ mod tests {
         use crate::player::streaming::rt_view::WindowIdentitySnapshot;
 
         let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
-        let first = PcmWindow::create(geometry, 1, 100, DecodedMemoryOwner::ActiveWindow).expect("first window");
+        let first = PcmWindow::create(geometry, 1, 100, DecodedMemoryOwner::ActiveWindow)
+            .expect("first window");
         let mut writer = first.writer;
         let mut slot = writer.try_claim_owned(1, 0, 0).expect("claim slot");
         let samples = vec![0.25; geometry.slot_samples()];
@@ -2902,7 +2906,8 @@ mod tests {
         assert_eq!(progress.rendered_frames, 4);
         assert_eq!(output, [0.25; 8]);
 
-        let second = PcmWindow::create(geometry, 2, 200, DecodedMemoryOwner::ActiveWindow).expect("second window");
+        let second = PcmWindow::create(geometry, 2, 200, DecodedMemoryOwner::ActiveWindow)
+            .expect("second window");
         rt.install_window(Some(Arc::clone(&second.window)));
         rt.publish_identity(WindowIdentitySnapshot {
             generation: 2,
@@ -2925,7 +2930,8 @@ mod tests {
         };
 
         let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
-        let parts = PcmWindow::create(geometry, 1, 100, DecodedMemoryOwner::ActiveWindow).expect("window");
+        let parts =
+            PcmWindow::create(geometry, 1, 100, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut writer = parts.writer;
         let mut slot = writer.try_claim_owned(1, 0, 0).expect("claim slot");
         slot.append_interleaved(&vec![0.5; geometry.slot_samples()])
@@ -3237,7 +3243,7 @@ mod tests {
         assert!(shared.streaming_active.load(Ordering::Acquire));
     }
 
-#[test]
+    #[test]
     fn v_gapless_swap_consumes_pending_rt_and_resets_position() {
         use crate::player::streaming::pcm_window::{PcmWindow, PcmWindowGeometry};
         use crate::player::streaming::rt_view::{
@@ -3247,9 +3253,12 @@ mod tests {
         let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
 
         // Active session at EOF.
-        let active_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("active window");
+        let active_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow)
+            .expect("active window");
         let mut active_writer = active_parts.writer;
-        let mut active_slot = active_writer.try_claim_owned(1, 0, 0).expect("active claim");
+        let mut active_slot = active_writer
+            .try_claim_owned(1, 0, 0)
+            .expect("active claim");
         active_slot
             .append_interleaved(&vec![0.5; geometry.slot_samples()])
             .expect("append");
@@ -3268,10 +3277,12 @@ mod tests {
         });
 
         // Pending preloaded session, Ready.
-        let pending_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("pending window");
+        let pending_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow)
+            .expect("pending window");
         let mut pending_writer = pending_parts.writer;
-        let mut pending_slot =
-            pending_writer.try_claim_owned(1, 0, 0).expect("pending claim");
+        let mut pending_slot = pending_writer
+            .try_claim_owned(1, 0, 0)
+            .expect("pending claim");
         pending_slot
             .append_interleaved(&vec![0.25; geometry.slot_samples()])
             .expect("pending append");
@@ -3295,11 +3306,21 @@ mod tests {
         shared.streaming_active.store(true, Ordering::Release);
         shared.streaming_v2_enabled.store(true, Ordering::Release);
         shared.publish_streaming_v2_rt(Some(Arc::clone(&active_rt)));
-        shared.streaming_pending_v2_rt.store(Some(Arc::clone(&pending_rt)));
-        shared.streaming_pending_ready.store(true, Ordering::Release);
-        shared.streaming_pending_generation.store(1, Ordering::Release);
-        shared.streaming_pending_total_frames.store(2_000, Ordering::Release);
-        shared.streaming_pending_channels.store(2, Ordering::Release);
+        shared
+            .streaming_pending_v2_rt
+            .store(Some(Arc::clone(&pending_rt)));
+        shared
+            .streaming_pending_ready
+            .store(true, Ordering::Release);
+        shared
+            .streaming_pending_generation
+            .store(1, Ordering::Release);
+        shared
+            .streaming_pending_total_frames
+            .store(2_000, Ordering::Release);
+        shared
+            .streaming_pending_channels
+            .store(2, Ordering::Release);
         shared.total_frames.store(500, Ordering::Release);
         shared
             .playback_clock
@@ -3351,7 +3372,9 @@ mod tests {
         assert!(shared.gapless_swap_pending.load(Ordering::Acquire));
 
         // Next callback renders from the swapped-in pending window at frame 0.
-        shared.streaming_swap_requested.store(false, Ordering::Release);
+        shared
+            .streaming_swap_requested
+            .store(false, Ordering::Release);
         let mut next_output = [0.0; 8];
         let mut next_pos = 0;
         let second_written = render_streaming_audio_output(
@@ -3380,9 +3403,12 @@ mod tests {
         };
 
         let geometry = PcmWindowGeometry::for_slot_count(2, 1).expect("geometry");
-        let active_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow).expect("active window");
+        let active_parts = PcmWindow::create(geometry, 1, 0, DecodedMemoryOwner::ActiveWindow)
+            .expect("active window");
         let mut active_writer = active_parts.writer;
-        let mut active_slot = active_writer.try_claim_owned(1, 0, 0).expect("active claim");
+        let mut active_slot = active_writer
+            .try_claim_owned(1, 0, 0)
+            .expect("active claim");
         active_slot
             .append_interleaved(&vec![0.5; geometry.slot_samples()])
             .expect("append");
@@ -3400,10 +3426,12 @@ mod tests {
             decode_state: StreamingDecodeState::EndOfStream,
         });
 
-        let pending_parts = PcmWindow::create(geometry, 2, 0, DecodedMemoryOwner::ActiveWindow).expect("pending window");
+        let pending_parts = PcmWindow::create(geometry, 2, 0, DecodedMemoryOwner::ActiveWindow)
+            .expect("pending window");
         let mut pending_writer = pending_parts.writer;
-        let mut pending_slot =
-            pending_writer.try_claim_owned(2, 0, 0).expect("pending claim");
+        let mut pending_slot = pending_writer
+            .try_claim_owned(2, 0, 0)
+            .expect("pending claim");
         pending_slot
             .append_interleaved(&vec![0.25; geometry.slot_samples()])
             .expect("append");
@@ -3426,11 +3454,21 @@ mod tests {
         shared.load_generation.store(2, Ordering::Release); // track changed
         shared.streaming_v2_enabled.store(true, Ordering::Release);
         shared.publish_streaming_v2_rt(Some(Arc::clone(&active_rt)));
-        shared.streaming_pending_v2_rt.store(Some(Arc::clone(&pending_rt)));
-        shared.streaming_pending_ready.store(true, Ordering::Release);
-        shared.streaming_pending_generation.store(1, Ordering::Release);
-        shared.streaming_pending_total_frames.store(2_000, Ordering::Release);
-        shared.streaming_pending_channels.store(2, Ordering::Release);
+        shared
+            .streaming_pending_v2_rt
+            .store(Some(Arc::clone(&pending_rt)));
+        shared
+            .streaming_pending_ready
+            .store(true, Ordering::Release);
+        shared
+            .streaming_pending_generation
+            .store(1, Ordering::Release);
+        shared
+            .streaming_pending_total_frames
+            .store(2_000, Ordering::Release);
+        shared
+            .streaming_pending_channels
+            .store(2, Ordering::Release);
         shared
             .playback_clock
             .callback
@@ -3460,12 +3498,10 @@ mod tests {
         // Stale pending is reaped, never swapped in.
         assert!(!shared.streaming_swap_requested.load(Ordering::Acquire));
         assert!(shared.streaming_pending_v2_rt.load_full().is_none());
-        assert!(
-            !Arc::ptr_eq(
-                shared.streaming_v2_rt.load_full().as_ref().unwrap(),
-                &pending_rt
-            )
-        );
+        assert!(!Arc::ptr_eq(
+            shared.streaming_v2_rt.load_full().as_ref().unwrap(),
+            &pending_rt
+        ));
         assert_eq!(shared.state.load(), PlayerState::Stopped);
     }
 }

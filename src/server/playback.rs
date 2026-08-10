@@ -91,9 +91,8 @@ pub(crate) fn spawn_playback_supervisor(state: &Arc<AppState>) -> actix_rt::task
 
             let needs_preload = shared_state.needs_preload.load(Ordering::Acquire);
             let pending_ready = shared_state.pending_ready.load(Ordering::Acquire);
-            let streaming_pending_ready = shared_state
-                .streaming_pending_ready
-                .load(Ordering::Acquire);
+            let streaming_pending_ready =
+                shared_state.streaming_pending_ready.load(Ordering::Acquire);
             if needs_preload && !pending_ready && !streaming_pending_ready {
                 match queue_next_from_persistent_queue(&data) {
                     Ok(Some(path)) => log::info!("Supervisor preloaded next queue entry: {}", path),

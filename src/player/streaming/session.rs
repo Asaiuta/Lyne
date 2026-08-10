@@ -127,7 +127,7 @@ impl PersistentStreamingSession {
             config.origin_frame,
             config.window_owner,
         )
-            .map_err(|error| StreamingSessionError::Reservation(error.to_string()))?;
+        .map_err(|error| StreamingSessionError::Reservation(error.to_string()))?;
         Self::start_local_from_builder(
             generation,
             capabilities,
@@ -315,30 +315,30 @@ fn run_worker(
                         rt.identity().generation
                     );
                 } else {
-                apply_source_seek(
-                    command,
-                    &mut decoder,
-                    resampler.as_mut(),
-                    &mut publisher,
-                    input_rate,
-                    output_sample_rate,
-                    &mut epoch,
-                    &mut origin_frame,
-                    &mut discard_output_frames,
-                    &mut activation_target,
-                    rt,
-                )?;
-                log::info!(
-                    "v2 src-seek: applied serial={} target={} epoch={}",
-                    command.serial,
-                    command.target_frame,
-                    epoch
-                );
-                control.publish_source_seek_applied(command.serial);
-                rt.record_source_seek_applied();
-                park = MIN_BACKPRESSURE_PARK;
-                at_eof = false;
-                handled_command = true;
+                    apply_source_seek(
+                        command,
+                        &mut decoder,
+                        resampler.as_mut(),
+                        &mut publisher,
+                        input_rate,
+                        output_sample_rate,
+                        &mut epoch,
+                        &mut origin_frame,
+                        &mut discard_output_frames,
+                        &mut activation_target,
+                        rt,
+                    )?;
+                    log::info!(
+                        "v2 src-seek: applied serial={} target={} epoch={}",
+                        command.serial,
+                        command.target_frame,
+                        epoch
+                    );
+                    control.publish_source_seek_applied(command.serial);
+                    rt.record_source_seek_applied();
+                    park = MIN_BACKPRESSURE_PARK;
+                    at_eof = false;
+                    handled_command = true;
                 }
             }
         }
@@ -731,7 +731,8 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-            DecodedMemoryOwner::ActiveWindow)
+            DecodedMemoryOwner::ActiveWindow,
+        )
         .expect("window");
         let mut session =
             PersistentStreamingSession::start_local(fixture.open(7), parts, config(44_100))
@@ -761,7 +762,8 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-            DecodedMemoryOwner::ActiveWindow)
+            DecodedMemoryOwner::ActiveWindow,
+        )
         .expect("window");
         let mut session_config = config(44_100);
         session_config.target_output_sample_rate = None;
@@ -782,7 +784,8 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-            DecodedMemoryOwner::ActiveWindow)
+            DecodedMemoryOwner::ActiveWindow,
+        )
         .expect("window");
         let session =
             PersistentStreamingSession::start_local(fixture.open(13), parts, config(44_100))
@@ -884,7 +887,8 @@ mod tests {
         let fixture = TempWav::pcm16(1, 44_100, &vec![1; geometry.slot_frames() * 3]);
         let baseline = process_decoded_memory_ledger().snapshot().reserved_by_owner
             [DecodedMemoryOwner::ProducerScratch as usize];
-        let parts = PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
+        let parts =
+            PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
         let session =
             PersistentStreamingSession::start_local(fixture.open(8), parts, config(44_100))
                 .expect("start session");
@@ -926,7 +930,8 @@ mod tests {
         let fixture = TempWav::pcm16(1, 44_100, &vec![1; geometry.slot_frames() * 3]);
         let baseline = process_decoded_memory_ledger().snapshot().reserved_by_owner
             [DecodedMemoryOwner::ResamplerCarry as usize];
-        let parts = PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
+        let parts =
+            PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut session =
             PersistentStreamingSession::start_local(fixture.open(10), parts, config(48_000))
                 .expect("start resampled session");
@@ -973,7 +978,8 @@ mod tests {
             .map(|frame| (frame % 30_000) as i16)
             .collect::<Vec<_>>();
         let fixture = TempWav::pcm16(1, 44_100, &samples);
-        let parts = PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
+        let parts =
+            PcmWindow::create(geometry, 3, 17, DecodedMemoryOwner::ActiveWindow).expect("window");
         let mut session =
             PersistentStreamingSession::start_local(fixture.open(11), parts, config(44_100))
                 .expect("start session");
@@ -1066,7 +1072,8 @@ mod tests {
     fn backward_request_protects_reclaim_floor_until_applied() {
         let _guard = session_test_guard();
         let geometry = PcmWindowGeometry::for_slot_count(1, 4).expect("geometry");
-        let parts = PcmWindow::create(geometry, 3, 1_000, DecodedMemoryOwner::ActiveWindow).expect("window");
+        let parts = PcmWindow::create(geometry, 3, 1_000, DecodedMemoryOwner::ActiveWindow)
+            .expect("window");
         let mut publisher = WindowSlotPublisher::new(parts.writer, 3, 1_000);
         let rt = StreamingRtView::new();
         rt.publish_producer(ProducerSnapshot {
@@ -1119,7 +1126,8 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             0,
-            DecodedMemoryOwner::ActiveWindow)
+            DecodedMemoryOwner::ActiveWindow,
+        )
         .expect("window");
         let session =
             PersistentStreamingSession::start_local(fixture.open(14), parts, config(44_100))
@@ -1183,7 +1191,8 @@ mod tests {
             PcmWindowGeometry::for_slot_count(1, 1).expect("geometry"),
             3,
             17,
-            DecodedMemoryOwner::ActiveWindow)
+            DecodedMemoryOwner::ActiveWindow,
+        )
         .expect("window");
         let error = PersistentStreamingSession::start_local(fixture.open(9), parts, config(44_100))
             .expect_err("reject mismatched channels");

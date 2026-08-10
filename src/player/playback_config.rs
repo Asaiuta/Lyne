@@ -327,7 +327,10 @@ impl AudioPlayer {
         // Streaming-v2 playback: preload through a second windowed session
         // (gapless pending swap) instead of the legacy full-buffer decode.
         if self.config.streaming_first_buffer
-            && self.shared_state.streaming_v2_enabled.load(Ordering::Acquire)
+            && self
+                .shared_state
+                .streaming_v2_enabled
+                .load(Ordering::Acquire)
         {
             return self.queue_next_streaming_v2(path, credentials);
         }
@@ -377,7 +380,7 @@ impl AudioPlayer {
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         std::thread::spawn(move || {
-            use crate::player::streaming::source::{StreamSourceFactory, StreamFetchPolicy};
+            use crate::player::streaming::source::{StreamFetchPolicy, StreamSourceFactory};
             log::info!("Gapless preload(v2) started: {}", path);
             let open_request = crate::player::streaming::source::OpenRequest {
                 generation,
@@ -448,7 +451,8 @@ impl AudioPlayer {
             }
             log::info!(
                 "Gapless preload(v2) installed: {} (gen {})",
-                path, generation
+                path,
+                generation
             );
             let _ = cmd_tx.send(AudioCommand::InstallPendingStreamingV2Session {
                 generation,

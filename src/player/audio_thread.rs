@@ -166,7 +166,10 @@ impl AudioThreadRuntime {
                 self.install_streaming_session(generation, autoplay, *session);
                 return ThreadControl::Continue;
             }
-            AudioCommand::InstallPendingStreamingV2Session { generation, session } => {
+            AudioCommand::InstallPendingStreamingV2Session {
+                generation,
+                session,
+            } => {
                 self.install_pending_streaming_session(generation, *session);
                 return ThreadControl::Continue;
             }
@@ -307,7 +310,11 @@ impl AudioThreadRuntime {
     /// the swap-sync path and must NOT be retired here — retrying it would
     /// kill freshly-swapped playback.
     fn clear_pending_streaming(&mut self, retire_if_unswapped: bool) {
-        let had_pending = self.shared_state.streaming_pending_v2_rt.load_full().is_some();
+        let had_pending = self
+            .shared_state
+            .streaming_pending_v2_rt
+            .load_full()
+            .is_some();
         self.shared_state.streaming_pending_v2_rt.store(None);
         self.shared_state
             .streaming_pending_ready
@@ -318,7 +325,11 @@ impl AudioThreadRuntime {
             }
             return;
         };
-        if retire_if_unswapped && self.shared_state.streaming_swap_requested.load(Ordering::Acquire)
+        if retire_if_unswapped
+            && self
+                .shared_state
+                .streaming_swap_requested
+                .load(Ordering::Acquire)
         {
             log::debug!("v2 gapless: clear_pending deferred to swap-sync");
             return;
@@ -366,9 +377,8 @@ impl AudioThreadRuntime {
         // The promoted window is now the live one: charge its bytes under the
         // active owner so ledger balances mirror what is playing.
         if let Some(session) = self.streaming_session.as_ref() {
-            session.reown_window(
-                crate::player::streaming::memory::DecodedMemoryOwner::ActiveWindow,
-            );
+            session
+                .reown_window(crate::player::streaming::memory::DecodedMemoryOwner::ActiveWindow);
         }
     }
 

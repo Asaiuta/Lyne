@@ -208,8 +208,10 @@ impl EngineSettings {
         // switch for the windowed decode default).
         let mut settings = settings;
         if std::env::var_os("AUDIO_STREAMING_FIRST_BUFFER").is_some() {
-            settings.streaming_first_buffer =
-                env_flag("AUDIO_STREAMING_FIRST_BUFFER", settings.streaming_first_buffer);
+            settings.streaming_first_buffer = env_flag(
+                "AUDIO_STREAMING_FIRST_BUFFER",
+                settings.streaming_first_buffer,
+            );
         }
         if std::env::var_os("AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB").is_some() {
             settings.streaming_pcm_window_limit_mib = env_parse_clamped(
