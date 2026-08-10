@@ -1,0 +1,63 @@
+queue replaced
+queue play started
+[   0.0s] first track: diagnostic-tone-30s.wav
+[   0.0s state=None ledger owners: active=256.3 MiB pending=0.0 MiB
+[   0.6s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   1.1s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   1.6s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   2.2s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   2.7s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   3.3s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   3.8s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   4.4s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   4.9s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   5.4s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   6.0s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   6.5s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   7.0s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   7.6s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   8.1s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   8.7s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   9.2s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[   9.7s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  10.3s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  10.8s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  11.4s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  11.9s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  12.5s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  13.0s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  13.6s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  14.1s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  14.6s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  15.2s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  15.7s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  16.2s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  16.8s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  17.3s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  17.8s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  18.4s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  18.9s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  19.5s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  20.0s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  20.5s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  21.1s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  21.6s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  22.2s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  22.7s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  23.3s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  23.8s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  24.3s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  24.9s state=None ledger owners: active=128.1 MiB pending=0.0 MiB
+[  25.4s PENDING PLAYBACK owner visible: 128.1 MiB
+[  25.4s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  26.0s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  26.5s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  27.1s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  27.6s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  28.1s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  28.7s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  29.2s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  29.8s state=None ledger owners: active=128.1 MiB pending=128.1 MiB
+[  30.3s] TRACK SWAPPED -> diagnostic-tone-10s.wav
+[  30.3s state=None ledger owners: active=256.3 MiB pending=0.0 MiB
+RESULT: PASS v2-gapless
