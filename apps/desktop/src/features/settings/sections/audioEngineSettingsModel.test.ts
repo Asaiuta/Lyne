@@ -59,7 +59,7 @@ test("audio engine form defaults come from one descriptor table", () => {
   assert.equal(form.targetSamplerate, "");
   assert.equal(form.preemptiveResample, true);
   assert.equal(form.streamingFirstBuffer, false);
-  assert.equal(form.streamingPcmWindowLimitMib, "256");
+  assert.equal(form.streamingPcmWindowLimitMib, "128");
   assert.deepEqual(Object.keys(form.eqBands), [...EQ_BAND_KEYS]);
   assert.equal(Object.values(form.eqBands).every((value) => value === 0), true);
 });
@@ -97,7 +97,7 @@ test("audio engine rollback reads the same descriptor defaults and settings valu
   assert.equal(readAudioEngineFormScalarValue(settings, "targetSamplerate"), "");
   assert.equal(readAudioEngineFormScalarValue(null, "volume"), "0.7");
   assert.equal(readAudioEngineFormScalarValue(undefined, "preemptiveResample"), true);
-  assert.equal(readAudioEngineFormScalarValue(undefined, "streamingPcmWindowLimitMib"), "256");
+  assert.equal(readAudioEngineFormScalarValue(undefined, "streamingPcmWindowLimitMib"), "128");
 });
 
 test("audio engine item descriptors keep rendered ids tied to form and patch fields", () => {

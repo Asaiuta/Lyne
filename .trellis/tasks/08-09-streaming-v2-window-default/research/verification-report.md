@@ -113,3 +113,18 @@ reader 的窗口 Arc 不变，数据源天然正确；只有换轨涉及**新窗
 - 低内存档位：`AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB=64`（本次对照中顺带补齐 `load_from_file`
   的 env 显式覆盖，此前与 first_buffer 一样只对文件缺失路径生效——已存在配置文件时被静默忽略）；
 - 代码级：config.rs 两处默认改回 `false`。
+
+## 6. 前端默认值契约收口（2026-08-10）
+
+全量前端测试新增的 Rust/TypeScript 契约检查发现唯一失败：Rust
+`DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB=128`，而设置表单在没有持久化快照时仍回退到
+`256`。这不是 gapless 双窗口峰值，而是默认值跨层漂移。前端缺省值与对应模型测试已同步为
+`128`；用户已持久化的合法窗口值不受影响。
+
+最终门禁：
+- `npm test`：521/521；bundle policy、provenance utils、Lyne sub-gates 全绿；
+- `npm run typecheck`、`npm run build`（含 bundle policy）通过；
+- `cargo test --lib`：403/403；`cargo clippy --lib` 通过（仅既有告警）；
+- 本任务 12 个 Rust 文件经 rustfmt 后逐文件 `--check` 通过；工作区级
+  `cargo fmt --all -- --check` 仍只被任务外的 `src/bench_gate.rs` 与
+  `src/bench_provenance.rs` 历史格式漂移阻断，未扩大本任务提交范围。

@@ -24,8 +24,10 @@ export const LOUDNESS_MODE_OPTIONS = [
 export const RESAMPLE_QUALITY_OPTIONS = ["low", "std", "hq", "uhq"] as const;
 export const OUTPUT_BIT_OPTIONS = ["16", "24", "32"] as const;
 export const EQ_TYPE_OPTIONS = ["IIR", "FIR"] as const;
-const STREAMING_FULL_BUFFER_LIMIT_MIB_DEFAULT = 256;
-const STREAMING_FULL_BUFFER_LIMIT_MIB_MAX = 4096;
+// Mirrors DEFAULT_STREAMING_PCM_WINDOW_LIMIT_MIB / MAX_STREAMING_PCM_WINDOW_LIMIT_MIB
+// in src/config.rs; focused model tests pin the frontend fallback behavior.
+export const STREAMING_FULL_BUFFER_LIMIT_MIB_DEFAULT = 128;
+export const STREAMING_FULL_BUFFER_LIMIT_MIB_MAX = 4096;
 
 export interface SettingsFormState {
   deviceId: string;
