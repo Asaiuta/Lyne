@@ -934,7 +934,17 @@ impl SharedState {
                 RetiredAudioResource::Window(window) => drop(window),
                 RetiredAudioResource::StreamingRtView(rt) => {
                     if Arc::strong_count(&rt) > 1 {
+                        log::debug!(
+                            "retired rt defer (count {}) gen {}",
+                            Arc::strong_count(&rt),
+                            rt.identity().generation
+                        );
                         deferred_rt_views.push(rt);
+                    } else {
+                        log::debug!(
+                            "retired rt drop (gen {})",
+                            rt.identity().generation
+                        );
                     }
                 }
             }

@@ -72,13 +72,38 @@ gapless 换轨记账：preload 窗口挂 `pending playback`（128.1 MiB），**�
    跨窗 seek 无一次 reject。默认保 128 不变（保守 + 远跳留余量），64 已可作为低内存
    档位一行切换（见 §5）。
 
+## 3.2 swap 旧窗口释放（owner-transfer 修复，2026-08-10）
+
+**排查中揭示一个更深的既有缺陷**：gapless 换轨此前"看起来成功"（无 reload、位置计数归零），
+实际是**假象**——preload 会话与 active 会话共用 `load_generation`（同 generation），
+`CallbackWindowCache` 只按 generation 换 reader，**换轨后 callback 仍读旧曲目窗口**：
+tone 素材无法听辨内容，之前的"无缝"验证全部无效；且旧窗口被 cache reader 持有，
+**PcmWindow 永不 drop**（物理页 + ledger 128.1 MiB 永久滞留）——这就是 §4 曾记录
+"记账滞留"的真正根因，不是 owner-transfer API 缺失。
+
+修复（最小侵入）：
+- `CallbackWindowCache::refresh` 增加 `reader 缺失时重绑` 条件（swap 重置后下一帧自动
+  adopt 新 rt 的窗口）；新增 `retire_reader()`。
+- `try_activate_pending_v2`（callback 线程）swap 时显式 `retire_reader`（旧窗口 Arc 进
+  retire 队列，audio 线程 drop）——旧窗口真正释放。
+
+实测（64 MiB 档，480 s → 880 Hz 10 s 双曲 + 三曲连放）：
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| swap 后 ledger `active window` | 128.1 MiB（滞留）| **64.1 MiB** |
+| `PcmWindow drop` | 从未发生 | swap 后立即 drop（origin=440 s 帧）|
+| swap 后 WorkingSet | 126.3 MB 不回落 | **118.7 → 54.9 MB**（= 基线 47.4 + 10s 曲实际页）|
+| 连续两次 swap（三曲连放）| 未验证 | 全绿，ledger 每次归零 |
+| 20× 跨窗 seek + rejection | — | 无回归（1.62 s / 0 reject）|
+
+注：跨窗 seek（`apply_source_seek`）不受影响——它重置的是**同一窗口**（epoch++），
+reader 的窗口 Arc 不变，数据源天然正确；只有换轨涉及**新窗口**，故仅 swap 需显式重绑。
+
 ## 4. 已知残留（非本任务引入）
 
 - v2 会话在 stop 后保留窗口占位（可复用播放路径的设计使然），不再是本次新增泄漏；
-  `pending` 槽的换轨/EOF 清理已完整。
-- 换轨/stop 后 ledger 记账滞留已实测确认（64 轮）：swap 后 `active window` 显示 128.1 MiB
-  （= 旧 64.1 + 新 64.1 双窗口滞留，物理 WS 119.4 MB），因缺乏 owner-transfer API 无法
-  在 swap 时释放，属既有 v2 stop 行为而非回归。
+  `pending` 槽的换轨/EOF 清理已完整。**swap 场景的窗口滞留已由 §3.2 修复**；
+  stop 场景（保留复用）仍属设计行为，如需 release 可后续再评估。
 - 换轨后 metadata 交接：lofty 粗提取写入 pending_metadata（title/artist），详细 tag 后端异步 enrichment 同 legacy。
 
 ## 5. 回滚与档位切换

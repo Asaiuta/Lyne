@@ -1034,6 +1034,14 @@ fn try_activate_pending_v2(
     }
     scratch.resample_leftover.clear();
     scratch.resample_leftover_pos = 0;
+    // The promoted preload session carries the SAME generation as the
+    // displaced active session (both derive from load_generation), so the
+    // window cache's generation check would keep rendering from the OLD
+    // track's window. Drop the reader here; the next frame rebinds to the
+    // promoted rt's window (refresh rebinds when the reader is absent).
+    scratch.callback_window.retire_reader(|window| {
+        shared.retire_audio_resource(RetiredAudioResource::Window(window));
+    });
     true
 }
 

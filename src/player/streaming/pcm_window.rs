@@ -403,6 +403,16 @@ pub struct PcmWindow {
     _reservation: RwLock<DecodedMemoryReservation>,
 }
 
+impl Drop for PcmWindow {
+    fn drop(&mut self) {
+        log::debug!(
+            "PcmWindow drop: origin={} cap_mib={}",
+            self.origin_frame.load(Ordering::Acquire),
+            self.geometry.reservation_bytes() / (1024 * 1024)
+        );
+    }
+}
+
 impl fmt::Debug for PcmWindow {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter

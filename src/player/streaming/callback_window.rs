@@ -21,7 +21,16 @@ impl CallbackWindowCache {
         mut retire: impl FnMut(Arc<PcmWindow>),
     ) -> WindowIdentitySnapshot {
         let identity = rt.identity();
-        if identity.generation != self.generation {
+        // Rebind the reader on generation change OR when a swap reset it
+        // (gapless promotes a preload session with the same generation; the
+        // cache must drop the old track's window and adopt the promoted one).
+        if identity.generation != self.generation || (identity.active && self.reader.is_none()) {
+            log::debug!(
+                "cb-window: rebind reader (gen {} -> {}, epoch {}), retiring old reader",
+                self.generation,
+                identity.generation,
+                identity.epoch
+            );
             if let Some(reader) = self.reader.take() {
                 retire(reader.into_window());
             }
@@ -35,6 +44,12 @@ impl CallbackWindowCache {
         }
         self.epoch = identity.epoch;
         identity
+    }
+
+    pub(crate) fn retire_reader(&mut self, mut retire: impl FnMut(Arc<PcmWindow>)) {
+        if let Some(reader) = self.reader.take() {
+            retire(reader.into_window());
+        }
     }
 
     pub(crate) fn reader_mut(&mut self) -> Option<&mut PcmWindowReader> {
