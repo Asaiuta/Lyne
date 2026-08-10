@@ -675,3 +675,16 @@ commit 106e417 · 任务 08-09-streaming-v2-window-default 待归档。
   一直正常（apply_source_seek 链路完整）。保留 info 级 seek telemetry（entry/command/publish/apply/warn）。
 - 顺带修复：load_from_file 缺 AUDIO_STREAMING_PCM_WINDOW_LIMIT_MIB env 显式覆盖（与 first_buffer 对齐），
   低内存档位切换对已存在配置文件生效。
+## 2026-08-10 — swap 旧窗口释放修复（gapless 假象揭穿）
+
+- 目标：换轨时释放旧窗口。排查发现更深缺陷：preload 与 active 共用 load_generation，
+  CallbackWindowCache 只按 generation 换 reader → 换轨后 callback 仍读旧曲目窗口
+  （tone 素材掩盖，之前"无缝"验证全部无效）；旧窗口被 cache reader 钉死，
+  PcmWindow 永不 drop → ledger 128.1 与物理页永久滞留（此前误判为 owner-transfer API 缺失）。
+- 修复：refresh 支持 reader 缺失重绑 + retire_reader()；try_activate_pending_v2 swap 时
+  显式 retire 旧 reader（Arc 进 retire 队列，audio 线程 drop）。
+- 实测（64MiB）：PcmWindow drop 首次出现（origin=440s 帧）；swap 后 ledger active=64.1
+  （原 128.1）；WS 118.7→54.9 MB（=基线 47.4+10s 实际页）；三曲连放两次 swap 全绿；
+  20× 跨窗 seek 无回归。跨窗 seek 不受影响（重置同一窗口）。
+- 注意：gapless 声音真实性首次被验证（rebind 到新窗口）；880Hz/440Hz tone 对照是
+  这次发现假象的关键手段。
