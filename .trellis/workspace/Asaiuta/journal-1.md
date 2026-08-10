@@ -722,3 +722,37 @@ Bounded the library viewport, verified 592-to-16-row virtualization and about 30
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: Streaming v2 window default closeout
+
+**Date**: 2026-08-10
+**Task**: Streaming v2 window default closeout
+**Branch**: `feat/desktop-lyric`
+
+### Summary
+
+Aligned the frontend streaming PCM window fallback to 128 MiB, synchronized model coverage and verification evidence, formatted the task-scoped Rust paths, and passed the full frontend and Rust validation gates.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d6752ce5` | (see git log) |
+| `f898ac8f` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

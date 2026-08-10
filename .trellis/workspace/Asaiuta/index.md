@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-08-10
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~738 | Active |
+| `journal-1.md` | ~772 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-08-10 | Streaming v2 window default closeout | `d6752ce5`, `f898ac8f` | `feat/desktop-lyric` |
 | 13 | 2026-08-10 | Songs list virtualization closeout | `59e13d0b`, `68de3d1a` | `feat/desktop-lyric` |
 | 12 | 2026-08-08 | Source-seek benchmark hardened with gate contract (PERF-002) | `18beb4d` | `feat/desktop-lyric` |
 | 11 | 2026-08-08 | Performance artifact provenance implemented and archived | `c0c64a8` | `feat/desktop-lyric` |
