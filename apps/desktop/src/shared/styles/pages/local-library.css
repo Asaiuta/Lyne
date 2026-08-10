@@ -1,3 +1,9 @@
+  .panel-library {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .local-library-title-fade-enter-active {
     transition:
       opacity var(--motion-duration-subtle) var(--motion-ease-balanced);
