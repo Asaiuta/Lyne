@@ -124,6 +124,9 @@ CREATE TABLE IF NOT EXISTS playback_queue_entries (
     queue_id         TEXT NOT NULL,
     position_index   INTEGER NOT NULL,
     source_path      TEXT NOT NULL,
+    source_key       TEXT REFERENCES webdav_sources(source_key) ON DELETE SET NULL,
+    source_identity  TEXT NOT NULL DEFAULT 'infer'
+                     CHECK (source_identity IN ('infer', 'public', 'webdav')),
     media_id         TEXT,
     status           TEXT NOT NULL DEFAULT 'queued',
     added_at         INTEGER NOT NULL,

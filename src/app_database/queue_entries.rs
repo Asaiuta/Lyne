@@ -1,7 +1,41 @@
 use rand::seq::SliceRandom;
-use rusqlite::{params, OptionalExtension, ToSql};
+use rusqlite::{params, OptionalExtension};
 
-use super::{media_id_for_path, now_epoch_secs_i64, AppDatabase, QueueEntryRecord};
+use super::{
+    media_id_for_path, now_epoch_secs_i64, AppDatabase, QueueEntryInput, QueueEntryRecord,
+};
+
+fn resolve_queue_source_key_tx(
+    conn: &rusqlite::Connection,
+    entry: &QueueEntryInput,
+) -> Result<(Option<String>, &'static str), String> {
+    if let Some(source_key) = entry.source_key.as_deref() {
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM webdav_sources WHERE source_key = ?1",
+                params![source_key],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to validate queue WebDAV source: {}", e))?
+            .is_some();
+        if !exists {
+            return Err(format!("WebDAV source '{}' does not exist", source_key));
+        }
+        return Ok((Some(source_key.to_string()), "webdav"));
+    }
+    if !entry.infer_source_key {
+        return Ok((None, "public"));
+    }
+
+    let source_keys =
+        super::webdav_sources::webdav_source_keys_for_media_path_tx(conn, &entry.source_path)?;
+    match source_keys.as_slice() {
+        [] => Ok((None, "infer")),
+        [source_key] => Ok((Some(source_key.clone()), "webdav")),
+        _ => Err("Queue entry has ambiguous WebDAV source ownership".to_string()),
+    }
+}
 
 fn queue_entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueEntryRecord> {
     Ok(QueueEntryRecord {
@@ -10,22 +44,24 @@ fn queue_entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueEntryR
         position_index: row.get(2)?,
         shuffle_index: row.get(3)?,
         source_path: row.get(4)?,
-        media_id: row.get(5)?,
-        status: row.get(6)?,
-        added_at_epoch_secs: row.get::<_, i64>(7)? as u64,
-        updated_at_epoch_secs: row.get::<_, i64>(8)? as u64,
-        title: row.get(9)?,
-        artist: row.get(10)?,
-        album: row.get(11)?,
-        duration_secs: row.get(12)?,
-        has_cover_art: row.get::<_, i64>(13)? != 0,
-        external_artwork_url: row.get(14)?,
+        source_key: row.get(5)?,
+        source_identity: row.get(6)?,
+        media_id: row.get(7)?,
+        status: row.get(8)?,
+        added_at_epoch_secs: row.get::<_, i64>(9)? as u64,
+        updated_at_epoch_secs: row.get::<_, i64>(10)? as u64,
+        title: row.get(11)?,
+        artist: row.get(12)?,
+        album: row.get(13)?,
+        duration_secs: row.get(14)?,
+        has_cover_art: row.get::<_, i64>(15)? != 0,
+        external_artwork_url: row.get(16)?,
     })
 }
 
 const QUEUE_ENTRY_SELECT_WITH_METADATA: &str = r#"
-    SELECT q.queue_id, q.entry_id, q.position_index, q.shuffle_index, q.source_path, q.media_id,
-           q.status, q.added_at, q.updated_at,
+    SELECT q.queue_id, q.entry_id, q.position_index, q.shuffle_index, q.source_path, q.source_key,
+           q.source_identity, q.media_id, q.status, q.added_at, q.updated_at,
            m.title, m.artist, m.album, m.duration_secs,
            EXISTS (
                SELECT 1
@@ -68,6 +104,19 @@ impl AppDatabase {
     }
 
     pub fn replace_queue_entries(&self, queue_id: &str, entries: &[String]) -> Result<(), String> {
+        let inputs = entries
+            .iter()
+            .cloned()
+            .map(QueueEntryInput::new)
+            .collect::<Vec<_>>();
+        self.replace_queue_entries_with_sources(queue_id, &inputs)
+    }
+
+    pub fn replace_queue_entries_with_sources(
+        &self,
+        queue_id: &str,
+        entries: &[QueueEntryInput],
+    ) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn
             .transaction()
@@ -79,18 +128,21 @@ impl AppDatabase {
         .map_err(|e| format!("Failed to clear queue entries: {}", e))?;
 
         let now = now_epoch_secs_i64();
-        for (index, source_path) in entries.iter().enumerate() {
+        for (index, entry) in entries.iter().enumerate() {
+            let (source_key, source_identity) = resolve_queue_source_key_tx(&tx, entry)?;
             tx.execute(
                 r#"
                 INSERT INTO playback_queue_entries
-                    (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
-                VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?5)
+                    (queue_id, position_index, source_path, source_key, source_identity, media_id, status, added_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?7)
                 "#,
                 params![
                     queue_id,
                     index as i64,
-                    source_path,
-                    media_id_for_path(source_path),
+                    entry.source_path,
+                    source_key,
+                    source_identity,
+                    media_id_for_path(&entry.source_path),
                     now,
                 ],
             )
@@ -103,6 +155,14 @@ impl AppDatabase {
     }
 
     pub fn append_queue_entry(&self, queue_id: &str, source_path: &str) -> Result<(), String> {
+        self.append_queue_entry_with_source(queue_id, &QueueEntryInput::new(source_path))
+    }
+
+    pub fn append_queue_entry_with_source(
+        &self,
+        queue_id: &str,
+        entry: &QueueEntryInput,
+    ) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = now_epoch_secs_i64();
         let next_position: i64 = conn
@@ -112,17 +172,20 @@ impl AppDatabase {
                 |row| row.get(0),
             )
             .map_err(|e| format!("Failed to compute next queue position: {}", e))?;
+        let (source_key, source_identity) = resolve_queue_source_key_tx(&conn, entry)?;
         conn.execute(
             r#"
             INSERT INTO playback_queue_entries
-                (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?5)
+                (queue_id, position_index, source_path, source_key, source_identity, media_id, status, added_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?7)
             "#,
             params![
                 queue_id,
                 next_position,
-                source_path,
-                media_id_for_path(source_path),
+                entry.source_path,
+                source_key,
+                source_identity,
+                media_id_for_path(&entry.source_path),
                 now
             ],
         )
@@ -131,6 +194,19 @@ impl AppDatabase {
     }
 
     pub fn append_queue_entries(&self, queue_id: &str, entries: &[String]) -> Result<(), String> {
+        let inputs = entries
+            .iter()
+            .cloned()
+            .map(QueueEntryInput::new)
+            .collect::<Vec<_>>();
+        self.append_queue_entries_with_sources(queue_id, &inputs)
+    }
+
+    pub fn append_queue_entries_with_sources(
+        &self,
+        queue_id: &str,
+        entries: &[QueueEntryInput],
+    ) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn
             .transaction()
@@ -144,18 +220,21 @@ impl AppDatabase {
             )
             .map_err(|e| format!("Failed to compute next queue position: {}", e))?;
 
-        for (offset, source_path) in entries.iter().enumerate() {
+        for (offset, entry) in entries.iter().enumerate() {
+            let (source_key, source_identity) = resolve_queue_source_key_tx(&tx, entry)?;
             tx.execute(
                 r#"
                 INSERT INTO playback_queue_entries
-                    (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
-                VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?5)
+                    (queue_id, position_index, source_path, source_key, source_identity, media_id, status, added_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?7)
                 "#,
                 params![
                     queue_id,
                     next_position + offset as i64,
-                    source_path,
-                    media_id_for_path(source_path),
+                    entry.source_path,
+                    source_key,
+                    source_identity,
+                    media_id_for_path(&entry.source_path),
                     now,
                 ],
             )
@@ -231,25 +310,19 @@ impl AppDatabase {
     pub fn peek_next_queue_entry(
         &self,
         queue_id: &str,
-        after_source_path: Option<&str>,
+        after_entry_id: Option<i64>,
     ) -> Result<Option<QueueEntryRecord>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let after_media_id = after_source_path.map(media_id_for_path);
 
         let query_with_cursor = format!(
             r#"
             {}
             WHERE q.queue_id = ?1
               AND q.status IN ('queued', 'preloading')
-              AND COALESCE(q.shuffle_index, q.position_index) > COALESCE(
-                  (
-                      SELECT COALESCE(q2.shuffle_index, q2.position_index)
-                      FROM playback_queue_entries q2
-                      WHERE q2.queue_id = ?1 AND q2.media_id = ?2
-                      ORDER BY COALESCE(q2.shuffle_index, q2.position_index) ASC, q2.entry_id ASC
-                      LIMIT 1
-                  ),
-                  -1
+              AND COALESCE(q.shuffle_index, q.position_index) > (
+                  SELECT COALESCE(q2.shuffle_index, q2.position_index)
+                  FROM playback_queue_entries q2
+                  WHERE q2.queue_id = ?1 AND q2.entry_id = ?2
               )
             ORDER BY COALESCE(q.shuffle_index, q.position_index) ASC, q.entry_id ASC
             LIMIT 1
@@ -268,10 +341,10 @@ impl AppDatabase {
             QUEUE_ENTRY_SELECT_WITH_METADATA
         );
 
-        let result = if let Some(media_id) = after_media_id.as_deref() {
+        let result = if let Some(entry_id) = after_entry_id {
             conn.query_row(
                 &query_with_cursor,
-                params![queue_id, media_id],
+                params![queue_id, entry_id],
                 queue_entry_from_row,
             )
         } else {
@@ -290,17 +363,17 @@ impl AppDatabase {
     pub fn peek_previous_queue_entry(
         &self,
         queue_id: &str,
-        before_source_path: Option<&str>,
+        before_entry_id: Option<i64>,
     ) -> Result<Option<QueueEntryRecord>, String> {
-        let Some(media_id) = before_source_path.map(media_id_for_path) else {
+        let Some(entry_id) = before_entry_id else {
             return Ok(None);
         };
 
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
             r#"
-            SELECT q.queue_id, q.entry_id, q.position_index, q.shuffle_index, q.source_path, q.media_id,
-                   q.status, q.added_at, q.updated_at,
+            SELECT q.queue_id, q.entry_id, q.position_index, q.shuffle_index, q.source_path, q.source_key,
+                   q.source_identity, q.media_id, q.status, q.added_at, q.updated_at,
                    m.title, m.artist, m.album, m.duration_secs,
                    EXISTS (
                        SELECT 1
@@ -315,14 +388,12 @@ impl AppDatabase {
               AND COALESCE(q.shuffle_index, q.position_index) < (
                   SELECT COALESCE(q2.shuffle_index, q2.position_index)
                   FROM playback_queue_entries q2
-                  WHERE q2.queue_id = ?1 AND q2.media_id = ?2
-                  ORDER BY COALESCE(q2.shuffle_index, q2.position_index) ASC, q2.entry_id ASC
-                  LIMIT 1
+                  WHERE q2.queue_id = ?1 AND q2.entry_id = ?2
               )
             ORDER BY COALESCE(q.shuffle_index, q.position_index) DESC, q.entry_id DESC
             LIMIT 1
             "#,
-            params![queue_id, media_id],
+            params![queue_id, entry_id],
             queue_entry_from_row,
         )
         .optional()
@@ -468,97 +539,6 @@ impl AppDatabase {
 
         tx.commit()
             .map_err(|e| format!("Failed to commit queue status transaction: {}", e))?;
-        Ok(())
-    }
-
-    pub fn mark_queue_entry_played_by_path(
-        &self,
-        queue_id: &str,
-        source_path: &str,
-    ) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let media_id = media_id_for_path(source_path);
-        conn.execute(
-            r#"
-            UPDATE playback_queue_entries
-            SET status = 'played',
-                updated_at = ?3
-            WHERE entry_id = (
-                SELECT entry_id
-                FROM playback_queue_entries
-                WHERE queue_id = ?1 AND media_id = ?2
-                ORDER BY position_index ASC, entry_id ASC
-                LIMIT 1
-            )
-            "#,
-            params![queue_id, media_id, now_epoch_secs_i64()],
-        )
-        .map_err(|e| format!("Failed to mark queue entry as played: {}", e))?;
-        Ok(())
-    }
-
-    pub fn mark_queue_entry_status_by_path(
-        &self,
-        queue_id: &str,
-        source_path: &str,
-        current_statuses: &[&str],
-        next_status: &str,
-    ) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let updated_at = now_epoch_secs_i64();
-        let media_id = media_id_for_path(source_path);
-
-        let changed = if current_statuses.is_empty() {
-            conn.execute(
-                r#"
-                UPDATE playback_queue_entries
-                SET status = ?3,
-                    updated_at = ?4
-                WHERE entry_id = (
-                    SELECT entry_id
-                    FROM playback_queue_entries
-                    WHERE queue_id = ?1 AND media_id = ?2
-                    ORDER BY position_index ASC, entry_id ASC
-                    LIMIT 1
-                )
-                "#,
-                params![queue_id, media_id, next_status, updated_at],
-            )
-        } else {
-            let placeholders = std::iter::repeat("?")
-                .take(current_statuses.len())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                r#"
-                UPDATE playback_queue_entries
-                SET status = ?,
-                    updated_at = ?
-                WHERE entry_id = (
-                    SELECT entry_id
-                    FROM playback_queue_entries
-                    WHERE queue_id = ?
-                      AND media_id = ?
-                      AND status IN ({})
-                    ORDER BY position_index ASC, entry_id ASC
-                    LIMIT 1
-                )
-                "#,
-                placeholders
-            );
-            let mut query_params: Vec<&dyn ToSql> =
-                vec![&next_status, &updated_at, &queue_id, &media_id];
-            for status in current_statuses {
-                query_params.push(status);
-            }
-            conn.execute(&sql, rusqlite::params_from_iter(query_params))
-        }
-        .map_err(|e| format!("Failed to update queue entry status by path: {}", e))?;
-
-        if changed == 0 {
-            return Ok(());
-        }
-
         Ok(())
     }
 }

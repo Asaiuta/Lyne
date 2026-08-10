@@ -44,7 +44,7 @@ pub(super) async fn play_ncm_track(
     let stream_url = track.stream_url.clone();
     let play_result = actix_web::rt::task::spawn_blocking(move || {
         let data = web::Data::new(state_for_task);
-        crate::server::playback::load_validated_path_for_playback(
+        crate::server::playback::load_public_path_for_playback(
             &data,
             &stream_url,
             true,
@@ -87,7 +87,10 @@ pub(super) async fn enqueue_ncm_track(
     let stream_url = track.stream_url.clone();
     let enqueue_result = actix_web::rt::task::spawn_blocking(move || {
         let data = web::Data::new(state_for_task);
-        crate::server::playback::append_validated_path_to_persistent_queue(&data, &stream_url)
+        crate::server::playback::append_queue_entries_with_sources_to_persistent_queue(
+            &data,
+            &[crate::app_database::QueueEntryInput::public(stream_url)],
+        )
     })
     .await;
 

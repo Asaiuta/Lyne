@@ -3,8 +3,44 @@ use rusqlite::{params, OptionalExtension};
 use crate::webdav::WebDavConfig;
 
 use super::{
-    bool_to_sqlite, now_epoch_secs_i64, AppDatabase, StoredWebDavSource, WebDavSourceRecord,
+    bool_to_sqlite, media_id_for_path, now_epoch_secs_i64, AppDatabase, StoredWebDavSource,
+    WebDavSourceRecord,
 };
+
+pub(super) fn webdav_source_keys_for_media_path_tx(
+    conn: &rusqlite::Connection,
+    source_path: &str,
+) -> Result<Vec<String>, String> {
+    let media_id = media_id_for_path(source_path);
+    let mut stmt = conn
+        .prepare(
+            r#"
+            SELECT DISTINCT library_roots.source_key
+            FROM media_items
+            JOIN library_root_memberships
+              ON library_root_memberships.media_id = media_items.media_id
+            JOIN library_roots
+              ON library_roots.root_id = library_root_memberships.root_id
+            WHERE (media_items.media_id = ?1 OR media_items.source_path = ?2)
+              AND library_roots.source_kind = 'webdav'
+              AND library_roots.source_key IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM ncm_track_sources
+                  WHERE ncm_track_sources.media_id = media_items.media_id
+              )
+            ORDER BY library_roots.source_key ASC
+            "#,
+        )
+        .map_err(|e| format!("Failed to prepare media WebDAV ownership query: {}", e))?;
+    let rows = stmt
+        .query_map(params![media_id, source_path], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| format!("Failed to query media WebDAV ownership: {}", e))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to decode media WebDAV ownership: {}", e))
+}
 
 fn webdav_source_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WebDavSourceRecord> {
     Ok(WebDavSourceRecord {
@@ -27,6 +63,14 @@ fn webdav_config_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WebDavCon
 }
 
 impl AppDatabase {
+    pub fn webdav_source_keys_for_media_path(
+        &self,
+        source_path: &str,
+    ) -> Result<Vec<String>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        webdav_source_keys_for_media_path_tx(&conn, source_path)
+    }
+
     pub fn load_primary_webdav_source(&self) -> Result<Option<WebDavConfig>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(

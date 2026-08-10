@@ -979,7 +979,13 @@ pub(super) fn scan_webdav_library(
         return Err("WebDAV source is not configured".to_string());
     }
 
-    let credentials = webdav_cfg.http_credentials();
+    let source_access = crate::player::MediaSourceAccess::trusted_origin(
+        &webdav_cfg
+            .normalized_origin()
+            .map_err(|error| format!("Invalid WebDAV source '{}': {}", source_key, error))?,
+        webdav_cfg.http_credentials(),
+        source_key,
+    )?;
     let mut scanned = 0_u64;
     let mut indexed = 0_u64;
     let mut index_failures = Vec::new();
@@ -1005,9 +1011,10 @@ pub(super) fn scan_webdav_library(
 
             scanned += 1;
             cancel_token.check()?;
-            match crate::decoder::StreamingDecoder::open_with_credentials_and_cancel(
+            match crate::decoder::StreamingDecoder::open_with_http_policy(
                 &entry.url,
-                credentials.as_ref(),
+                source_access.credentials(),
+                source_access.address_policy(),
                 Some(cancel_token.decode_token()),
             ) {
                 Ok(decoder) => {

@@ -362,6 +362,8 @@ pub struct QueueEntryRecord {
     pub position_index: i64,
     pub shuffle_index: Option<i64>,
     pub source_path: String,
+    pub source_key: Option<String>,
+    pub source_identity: String,
     pub media_id: Option<String>,
     pub status: String,
     pub added_at_epoch_secs: u64,
@@ -372,6 +374,39 @@ pub struct QueueEntryRecord {
     pub duration_secs: Option<f64>,
     pub has_cover_art: bool,
     pub external_artwork_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct QueueEntryInput {
+    pub source_path: String,
+    pub source_key: Option<String>,
+    pub infer_source_key: bool,
+}
+
+impl QueueEntryInput {
+    pub fn new(source_path: impl Into<String>) -> Self {
+        Self {
+            source_path: source_path.into(),
+            source_key: None,
+            infer_source_key: true,
+        }
+    }
+
+    pub fn public(source_path: impl Into<String>) -> Self {
+        Self {
+            source_path: source_path.into(),
+            source_key: None,
+            infer_source_key: false,
+        }
+    }
+
+    pub fn with_source_key(source_path: impl Into<String>, source_key: impl Into<String>) -> Self {
+        Self {
+            source_path: source_path.into(),
+            source_key: Some(source_key.into()),
+            infer_source_key: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

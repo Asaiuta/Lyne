@@ -15,6 +15,7 @@ use super::cache::{
     save_cache_with_header,
 };
 use super::state::{self, LoadResult, SharedState};
+use super::MediaSourceAccess;
 use crate::config::{EngineSettings, ResampleQuality};
 use crate::decoder::{DecodeCancelToken, StreamingDecoder};
 use crate::processor::{LoudnessDatabase, StreamingResampler};
@@ -25,9 +26,10 @@ fn is_remote_http_path(path: &str) -> bool {
 pub(super) fn cached_loudness_from_db(
     db: Option<&LoudnessDatabase>,
     path: &str,
+    source_access: &MediaSourceAccess,
 ) -> Option<state::CachedLoudness> {
     let db = db?;
-    match db.get_fresh(path) {
+    match db.get_fresh(source_access.cache_key(path).as_ref()) {
         Ok(Some(track)) => {
             let cached = state::CachedLoudness::from_track(&track);
             if cached.is_some() {
@@ -81,7 +83,7 @@ fn effective_resample_plan(
 /// Internal decode function for async loading.
 pub(super) fn decode_file_internal(
     path: &str,
-    credentials: Option<&crate::decoder::HttpCredentials>,
+    source_access: &MediaSourceAccess,
     config: &EngineSettings,
     device_id: Option<usize>,
     shared_state: &Arc<SharedState>,
@@ -92,17 +94,21 @@ pub(super) fn decode_file_internal(
     let decode_started_at = std::time::Instant::now();
     shared_state.mark_decode_started();
     let cancel_token = DecodeCancelToken::new(Arc::clone(load_cancel));
-    let mut decoder =
-        StreamingDecoder::open_with_credentials_and_cancel(path, credentials, Some(cancel_token))
-            .map_err(|e| {
-            log::error!("Failed to open decoder for {}: {}", path, e);
-            e.to_string()
-        })?;
+    let mut decoder = StreamingDecoder::open_with_http_policy(
+        path,
+        source_access.credentials(),
+        source_access.address_policy(),
+        Some(cancel_token),
+    )
+    .map_err(|e| {
+        log::error!("Failed to open decoder for {}: {}", path, e);
+        e.to_string()
+    })?;
 
     let info = decoder.info.clone();
     let original_sr = info.sample_rate;
     let channels = info.channels;
-    let cached_loudness = cached_loudness_from_db(loudness_db.as_deref(), path);
+    let cached_loudness = cached_loudness_from_db(loudness_db.as_deref(), path, source_access);
 
     let target_sr = target_sample_rate_for_device(original_sr, config, device_id);
     let estimated_input_frames = info.total_frames.unwrap_or(0) as usize;
@@ -113,7 +119,7 @@ pub(super) fn decode_file_internal(
         let cache_dir = crate::runtime::RuntimePaths::resolve().cache_dir;
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        hasher.update(path.as_bytes());
+        hasher.update(source_access.cache_key(path).as_bytes());
         hasher.update(final_target_sr.to_le_bytes());
         let q_byte = match config.resample_quality {
             ResampleQuality::Low => 0,

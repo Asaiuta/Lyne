@@ -10,6 +10,7 @@ pub(super) struct ScanTaskPath {
 #[derive(Deserialize)]
 pub(super) struct AutomixAnalyzeRequest {
     pub(super) path: String,
+    pub(super) source_key: Option<String>,
     #[serde(default)]
     pub(super) mode: crate::processor::AutomixAnalysisMode,
     pub(super) max_analyze_time_sec: Option<f64>,
@@ -37,16 +38,29 @@ pub(super) struct LibraryScanRequest {
 #[derive(Deserialize)]
 pub(super) struct QueueEnqueueRequest {
     pub(super) path: String,
+    pub(super) source_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct QueueSourceInput {
+    pub(super) path: String,
+    pub(super) source_key: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct QueueEnqueueManyRequest {
+    #[serde(default)]
     pub(super) paths: Vec<String>,
+    #[serde(default)]
+    pub(super) entries: Vec<QueueSourceInput>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct QueueReplaceRequest {
+    #[serde(default)]
     pub(super) paths: Vec<String>,
+    #[serde(default)]
+    pub(super) entries: Vec<QueueSourceInput>,
 }
 
 #[derive(Deserialize)]
@@ -238,6 +252,38 @@ pub(super) enum PlaylistLoadMode {
 pub(super) struct PlaylistLoadRequest {
     pub(super) path: String,
     pub(super) mode: PlaylistLoadMode,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{QueueEnqueueRequest, QueueReplaceRequest};
+
+    #[test]
+    fn persistent_queue_requests_keep_legacy_paths_and_accept_typed_entries() {
+        let legacy_single: QueueEnqueueRequest =
+            serde_json::from_value(serde_json::json!({ "path": "D:/music/a.flac" })).unwrap();
+        assert_eq!(legacy_single.path, "D:/music/a.flac");
+        assert!(legacy_single.source_key.is_none());
+
+        let legacy_replace: QueueReplaceRequest = serde_json::from_value(serde_json::json!({
+            "paths": ["D:/music/a.flac", "https://example.com/b.flac"]
+        }))
+        .unwrap();
+        assert_eq!(legacy_replace.paths.len(), 2);
+        assert!(legacy_replace.entries.is_empty());
+
+        let typed_replace: QueueReplaceRequest = serde_json::from_value(serde_json::json!({
+            "entries": [
+                { "path": "http://nas.test/dav/a.flac", "source_key": "nas" },
+                { "path": "https://example.com/b.flac" }
+            ]
+        }))
+        .unwrap();
+        assert!(typed_replace.paths.is_empty());
+        assert_eq!(typed_replace.entries.len(), 2);
+        assert_eq!(typed_replace.entries[0].source_key.as_deref(), Some("nas"));
+        assert!(typed_replace.entries[1].source_key.is_none());
+    }
 }
 
 #[derive(Deserialize)]

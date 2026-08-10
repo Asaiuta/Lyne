@@ -16,6 +16,7 @@ mod gapless;
 mod loading;
 mod output_stream;
 mod playback_config;
+mod source_access;
 mod spectrum;
 mod state;
 pub(crate) mod streaming;
@@ -29,6 +30,7 @@ pub use callback::{
 };
 pub use gapless::GaplessManager;
 pub(crate) use playback_config::{pending_promotion_readiness, PendingPromotionReadiness};
+pub use source_access::MediaSourceAccess;
 pub use spectrum::SpectrumBatch;
 pub use state::{
     AtomicPlayerState, AudioCommand, AudioDeviceInfo, CachedLoudness, PlayerState, RepeatMode,
@@ -342,37 +344,34 @@ impl AudioPlayer {
     }
 
     pub fn load(&mut self, path: &str) -> Result<(), String> {
-        self.load_with_credentials(path, None)
+        self.load_with_source_access(path, &MediaSourceAccess::public_only())
     }
 
-    /// Load audio file asynchronously in a background thread.
-    /// Returns immediately with Ok(()) - check `is_loading()` for completion status.
-    /// On completion, a `LoadComplete` command is sent to the audio thread.
-    pub fn load_with_credentials(
+    pub(crate) fn load_with_source_access(
         &mut self,
         path: &str,
-        credentials: Option<&crate::decoder::HttpCredentials>,
+        access: &MediaSourceAccess,
     ) -> Result<(), String> {
-        self.load_with_credentials_inner(path, credentials, false)
+        self.load_with_source_access_inner(path, access, false)
     }
 
-    pub fn load_with_credentials_and_autoplay(
+    pub(crate) fn load_with_source_access_and_autoplay(
         &mut self,
         path: &str,
-        credentials: Option<&crate::decoder::HttpCredentials>,
+        access: &MediaSourceAccess,
     ) -> Result<(), String> {
-        self.load_with_credentials_inner(path, credentials, true)
+        self.load_with_source_access_inner(path, access, true)
     }
 
-    fn load_with_credentials_inner(
+    fn load_with_source_access_inner(
         &mut self,
         path: &str,
-        credentials: Option<&crate::decoder::HttpCredentials>,
+        access: &MediaSourceAccess,
         autoplay: bool,
     ) -> Result<(), String> {
         log::info!(
             "Loading track async (credentials={}): {}",
-            credentials.is_some(),
+            access.has_credentials(),
             path
         );
         self.stop_for_track_load();
@@ -388,7 +387,7 @@ impl AudioPlayer {
         self.begin_loading_track(path, autoplay);
 
         let path_owned = path.to_string();
-        let credentials_owned = credentials.cloned();
+        let access_owned = access.clone();
         let shared_state = Arc::clone(&self.shared_state);
         let cmd_tx = self.cmd_tx.clone();
         let config = self.config.clone();
@@ -397,7 +396,7 @@ impl AudioPlayer {
         let loudness_db = self.loudness_db.clone();
 
         let use_streaming_first_buffer =
-            self.should_use_streaming_first_buffer(path, credentials, autoplay);
+            self.should_use_streaming_first_buffer(path, access, autoplay);
         let use_streaming_v2 = use_streaming_first_buffer;
 
         // Spawn background thread for decoding
@@ -411,7 +410,7 @@ impl AudioPlayer {
                         intent: crate::player::streaming::source::StreamOpenIntent::InitialPlayback,
                         path: std::path::Path::new(&path_owned),
                         cancel: crate::decoder::DecodeCancelToken::new(Arc::clone(&load_cancel)),
-                        credentials: credentials_owned.as_ref(),
+                        source_access: &access_owned,
                         expected_identity: None,
                         fetch_policy: if is_remote_http_path(&path_owned) {
                             crate::player::streaming::source::StreamFetchPolicy::AllowRemote
@@ -454,7 +453,7 @@ impl AudioPlayer {
             } else {
                 decode_file_internal(
                     &path_owned,
-                    credentials_owned.as_ref(),
+                    &access_owned,
                     &config,
                     device_id,
                     &shared_state,
@@ -521,14 +520,14 @@ impl AudioPlayer {
     fn should_use_streaming_first_buffer(
         &self,
         path: &str,
-        credentials: Option<&crate::decoder::HttpCredentials>,
+        access: &MediaSourceAccess,
         autoplay: bool,
     ) -> bool {
         if !self.config.streaming_first_buffer || !autoplay || self.config.use_cache {
             return false;
         }
 
-        if credentials.is_some() {
+        if access.has_credentials() {
             return false;
         }
 
@@ -564,6 +563,7 @@ impl AudioPlayer {
 
     fn begin_loading_track(&self, path: &str, autoplay: bool) {
         self.shared_state.reset_load_phase_timestamps();
+        self.shared_state.set_current_queue_entry_id(None);
         // Slot-published reset (not a bare store): supersedes any unconsumed
         // seek request from the previous track so it cannot be applied to the
         // newly loading one.
@@ -755,15 +755,16 @@ mod tests {
     fn streaming_first_buffer_allows_local_and_http_autoplay_without_cache_or_credentials() {
         let player = build_streaming_policy_player(false);
 
-        assert!(player.should_use_streaming_first_buffer(r"D:\Music\song.flac", None, true));
+        let public = MediaSourceAccess::public_only();
+        assert!(player.should_use_streaming_first_buffer(r"D:\Music\song.flac", &public, true));
         assert!(player.should_use_streaming_first_buffer(
             "http://media.example.test/song.flac",
-            None,
+            &public,
             true
         ));
         assert!(player.should_use_streaming_first_buffer(
             "https://m701.music.126.net/song.flac",
-            None,
+            &public,
             true
         ));
     }
@@ -776,25 +777,32 @@ mod tests {
             username: "user".to_string(),
             password: "pass".to_string(),
         };
+        let authenticated = MediaSourceAccess::trusted_origin(
+            "https://dav.example.test/song.flac",
+            Some(credentials),
+            "test-source",
+        )
+        .unwrap();
+        let public = MediaSourceAccess::public_only();
 
         assert!(!player.should_use_streaming_first_buffer(
             "https://dav.example.test/song.flac",
-            Some(&credentials),
+            &authenticated,
             true
         ));
         assert!(!cached_player.should_use_streaming_first_buffer(
             "https://m701.music.126.net/song.flac",
-            None,
+            &public,
             true
         ));
         assert!(!player.should_use_streaming_first_buffer(
             "https://m701.music.126.net/song.flac",
-            None,
+            &public,
             false
         ));
         assert!(!player.should_use_streaming_first_buffer(
             "ftp://media.example.test/song.flac",
-            None,
+            &public,
             true
         ));
     }

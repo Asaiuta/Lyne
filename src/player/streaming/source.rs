@@ -7,7 +7,8 @@ use std::time::UNIX_EPOCH;
 
 use thiserror::Error;
 
-use crate::decoder::{DecodeCancelToken, HttpCredentials, OpenedMediaSource};
+use crate::decoder::{DecodeCancelToken, OpenedMediaSource};
+use crate::player::MediaSourceAccess;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum StreamOpenIntent {
@@ -68,7 +69,7 @@ pub(crate) struct OpenRequest<'a> {
     pub intent: StreamOpenIntent,
     pub path: &'a Path,
     pub cancel: DecodeCancelToken,
-    pub credentials: Option<&'a HttpCredentials>,
+    pub source_access: &'a MediaSourceAccess,
     pub expected_identity: Option<&'a StreamSourceIdentity>,
     pub fetch_policy: StreamFetchPolicy,
 }
@@ -174,7 +175,7 @@ impl StreamSourceFactory for LocalFileSourceFactory {
             },
         };
 
-        let _ = request.credentials;
+        let _ = request.source_access;
         Ok(OpenedSource {
             generation: request.generation,
             source,
@@ -209,9 +210,10 @@ impl StreamSourceFactory for RemoteHttpSourceFactory {
         {
             return Err(StreamSourceError::IdentityMismatch);
         }
-        let source = OpenedMediaSource::open_path_with_credentials_and_cancel(
+        let source = OpenedMediaSource::open_path_with_http_policy(
             request.path,
-            request.credentials,
+            request.source_access.credentials(),
+            request.source_access.address_policy(),
             Some(request.cancel.clone()),
         )
         .map_err(|error| {
@@ -305,7 +307,7 @@ mod tests {
                 intent: StreamOpenIntent::InitialPlayback,
                 path: &fixture.path,
                 cancel: token(false),
-                credentials: None,
+                source_access: &MediaSourceAccess::public_only(),
                 expected_identity: None,
                 fetch_policy: StreamFetchPolicy::LocalOnly,
             })
@@ -329,7 +331,7 @@ mod tests {
                 intent: StreamOpenIntent::InitialPlayback,
                 path: &fixture.path,
                 cancel: token(false),
-                credentials: None,
+                source_access: &MediaSourceAccess::public_only(),
                 expected_identity: None,
                 fetch_policy: StreamFetchPolicy::LocalOnly,
             })
@@ -346,7 +348,7 @@ mod tests {
             intent: StreamOpenIntent::SourceSeekRecovery,
             path: &fixture.path,
             cancel: token(false),
-            credentials: None,
+            source_access: &MediaSourceAccess::public_only(),
             expected_identity: Some(&first.identity),
             fetch_policy: StreamFetchPolicy::LocalOnly,
         });
@@ -361,7 +363,7 @@ mod tests {
             intent: StreamOpenIntent::InitialPlayback,
             path: Path::new("Z:/not-touched.flac"),
             cancel: token(true),
-            credentials: None,
+            source_access: &MediaSourceAccess::public_only(),
             expected_identity: None,
             fetch_policy: StreamFetchPolicy::LocalOnly,
         });
@@ -376,7 +378,7 @@ mod tests {
             intent: StreamOpenIntent::InitialPlayback,
             path: Path::new("https://example.test/audio.flac"),
             cancel: token(false),
-            credentials: None,
+            source_access: &MediaSourceAccess::public_only(),
             expected_identity: None,
             fetch_policy: StreamFetchPolicy::AllowRemote,
         });
@@ -391,7 +393,7 @@ mod tests {
             intent: StreamOpenIntent::InitialPlayback,
             path: Path::new("https://user:secret@example.invalid/audio.flac?token=secret"),
             cancel: token(true),
-            credentials: None,
+            source_access: &MediaSourceAccess::public_only(),
             expected_identity: None,
             fetch_policy: StreamFetchPolicy::AllowRemote,
         });
@@ -402,7 +404,7 @@ mod tests {
             intent: StreamOpenIntent::InitialPlayback,
             path: Path::new("https://example.invalid/audio.flac"),
             cancel: token(false),
-            credentials: None,
+            source_access: &MediaSourceAccess::public_only(),
             expected_identity: None,
             fetch_policy: StreamFetchPolicy::LocalOnly,
         });
@@ -424,7 +426,7 @@ mod tests {
             intent: StreamOpenIntent::SourceSeekRecovery,
             path: Path::new("https://example.invalid/new.flac?token=secret"),
             cancel: token(false),
-            credentials: None,
+            source_access: &MediaSourceAccess::public_only(),
             expected_identity: Some(&expected),
             fetch_policy: StreamFetchPolicy::AllowRemote,
         });

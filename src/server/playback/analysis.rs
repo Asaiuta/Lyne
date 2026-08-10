@@ -183,10 +183,11 @@ pub(super) fn track_loudness_to_json(
 pub(super) fn try_get_cached_loudness(
     data: &web::Data<Arc<AppState>>,
     path: &str,
+    source_access: &crate::player::MediaSourceAccess,
 ) -> Option<crate::processor::TrackLoudness> {
     let db = data.analysis.loudness_db.as_ref()?;
 
-    match db.get_fresh(path) {
+    match db.get_fresh(source_access.cache_key(path).as_ref()) {
         Ok(Some(track)) => {
             log::info!("Using cached loudness for: {}", path);
             Some(track)
@@ -216,16 +217,17 @@ pub(super) fn try_store_loudness(
 
 pub(super) fn analyze_track_loudness(
     path: String,
-    credentials: Option<crate::decoder::HttpCredentials>,
+    source_access: crate::player::MediaSourceAccess,
     cancel_token: AnalysisCancelToken,
 ) -> Result<crate::processor::TrackLoudness, String> {
     use crate::decoder::StreamingDecoder;
     use crate::processor::{LoudnessMeter, TrackLoudness, DEFAULT_STREAMING_TARGET_LUFS};
 
     cancel_token.check()?;
-    let mut decoder = StreamingDecoder::open_with_credentials_and_cancel(
+    let mut decoder = StreamingDecoder::open_with_http_policy(
         &path,
-        credentials.as_ref(),
+        source_access.credentials(),
+        source_access.address_policy(),
         Some(cancel_token.decode_token()),
     )
     .map_err(|e| format!("Failed to open file: {}", e))?;
@@ -262,8 +264,8 @@ pub(super) fn analyze_track_loudness(
     let true_peak_linear = meter.true_peak().max(1e-10);
     let true_peak_dbtp = 20.0 * true_peak_linear.log10();
 
-    let track_loudness = TrackLoudness::new(
-        &path,
+    let mut track_loudness = TrackLoudness::new(
+        source_access.cache_key(&path).as_ref(),
         integrated_lufs,
         true_peak_dbtp,
         if loudness_range > 0.0 {
@@ -273,6 +275,7 @@ pub(super) fn analyze_track_loudness(
         },
         DEFAULT_STREAMING_TARGET_LUFS,
     );
+    track_loudness.file_path = path.clone();
 
     log::info!(
         "Loudness scan complete: {} -> {:.1} LUFS, {:.1} dBTP, {} samples",

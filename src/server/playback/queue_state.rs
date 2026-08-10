@@ -1,5 +1,7 @@
 use super::*;
-use crate::app_database::{media_id_for_path, LibraryCleanupReport, QueueEntryRecord};
+use crate::app_database::{
+    media_id_for_path, LibraryCleanupReport, QueueEntryInput, QueueEntryRecord,
+};
 use crate::player::{
     pending_promotion_readiness, PendingPromotionReadiness, RepeatMode, SharedState,
 };
@@ -158,25 +160,34 @@ pub(super) fn playback_runtime_snapshot_from_state(
     }
 }
 
-pub(crate) fn mark_current_track_as_played(data: &web::Data<Arc<AppState>>, current_path: &str) {
+pub(crate) fn mark_queue_entry_as_played(
+    data: &web::Data<Arc<AppState>>,
+    entry_id: Option<i64>,
+    current_path: &str,
+) {
     let shared_state = {
         let player = data.player.lock();
         player.shared_state()
     };
-    mark_current_track_as_played_from_shared(data, &shared_state, current_path);
+    mark_queue_entry_as_played_from_shared(data, &shared_state, entry_id, current_path);
 }
 
-fn mark_current_track_as_played_from_shared(
+fn mark_queue_entry_as_played_from_shared(
     data: &web::Data<Arc<AppState>>,
     shared_state: &Arc<SharedState>,
+    entry_id: Option<i64>,
     current_path: &str,
 ) {
+    let Some(entry_id) = entry_id else {
+        return;
+    };
     if let Err(e) = data
         .app_db
-        .mark_queue_entry_played_by_path("active", current_path)
+        .mark_queue_entry_status("active", entry_id, "played")
     {
         log::warn!(
-            "Failed to mark queue entry as played for '{}': {}",
+            "Failed to mark queue entry {} as played for '{}': {}",
+            entry_id,
             current_path,
             e
         );
@@ -190,17 +201,14 @@ pub(super) fn load_queue_entry_for_playback(
     entry: QueueEntryRecord,
     autoplay: bool,
 ) -> Result<(StateResponse, Arc<SharedState>), String> {
-    let credentials = {
-        let cfg = data.webdav_config.lock();
-        cfg.http_credentials()
-    };
+    let resolved = resolve_queue_media_source(&data.app_db, &entry)?;
 
     let (state_response, shared_state) = {
         let mut player = data.player.lock();
         if autoplay {
-            player.load_with_credentials_and_autoplay(&entry.source_path, credentials.as_ref())?;
+            player.load_with_source_access_and_autoplay(&resolved.path, &resolved.access)?;
         } else {
-            player.load_with_credentials(&entry.source_path, credentials.as_ref())?;
+            player.load_with_source_access(&resolved.path, &resolved.access)?;
         }
         (get_player_state(&player), player.shared_state())
     };
@@ -216,13 +224,14 @@ pub(super) async fn promote_pending_queue_entry_for_playback(
         player.shared_state()
     };
 
-    if !wait_for_pending_promotion_ready(&shared_state, &entry.source_path).await {
+    if !wait_for_pending_promotion_ready(&shared_state, &entry.source_path, entry.entry_id).await {
         return Ok(None);
     }
 
     let (promoted, state_response, shared_state) = {
         let mut player = data.player.lock();
-        let promoted = player.promote_pending_if_matching(&entry.source_path)?;
+        let promoted =
+            player.promote_pending_if_matching(&entry.source_path, Some(entry.entry_id))?;
         (promoted, get_player_state(&player), player.shared_state())
     };
 
@@ -233,10 +242,14 @@ pub(super) async fn promote_pending_queue_entry_for_playback(
     finish_queue_entry_playback_start(data, &entry, true, state_response, shared_state).map(Some)
 }
 
-async fn wait_for_pending_promotion_ready(shared: &SharedState, expected_path: &str) -> bool {
+async fn wait_for_pending_promotion_ready(
+    shared: &SharedState,
+    expected_path: &str,
+    expected_entry_id: i64,
+) -> bool {
     let deadline = std::time::Instant::now() + MANUAL_NEXT_PRELOAD_WAIT;
     loop {
-        match pending_promotion_readiness(shared, expected_path) {
+        match pending_promotion_readiness(shared, expected_path, Some(expected_entry_id)) {
             PendingPromotionReadiness::Ready => return true,
             PendingPromotionReadiness::Mismatch | PendingPromotionReadiness::Unavailable => {
                 return false;
@@ -258,6 +271,7 @@ fn finish_queue_entry_playback_start(
     state_response: StateResponse,
     shared_state: Arc<SharedState>,
 ) -> Result<(StateResponse, Arc<SharedState>), String> {
+    shared_state.set_current_queue_entry_id(Some(entry.entry_id));
     let state_response = enrich_player_state(&data.app_db, state_response);
 
     let media_id = data.app_db.record_media_stub(&entry.source_path);
@@ -322,26 +336,44 @@ fn finish_queue_entry_playback_start(
 pub(crate) fn load_validated_path_for_playback(
     data: &web::Data<Arc<AppState>>,
     path: &str,
+    source_key: Option<&str>,
     autoplay: bool,
     history_kind: &'static str,
 ) -> Result<(StateResponse, Arc<SharedState>), String> {
-    let credentials = {
-        let cfg = data.webdav_config.lock();
-        cfg.http_credentials()
-    };
+    let resolved = resolve_media_source(&data.app_db, path, source_key)?;
+    load_resolved_media_source_for_playback(data, resolved, autoplay, history_kind)
+}
+
+pub(crate) fn load_public_path_for_playback(
+    data: &web::Data<Arc<AppState>>,
+    path: &str,
+    autoplay: bool,
+    history_kind: &'static str,
+) -> Result<(StateResponse, Arc<SharedState>), String> {
+    let resolved = resolve_public_media_source(path)?;
+    load_resolved_media_source_for_playback(data, resolved, autoplay, history_kind)
+}
+
+fn load_resolved_media_source_for_playback(
+    data: &web::Data<Arc<AppState>>,
+    resolved: ResolvedMediaSource,
+    autoplay: bool,
+    history_kind: &'static str,
+) -> Result<(StateResponse, Arc<SharedState>), String> {
+    let path = resolved.path;
 
     let (state_response, shared_state) = {
         let mut player = data.player.lock();
         if autoplay {
-            player.load_with_credentials_and_autoplay(path, credentials.as_ref())?;
+            player.load_with_source_access_and_autoplay(&path, &resolved.access)?;
         } else {
-            player.load_with_credentials(path, credentials.as_ref())?;
+            player.load_with_source_access(&path, &resolved.access)?;
         }
         (get_player_state(&player), player.shared_state())
     };
     let state_response = enrich_player_state(&data.app_db, state_response);
 
-    let media_id = data.app_db.record_media_stub(path);
+    let media_id = data.app_db.record_media_stub(&path);
     if let Err(e) = &media_id {
         log::warn!("Failed to ensure media item for '{}': {}", path, e);
     }
@@ -363,7 +395,7 @@ pub(crate) fn load_validated_path_for_playback(
     }
 
     match data.app_db.start_playback_session(
-        path,
+        &path,
         if autoplay { "playing" } else { "loaded" },
         &snapshot,
     ) {
@@ -372,7 +404,7 @@ pub(crate) fn load_validated_path_for_playback(
             begin_ncm_scrobble_session(
                 data,
                 session_id,
-                path,
+                &path,
                 state_response.is_playing && !state_response.is_loading,
             );
             let payload = serde_json::json!({
@@ -383,7 +415,7 @@ pub(crate) fn load_validated_path_for_playback(
                 data,
                 &shared_state,
                 Some(session_id),
-                path,
+                &path,
                 "load_requested",
                 snapshot.position_secs,
                 Some(&payload),
@@ -402,29 +434,30 @@ pub(super) fn same_media_identity(left: &str, right: &str) -> bool {
     media_id_for_path(left) == media_id_for_path(right)
 }
 
-pub(super) fn current_queue_cursor_path(data: &web::Data<Arc<AppState>>) -> Option<String> {
+pub(super) fn current_queue_cursor_entry_id(data: &web::Data<Arc<AppState>>) -> Option<i64> {
     let player = data.player.lock();
     let shared = player.shared_state();
-    let current_track_path = shared.current_track_path.read().clone();
-    if current_track_path.is_some() {
-        return current_track_path;
-    }
-    let file_path = shared.file_path.read().clone();
-    file_path
+    shared.current_queue_entry_id()
 }
 
 fn finish_active_session_on_natural_end(data: &web::Data<Arc<AppState>>) {
-    let (snapshot, current_path, shared_state) = {
+    let (snapshot, current_path, current_entry_id, shared_state) = {
         let player = data.player.lock();
         let shared = player.shared_state();
         let snapshot = build_runtime_snapshot(&player);
         let current_path = shared.current_track_path.read().clone();
         let file_path = shared.file_path.read().clone();
-        (snapshot, current_path.or(file_path), shared)
+        let current_entry_id = shared.current_queue_entry_id();
+        (
+            snapshot,
+            current_path.or(file_path),
+            current_entry_id,
+            shared,
+        )
     };
 
     if let Some(ref path) = current_path {
-        mark_current_track_as_played_from_shared(data, &shared_state, path);
+        mark_queue_entry_as_played_from_shared(data, &shared_state, current_entry_id, path);
     }
 
     if let Some(session_id) = data.playback.active_session_id.lock().take() {
@@ -469,6 +502,7 @@ pub(super) fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
         .read()
         .clone()
         .or_else(|| shared_state.file_path.read().clone());
+    let current_entry_id = shared_state.current_queue_entry_id();
 
     if repeat_mode == RepeatMode::One {
         if let Some(ref path) = current_path {
@@ -496,7 +530,7 @@ pub(super) fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
 
     match data
         .app_db
-        .peek_next_queue_entry("active", current_path.as_deref())
+        .peek_next_queue_entry("active", current_entry_id)
     {
         Ok(Some(entry)) => {
             finish_active_session_on_natural_end(data);
@@ -533,16 +567,15 @@ pub(super) fn handle_natural_playback_end(data: &web::Data<Arc<AppState>>) {
 pub(crate) fn queue_next_from_persistent_queue(
     data: &web::Data<Arc<AppState>>,
 ) -> Result<Option<String>, String> {
-    let (current_path, shared_state) = {
+    let (current_entry_id, shared_state) = {
         let player = data.player.lock();
         let shared = player.shared_state();
-        let current_path = shared.current_track_path.read().clone();
-        (current_path, shared)
+        (shared.current_queue_entry_id(), shared)
     };
 
     let next_entry = data
         .app_db
-        .peek_next_queue_entry("active", current_path.as_deref())?;
+        .peek_next_queue_entry("active", current_entry_id)?;
 
     let Some(entry) = next_entry else {
         return Ok(None);
@@ -552,14 +585,15 @@ pub(crate) fn queue_next_from_persistent_queue(
         .mark_queue_entry_status("active", entry.entry_id, "preloading")?;
     emit_queue_updated_from_shared(&shared_state);
 
-    let credentials = {
-        let cfg = data.webdav_config.lock();
-        cfg.http_credentials()
-    };
+    let resolved = resolve_queue_media_source(&data.app_db, &entry)?;
 
     let (queue_result, shared_state) = {
         let player = data.player.lock();
-        let result = player.queue_next_with_credentials(&entry.source_path, credentials);
+        let result = player.queue_next_with_source_access(
+            &resolved.path,
+            &resolved.access,
+            Some(entry.entry_id),
+        );
         (result, player.shared_state())
     };
 
@@ -579,18 +613,24 @@ pub(crate) fn queue_next_from_persistent_queue(
     }
 }
 
-pub(crate) fn append_validated_path_to_persistent_queue(
-    data: &web::Data<Arc<AppState>>,
-    path: &str,
-) -> Result<Vec<QueueEntryRecord>, String> {
-    append_validated_paths_to_persistent_queue(data, &[path.to_string()])
-}
-
 pub(crate) fn append_validated_paths_to_persistent_queue(
     data: &web::Data<Arc<AppState>>,
     paths: &[String],
 ) -> Result<Vec<QueueEntryRecord>, String> {
-    data.app_db.append_queue_entries("active", paths)?;
+    let entries = paths
+        .iter()
+        .cloned()
+        .map(QueueEntryInput::new)
+        .collect::<Vec<_>>();
+    append_queue_entries_with_sources_to_persistent_queue(data, &entries)
+}
+
+pub(crate) fn append_queue_entries_with_sources_to_persistent_queue(
+    data: &web::Data<Arc<AppState>>,
+    entries: &[QueueEntryInput],
+) -> Result<Vec<QueueEntryRecord>, String> {
+    data.app_db
+        .append_queue_entries_with_sources("active", entries)?;
     emit_queue_updated(data);
     data.app_db.list_queue_entries("active")
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::app_database::QueueEntryRecord;
+use crate::app_database::{QueueEntryInput, QueueEntryRecord};
 use actix_web::{web, HttpResponse};
 
 /// Typed failure for `play_from_persistent_queue` so the offload boundary
@@ -11,25 +11,74 @@ enum QueuePlayFailure {
     Load(String),
 }
 
+fn resolve_queue_entry_input(
+    data: &web::Data<Arc<AppState>>,
+    path: &str,
+    source_key: Option<&str>,
+) -> Result<QueueEntryInput, String> {
+    let resolved = resolve_media_source(&data.app_db, path, source_key)?;
+    Ok(match resolved.source_key {
+        Some(source_key) => QueueEntryInput::with_source_key(resolved.path, source_key),
+        None => QueueEntryInput::public(resolved.path),
+    })
+}
+
+fn resolve_queue_entry_inputs(
+    data: &web::Data<Arc<AppState>>,
+    paths: &[String],
+    entries: &[QueueSourceInput],
+) -> Result<Vec<QueueEntryInput>, String> {
+    if !paths.is_empty() && !entries.is_empty() {
+        return Err("provide either paths or entries, not both".to_string());
+    }
+
+    if entries.is_empty() {
+        paths
+            .iter()
+            .map(|path| resolve_queue_entry_input(data, path, None))
+            .collect()
+    } else {
+        entries
+            .iter()
+            .map(|entry| resolve_queue_entry_input(data, &entry.path, entry.source_key.as_deref()))
+            .collect()
+    }
+}
+
+fn pending_queue_entry_for_request(
+    data: &web::Data<Arc<AppState>>,
+    body: &QueueNextRequest,
+) -> Result<Option<QueueEntryRecord>, String> {
+    let candidate = if let Some(entry_id) = body.entry_id {
+        data.app_db
+            .list_queue_entries("active")?
+            .into_iter()
+            .find(|entry| entry.entry_id == entry_id)
+    } else {
+        data.app_db
+            .peek_next_queue_entry("active", current_queue_cursor_entry_id(data))?
+    };
+
+    Ok(candidate.filter(|entry| {
+        same_media_identity(&entry.source_path, &body.path)
+            && body
+                .source_key
+                .as_deref()
+                .is_none_or(|source_key| entry.source_key.as_deref() == Some(source_key))
+    }))
+}
+
 fn select_queue_entry_for_play(
     entries: Vec<QueueEntryRecord>,
     entry_id: Option<i64>,
     source_path: Option<&str>,
 ) -> Option<QueueEntryRecord> {
-    if let (Some(entry_id), Some(source_path)) = (entry_id, source_path) {
-        entries
-            .iter()
-            .find(|entry| {
-                entry.entry_id == entry_id && same_media_identity(&entry.source_path, source_path)
-            })
-            .cloned()
-            .or_else(|| {
-                entries
-                    .into_iter()
-                    .find(|entry| same_media_identity(&entry.source_path, source_path))
-            })
-    } else if let Some(entry_id) = entry_id {
-        entries.into_iter().find(|entry| entry.entry_id == entry_id)
+    if let Some(entry_id) = entry_id {
+        entries.into_iter().find(|entry| {
+            entry.entry_id == entry_id
+                && source_path
+                    .is_none_or(|source_path| same_media_identity(&entry.source_path, source_path))
+        })
     } else if let Some(source_path) = source_path {
         entries
             .into_iter()
@@ -70,22 +119,34 @@ pub(super) async fn queue_next(
     data: web::Data<Arc<AppState>>,
     body: web::Json<QueueNextRequest>,
 ) -> HttpResponse {
-    let path = match validate_path(&body.path) {
-        Ok(p) => p,
+    let queue_entry = match pending_queue_entry_for_request(&data, &body) {
+        Ok(entry) => entry,
+        Err(e) => return internal_server_error_response(e),
+    };
+    let resolved = match queue_entry.as_ref() {
+        Some(entry) => resolve_queue_media_source(&data.app_db, entry),
+        None => resolve_media_source(&data.app_db, &body.path, body.source_key.as_deref()),
+    };
+    let resolved = match resolved {
+        Ok(resolved) => resolved,
         Err(e) => return bad_request_response(e),
     };
+    let path = resolved.path.clone();
+    let pending_entry_id = queue_entry.as_ref().map(|entry| entry.entry_id);
 
-    let credentials = match (&body.username, &body.password) {
-        (Some(u), Some(p)) => Some(crate::decoder::HttpCredentials {
-            username: u.clone(),
-            password: p.clone(),
-        }),
-        _ => data.webdav_config.lock().http_credentials(),
-    };
+    if let Some(entry_id) = pending_entry_id {
+        if let Err(e) = data
+            .app_db
+            .mark_queue_entry_status("active", entry_id, "preloading")
+        {
+            return internal_server_error_response(e);
+        }
+    }
 
     let (queue_result, shared_state, current_path, current_position) = {
         let player = data.player.lock();
-        let result = player.queue_next_with_credentials(&path, credentials);
+        let result =
+            player.queue_next_with_source_access(&path, &resolved.access, pending_entry_id);
         let shared_state = player.shared_state();
         let current_path = shared_state.file_path.read().clone();
         let current_position = shared_state.current_time_secs();
@@ -94,15 +155,10 @@ pub(super) async fn queue_next(
 
     match queue_result {
         Ok(()) => {
-            let _ = data.app_db.mark_queue_entry_status_by_path(
-                "active",
-                &path,
-                &["queued"],
-                "preloading",
-            );
             let payload = serde_json::json!({
                 "queued_path": path,
-                "has_credentials_override": body.username.is_some() && body.password.is_some()
+                "source_key": resolved.source_key,
+                "entry_id": pending_entry_id
             });
             if let Some(session_id) = *data.playback.active_session_id.lock() {
                 let source_path = current_path.as_deref().unwrap_or(&path);
@@ -120,7 +176,14 @@ pub(super) async fn queue_next(
             emit_queue_updated_from_shared(&shared_state);
             HttpResponse::Ok().json(ApiResponse::success("Queued for gapless playback"))
         }
-        Err(e) => internal_server_error_response(e),
+        Err(e) => {
+            if let Some(entry_id) = pending_entry_id {
+                let _ = data
+                    .app_db
+                    .mark_queue_entry_status("active", entry_id, "queued");
+            }
+            internal_server_error_response(e)
+        }
     }
 }
 
@@ -171,11 +234,11 @@ pub(super) async fn play_next_queue_entry(data: web::Data<Arc<AppState>>) -> Htt
     let state_for_task = data.get_ref().clone();
     let peek_result = actix_web::rt::task::spawn_blocking(move || {
         let data = web::Data::new(state_for_task);
-        let Some(current_path) = current_queue_cursor_path(&data) else {
+        let Some(current_entry_id) = current_queue_cursor_entry_id(&data) else {
             return Ok(None);
         };
         data.app_db
-            .peek_next_queue_entry("active", Some(&current_path))
+            .peek_next_queue_entry("active", Some(current_entry_id))
     })
     .await;
 
@@ -223,11 +286,11 @@ pub(super) async fn play_previous_queue_entry(data: web::Data<Arc<AppState>>) ->
     let state_for_task = data.get_ref().clone();
     let peek_result = actix_web::rt::task::spawn_blocking(move || {
         let data = web::Data::new(state_for_task);
-        let Some(current_path) = current_queue_cursor_path(&data) else {
+        let Some(current_entry_id) = current_queue_cursor_entry_id(&data) else {
             return Ok(None);
         };
         data.app_db
-            .peek_previous_queue_entry("active", Some(&current_path))
+            .peek_previous_queue_entry("active", Some(current_entry_id))
     })
     .await;
 
@@ -255,7 +318,7 @@ pub(super) async fn play_previous_queue_entry(data: web::Data<Arc<AppState>>) ->
 }
 
 pub(super) async fn get_queue_adjacent_entries(data: web::Data<Arc<AppState>>) -> HttpResponse {
-    let Some(current_path) = current_queue_cursor_path(&data) else {
+    let Some(current_entry_id) = current_queue_cursor_entry_id(&data) else {
         return HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "previous_entry_id": null,
@@ -264,14 +327,14 @@ pub(super) async fn get_queue_adjacent_entries(data: web::Data<Arc<AppState>>) -
     };
     let previous = match data
         .app_db
-        .peek_previous_queue_entry("active", Some(&current_path))
+        .peek_previous_queue_entry("active", Some(current_entry_id))
     {
         Ok(entry) => entry,
         Err(e) => return internal_server_error_response(e),
     };
     let next = match data
         .app_db
-        .peek_next_queue_entry("active", Some(&current_path))
+        .peek_next_queue_entry("active", Some(current_entry_id))
     {
         Ok(entry) => entry,
         Err(e) => return internal_server_error_response(e),
@@ -313,15 +376,15 @@ pub(super) async fn replace_persistent_queue(
     data: web::Data<Arc<AppState>>,
     body: web::Json<QueueReplaceRequest>,
 ) -> HttpResponse {
-    let mut validated = Vec::with_capacity(body.paths.len());
-    for path in &body.paths {
-        match validate_path(path) {
-            Ok(value) => validated.push(value),
-            Err(e) => return bad_request_response(e),
-        }
-    }
+    let entries = match resolve_queue_entry_inputs(&data, &body.paths, &body.entries) {
+        Ok(entries) => entries,
+        Err(e) => return bad_request_response(e),
+    };
 
-    match data.app_db.replace_queue_entries("active", &validated) {
+    match data
+        .app_db
+        .replace_queue_entries_with_sources("active", &entries)
+    {
         Ok(()) => {
             emit_queue_updated(&data);
             get_persistent_queue(data).await
@@ -334,12 +397,12 @@ pub(super) async fn enqueue_persistent_queue(
     data: web::Data<Arc<AppState>>,
     body: web::Json<QueueEnqueueRequest>,
 ) -> HttpResponse {
-    let path = match validate_path(&body.path) {
-        Ok(value) => value,
+    let entry = match resolve_queue_entry_input(&data, &body.path, body.source_key.as_deref()) {
+        Ok(entry) => entry,
         Err(e) => return bad_request_response(e),
     };
 
-    match append_validated_path_to_persistent_queue(&data, &path) {
+    match append_queue_entries_with_sources_to_persistent_queue(&data, &[entry]) {
         Ok(entries) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "queue": entries
@@ -352,19 +415,15 @@ pub(super) async fn enqueue_persistent_queue_many(
     data: web::Data<Arc<AppState>>,
     body: web::Json<QueueEnqueueManyRequest>,
 ) -> HttpResponse {
-    if body.paths.is_empty() {
-        return bad_request_response("paths cannot be empty");
-    }
-
-    let mut validated = Vec::with_capacity(body.paths.len());
-    for path in &body.paths {
-        match validate_path(path) {
-            Ok(value) => validated.push(value),
-            Err(e) => return bad_request_response(e),
+    let entries = match resolve_queue_entry_inputs(&data, &body.paths, &body.entries) {
+        Ok(entries) if entries.is_empty() => {
+            return bad_request_response("queue entries cannot be empty")
         }
-    }
+        Ok(entries) => entries,
+        Err(e) => return bad_request_response(e),
+    };
 
-    match append_validated_paths_to_persistent_queue(&data, &validated) {
+    match append_queue_entries_with_sources_to_persistent_queue(&data, &entries) {
         Ok(entries) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "queue": entries
@@ -396,5 +455,58 @@ pub(super) async fn clear_persistent_queue(data: web::Data<Arc<AppState>>) -> Ht
             }))
         }
         Err(e) => internal_server_error_response(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_queue_entry_for_play;
+    use crate::app_database::QueueEntryRecord;
+
+    fn entry(entry_id: i64, source_path: &str) -> QueueEntryRecord {
+        QueueEntryRecord {
+            queue_id: "active".to_string(),
+            entry_id,
+            position_index: entry_id,
+            shuffle_index: None,
+            source_path: source_path.to_string(),
+            source_key: None,
+            source_identity: "public".to_string(),
+            media_id: None,
+            status: "queued".to_string(),
+            added_at_epoch_secs: 0,
+            updated_at_epoch_secs: 0,
+            title: None,
+            artist: None,
+            album: None,
+            duration_secs: None,
+            has_cover_art: false,
+            external_artwork_url: None,
+        }
+    }
+
+    #[test]
+    fn entry_id_does_not_fall_back_to_a_duplicate_path() {
+        let entries = vec![
+            entry(1, "https://shared.example.test/song.flac"),
+            entry(2, "https://shared.example.test/song.flac"),
+        ];
+
+        assert_eq!(
+            select_queue_entry_for_play(
+                entries.clone(),
+                Some(2),
+                Some("https://shared.example.test/song.flac"),
+            )
+            .unwrap()
+            .entry_id,
+            2
+        );
+        assert!(select_queue_entry_for_play(
+            entries,
+            Some(2),
+            Some("https://other.example.test/song.flac"),
+        )
+        .is_none());
     }
 }

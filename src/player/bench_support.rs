@@ -20,6 +20,7 @@ use super::streaming::session::{LocalSessionConfig, PersistentStreamingSession};
 use super::streaming::source::{
     LocalFileSourceFactory, OpenRequest, StreamFetchPolicy, StreamOpenIntent, StreamSourceFactory,
 };
+use super::MediaSourceAccess;
 use crate::config::{PhaseResponse, ResampleQuality};
 use crate::decoder::{DecodeCancelToken, StreamingDecoder};
 use std::io::Write;
@@ -50,7 +51,7 @@ pub fn open_source_seek_bench() -> SourceSeekBench {
             intent: StreamOpenIntent::InitialPlayback,
             path: &path,
             cancel: cancel(),
-            credentials: None,
+            source_access: &MediaSourceAccess::public_only(),
             expected_identity: None,
             fetch_policy: StreamFetchPolicy::LocalOnly,
         })
@@ -105,7 +106,7 @@ impl SourceSeekBench {
                 intent: StreamOpenIntent::SourceSeekRecovery,
                 path: &self.fixture,
                 cancel: cancel(),
-                credentials: None,
+                source_access: &MediaSourceAccess::public_only(),
                 expected_identity: Some(&self.session.identity),
                 fetch_policy: StreamFetchPolicy::LocalOnly,
             })

@@ -1037,10 +1037,170 @@ fn persists_library_roots_and_queue_entries() {
 }
 
 #[test]
+fn queue_source_identity_survives_restart_for_multiple_webdav_sources() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let db_path = std::env::temp_dir().join(format!(
+        "audio-player-queue-source-restart-{}-{nonce}.db",
+        std::process::id()
+    ));
+    let first_path = "https://first.example.test/dav/music/first.flac";
+    let second_path = "https://second.example.test/dav/music/second.flac";
+
+    {
+        let db = AppDatabase::open(&db_path).unwrap();
+        for (source_key, base_url) in [
+            ("first", "https://first.example.test/dav/music"),
+            ("second", "https://second.example.test/dav/music"),
+        ] {
+            db.upsert_webdav_source(
+                source_key,
+                source_key,
+                &WebDavConfig {
+                    base_url: base_url.to_string(),
+                    username: Some(source_key.to_string()),
+                    password: Some(format!("{source_key}-secret")),
+                },
+                source_key == "first",
+            )
+            .unwrap();
+        }
+
+        let first_root = db
+            .upsert_library_root(Some("first"), "/first", "webdav", "First", "completed")
+            .unwrap();
+        let first_media = db.record_media_stub(first_path).unwrap();
+        add_library_membership(&db, first_root, &first_media);
+
+        db.replace_queue_entries_with_sources(
+            "active",
+            &[
+                QueueEntryInput::new(first_path),
+                QueueEntryInput::with_source_key(second_path, "second"),
+            ],
+        )
+        .unwrap();
+    }
+
+    {
+        let db = AppDatabase::open(&db_path).unwrap();
+        let queue = db.list_queue_entries("active").unwrap();
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue[0].source_key.as_deref(), Some("first"));
+        assert_eq!(queue[1].source_key.as_deref(), Some("second"));
+        assert_eq!(queue[0].source_identity, "webdav");
+        assert_eq!(queue[1].source_identity, "webdav");
+
+        db.delete_webdav_source("first").unwrap();
+        let queue = db.list_queue_entries("active").unwrap();
+        assert_eq!(queue[0].source_key, None);
+        assert_eq!(queue[1].source_key.as_deref(), Some("second"));
+    }
+
+    let _ = fs::remove_file(&db_path);
+    let _ = fs::remove_file(db_path.with_extension("db-wal"));
+    let _ = fs::remove_file(db_path.with_extension("db-shm"));
+}
+
+#[test]
+fn duplicate_url_queue_entries_keep_source_identity_across_restart_navigation_and_status() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let db_path = std::env::temp_dir().join(format!(
+        "audio-player-queue-duplicate-url-{}-{nonce}.db",
+        std::process::id()
+    ));
+    let shared_url = "https://shared.example.test/dav/music/song.flac";
+
+    {
+        let db = AppDatabase::open(&db_path).unwrap();
+        for source_key in ["first", "second"] {
+            db.upsert_webdav_source(
+                source_key,
+                source_key,
+                &WebDavConfig {
+                    base_url: "https://shared.example.test/dav/music".to_string(),
+                    username: Some(format!("{source_key}-user")),
+                    password: Some(format!("{source_key}-secret")),
+                },
+                source_key == "first",
+            )
+            .unwrap();
+        }
+        db.replace_queue_entries_with_sources(
+            "active",
+            &[
+                QueueEntryInput::with_source_key(shared_url, "first"),
+                QueueEntryInput::with_source_key(shared_url, "second"),
+            ],
+        )
+        .unwrap();
+    }
+
+    {
+        let db = AppDatabase::open(&db_path).unwrap();
+        let queue = db.list_queue_entries("active").unwrap();
+        assert_eq!(queue.len(), 2);
+        assert_ne!(queue[0].entry_id, queue[1].entry_id);
+        assert_eq!(queue[0].source_path, shared_url);
+        assert_eq!(queue[1].source_path, shared_url);
+        assert_eq!(queue[0].source_key.as_deref(), Some("first"));
+        assert_eq!(queue[1].source_key.as_deref(), Some("second"));
+        assert!(queue.iter().all(|entry| entry.source_identity == "webdav"));
+
+        let first = db.peek_next_queue_entry("active", None).unwrap().unwrap();
+        let second = db
+            .peek_next_queue_entry("active", Some(first.entry_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.entry_id, queue[0].entry_id);
+        assert_eq!(second.entry_id, queue[1].entry_id);
+
+        db.mark_queue_entry_status("active", first.entry_id, "played")
+            .unwrap();
+        let statuses = db.list_queue_entries("active").unwrap();
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|entry| entry.entry_id == first.entry_id)
+                .unwrap()
+                .status,
+            "played"
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .find(|entry| entry.entry_id == second.entry_id)
+                .unwrap()
+                .status,
+            "queued"
+        );
+        assert_eq!(
+            db.peek_previous_queue_entry("active", Some(second.entry_id))
+                .unwrap()
+                .unwrap()
+                .entry_id,
+            first.entry_id
+        );
+    }
+
+    let _ = fs::remove_file(&db_path);
+    let _ = fs::remove_file(db_path.with_extension("db-wal"));
+    let _ = fs::remove_file(db_path.with_extension("db-shm"));
+}
+
+#[test]
 fn migrations_create_schema_version_and_expected_columns() {
     let db = AppDatabase::in_memory().unwrap();
 
     assert!(db.has_column("library_roots", "source_key").unwrap());
+    assert!(db
+        .has_column("playback_queue_entries", "source_identity")
+        .unwrap());
     assert!(db
         .has_column("playback_queue_entries", "shuffle_index")
         .unwrap());
@@ -1065,7 +1225,7 @@ fn migrations_create_schema_version_and_expected_columns() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
 
     let index_count: i64 = conn
             .query_row(
@@ -1388,13 +1548,13 @@ fn peek_next_queue_entry_uses_effective_shuffle_order() {
     assert_eq!(first.source_path, "D:/music/b.flac");
 
     let next = db
-        .peek_next_queue_entry("active", Some("D:/music/b.flac"))
+        .peek_next_queue_entry("active", Some(first.entry_id))
         .unwrap()
         .unwrap();
     assert_eq!(next.source_path, "D:/music/c.flac");
 
     let previous = db
-        .peek_previous_queue_entry("active", Some("D:/music/c.flac"))
+        .peek_previous_queue_entry("active", Some(next.entry_id))
         .unwrap()
         .unwrap();
     assert_eq!(previous.source_path, "D:/music/b.flac");
@@ -1408,9 +1568,10 @@ fn repeat_all_reset_requeues_played_entries() {
         &["D:/music/a.flac".to_string(), "D:/music/b.flac".to_string()],
     )
     .unwrap();
-    db.mark_queue_entry_status_by_path("active", "D:/music/a.flac", &["queued"], "played")
+    let entries = db.list_queue_entries("active").unwrap();
+    db.mark_queue_entry_status("active", entries[0].entry_id, "played")
         .unwrap();
-    db.mark_queue_entry_status_by_path("active", "D:/music/b.flac", &["queued"], "playing")
+    db.mark_queue_entry_status("active", entries[1].entry_id, "playing")
         .unwrap();
 
     let first = db
@@ -1478,7 +1639,7 @@ fn media_art_lookup_accepts_raw_and_normalized_identity() {
 }
 
 #[test]
-fn queue_cursor_matches_extended_length_windows_paths() {
+fn queue_cursor_uses_exact_entry_id() {
     let db = AppDatabase::in_memory().unwrap();
     db.append_queue_entries(
         "active",
@@ -1489,16 +1650,17 @@ fn queue_cursor_matches_extended_length_windows_paths() {
         ],
     )
     .unwrap();
+    let queue = db.list_queue_entries("active").unwrap();
 
     let next = db
-        .peek_next_queue_entry("active", Some(r"\\?\D:\Music\a.flac"))
+        .peek_next_queue_entry("active", Some(queue[0].entry_id))
         .unwrap()
         .unwrap();
 
     assert_eq!(next.source_path, "D:\\Music\\b.flac");
 
     let previous = db
-        .peek_previous_queue_entry("active", Some(r"\\?\D:\Music\c.flac"))
+        .peek_previous_queue_entry("active", Some(queue[2].entry_id))
         .unwrap()
         .unwrap();
 
@@ -1522,7 +1684,7 @@ fn peek_next_queue_entry_can_advance_to_preloading_entry() {
         .unwrap();
 
     let next = db
-        .peek_next_queue_entry("active", Some("D:/music/a.flac"))
+        .peek_next_queue_entry("active", Some(queue[0].entry_id))
         .unwrap()
         .unwrap();
 
@@ -1717,29 +1879,21 @@ fn file_backed_database_enables_wal_with_normal_synchronous_mode() {
 }
 
 #[test]
-fn mark_queue_entry_status_by_path_supports_dynamic_status_filters() {
+fn queue_entry_status_updates_target_exact_duplicate_entry() {
     let db = AppDatabase::in_memory().unwrap();
 
-    db.append_queue_entry("active", "D:/music/a.flac").unwrap();
-    db.mark_queue_entry_status_by_path("active", "D:/music/a.flac", &[], "playing")
-        .unwrap();
-    let queue = db.list_queue_entries("active").unwrap();
-    assert_eq!(queue[0].status, "playing");
-
-    db.mark_queue_entry_status_by_path("active", "D:/music/a.flac", &["queued"], "skipped")
-        .unwrap();
-    let queue = db.list_queue_entries("active").unwrap();
-    assert_eq!(queue[0].status, "playing");
-
-    db.mark_queue_entry_status_by_path(
+    db.append_queue_entries(
         "active",
-        "D:/music/a.flac",
-        &["queued", "playing", "preloading"],
-        "played",
+        &["D:/music/a.flac".to_string(), "D:/music/a.flac".to_string()],
     )
     .unwrap();
     let queue = db.list_queue_entries("active").unwrap();
-    assert_eq!(queue[0].status, "played");
+    db.mark_queue_entry_status("active", queue[1].entry_id, "played")
+        .unwrap();
+
+    let updated = db.list_queue_entries("active").unwrap();
+    assert_eq!(updated[0].status, "queued");
+    assert_eq!(updated[1].status, "played");
 }
 
 #[test]

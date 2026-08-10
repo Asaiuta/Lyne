@@ -92,7 +92,10 @@ fn webdav_media_belongs_to_root(
                 username: None,
                 password: None,
             };
-            reqwest::Url::parse(&config.resolve_url(root_path)).ok()
+            config
+                .resolve_url(root_path)
+                .ok()
+                .and_then(|url| reqwest::Url::parse(&url).ok())
         })
     });
     let Some(root_url) = root_url else {

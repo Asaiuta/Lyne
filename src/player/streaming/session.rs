@@ -682,7 +682,7 @@ mod tests {
                     intent: StreamOpenIntent::InitialPlayback,
                     path: &self.path,
                     cancel: DecodeCancelToken::new(Arc::new(AtomicBool::new(false))),
-                    credentials: None,
+                    source_access: &crate::player::MediaSourceAccess::public_only(),
                     expected_identity: None,
                     fetch_policy: StreamFetchPolicy::LocalOnly,
                 })

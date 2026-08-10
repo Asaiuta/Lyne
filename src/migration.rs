@@ -6,6 +6,8 @@ const BASELINE_SQL: &str = include_str!("../migrations/001_baseline.sql");
 const INDEXES_SQL: &str = include_str!("../migrations/003_indexes.sql");
 const LIBRARY_ROOT_MEMBERSHIPS_SQL: &str =
     include_str!("../migrations/012_library_root_memberships.sql");
+const QUEUE_ENTRY_SOURCE_KEY_SQL: &str =
+    include_str!("../migrations/013_queue_entry_source_key.sql");
 
 pub fn run_migrations(conn: &mut Connection) -> Result<(), String> {
     run_migrations_with_webdav_fallback(conn, None)
@@ -60,6 +62,9 @@ pub(crate) fn run_migrations_with_webdav_fallback(
     }
     if current < 12 {
         apply_library_root_memberships_migration(conn, webdav_fallback_base_url)?;
+    }
+    if current < 13 {
+        apply_queue_entry_source_key_migration(conn)?;
     }
 
     Ok(())
@@ -198,6 +203,32 @@ fn apply_library_root_memberships_migration(
     })
 }
 
+fn apply_queue_entry_source_key_migration(conn: &mut Connection) -> Result<(), String> {
+    apply_migration_tx(conn, 13, |tx| {
+        if !column_exists(tx, "playback_queue_entries", "source_key")? {
+            tx.execute(
+                "ALTER TABLE playback_queue_entries ADD COLUMN source_key TEXT REFERENCES webdav_sources(source_key) ON DELETE SET NULL",
+                [],
+            )
+            .map_err(|e| format!("Failed to add playback_queue_entries.source_key: {}", e))?;
+        }
+        if !column_exists(tx, "playback_queue_entries", "source_identity")? {
+            tx.execute(
+                "ALTER TABLE playback_queue_entries ADD COLUMN source_identity TEXT NOT NULL DEFAULT 'infer' CHECK (source_identity IN ('infer', 'public', 'webdav'))",
+                [],
+            )
+            .map_err(|e| {
+                format!(
+                    "Failed to add playback_queue_entries.source_identity: {}",
+                    e
+                )
+            })?;
+        }
+        tx.execute_batch(QUEUE_ENTRY_SOURCE_KEY_SQL)
+            .map_err(|e| format!("Failed to create queue source-key index: {}", e))
+    })
+}
+
 fn apply_ncm_accounts_migration(conn: &mut Connection) -> Result<(), String> {
     apply_migration_tx(conn, 7, |tx| {
         tx.execute_batch(
@@ -318,11 +349,127 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         run_migrations(&mut conn).unwrap();
-        conn.execute("DELETE FROM schema_version WHERE version = 12", [])
+        conn.execute("DELETE FROM schema_version WHERE version >= 12", [])
             .unwrap();
         conn.execute("DELETE FROM library_root_memberships", [])
             .unwrap();
         conn
+    }
+
+    #[test]
+    fn queue_source_key_migration_is_applied_and_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 13);
+        let indexed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_index_list('playback_queue_entries') WHERE name = 'idx_playback_queue_entries_source_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed, 1);
+        assert!(column_exists(&conn, "playback_queue_entries", "source_identity").unwrap());
+
+        conn.execute_batch(
+            r#"
+            INSERT INTO webdav_sources
+                (source_key, display_name, base_url, is_default, created_at, updated_at)
+            VALUES ('archive', 'Archive', 'https://dav.example.test/music', 1, 1, 1);
+            INSERT INTO playback_queue_entries
+                (queue_id, position_index, source_path, source_key, media_id, status, added_at, updated_at)
+            VALUES (
+                'active', 0, 'https://dav.example.test/music/song.flac', 'archive',
+                'https://dav.example.test/music/song.flac', 'queued', 1, 1
+            );
+            DELETE FROM webdav_sources WHERE source_key = 'archive';
+            "#,
+        )
+        .unwrap();
+        let source_key: Option<String> = conn
+            .query_row(
+                "SELECT source_key FROM playback_queue_entries WHERE queue_id = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source_key, None);
+        let foreign_key_errors: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_errors, 0);
+
+        run_migrations(&mut conn).unwrap();
+        let versions: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_version WHERE version = 13",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(versions, 1);
+    }
+
+    #[test]
+    fn queue_source_key_migration_preserves_legacy_rows_as_unowned() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE webdav_sources (
+                source_key TEXT PRIMARY KEY
+            );
+            CREATE TABLE playback_queue_entries (
+                entry_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                queue_id      TEXT NOT NULL,
+                position_index INTEGER NOT NULL,
+                shuffle_index INTEGER,
+                source_path   TEXT NOT NULL,
+                media_id      TEXT NOT NULL,
+                status        TEXT NOT NULL,
+                added_at      INTEGER NOT NULL,
+                updated_at    INTEGER NOT NULL
+            );
+            CREATE TABLE schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at INTEGER NOT NULL
+            );
+            INSERT INTO schema_version (version, applied_at) VALUES (12, 1);
+            INSERT INTO playback_queue_entries
+                (queue_id, position_index, source_path, media_id, status, added_at, updated_at)
+            VALUES ('active', 0, 'https://example.test/legacy.flac', 'legacy', 'queued', 1, 1);
+            "#,
+        )
+        .unwrap();
+
+        run_migrations(&mut conn).unwrap();
+
+        assert!(column_exists(&conn, "playback_queue_entries", "source_key").unwrap());
+        let row: (String, Option<String>, String) = conn
+            .query_row(
+                "SELECT source_path, source_key, source_identity FROM playback_queue_entries WHERE queue_id = 'active'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "https://example.test/legacy.flac");
+        assert_eq!(row.1, None);
+        assert_eq!(row.2, "infer");
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 13);
     }
 
     #[test]
@@ -840,7 +987,7 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(version, 12);
+        assert_eq!(version, 13);
         let foreign_key_errors: i64 = conn
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
                 row.get(0)

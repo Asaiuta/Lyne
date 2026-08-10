@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct AutomixCacheKey {
     path: String,
+    source_key: Option<String>,
     mode: crate::processor::AutomixAnalysisMode,
     max_analyze_time_millis: u64,
     len: u64,
@@ -22,16 +23,23 @@ pub(super) async fn analyze_automix_track(
     data: web::Data<Arc<AppState>>,
     body: web::Json<AutomixAnalyzeRequest>,
 ) -> HttpResponse {
-    let path = match validate_path(&body.path) {
-        Ok(p) => p,
+    let resolved = match resolve_media_source(&data.app_db, &body.path, body.source_key.as_deref())
+    {
+        Ok(resolved) => resolved,
         Err(e) => return bad_request_response(e),
     };
+    let path = resolved.path;
     let options = crate::processor::AutomixAnalysisOptions {
         mode: body.mode,
         max_analyze_time_sec: body.max_analyze_time_sec.unwrap_or(60.0),
     }
     .normalized();
-    let cache_key = automix_cache_key(&path, options.mode, options.max_analyze_time_sec);
+    let cache_key = automix_cache_key(
+        &path,
+        resolved.source_key.as_deref(),
+        options.mode,
+        options.max_analyze_time_sec,
+    );
 
     if let Some(cache_key) = cache_key.as_ref() {
         if let Some(analysis) = get_cached_automix(cache_key) {
@@ -43,18 +51,16 @@ pub(super) async fn analyze_automix_track(
         }
     }
 
-    let credentials = {
-        let cfg = data.webdav_config.lock();
-        cfg.http_credentials()
-    };
     let path_for_job = path.clone();
-    let credentials_for_job = credentials.clone();
+    let credentials_for_job = resolved.access.credentials().cloned();
+    let address_policy_for_job = resolved.access.address_policy().clone();
     let options_for_job = options.clone();
 
     let result = run_analysis_job(&data, move |cancel_token| {
-        crate::processor::analyze_automix_with_cancel(
+        crate::processor::analyze_automix_with_http_policy_and_cancel(
             path_for_job,
             credentials_for_job,
+            address_policy_for_job,
             options_for_job,
             Some(cancel_token.decode_token()),
         )
@@ -90,6 +96,7 @@ fn store_cached_automix(key: AutomixCacheKey, analysis: crate::processor::Automi
 
 fn automix_cache_key(
     path: &str,
+    source_key: Option<&str>,
     mode: crate::processor::AutomixAnalysisMode,
     max_analyze_time_sec: f64,
 ) -> Option<AutomixCacheKey> {
@@ -103,6 +110,7 @@ fn automix_cache_key(
 
     Some(AutomixCacheKey {
         path: path.to_string(),
+        source_key: source_key.map(str::to_string),
         mode,
         max_analyze_time_millis: (max_analyze_time_sec * 1_000.0).round() as u64,
         len: metadata.len(),
@@ -126,13 +134,13 @@ mod tests {
         ));
         fs::write(&path, b"head").unwrap();
         let path_str = path.to_string_lossy().to_string();
-        let first = automix_cache_key(&path_str, AutomixAnalysisMode::Full, 60.0).unwrap();
+        let first = automix_cache_key(&path_str, None, AutomixAnalysisMode::Full, 60.0).unwrap();
 
         let mut file = OpenOptions::new().append(true).open(&path).unwrap();
         file.write_all(b"-tail").unwrap();
         file.flush().unwrap();
 
-        let second = automix_cache_key(&path_str, AutomixAnalysisMode::Full, 60.0).unwrap();
+        let second = automix_cache_key(&path_str, None, AutomixAnalysisMode::Full, 60.0).unwrap();
         fs::remove_file(&path).unwrap();
 
         assert_ne!(first, second);
@@ -148,10 +156,29 @@ mod tests {
         fs::write(&path, b"same").unwrap();
         let path_str = path.to_string_lossy().to_string();
 
-        let head = automix_cache_key(&path_str, AutomixAnalysisMode::Head, 60.0).unwrap();
-        let full = automix_cache_key(&path_str, AutomixAnalysisMode::Full, 60.0).unwrap();
+        let head = automix_cache_key(&path_str, None, AutomixAnalysisMode::Head, 60.0).unwrap();
+        let full = automix_cache_key(&path_str, None, AutomixAnalysisMode::Full, 60.0).unwrap();
         fs::remove_file(&path).unwrap();
 
         assert_ne!(head, full);
+    }
+
+    #[test]
+    fn automix_cache_key_separates_source_identities() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "audioplayer-automix-cache-source-{}.tmp",
+            std::process::id()
+        ));
+        fs::write(&path, b"same").unwrap();
+        let path_str = path.to_string_lossy().to_string();
+
+        let first =
+            automix_cache_key(&path_str, Some("first"), AutomixAnalysisMode::Full, 60.0).unwrap();
+        let second =
+            automix_cache_key(&path_str, Some("second"), AutomixAnalysisMode::Full, 60.0).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert_ne!(first, second);
     }
 }

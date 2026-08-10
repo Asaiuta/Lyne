@@ -15,6 +15,7 @@ use super::buffer_budget::{
 use super::callback::normalize_channels;
 use super::loading::cached_loudness_from_db;
 use super::state::{CachedLoudness, SharedState};
+use super::MediaSourceAccess;
 use crate::config::EngineSettings;
 use crate::config::NormalizationMode;
 use crate::decoder::StreamingDecoder;
@@ -34,15 +35,15 @@ impl GaplessManager {
         loudness_normalizer: &Arc<parking_lot::Mutex<crate::processor::LoudnessNormalizer>>,
         config: &EngineSettings,
         path: &str,
-        credentials: Option<crate::decoder::HttpCredentials>,
+        source_access: MediaSourceAccess,
+        pending_queue_entry_id: Option<i64>,
         loudness_enabled: bool,
         normalization_mode: NormalizationMode,
         loudness_db: Option<Arc<LoudnessDatabase>>,
     ) -> Result<(), String> {
         // Ignore if pending buffer is already ready
         if shared.pending_ready.load(Ordering::Relaxed) {
-            log::debug!("Gapless: pending already ready, ignoring queue_next");
-            return Ok(());
+            return Err("Gapless preload is already ready for another request".to_string());
         }
 
         let path = path.to_string();
@@ -62,7 +63,7 @@ impl GaplessManager {
 
         // Reset cancel signal before starting new preload (Defect 31 fix)
         shared.cancel_preload_signal.store(false, Ordering::Release);
-        *shared.pending_file_path.write() = Some(path.clone());
+        shared.publish_pending_preload(path.clone(), pending_queue_entry_id);
 
         let shared_for_error = Arc::clone(shared);
 
@@ -78,13 +79,14 @@ impl GaplessManager {
                 return;
             }
 
-            let cached_loudness = cached_loudness_from_db(loudness_db.as_deref(), &path);
+            let cached_loudness =
+                cached_loudness_from_db(loudness_db.as_deref(), &path, &source_access);
 
             match decode_to_buffer_with_cancel(
                 &path,
                 target_sr,
                 target_channels,
-                credentials.as_ref(),
+                &source_access,
                 &config_clone,
                 &shared_clone,
                 &shared_clone.cancel_preload_signal,
@@ -157,6 +159,12 @@ impl GaplessManager {
                     if !shared_clone.cancel_preload_signal.load(Ordering::Acquire)
                         && shared_clone.preload_generation.load(Ordering::Acquire) == generation
                     {
+                        if shared_clone
+                            .clear_pending_preload_if_matches(&path, pending_queue_entry_id)
+                        {
+                            *shared_clone.pending_metadata.write() = None;
+                            *shared_clone.pending_cached_loudness.write() = None;
+                        }
                         log::error!("Gapless preload failed: {}", e);
                         // Restore needs_preload so frontend can retry
                         shared_for_error
@@ -186,6 +194,7 @@ impl GaplessManager {
         shared.pending_sample_rate.store(44100, Ordering::Relaxed);
         shared.pending_channels.store(2, Ordering::Relaxed);
         *shared.pending_file_path.write() = None;
+        shared.set_pending_queue_entry_id(None);
         *shared.pending_metadata.write() = None;
         *shared.pending_cached_loudness.write() = None;
         shared.pending_ready.store(false, Ordering::Relaxed);
@@ -240,7 +249,7 @@ fn decode_to_buffer_with_cancel(
     path: &str,
     target_sr: u32,
     target_channels: usize,
-    credentials: Option<&crate::decoder::HttpCredentials>,
+    source_access: &MediaSourceAccess,
     config: &EngineSettings,
     shared: &SharedState,
     cancel_signal: &std::sync::atomic::AtomicBool,
@@ -254,8 +263,13 @@ fn decode_to_buffer_with_cancel(
     ),
     String,
 > {
-    let mut decoder =
-        StreamingDecoder::open_with_credentials(path, credentials).map_err(|e| e.to_string())?;
+    let mut decoder = StreamingDecoder::open_with_http_policy(
+        path,
+        source_access.credentials(),
+        source_access.address_policy(),
+        None,
+    )
+    .map_err(|e| e.to_string())?;
 
     let original_sr = decoder.info.sample_rate;
     let decoded_channels = decoder.info.channels;

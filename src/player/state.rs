@@ -8,11 +8,21 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use crossbeam::queue::ArrayQueue;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use super::streaming::memory::DecodedMemoryLease;
+
+fn encode_queue_entry_id(entry_id: Option<i64>) -> i64 {
+    entry_id
+        .filter(|value| *value >= 0)
+        .unwrap_or(NO_QUEUE_ENTRY_ID)
+}
+
+fn decode_queue_entry_id(entry_id: i64) -> Option<i64> {
+    (entry_id >= 0).then_some(entry_id)
+}
 
 // ============ Event Flag Constants (Task E) ============
 
@@ -37,6 +47,7 @@ pub const AUDIO_COMMAND_CODE_STREAMING_LOAD_READY: u64 = 3;
 pub const AUDIO_COMMAND_CODE_ENSURE_PLAYBACK_PROGRESS: u64 = 4;
 pub(crate) const PLAYBACK_PROGRESS_AFTER_PLAY_GRACE_MS: u64 = 300;
 pub(crate) const PLAYBACK_PROGRESS_REPLAY_GRACE_MS: u64 = 150;
+const NO_QUEUE_ENTRY_ID: i64 = -1;
 
 // ============ Commands & State ============
 
@@ -513,6 +524,7 @@ pub struct SharedState {
     pub pending_sample_rate: AtomicU64,
     pub pending_channels: AtomicU64,
     pub pending_file_path: RwLock<Option<String>>,
+    pending_queue_entry_id: AtomicI64,
     pub needs_preload: AtomicBool,
     pub pending_ready: AtomicBool,
     pub dsp_reset_pending: AtomicBool,
@@ -619,6 +631,7 @@ pub struct SharedState {
     /// event_flags because WebSocket handlers consume event_flags with swap().
     pub playback_end_count: AtomicU64,
     pub current_track_path: RwLock<Option<String>>, // Current track for notifications
+    current_queue_entry_id: AtomicI64,
     pub repeat_mode: AtomicU8,
     pub shuffle_mode: AtomicU8,
 
@@ -655,6 +668,54 @@ pub struct SharedState {
 }
 
 impl SharedState {
+    pub(crate) fn current_queue_entry_id(&self) -> Option<i64> {
+        decode_queue_entry_id(self.current_queue_entry_id.load(Ordering::Acquire))
+    }
+
+    pub(crate) fn set_current_queue_entry_id(&self, entry_id: Option<i64>) {
+        self.current_queue_entry_id
+            .store(encode_queue_entry_id(entry_id), Ordering::Release);
+    }
+
+    pub(crate) fn pending_queue_entry_id(&self) -> Option<i64> {
+        decode_queue_entry_id(self.pending_queue_entry_id.load(Ordering::Acquire))
+    }
+
+    pub(crate) fn set_pending_queue_entry_id(&self, entry_id: Option<i64>) {
+        self.pending_queue_entry_id
+            .store(encode_queue_entry_id(entry_id), Ordering::Release);
+    }
+
+    /// Publish the pending path and queue identity under one lock order.
+    /// Cleanup paths use the same order so an older preload cannot clear a
+    /// newer request between publishing the id and path.
+    pub(crate) fn publish_pending_preload(&self, path: String, entry_id: Option<i64>) {
+        let mut pending_path = self.pending_file_path.write();
+        self.set_pending_queue_entry_id(entry_id);
+        *pending_path = Some(path);
+    }
+
+    pub(crate) fn clear_pending_preload_if_matches(
+        &self,
+        path: &str,
+        entry_id: Option<i64>,
+    ) -> bool {
+        let mut pending_path = self.pending_file_path.write();
+        if pending_path.as_deref() != Some(path) || self.pending_queue_entry_id() != entry_id {
+            return false;
+        }
+        self.set_pending_queue_entry_id(None);
+        *pending_path = None;
+        true
+    }
+
+    pub(crate) fn take_pending_queue_entry_id(&self) -> Option<i64> {
+        decode_queue_entry_id(
+            self.pending_queue_entry_id
+                .swap(NO_QUEUE_ENTRY_ID, Ordering::AcqRel),
+        )
+    }
+
     pub fn new() -> Self {
         // Force the monotonic playback clock epoch to initialize here, off the
         // realtime thread, so the first audio-callback read of
@@ -700,6 +761,7 @@ impl SharedState {
             pending_sample_rate: AtomicU64::new(44100),
             pending_channels: AtomicU64::new(2),
             pending_file_path: RwLock::new(None),
+            pending_queue_entry_id: AtomicI64::new(NO_QUEUE_ENTRY_ID),
             needs_preload: AtomicBool::new(false),
             pending_ready: AtomicBool::new(false),
             dsp_reset_pending: AtomicBool::new(false),
@@ -794,6 +856,7 @@ impl SharedState {
             event_flags: std::sync::atomic::AtomicU32::new(0),
             playback_end_count: AtomicU64::new(0),
             current_track_path: RwLock::new(None),
+            current_queue_entry_id: AtomicI64::new(NO_QUEUE_ENTRY_ID),
             repeat_mode: AtomicU8::new(RepeatMode::Off as u8),
             shuffle_mode: AtomicU8::new(ShuffleMode::Off as u8),
 

@@ -24,12 +24,14 @@ pub(super) async fn scan_track_loudness(
     data: web::Data<Arc<AppState>>,
     body: web::Json<LoadRequest>,
 ) -> HttpResponse {
-    let path = match validate_path(&body.path) {
-        Ok(p) => p,
+    let resolved = match resolve_media_source(&data.app_db, &body.path, body.source_key.as_deref())
+    {
+        Ok(resolved) => resolved,
         Err(e) => return bad_request_response(e),
     };
+    let path = resolved.path;
 
-    if let Some(track_loudness) = try_get_cached_loudness(&data, &path) {
+    if let Some(track_loudness) = try_get_cached_loudness(&data, &path, &resolved.access) {
         return HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "source": "cache",
@@ -37,16 +39,11 @@ pub(super) async fn scan_track_loudness(
         }));
     }
 
-    let credentials = {
-        let cfg = data.webdav_config.lock();
-        cfg.http_credentials()
-    };
-
     let path_for_job = path.clone();
-    let credentials_for_job = credentials.clone();
+    let access_for_job = resolved.access;
 
     let result = run_analysis_job(&data, move |cancel_token| {
-        analyze_track_loudness(path_for_job, credentials_for_job, cancel_token)
+        analyze_track_loudness(path_for_job, access_for_job, cancel_token)
     })
     .await;
 
@@ -67,10 +64,13 @@ pub(super) async fn scan_loudness_background(
     data: web::Data<Arc<AppState>>,
     body: web::Json<ScanBackgroundRequest>,
 ) -> HttpResponse {
-    let path = match validate_path(&body.path) {
-        Ok(p) => p,
+    let resolved = match resolve_media_source(&data.app_db, &body.path, body.source_key.as_deref())
+    {
+        Ok(resolved) => resolved,
         Err(e) => return bad_request_response(e),
     };
+    let path = resolved.path;
+    let source_access = resolved.access;
     let store = body.store.unwrap_or(true);
 
     if data.analysis.analysis_semaphore.available_permits() == 0 {
@@ -135,7 +135,9 @@ pub(super) async fn scan_loudness_background(
             return;
         }
 
-        if let Some(track_loudness) = try_get_cached_loudness(&data_for_task, &path_for_task) {
+        if let Some(track_loudness) =
+            try_get_cached_loudness(&data_for_task, &path_for_task, &source_access)
+        {
             if !task_is_canceled(&data_for_task, task_id) {
                 if let Some(task) = data_for_task.analysis.scan_tasks.lock().get_mut(&task_id) {
                     task.status = "success".to_string();
@@ -156,9 +158,10 @@ pub(super) async fn scan_loudness_background(
         }
 
         let path_for_analysis = path_for_task.clone();
+        let access_for_analysis = source_access.clone();
         let result =
             run_analysis_job_with_token(&data_for_task, task_cancel_token, move |cancel_token| {
-                analyze_track_loudness(path_for_analysis, None, cancel_token)
+                analyze_track_loudness(path_for_analysis, access_for_analysis, cancel_token)
             })
             .await;
 

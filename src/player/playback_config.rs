@@ -316,13 +316,14 @@ impl AudioPlayer {
     }
 
     pub fn queue_next(&self, path: &str) -> Result<(), String> {
-        self.queue_next_with_credentials(path, None)
+        self.queue_next_with_source_access(path, &super::MediaSourceAccess::public_only(), None)
     }
 
-    pub fn queue_next_with_credentials(
+    pub(crate) fn queue_next_with_source_access(
         &self,
         path: &str,
-        credentials: Option<crate::decoder::HttpCredentials>,
+        source_access: &super::MediaSourceAccess,
+        pending_queue_entry_id: Option<i64>,
     ) -> Result<(), String> {
         // Streaming-v2 playback: preload through a second windowed session
         // (gapless pending swap) instead of the legacy full-buffer decode.
@@ -332,7 +333,11 @@ impl AudioPlayer {
                 .streaming_v2_enabled
                 .load(Ordering::Acquire)
         {
-            return self.queue_next_streaming_v2(path, credentials);
+            return self.queue_next_streaming_v2(
+                path,
+                source_access.clone(),
+                pending_queue_entry_id,
+            );
         }
         let mode = self.config.loudness.mode;
         GaplessManager::queue_next(
@@ -340,7 +345,8 @@ impl AudioPlayer {
             &self.loudness_normalizer,
             &self.config,
             path,
-            credentials,
+            source_access.clone(),
+            pending_queue_entry_id,
             self.loudness_enabled,
             mode,
             self.loudness_db.clone(),
@@ -353,17 +359,22 @@ impl AudioPlayer {
     fn queue_next_streaming_v2(
         &self,
         path: &str,
-        credentials: Option<crate::decoder::HttpCredentials>,
+        source_access: super::MediaSourceAccess,
+        pending_queue_entry_id: Option<i64>,
     ) -> Result<(), String> {
         if self
             .shared_state
             .streaming_pending_ready
             .load(Ordering::Acquire)
         {
-            log::debug!("Gapless(v2): pending already ready, ignoring queue_next");
-            return Ok(());
+            return Err("Gapless(v2) preload is already ready for another request".to_string());
         }
         let path = path.to_string();
+        let preload_generation = self
+            .shared_state
+            .preload_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
         let generation = self.shared_state.load_generation.load(Ordering::Acquire);
         let config = self.config.clone();
         let cmd_tx = self.cmd_tx.clone();
@@ -372,7 +383,11 @@ impl AudioPlayer {
         // the same slots legacy preload uses; the WS coordinator publishes them
         // when the callback fires EVENT_TRACK_CHANGED at the swap. The lofty
         // parse is blocking file I/O, so it runs inside the preload thread.
-        *shared_state.pending_file_path.write() = Some(path.clone());
+        shared_state
+            .cancel_preload_signal
+            .store(false, Ordering::Release);
+        shared_state.needs_preload.store(false, Ordering::Release);
+        shared_state.publish_pending_preload(path.clone(), pending_queue_entry_id);
         // Force the preload session to the active output format (the callback
         // does not channel-resample on swap; it only switches `channels`).
         let active_sample_rate = self.shared_state.sample_rate.load(Ordering::Acquire) as u32;
@@ -387,7 +402,7 @@ impl AudioPlayer {
                 intent: crate::player::streaming::source::StreamOpenIntent::GaplessPreload,
                 path: std::path::Path::new(&path),
                 cancel: crate::decoder::DecodeCancelToken::new(Arc::clone(&cancel)),
-                credentials: credentials.as_ref(),
+                source_access: &source_access,
                 expected_identity: None,
                 fetch_policy: if super::is_remote_http_path(&path) {
                     StreamFetchPolicy::AllowRemote
@@ -404,6 +419,12 @@ impl AudioPlayer {
             let opened = match result {
                 Ok(opened) => opened,
                 Err(error) => {
+                    clear_failed_streaming_v2_preload(
+                        &shared_state,
+                        preload_generation,
+                        &path,
+                        pending_queue_entry_id,
+                    );
                     log::warn!("Gapless preload(v2) open failed: {}", error);
                     return;
                 }
@@ -437,11 +458,23 @@ impl AudioPlayer {
             {
                 Ok(session) => session,
                 Err(error) => {
+                    clear_failed_streaming_v2_preload(
+                        &shared_state,
+                        preload_generation,
+                        &path,
+                        pending_queue_entry_id,
+                    );
                     log::warn!("Gapless preload(v2) session failed: {}", error);
                     return;
                 }
             };
             if session.channels != active_channels {
+                clear_failed_streaming_v2_preload(
+                    &shared_state,
+                    preload_generation,
+                    &path,
+                    pending_queue_entry_id,
+                );
                 log::warn!(
                     "Gapless preload(v2) channel mismatch (pending {} vs active {}), dropping preload",
                     session.channels,
@@ -449,15 +482,29 @@ impl AudioPlayer {
                 );
                 return;
             }
+            if shared_state.preload_generation.load(Ordering::Acquire) != preload_generation
+                || shared_state.cancel_preload_signal.load(Ordering::Acquire)
+            {
+                log::debug!("Gapless preload(v2) cancelled before install: {}", path);
+                return;
+            }
             log::info!(
                 "Gapless preload(v2) installed: {} (gen {})",
                 path,
                 generation
             );
-            let _ = cmd_tx.send(AudioCommand::InstallPendingStreamingV2Session {
+            if let Err(error) = cmd_tx.send(AudioCommand::InstallPendingStreamingV2Session {
                 generation,
                 session: Box::new(session),
-            });
+            }) {
+                clear_failed_streaming_v2_preload(
+                    &shared_state,
+                    preload_generation,
+                    &path,
+                    pending_queue_entry_id,
+                );
+                log::warn!("Gapless preload(v2) install failed: {}", error);
+            }
         });
         Ok(())
     }
@@ -478,9 +525,18 @@ impl AudioPlayer {
     /// when playback is active and the pending buffer exactly matches the
     /// requested queue entry. Other cases return `Ok(false)` so callers can
     /// fall back to the normal load path.
-    pub fn promote_pending_if_matching(&mut self, expected_path: &str) -> Result<bool, String> {
+    pub fn promote_pending_if_matching(
+        &mut self,
+        expected_path: &str,
+        expected_queue_entry_id: Option<i64>,
+    ) -> Result<bool, String> {
         let loudness_state = self.loudness_normalizer.lock().atomic_state();
-        promote_pending_buffer_if_matching(&self.shared_state, &loudness_state, expected_path)
+        promote_pending_buffer_if_matching(
+            &self.shared_state,
+            &loudness_state,
+            expected_path,
+            expected_queue_entry_id,
+        )
     }
 
     /// Set output bit depth for NoiseShaper
@@ -541,6 +597,27 @@ fn pending_path_matches(pending: &str, expected: &str) -> bool {
     comparable_media_path(pending) == comparable_media_path(expected)
 }
 
+fn clear_failed_streaming_v2_preload(
+    shared: &SharedState,
+    preload_generation: u64,
+    path: &str,
+    pending_queue_entry_id: Option<i64>,
+) -> bool {
+    if shared.preload_generation.load(Ordering::Acquire) != preload_generation {
+        return false;
+    }
+    if !shared.clear_pending_preload_if_matches(path, pending_queue_entry_id) {
+        return false;
+    }
+    if shared.preload_generation.load(Ordering::Acquire) != preload_generation {
+        return false;
+    }
+    *shared.pending_metadata.write() = None;
+    *shared.pending_cached_loudness.write() = None;
+    shared.needs_preload.store(true, Ordering::Release);
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PendingPromotionReadiness {
     Ready,
@@ -552,6 +629,7 @@ pub(crate) enum PendingPromotionReadiness {
 pub(crate) fn pending_promotion_readiness(
     shared: &SharedState,
     expected_path: &str,
+    expected_queue_entry_id: Option<i64>,
 ) -> PendingPromotionReadiness {
     if shared.state.load() != PlayerState::Playing || shared.is_loading.load(Ordering::Acquire) {
         return PendingPromotionReadiness::Unavailable;
@@ -561,6 +639,9 @@ pub(crate) fn pending_promotion_readiness(
         return PendingPromotionReadiness::Unavailable;
     };
     if !pending_path_matches(&pending_path, expected_path) {
+        return PendingPromotionReadiness::Mismatch;
+    }
+    if shared.pending_queue_entry_id() != expected_queue_entry_id {
         return PendingPromotionReadiness::Mismatch;
     }
 
@@ -577,8 +658,11 @@ fn promote_pending_buffer_if_matching(
     shared: &Arc<SharedState>,
     loudness_state: &AtomicLoudnessState,
     expected_path: &str,
+    expected_queue_entry_id: Option<i64>,
 ) -> Result<bool, String> {
-    if pending_promotion_readiness(shared, expected_path) != PendingPromotionReadiness::Ready {
+    if pending_promotion_readiness(shared, expected_path, expected_queue_entry_id)
+        != PendingPromotionReadiness::Ready
+    {
         return Ok(false);
     }
 
@@ -650,6 +734,7 @@ fn promote_pending_buffer_if_matching(
     *shared.current_track_path.write() = Some(pending_path.clone());
     *shared.track_metadata.write() = pending_metadata;
     *shared.current_cached_loudness.write() = pending_cached_loudness;
+    shared.set_current_queue_entry_id(shared.take_pending_queue_entry_id());
     loudness_state.set_target_gain(pending_gain_db);
 
     clear_pending_after_manual_promote(shared);
@@ -674,6 +759,7 @@ fn clear_pending_after_manual_promote(shared: &SharedState) {
     shared.pending_sample_rate.store(44100, Ordering::Relaxed);
     shared.pending_channels.store(2, Ordering::Relaxed);
     *shared.pending_file_path.write() = None;
+    shared.set_pending_queue_entry_id(None);
     *shared.pending_metadata.write() = None;
     *shared.pending_cached_loudness.write() = None;
     shared.pending_ready.store(false, Ordering::Release);
@@ -783,9 +869,13 @@ mod tests {
             .pending_target_gain_db
             .store(3.5_f64.to_bits(), Ordering::Relaxed);
 
-        let promoted =
-            promote_pending_buffer_if_matching(&shared, &loudness_state, r"\\?\D:\Music\next.flac")
-                .expect("promotion should not error");
+        let promoted = promote_pending_buffer_if_matching(
+            &shared,
+            &loudness_state,
+            r"\\?\D:\Music\next.flac",
+            None,
+        )
+        .expect("promotion should not error");
 
         assert!(promoted);
         let current = shared.audio_buffer.load_full();
@@ -834,12 +924,76 @@ mod tests {
         *shared.pending_file_path.write() = Some(r"D:\Music\other.flac".to_string());
         shared.pending_ready.store(true, Ordering::Release);
 
-        let promoted =
-            promote_pending_buffer_if_matching(&shared, &loudness_state, r"D:\Music\next.flac")
-                .expect("promotion should not error");
+        let promoted = promote_pending_buffer_if_matching(
+            &shared,
+            &loudness_state,
+            r"D:\Music\next.flac",
+            None,
+        )
+        .expect("promotion should not error");
 
         assert!(!promoted);
         assert!(shared.pending_ready.load(Ordering::Acquire));
         assert!(shared.pending_buffer.load_full().is_some());
+    }
+
+    #[test]
+    fn manual_promote_rejects_same_path_for_a_different_queue_entry() {
+        let shared = Arc::new(SharedState::new());
+        let loudness_state = AtomicLoudnessState::default();
+        shared.state.store(PlayerState::Playing);
+        shared.sample_rate.store(48_000, Ordering::Relaxed);
+        shared.channels.store(2, Ordering::Relaxed);
+        shared.pending_buffer.store(Some(Arc::new(vec![0.0, 1.0])));
+        shared.pending_total_frames.store(1, Ordering::Relaxed);
+        shared.pending_sample_rate.store(48_000, Ordering::Relaxed);
+        shared.pending_channels.store(2, Ordering::Relaxed);
+        *shared.pending_file_path.write() = Some("https://nas.test/song.flac".to_string());
+        shared.set_pending_queue_entry_id(Some(42));
+        shared.pending_ready.store(true, Ordering::Release);
+
+        let promoted = promote_pending_buffer_if_matching(
+            &shared,
+            &loudness_state,
+            "https://nas.test/song.flac",
+            Some(43),
+        )
+        .expect("identity mismatch should fall back");
+
+        assert!(!promoted);
+        assert_eq!(shared.pending_queue_entry_id(), Some(42));
+        assert!(shared.pending_buffer.load_full().is_some());
+    }
+
+    #[test]
+    fn failed_v2_preload_clears_only_its_owned_pending_identity() {
+        let shared = Arc::new(SharedState::new());
+        shared.preload_generation.store(7, Ordering::Release);
+        shared.publish_pending_preload("https://nas.test/song.flac".to_string(), Some(42));
+        shared.needs_preload.store(false, Ordering::Release);
+
+        assert!(clear_failed_streaming_v2_preload(
+            &shared,
+            7,
+            "https://nas.test/song.flac",
+            Some(42),
+        ));
+        assert_eq!(shared.pending_queue_entry_id(), None);
+        assert_eq!(*shared.pending_file_path.read(), None);
+        assert!(shared.needs_preload.load(Ordering::Acquire));
+
+        shared.preload_generation.store(8, Ordering::Release);
+        shared.publish_pending_preload("https://nas.test/song.flac".to_string(), Some(43));
+        assert!(!clear_failed_streaming_v2_preload(
+            &shared,
+            7,
+            "https://nas.test/song.flac",
+            Some(42),
+        ));
+        assert_eq!(shared.pending_queue_entry_id(), Some(43));
+        assert_eq!(
+            shared.pending_file_path.read().as_deref(),
+            Some("https://nas.test/song.flac")
+        );
     }
 }

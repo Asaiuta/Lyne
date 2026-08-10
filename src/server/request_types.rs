@@ -15,6 +15,7 @@ use crate::player::AudioDeviceInfo;
 pub struct LoadRequest {
     pub(crate) path: String,
     pub(crate) autoplay: Option<bool>,
+    pub(crate) source_key: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -99,14 +100,14 @@ pub struct ConfigureNormalizationRequest {
 pub struct ScanBackgroundRequest {
     pub(crate) path: String,
     pub(crate) store: Option<bool>, // Whether to store in database (default: true)
+    pub(crate) source_key: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct QueueNextRequest {
     pub(crate) path: String,
-    // Optional: WebDAV auth (if path is HTTP URL)
-    pub(crate) username: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) source_key: Option<String>,
+    pub(crate) entry_id: Option<i64>,
 }
 
 #[derive(Deserialize)]

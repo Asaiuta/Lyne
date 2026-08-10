@@ -1,9 +1,9 @@
 use super::lyrics;
 use super::*;
 pub(crate) use queue_state::{
-    append_validated_path_to_persistent_queue, append_validated_paths_to_persistent_queue,
-    load_validated_path_for_playback, mark_current_track_as_played,
-    queue_next_from_persistent_queue,
+    append_queue_entries_with_sources_to_persistent_queue,
+    append_validated_paths_to_persistent_queue, load_public_path_for_playback,
+    load_validated_path_for_playback, mark_queue_entry_as_played, queue_next_from_persistent_queue,
 };
 #[path = "playback/analysis.rs"]
 mod analysis;
@@ -31,6 +31,8 @@ mod queue_handlers;
 mod queue_state;
 #[path = "playback/routes.rs"]
 mod routes;
+#[path = "playback/source_access.rs"]
+mod source_access;
 #[path = "playback/transport.rs"]
 mod transport;
 #[path = "playback/types.rs"]
@@ -49,6 +51,7 @@ use ncm_scrobble::*;
 use playlist_handlers::*;
 use queue_handlers::*;
 use queue_state::*;
+use source_access::*;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

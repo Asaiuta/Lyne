@@ -6,11 +6,6 @@ pub(super) async fn load(
     data: web::Data<Arc<AppState>>,
     body: web::Json<LoadRequest>,
 ) -> HttpResponse {
-    let path = match validate_path(&body.path) {
-        Ok(p) => p,
-        Err(e) => return bad_request_response(e),
-    };
-
     let autoplay = body.autoplay.unwrap_or(false);
     // `load_validated_path_for_playback` is fully synchronous: it acquires the
     // `parking_lot::Mutex<AudioPlayer>` (a `!Send` guard) and performs a decoder
@@ -20,11 +15,14 @@ pub(super) async fn load(
     // released entirely inside the closure (no `.await` there), so the `!Send`
     // guard never crosses an await point.
     let state_for_task = data.get_ref().clone();
+    let path = body.path.clone();
+    let source_key = body.source_key.clone();
     let load_result = actix_web::rt::task::spawn_blocking(move || {
         let data = web::Data::new(state_for_task);
         load_validated_path_for_playback(
             &data,
             &path,
+            source_key.as_deref(),
             autoplay,
             if autoplay { "autoplay" } else { "load" },
         )

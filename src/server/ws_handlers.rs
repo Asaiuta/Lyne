@@ -213,6 +213,8 @@ fn apply_gapless_swap_side_effects(
     data: &web::Data<Arc<AppState>>,
     shared_state: &Arc<crate::player::SharedState>,
 ) {
+    let previous_queue_entry_id = shared_state.current_queue_entry_id();
+    let next_queue_entry_id = shared_state.take_pending_queue_entry_id();
     let next_path = shared_state.pending_file_path.write().take();
     let next_metadata = shared_state.pending_metadata.write().take();
     let next_cached_loudness = shared_state.pending_cached_loudness.write().take();
@@ -250,6 +252,7 @@ fn apply_gapless_swap_side_effects(
     }
     *shared_state.current_cached_loudness.write() = next_cached_loudness;
     *shared_state.current_track_path.write() = next_path.clone();
+    shared_state.set_current_queue_entry_id(next_queue_entry_id);
     if let Some(current_path) = next_path {
         // Both writes below are blocking SQLite upserts with no read-after-write
         // dependence within this tick. Offload them so the 50ms coordinator tick
@@ -258,13 +261,14 @@ fn apply_gapless_swap_side_effects(
         let data_for_task = data.get_ref().clone();
         actix_web::rt::task::spawn_blocking(move || {
             let data = web::Data::new(data_for_task);
-            super::playback::mark_current_track_as_played(&data, &current_path);
-            let _ = data.app_db.mark_queue_entry_status_by_path(
-                "active",
+            super::playback::mark_queue_entry_as_played(
+                &data,
+                previous_queue_entry_id,
                 &current_path,
-                &["preloading", "queued"],
-                "playing",
             );
+            if let Some(entry_id) = next_queue_entry_id {
+                let _ = data.app_db.mark_queue_entry_playing("active", entry_id);
+            }
         });
     }
 }
