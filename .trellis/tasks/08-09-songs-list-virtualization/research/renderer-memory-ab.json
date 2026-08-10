@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "shellPid": 22848,
+    "webviewBrowserPid": 28576,
+    "rendererPid": 36724,
+    "sidecarPid": 37512,
+    "cdpUrl": "http://127.0.0.1:9233",
+    "appUrl": "http://tauri.localhost/"
+  },
+  "protocol": "Same WebView2 renderer; force the old unbounded panel with a task-local style, sample, remove the style, then sample the bounded production layout.",
+  "initialAcceptanceSample": {
+    "precision": "rounded to 0.1 MiB in the original console capture",
+    "forcedUnbounded": {
+      "workingSetMiB": 176.8,
+      "privateBytesMiB": 113.8
+    },
+    "bounded": {
+      "workingSetMiB": 146.9,
+      "privateBytesMiB": 87.6
+    },
+    "delta": {
+      "workingSetMiB": 29.9,
+      "privateBytesMiB": 26.2,
+      "meets25MiBGate": true
+    }
+  },
+  "pairedGcRepeat": {
+    "forcedUnbounded": {
+      "capturedAt": "2026-08-10T08:01:03.8039963Z",
+      "workingSetBytes": 195584000,
+      "privateBytes": 133853184,
+      "workingSetMiB": 186.523,
+      "privateBytesMiB": 127.652,
+      "runtimeEvidence": "runtime-forced-unbounded/songs-list-runtime.json"
+    },
+    "bounded": {
+      "capturedAt": "2026-08-10T08:02:24.9247816Z",
+      "workingSetBytes": 173289472,
+      "privateBytes": 111464448,
+      "workingSetMiB": 165.262,
+      "privateBytesMiB": 106.301,
+      "runtimeEvidence": "runtime-restored/songs-list-runtime.json"
+    },
+    "delta": {
+      "workingSetBytes": 22294528,
+      "privateBytes": 22388736,
+      "workingSetMiB": 21.262,
+      "privateBytesMiB": 21.352,
+      "meets25MiBGate": false
+    },
+    "notes": "Both states were sampled after an explicit CDP HeapProfiler.collectGarbage call. Process memory varied across repeated toggles even though DOM, row and image counts were deterministic."
+  }
+}

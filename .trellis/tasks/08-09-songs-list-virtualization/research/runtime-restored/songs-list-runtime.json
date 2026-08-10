@@ -1,0 +1,397 @@
+{
+  "schemaVersion": 1,
+  "cdpUrl": "http://127.0.0.1:9233",
+  "appUrlPrefix": "http://tauri.localhost/",
+  "initial": {
+    "label": "initial",
+    "capturedAt": "2026-08-10T08:01:17.840Z",
+    "domCounters": {
+      "available": true,
+      "documents": 5,
+      "nodes": 29553,
+      "jsEventListeners": 2852
+    },
+    "jsHeap": {
+      "usedBytes": 38155280,
+      "totalBytes": 39092224
+    },
+    "list": {
+      "href": "http://tauri.localhost/",
+      "viewport": {
+        "virtualized": "true",
+        "clientHeight": 514,
+        "scrollHeight": 53280,
+        "scrollTop": 0
+      },
+      "rendered": {
+        "rowCount": 16,
+        "firstIndexText": "1",
+        "lastIndexText": "16",
+        "imageCount": 31,
+        "decodedImageCount": 31,
+        "selectedRowCount": 0,
+        "currentRowCount": 0
+      },
+      "geometry": {
+        "spacerInlineHeight": "53280px",
+        "rowGroupTransform": "translateY(0px)",
+        "table": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "router": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "panel": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "hidden"
+        },
+        "contentArea": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "auto"
+        }
+      },
+      "document": {
+        "elementCount": 941,
+        "imageCount": 34,
+        "mediaRowCount": 16
+      }
+    }
+  },
+  "middle": {
+    "label": "middle",
+    "capturedAt": "2026-08-10T08:01:18.697Z",
+    "domCounters": {
+      "available": true,
+      "documents": 7,
+      "nodes": 4778,
+      "jsEventListeners": 660
+    },
+    "jsHeap": {
+      "usedBytes": 17231940,
+      "totalBytes": 40927232
+    },
+    "list": {
+      "href": "http://tauri.localhost/",
+      "viewport": {
+        "virtualized": "true",
+        "clientHeight": 514,
+        "scrollHeight": 53280,
+        "scrollTop": 26383
+      },
+      "rendered": {
+        "rowCount": 16,
+        "firstIndexText": "289",
+        "lastIndexText": "304",
+        "imageCount": 21,
+        "decodedImageCount": 21,
+        "selectedRowCount": 1,
+        "currentRowCount": 0
+      },
+      "geometry": {
+        "spacerInlineHeight": "53280px",
+        "rowGroupTransform": "translateY(25920px)",
+        "table": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "router": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "panel": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "hidden"
+        },
+        "contentArea": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "auto"
+        }
+      },
+      "document": {
+        "elementCount": 930,
+        "imageCount": 24,
+        "mediaRowCount": 16
+      }
+    }
+  },
+  "scrollSweep": [
+    {
+      "ratio": 0.1,
+      "href": "http://tauri.localhost/",
+      "viewport": {
+        "virtualized": "true",
+        "clientHeight": 514,
+        "scrollHeight": 53280,
+        "scrollTop": 5277
+      },
+      "rendered": {
+        "rowCount": 16,
+        "firstIndexText": "54",
+        "lastIndexText": "69",
+        "imageCount": 23,
+        "decodedImageCount": 23,
+        "selectedRowCount": 0,
+        "currentRowCount": 0
+      },
+      "geometry": {
+        "spacerInlineHeight": "53280px",
+        "rowGroupTransform": "translateY(4770px)",
+        "table": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "router": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "panel": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "hidden"
+        },
+        "contentArea": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "auto"
+        }
+      },
+      "document": {
+        "elementCount": 933,
+        "imageCount": 26,
+        "mediaRowCount": 16
+      }
+    },
+    {
+      "ratio": 0.25,
+      "href": "http://tauri.localhost/",
+      "viewport": {
+        "virtualized": "true",
+        "clientHeight": 514,
+        "scrollHeight": 53280,
+        "scrollTop": 13192
+      },
+      "rendered": {
+        "rowCount": 16,
+        "firstIndexText": "142",
+        "lastIndexText": "157",
+        "imageCount": 23,
+        "decodedImageCount": 23,
+        "selectedRowCount": 0,
+        "currentRowCount": 0
+      },
+      "geometry": {
+        "spacerInlineHeight": "53280px",
+        "rowGroupTransform": "translateY(12690px)",
+        "table": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "router": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "panel": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "hidden"
+        },
+        "contentArea": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "auto"
+        }
+      },
+      "document": {
+        "elementCount": 933,
+        "imageCount": 26,
+        "mediaRowCount": 16
+      }
+    },
+    {
+      "ratio": 0.5,
+      "href": "http://tauri.localhost/",
+      "viewport": {
+        "virtualized": "true",
+        "clientHeight": 514,
+        "scrollHeight": 53280,
+        "scrollTop": 26383
+      },
+      "rendered": {
+        "rowCount": 16,
+        "firstIndexText": "289",
+        "lastIndexText": "304",
+        "imageCount": 21,
+        "decodedImageCount": 21,
+        "selectedRowCount": 1,
+        "currentRowCount": 0
+      },
+      "geometry": {
+        "spacerInlineHeight": "53280px",
+        "rowGroupTransform": "translateY(25920px)",
+        "table": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "router": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "panel": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "hidden"
+        },
+        "contentArea": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "auto"
+        }
+      },
+      "document": {
+        "elementCount": 930,
+        "imageCount": 24,
+        "mediaRowCount": 16
+      }
+    },
+    {
+      "ratio": 0.75,
+      "href": "http://tauri.localhost/",
+      "viewport": {
+        "virtualized": "true",
+        "clientHeight": 514,
+        "scrollHeight": 53280,
+        "scrollTop": 39575
+      },
+      "rendered": {
+        "rowCount": 16,
+        "firstIndexText": "435",
+        "lastIndexText": "450",
+        "imageCount": 22,
+        "decodedImageCount": 22,
+        "selectedRowCount": 0,
+        "currentRowCount": 0
+      },
+      "geometry": {
+        "spacerInlineHeight": "53280px",
+        "rowGroupTransform": "translateY(39060px)",
+        "table": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "router": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "panel": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "hidden"
+        },
+        "contentArea": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "auto"
+        }
+      },
+      "document": {
+        "elementCount": 932,
+        "imageCount": 25,
+        "mediaRowCount": 16
+      }
+    },
+    {
+      "ratio": 0.9,
+      "href": "http://tauri.localhost/",
+      "viewport": {
+        "virtualized": "true",
+        "clientHeight": 514,
+        "scrollHeight": 53280,
+        "scrollTop": 47489
+      },
+      "rendered": {
+        "rowCount": 16,
+        "firstIndexText": "523",
+        "lastIndexText": "538",
+        "imageCount": 23,
+        "decodedImageCount": 23,
+        "selectedRowCount": 0,
+        "currentRowCount": 0
+      },
+      "geometry": {
+        "spacerInlineHeight": "53280px",
+        "rowGroupTransform": "translateY(46980px)",
+        "table": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "router": {
+          "clientHeight": 554,
+          "scrollHeight": 554,
+          "rectHeight": 554,
+          "overflowY": "hidden"
+        },
+        "panel": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "hidden"
+        },
+        "contentArea": {
+          "clientHeight": 710,
+          "scrollHeight": 710,
+          "rectHeight": 710,
+          "overflowY": "auto"
+        }
+      },
+      "document": {
+        "elementCount": 933,
+        "imageCount": 26,
+        "mediaRowCount": 16
+      }
+    }
+  ]
+}

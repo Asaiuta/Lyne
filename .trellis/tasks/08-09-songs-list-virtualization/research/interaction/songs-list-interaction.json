@@ -1,0 +1,88 @@
+{
+  "capturedAt": "2026-08-10T07:49:10.001Z",
+  "selection": {
+    "targetIndex": "294",
+    "targetTitle": "争流口岸",
+    "awayWindow": {
+      "scrollTop": 39575,
+      "clientHeight": 514,
+      "rowCount": 16,
+      "firstIndex": "435",
+      "lastIndex": "450",
+      "selectedIndexes": [],
+      "currentRowCount": 0
+    },
+    "returnedWindow": {
+      "scrollTop": 26383,
+      "clientHeight": 514,
+      "rowCount": 16,
+      "firstIndex": "289",
+      "lastIndex": "304",
+      "selectedIndexes": [
+        "294"
+      ],
+      "currentRowCount": 0
+    }
+  },
+  "contextMenu": {
+    "x": 724,
+    "y": 311,
+    "width": 190.166015625,
+    "height": 427.190185546875,
+    "viewport": {
+      "width": 1220,
+      "height": 780
+    }
+  },
+  "wheelWindows": [
+    {
+      "scrollTop": 437,
+      "clientHeight": 514,
+      "rowCount": 16,
+      "firstIndex": "1",
+      "lastIndex": "16",
+      "selectedIndexes": [],
+      "currentRowCount": 0
+    },
+    {
+      "scrollTop": 874,
+      "clientHeight": 514,
+      "rowCount": 16,
+      "firstIndex": "5",
+      "lastIndex": "20",
+      "selectedIndexes": [],
+      "currentRowCount": 0
+    },
+    {
+      "scrollTop": 1311,
+      "clientHeight": 514,
+      "rowCount": 16,
+      "firstIndex": "10",
+      "lastIndex": "25",
+      "selectedIndexes": [],
+      "currentRowCount": 0
+    },
+    {
+      "scrollTop": 1748,
+      "clientHeight": 514,
+      "rowCount": 16,
+      "firstIndex": "15",
+      "lastIndex": "30",
+      "selectedIndexes": [],
+      "currentRowCount": 0
+    },
+    {
+      "scrollTop": 2185,
+      "clientHeight": 514,
+      "rowCount": 16,
+      "firstIndex": "20",
+      "lastIndex": "35",
+      "selectedIndexes": [],
+      "currentRowCount": 0
+    }
+  ],
+  "playbackRow": {
+    "status": "not-applicable",
+    "reason": "measurement sidecar had no active track"
+  }
+}
