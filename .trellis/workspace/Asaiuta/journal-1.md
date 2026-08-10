@@ -688,3 +688,37 @@ commit 106e417 · 任务 08-09-streaming-v2-window-default 待归档。
   20× 跨窗 seek 无回归。跨窗 seek 不受影响（重置同一窗口）。
 - 注意：gapless 声音真实性首次被验证（rebind 到新窗口）；880Hz/440Hz tone 对照是
   这次发现假象的关键手段。
+
+
+## Session 13: Songs list virtualization closeout
+
+**Date**: 2026-08-10
+**Task**: Songs list virtualization closeout
+**Branch**: `feat/desktop-lyric`
+
+### Summary
+
+Bounded the library viewport, verified 592-to-16-row virtualization and about 30 MiB renderer savings, and recorded runtime evidence.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `59e13d0b` | (see git log) |
+| `68de3d1a` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
