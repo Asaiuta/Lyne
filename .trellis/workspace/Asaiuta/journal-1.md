@@ -756,3 +756,44 @@ Aligned the frontend streaming PCM window fallback to 128 MiB, synchronized mode
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: WebDAV credential-origin binding closeout
+
+**Date**: 2026-08-11
+**Task**: WebDAV credential-origin binding closeout
+**Branch**: `feat/desktop-lyric`
+
+### Summary
+
+Bound WebDAV Basic Auth to persisted source identity, enforced same-origin href/redirect policy, persisted queue source ownership, and validated 428 tests.
+
+### Main Changes
+
+- Added typed `MediaSourceAccess` and persisted queue source identity so
+  credentials and destination policy cannot be separated.
+- Enforced configured WebDAV origin/collection boundaries for hrefs and
+  redirects, including multi-source and public playlist handling.
+- Pinned `audio-engine-core` revision
+  `5389c32f66c52c2d0b870acdeae4b20cf9c9de47`.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a275babb` | (see git log) |
+
+### Testing
+
+- `cargo check --locked --tests` passed.
+- `cargo test --locked`: 428/428 passed.
+- `cargo clippy --locked --lib --tests --message-format=short` exited 0.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Resume `07-02-server-fetch-hardening` after removing WebDAV boundaries
+  already closed by this task from its residual scope.
