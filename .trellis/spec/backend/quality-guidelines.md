@@ -512,6 +512,103 @@ playback is inactive or the audio thread exits.
 
 ---
 
+## Resample cache bulk I/O contract
+
+### 1. Scope / Trigger
+
+Apply this contract when changing decoded/resampled PCM disk-cache serialization
+in `src/player/cache.rs`. A cache hit must not replace decoder/resampler work
+with millions of 8-byte filesystem calls.
+
+### 2. Signatures
+
+```rust
+pub fn save_cache_with_header(
+    path: &Path,
+    samples: &[f64],
+    sample_rate: u32,
+    channels: u32,
+) -> std::io::Result<()>;
+
+pub fn load_cache_with_header(
+    path: &Path,
+    expected_sr: u32,
+    expected_ch: u32,
+) -> Option<Vec<f64>>;
+```
+
+### 3. Contracts
+
+- Convert and transfer samples in reusable bounded chunks. The conversion
+  buffer must not exceed 8 MiB and must never scale to the whole track.
+- Do not call `File::write_all` or `File::read_exact` once per sample. Bulk I/O
+  must happen at the encoded chunk boundary.
+- V1 payload samples remain little-endian `f64` bytes and CRC32 covers the
+  payload bytes in file order.
+- Preserve the current bytes when the optimized implementation can do so
+  directly. Do not add a legacy slow path or migration adapter merely for
+  compatibility. If a future requirement truly changes the format, bump the
+  version and invalidate the disposable cache instead of accumulating readers.
+- Keep file I/O off the realtime audio callback; cache load/save belongs to the
+  existing background load path.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Zero channels or samples not divisible by channels | Save returns `InvalidInput` |
+| Magic, version, sample rate, or channel mismatch | Load rejects the cache |
+| Frame/sample arithmetic overflow | Load rejects before allocation |
+| File length differs from header layout | Load rejects before payload decode |
+| Truncated chunk read | Load rejects without publishing partial samples |
+| Payload CRC mismatch | Load rejects the complete decoded buffer |
+
+### 5. Good/Base/Bad Cases
+
+- Good: one 1 MiB conversion buffer is reused for chunked writes and one for
+  chunked reads; old V1 bytes load without a production compatibility branch.
+- Base: a small cache uses one right-sized chunk and preserves the same header,
+  payload bytes, and CRC.
+- Bad: wrapping the file while retaining per-sample conversion/I/O calls, or
+  reading the whole encoded track into a second track-sized byte vector.
+
+### 6. Tests Required
+
+- Compare the optimized writer against the legacy V1 byte shape across at least
+  one full chunk boundary plus a partial tail.
+- Load legacy V1 bytes through the optimized reader across the same boundary.
+- Reject checksum corruption, truncation, invalid layouts, and arithmetic
+  overflow.
+- Run the ignored 100 MiB cache benchmark before and after on the same host and
+  profile. Record all trials and medians; keep the change only when save and load
+  both materially improve.
+- Run `cargo test --lib` and check Clippy output for new warnings in the touched
+  module.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+for sample in samples {
+    file.write_all(&sample.to_le_bytes())?;
+}
+```
+
+#### Correct
+
+```rust
+for sample_chunk in samples.chunks(CHUNK_SAMPLES) {
+    encoded.clear();
+    for sample in sample_chunk {
+        encoded.extend_from_slice(&sample.to_le_bytes());
+    }
+    file.write_all(&encoded)?;
+}
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit tests
