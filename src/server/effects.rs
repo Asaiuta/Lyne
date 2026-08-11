@@ -101,9 +101,6 @@ async fn configure_optimizations(
             return crate::server::settings_handlers::audio_settings_error_response(error);
         }
     }
-    if let Some(replaygain_enabled) = body.replaygain_enabled {
-        data.player.lock().replaygain_enabled = replaygain_enabled;
-    }
     success_response("Optimizations updated")
 }
 

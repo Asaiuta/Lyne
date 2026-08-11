@@ -84,7 +84,6 @@ pub struct SetEqTypeRequest {
 #[derive(Deserialize)]
 pub struct ConfigureOptimizationsRequest {
     pub(crate) dither_enabled: Option<bool>,
-    pub(crate) replaygain_enabled: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -179,6 +178,8 @@ pub struct StateResponse {
     pub(crate) exclusive_mode: bool,
     pub(crate) eq_type: String,
     pub(crate) dither_enabled: bool,
+    /// Compatibility read field derived from `NormalizationMode`; it has no
+    /// independent runtime owner.
     pub(crate) replaygain_enabled: bool,
     pub(crate) loudness_enabled: bool,
     // Loudness normalization extended fields

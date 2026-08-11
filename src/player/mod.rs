@@ -104,7 +104,6 @@ pub struct AudioPlayer {
     // Config
     pub exclusive_mode: bool,
     pub dither_enabled: bool,
-    pub replaygain_enabled: bool,
     pub loudness_enabled: bool,
 
     // FIR EQ emulation state (maps FIR API onto lock-free EQ runtime)
@@ -282,7 +281,6 @@ impl AudioPlayer {
             dynamic_loudness_telemetry,
             exclusive_mode,
             dither_enabled,
-            replaygain_enabled: true,
             loudness_enabled,
             fir_eq_enabled: false,
             fir_taps,

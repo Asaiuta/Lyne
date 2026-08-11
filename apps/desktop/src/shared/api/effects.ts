@@ -54,7 +54,6 @@ export interface SetEqTypeInput {
 
 export interface ConfigureOptimizationsInput {
   dither_enabled?: boolean;
-  replaygain_enabled?: boolean;
 }
 
 export interface CrossfeedSettings {

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app_database::{AppDatabase, PlaybackRuntimeSnapshot};
+use crate::config::{normalization_mode_to_string, NormalizationMode};
 use crate::player::{AudioPlayer, PlayerState};
 
 use super::{AppState, ScanTaskRecord, StateResponse};
@@ -36,13 +37,12 @@ pub(crate) fn get_player_state(player: &AudioPlayer) -> StateResponse {
 
     // Get loudness normalization info
     let loudness_info = player.get_loudness_info();
-    let loudness_mode = match player.get_normalization_mode() {
-        crate::config::NormalizationMode::Track => "track".to_string(),
-        crate::config::NormalizationMode::Album => "album".to_string(),
-        crate::config::NormalizationMode::Streaming => "streaming".to_string(),
-        crate::config::NormalizationMode::ReplayGainTrack => "replaygain_track".to_string(),
-        crate::config::NormalizationMode::ReplayGainAlbum => "replaygain_album".to_string(),
-    };
+    let normalization_mode = player.get_normalization_mode();
+    let loudness_mode = normalization_mode_to_string(normalization_mode);
+    let replaygain_enabled = matches!(
+        normalization_mode,
+        NormalizationMode::ReplayGainTrack | NormalizationMode::ReplayGainAlbum
+    );
 
     // Get saturation info
     let saturation_info = player.get_saturation_info();
@@ -72,7 +72,7 @@ pub(crate) fn get_player_state(player: &AudioPlayer) -> StateResponse {
         exclusive_mode: player.exclusive_mode,
         eq_type,
         dither_enabled: player.dither_enabled,
-        replaygain_enabled: player.replaygain_enabled,
+        replaygain_enabled,
         loudness_enabled: player.loudness_enabled,
         // Loudness normalization extended fields
         loudness_mode,
@@ -335,5 +335,27 @@ mod tests {
             state.ncm_source_page_url.as_deref(),
             Some("https://music.163.com/#/song?id=12345")
         );
+    }
+
+    #[test]
+    fn replaygain_state_is_derived_from_normalization_mode() {
+        let mut player = AudioPlayer::new(crate::config::EngineSettings::default());
+
+        for mode in [
+            NormalizationMode::Track,
+            NormalizationMode::Album,
+            NormalizationMode::Streaming,
+        ] {
+            player.set_normalization_mode(mode);
+            assert!(!get_player_state(&player).replaygain_enabled);
+        }
+
+        for mode in [
+            NormalizationMode::ReplayGainTrack,
+            NormalizationMode::ReplayGainAlbum,
+        ] {
+            player.set_normalization_mode(mode);
+            assert!(get_player_state(&player).replaygain_enabled);
+        }
     }
 }
