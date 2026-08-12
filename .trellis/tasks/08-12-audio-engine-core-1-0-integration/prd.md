@@ -66,16 +66,25 @@ persistence behavior remains valid under the new typed contracts.
 
 ## Acceptance Criteria
 
-- [ ] No production, test, or benchmark target references removed core APIs.
-- [ ] `cargo metadata --locked --no-deps` resolves the target revision.
-- [ ] Root fmt and clippy gates pass without unrelated worktree changes.
-- [ ] Root workspace tests pass with required SoXR native libraries; any local
-  limitation is recorded with its exact command and error.
-- [ ] Relevant callback, decoder, resampler, convolver, and playback benchmark
-  gates pass without unexplained regressions.
-- [ ] The independent Tauri crate still checks, tests, and links as required.
-- [ ] `Cargo.toml` and `Cargo.lock` point to the target commit and the final
-  diff contains no unrelated changes.
+- [x] No production, test, or benchmark target references removed core APIs.
+- [x] `cargo metadata --locked --no-deps` resolves the target revision.
+- [x] Root fmt and clippy gates pass without unrelated worktree changes.
+- [x] Root workspace tests pass with required SoXR native libraries; any local
+  limitation is recorded with its exact command and error. 445 passed, 0 failed,
+  1 ignored; no SoXR limitation was hit.
+- [x] Relevant callback, decoder, resampler, convolver, and playback benchmark
+  gates pass without unexplained regressions. Callback chain, callback output
+  path, and resampler streaming all report `bench_gate verdict=passed
+  mode=check`, and the output-path bench reports zero deadline misses.
+  `audio_convolver_perf` is report-only (no gate spec) and improved over its
+  legacy path. These are integrity verdicts, not device or end-to-end latency
+  evidence.
+- [x] The independent Tauri crate still checks, tests, and links as required:
+  `cargo check --all-targets` 0 errors, `cargo test` 19 passed. Its pre-existing
+  `main.rs` fmt drift is untouched by this task.
+- [x] `Cargo.toml` and `Cargo.lock` point to the target commit and the final
+  diff contains no unrelated changes; the `Cargo.toml` diff is exactly the one
+  revision line.
 
 ## Explicitly Out Of Scope
 

@@ -689,6 +689,20 @@ commit 106e417 · 任务 08-09-streaming-v2-window-default 待归档。
 - 注意：gapless 声音真实性首次被验证（rebind 到新窗口）；880Hz/440Hz tone 对照是
   这次发现假象的关键手段。
 
+## 2026-08-10 WebView2 托盘隐藏销毁主窗口（destroy-on-hide）
+
+- 背景：实测确认 Lyne 自身 WebView2 单环境单树（browser+renderer+gpu+utils ≈ 202-444 MB）；歌词窗口已按 label 分流轻量化（main.tsx）；最小化对 WebView2 内存无影响（804→818 MB）；微软三项中"环境共享"已满足。
+- 决策（用户拍板）：点 X 进托盘时销毁主窗口 webview，托盘点击重建。
+- 实现（apps/desktop/src-tauri/src/main.rs，commit 2f2f3261）：
+  - CloseRequested(main) → prevent_close + 存 outer_position/inner_size（MainWindowGeometry state）→ destroy；
+  - ExitRequested 在 MAIN_HIDDEN_IN_TRAY 时 prevent_exit（sidecar 继续播放）；
+  - 托盘新增"退出 Lyne"菜单（清除标志后 app.exit 走 RunEvent::Exit → shutdown_backends）；
+  - restore_main_window：窗口不存在时 WebviewWindowBuilder 重建（1220x780/min 980x640/无装饰）+ 几何恢复 + debug 下 open_devtools；
+  - main Destroyed 仍连带关闭 desktop-lyric。
+- 实测：WM_CLOSE 后 Lyne WebView2 树 360 MB → 0 MB，app 与 audio_server 存活（端口 5582 持续监听），日志无 panic。
+- 遗留：托盘点击恢复路径自动化受 Win11 托盘结构限制（UIA 不可见/ToolbarWindow32 缺失/Win+B 遍历未命中），待用户手动验证。
+- 任务：08-10-desktop-tray-destroy-webview（子任务，挂 memory-optimize-execution 父任务）；验收 5/6，恢复项待手动验证。
+
 
 ## Session 13: Songs list virtualization closeout
 
@@ -797,3 +811,106 @@ Bound WebDAV Basic Auth to persisted source identity, enforced same-origin href/
 
 - Resume `07-02-server-fetch-hardening` after removing WebDAV boundaries
   already closed by this task from its residual scope.
+
+## Session 16: audio-engine-core 1.0.1 integration closeout
+
+### Scope
+
+Task `08-12-audio-engine-core-1-0-integration`. Migrate AudioPlayer from
+`5389c32f` to `af589988` (`1.0.1`) and move every call site to the stable 1.0
+API. This was a source migration, not a version bump: the target exposed ~93
+library and ~121 test/bench errors.
+
+### What Changed
+
+- Typed `MediaLocation` decoder/loudness inputs through `MediaSourceAccess`;
+  `LoudnessSourceIdentity` for cache and persistence keys.
+- New `src/player/resample_stream.rs` as the single driver over the core's
+  caller-owned `StreamingProcessor` resampler contract. The realtime callback
+  reuses its preallocated reserve and stays allocation-free.
+- Fallible `DspChain` / limiter / dynamic loudness / noise shaper construction,
+  propagated at all five build sites.
+- `ConvolverControl` replaces the `ArcSwapOption` kernel slot, with disposal
+  kept on the control thread.
+- Removed HTTP-policy APIs replaced by the app-owned remote-fetch boundary.
+
+### Two Real Bugs Found During Verification
+
+The migration compiled, passed 442 tests, and passed every bench gate while
+still containing an inaudible-convolution bug. Both were found by review, not
+by the suite.
+
+1. `build_dsp_chain` never published the chain rate to its stages.
+   `DspChain::add` validates the rate but does not propagate it, and
+   `ConvolverProcessor` defaults to 44_100 Hz and silently passes audio through
+   on a kernel-rate mismatch. IR/FIR convolution was inaudible at 48/96 kHz —
+   the common Windows shared-mode default — on every chain, including the
+   rebuild that fires on each track load. Core's own
+   `OutputChainBuilder::build_callback_chain` closes this with
+   `chain.set_sample_rate(...)`; the app's builder omitted it.
+2. The convolver registry pruned by `ConvolverControl::is_quiescent()`. That is
+   core's teardown check for a *stopped* publisher set and is also true for a
+   live-but-idle chain with no kernel yet. Registering a second chain evicted
+   the playing one, so a later IR load published into nothing. Registration
+   lifetime now follows the owning chain through an app-owned liveness flag on
+   a `TrackedConvolverProcessor` wrapper.
+
+Also fixed: `dsp_stage_error_count` was write-only while its doc comments
+claimed it was surfaced; it is now a `PlaybackDiagnostics` field.
+
+### Lesson: a passing realtime test can be tautological
+
+My first regression test for bug 2 asserted only non-silence after publishing a
+**unit** impulse. Two independent reasons it could never fail:
+
+- a convolver with no kernel is a **passthrough**, not silence;
+- a single-frame unit impulse is the identity filter.
+
+`no_kernel`, `unit_ir`, and `quarter_ir` all produced byte-identical output. The
+test passed while the convolver did nothing, which is exactly how bug 1 survived
+the whole migration. Realtime DSP tests must baseline against the no-kernel
+passthrough output and use a non-identity kernel. I now verify a new regression
+test by removing the fix and watching it fail before trusting it.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `16221794` | feat(deps): integrate audio-engine-core 1.0.1 |
+
+### Testing
+
+- `cargo check --lib` and `--all-targets`: 0 errors.
+- `cargo fmt --all -- --check` pass; `cargo clippy --workspace --all-targets
+  --locked` 0 errors.
+- `cargo test --workspace --locked`: 445 passed, 0 failed, 1 ignored.
+- `audio_callback_chain_perf`, `audio_callback_output_path_perf`,
+  `audio_resampler_streaming_perf`: all `verdict=passed mode=check`;
+  output-path reports zero deadline misses. Check-mode proves measurement
+  integrity, not device or end-to-end latency.
+- Tauri crate: `cargo check --all-targets` 0 errors, `cargo test` 19 passed.
+
+### Spec Updates
+
+- New DSP chain construction contract and shared resample driver contract in
+  `backend/quality-guidelines.md`.
+- `backend/remote-fetch-boundaries.md`: removed `HttpAddressPolicy`, corrected
+  the owning revision, and recorded that core 1.0.1 policy is unconditional, so
+  a LAN/private WebDAV source can no longer be opened.
+- `backend/directory-structure.md`: `audio-engine-core` is an external pinned
+  git dependency, not a workspace member; `AudioProcessor` is now
+  `StreamingProcessor` + `FixedInPlaceProcessor`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- `07-02-build-ci-hygiene` still owns removing the dead `pyo3`/`numpy`
+  dependencies and the `python` feature. A sub-agent deleted them here; I
+  restored them to keep this diff to the one revision line.
+- Accepted residual: convolver drop ordering is safe by current call sites, not
+  by construction. The liveness flag clears before the inner processor's drop
+  completes, so a future chain drop from the audio thread or a worker needs a
+  re-check.
