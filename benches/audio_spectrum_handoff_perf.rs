@@ -197,7 +197,8 @@ fn measure_background_accumulate_analyze_publish(frames: usize, iterations: usiz
 
     let batch = synthetic_batch(frames);
     let mut buffer = Vec::with_capacity(FFT_SIZE);
-    let mut analyzer = SpectrumAnalyzer::new(FFT_SIZE, NUM_BINS);
+    let mut analyzer =
+        SpectrumAnalyzer::new(FFT_SIZE, NUM_BINS).expect("valid benchmark spectrum analyzer");
     let start = Instant::now();
 
     for _ in 0..iterations {
@@ -214,12 +215,19 @@ fn measure_background_accumulate_analyze_publish(frames: usize, iterations: usiz
 
 fn measure_analyzer_only(iterations: usize) -> Report {
     let samples = synthetic_mono(FFT_SIZE);
-    let mut analyzer = SpectrumAnalyzer::new(FFT_SIZE, NUM_BINS);
-    analyzer.analyze(&samples, SAMPLE_RATE);
+    let mut analyzer =
+        SpectrumAnalyzer::new(FFT_SIZE, NUM_BINS).expect("valid benchmark spectrum analyzer");
+    analyzer
+        .analyze(&samples, SAMPLE_RATE)
+        .expect("benchmark analyze");
 
     let start = Instant::now();
     for _ in 0..iterations {
-        black_box(analyzer.analyze(black_box(&samples), SAMPLE_RATE));
+        black_box(
+            analyzer
+                .analyze(black_box(&samples), SAMPLE_RATE)
+                .expect("benchmark analyze"),
+        );
     }
 
     let elapsed = start.elapsed();
@@ -248,7 +256,9 @@ fn consume_batch(
             continue;
         }
 
-        let spectrum = analyzer.analyze(buffer, SAMPLE_RATE);
+        let spectrum = analyzer
+            .analyze(buffer, SAMPLE_RATE)
+            .expect("benchmark analyze");
         shared.spectrum_data.store(Arc::new(spectrum.to_vec()));
         buffer.clear();
     }

@@ -4,9 +4,8 @@
 //! All parameter updates use atomic operations, eliminating lock contention
 //! between the audio thread and main thread.
 
-use arc_swap::ArcSwapOption;
 use crossbeam::channel::Sender;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use super::spectrum::{SpectrumBatch, SPECTRUM_BATCH_CAPACITY};
@@ -21,13 +20,15 @@ use super::streaming::memory::DecodedMemoryOwner;
 use super::streaming::rt_view::{
     AppliedWindowSeek, StreamingRtView, WindowSeekKind, WindowSeekResult,
 };
+use crate::player::resample_stream;
 use crate::processor::{
-    AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
-    AtomicEqParams, AtomicLoudnessState, AtomicNoiseShaperParams, AtomicPeakLimiterParams,
-    AtomicSaturationParams, AtomicVolumeParams, AudioProcessor, ConvolverProcessor,
-    CrossfeedProcessor, DspChain, DynamicLoudnessProcessor, EqProcessor, FFTConvolver,
-    NoiseShaperProcessor, PeakLimiterProcessor, SaturationProcessor, StreamingResampler,
-    VolumeProcessor,
+    process_checked, AtomicCrossfeedParams, AtomicDynamicLoudnessParams,
+    AtomicDynamicLoudnessTelemetry, AtomicEqParams, AtomicLoudnessState, AtomicNoiseShaperParams,
+    AtomicPeakLimiterParams, AtomicSaturationParams, AtomicVolumeParams, AudioBlockMut,
+    ConvolverControl, ConvolverProcessor, CrossfeedProcessor, DspChain, DynamicLoudnessProcessor,
+    EqProcessor, FFTConvolver, FixedInPlaceProcessor, NoiseShaperProcessor, PeakLimiterProcessor,
+    ProcessBuffers, ProcessError, ProcessProgress, SaturationProcessor, StreamingProcessor,
+    StreamingResampler, VolumeProcessor,
 };
 
 pub const AUDIO_PROCESS_BUFFER_FRAMES: usize = 8192;
@@ -107,12 +108,13 @@ impl CallbackScratch {
     /// Grow the `resample_leftover` reserve off the audio thread so a single
     /// resampler output chunk can never reallocate inside the callback.
     ///
-    /// Per-call Soxr output is now capped to the naive ratio bound (the resampler
-    /// slices its scratch), so the reserve is driven by
-    /// `StreamingResampler::max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels)`
-    /// — the output ceiling for the largest input chunk the render loop feeds in
-    /// one call. Call this whenever a resampler is attached to this scratch (off
-    /// the realtime path); it is a no-op once the capacity is already large enough.
+    /// Per-call resampler output is bounded by the core's exact rational
+    /// ceiling plus backend burst allowance, so the reserve is driven by
+    /// `resample_stream::max_output_samples_for_input(resampler,
+    /// AUDIO_PROCESS_BUFFER_FRAMES, channels)` — the output ceiling for the
+    /// largest input chunk the render loop feeds in one call. Call this whenever
+    /// a resampler is attached to this scratch (off the realtime path); it is a
+    /// no-op once the capacity is already large enough.
     pub fn reserve_resample_leftover(&mut self, max_chunk_samples: usize) {
         if max_chunk_samples > self.resample_leftover.capacity() {
             let additional = max_chunk_samples - self.resample_leftover.len();
@@ -382,7 +384,9 @@ fn refresh_streaming_scratch_generation(
     }
     clear_streaming_scratch(shared, scratch);
     if let Some(ref mut rs) = resampler {
-        rs.reset();
+        if rs.reset().is_err() {
+            shared.mark_dsp_stage_error();
+        }
     }
     // A new generation restarts the consumed-frame playhead. Seed it from the
     // absolute output position this generation resumes at (`position_frames`)
@@ -503,6 +507,110 @@ fn downmix_multichannel(samples: &[f64], from: usize, to: usize) -> Option<Vec<f
 ///                    v
 ///               resampler → NoiseShaper → output
 /// ```
+/// `ConvolverProcessor` plus an application-owned liveness flag.
+///
+/// `ConvolverControl::is_quiescent()` is core's teardown check for a *stopped*
+/// publisher set; it also returns `true` for a control whose consumer is very
+/// much alive but simply idle (enabled false, no published/retired kernel). Core
+/// exposes no public liveness signal — `consumer_active` is private and its
+/// `ConsumerLease` only clears inside `ConvolverProcessor::drop`. Probing core
+/// state therefore cannot distinguish "consumer gone" from "consumer idle", and
+/// pruning the registry on `is_quiescent()` silently forgets a live chain, after
+/// which a later IR/FIR load publishes into nothing and convolution goes
+/// inaudible.
+///
+/// So the app tracks liveness itself. This wrapper owns the real convolver
+/// consumer, so it is moved, parked, and dropped exactly with it — including
+/// when the audio thread swaps a chain out and `RetiredAudioResource::Chain`
+/// frees it on the control thread. Its `Drop` clears the shared flag, which is
+/// the only signal [`LockfreeDspContext`] prunes on. Every trait method
+/// delegates unchanged and `name()` still reports `"Convolver"`, so the chain's
+/// stage identity and canonical order are unaffected.
+struct TrackedConvolverProcessor {
+    inner: ConvolverProcessor,
+    alive: Arc<AtomicBool>,
+}
+
+impl Drop for TrackedConvolverProcessor {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::Release);
+    }
+}
+
+impl StreamingProcessor for TrackedConvolverProcessor {
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+
+    fn process(&mut self, buffers: ProcessBuffers<'_>) -> Result<ProcessProgress, ProcessError> {
+        self.inner.process(buffers)
+    }
+
+    fn finish(&mut self, output: AudioBlockMut<'_>) -> Result<ProcessProgress, ProcessError> {
+        self.inner.finish(output)
+    }
+
+    fn reset(&mut self) -> Result<(), ProcessError> {
+        self.inner.reset()
+    }
+
+    fn latency(&self) -> crate::processor::FrameDuration {
+        self.inner.latency()
+    }
+
+    fn tail(&self) -> crate::processor::TailSpec {
+        self.inner.tail()
+    }
+
+    fn tail_energy_observation_barrier(&self) -> bool {
+        self.inner.tail_energy_observation_barrier()
+    }
+
+    fn output_sample_rate_hz(&self, input_sample_rate_hz: u32) -> Result<u32, ProcessError> {
+        self.inner.output_sample_rate_hz(input_sample_rate_hz)
+    }
+
+    fn set_sample_rate(&mut self, sample_rate_hz: u32) -> Result<(), ProcessError> {
+        self.inner.set_sample_rate(sample_rate_hz)
+    }
+}
+
+impl FixedInPlaceProcessor for TrackedConvolverProcessor {}
+
+/// A registered chain's convolver control plus the state needed to publish into
+/// it and to know when its owning chain is gone.
+struct RegisteredConvolver {
+    control: ConvolverControl,
+    sample_rate_hz: u32,
+    /// Cleared by `TrackedConvolverProcessor::drop` when the chain is freed.
+    chain_alive: Arc<AtomicBool>,
+}
+
+impl RegisteredConvolver {
+    fn chain_is_alive(&self) -> bool {
+        self.chain_alive.load(Ordering::Acquire)
+    }
+}
+
+/// One built DSP chain's convolver registration, returned by
+/// [`LockfreeDspContext::build_dsp_chain`]. The caller must hand it to
+/// [`LockfreeDspContext::register_convolver_control`] before installing the
+/// chain for playback, so published kernels reach that chain and its retired
+/// kernels are reclaimed off the audio thread.
+pub struct ConvolverChainRegistration {
+    control: ConvolverControl,
+    chain_alive: Arc<AtomicBool>,
+}
+
+impl ConvolverChainRegistration {
+    /// Clone the control-plane handle so a test or diagnostic can observe the
+    /// same control the chain's audio consumer uses.
+    #[cfg(test)]
+    pub fn control(&self) -> ConvolverControl {
+        self.control.clone()
+    }
+}
+
 pub struct LockfreeDspContext {
     /// Lock-free parameter references (shared with main thread, read atomically)
     pub eq_params: Arc<AtomicEqParams>,
@@ -513,10 +621,22 @@ pub struct LockfreeDspContext {
     pub noise_shaper_params: Arc<AtomicNoiseShaperParams>,
     pub dynamic_loudness_params: Arc<AtomicDynamicLoudnessParams>,
 
-    /// Merged convolver — updated via ArcSwap (wait-free pointer swap from main thread,
-    /// wait-free load from audio thread). No Mutex needed.
-    pub merged_convolver: Arc<ArcSwapOption<FFTConvolver>>,
-    pub merged_convolver_enabled: Arc<AtomicBool>,
+    /// Control handles of every live `ConvolverProcessor` built for this context
+    /// (main chain, WASAPI chain, fallback chains, rebuilds). The core owns the
+    /// wait-free publish/adopt/retire hand-off; the publisher clones the handle
+    /// per chain, publishes merged kernels into every live control, and reclaims
+    /// retired kernels here so the audio thread never frees one. An entry is
+    /// removed only after its owning chain has actually been dropped, tracked by
+    /// [`ConvolverChainLiveness`] rather than by probing core state. Only
+    /// touched from non-realtime paths.
+    convolver_controls: parking_lot::Mutex<Vec<RegisteredConvolver>>,
+
+    /// Control-plane enabled state mirrored onto every new control handle.
+    convolver_enabled: AtomicBool,
+
+    /// Sample rate of the currently published kernel domain, so a chain built
+    /// later can be seeded with the same kernel. Zero means no kernel.
+    convolver_published_rate_hz: AtomicU32,
 
     /// IR kernel sources — only accessed from non-realtime command handling path.
     /// Protected by Mutex because they are only read/written from the audio thread's
@@ -524,20 +644,20 @@ pub struct LockfreeDspContext {
     external_ir_kernel: parking_lot::Mutex<Option<(Vec<f64>, usize)>>,
     fir_ir_kernel: parking_lot::Mutex<Option<(Vec<f64>, usize)>>,
 
-    /// Disposal slots of every `ConvolverProcessor` built for this context
-    /// (main chain, WASAPI chain, fallback chains, rebuilds). The audio thread
-    /// parks retired kernels in its chain's slot; per the core contract at most
-    /// two park before further kernel adoptions are deferred, so the publisher
-    /// must drain these before installing a new kernel. Only touched from
-    /// non-realtime paths.
-    convolver_disposal_slots: parking_lot::Mutex<Vec<Arc<ArcSwapOption<FFTConvolver>>>>,
+    /// Merged interleaved IR kept so a chain built after publication can adopt
+    /// the same kernel. Only touched from non-realtime paths.
+    merged_ir_kernel: parking_lot::Mutex<Option<(Vec<f64>, usize)>>,
 }
 
 impl LockfreeDspContext {
+    /// Build a DSP chain plus the convolver registration that owns its kernel
+    /// hand-off. The caller must register it with
+    /// [`Self::register_convolver_control`] so published kernels reach this chain
+    /// and its retired kernels are reclaimed off the audio thread.
     #[allow(clippy::too_many_arguments)]
     pub fn build_dsp_chain(
         channels: usize,
-        sample_rate: f64,
+        sample_rate: u32,
         eq_params: Arc<AtomicEqParams>,
         saturation_params: Arc<AtomicSaturationParams>,
         crossfeed_params: Arc<AtomicCrossfeedParams>,
@@ -546,35 +666,81 @@ impl LockfreeDspContext {
         _noise_shaper_params: Arc<AtomicNoiseShaperParams>,
         dynamic_loudness_params: Arc<AtomicDynamicLoudnessParams>,
         dynamic_loudness_telemetry: Arc<AtomicDynamicLoudnessTelemetry>,
-        convolver_swap: Arc<ArcSwapOption<FFTConvolver>>,
-        convolver_enabled: Arc<AtomicBool>,
-    ) -> (DspChain, Arc<ArcSwapOption<FFTConvolver>>) {
+        convolver_enabled: bool,
+    ) -> Result<(DspChain, ConvolverChainRegistration), String> {
         // Stage order follows audio-engine-core's canonical output chain
         // (`canonical_output_stage_descriptors`): Volume → EQ → Saturation →
         // Crossfeed → Convolver → DynamicLoudness → PeakLimiter. NoiseShaper is
         // intentionally NOT added here: the realtime path applies it separately
         // after resampling (at the output rate) via `final_noise_shaper`, so it
         // must not also live inside the source-rate DSP chain.
-        let mut chain = DspChain::with_capacity(7, sample_rate);
-        chain.add(VolumeProcessor::new(volume_params));
-        chain.add(EqProcessor::new(channels, sample_rate, eq_params));
-        chain.add(SaturationProcessor::new(channels, saturation_params));
-        chain.add(CrossfeedProcessor::new(sample_rate, crossfeed_params));
-        let convolver = ConvolverProcessor::new(convolver_swap, convolver_enabled);
-        let convolver_disposal = convolver.disposal_slot();
-        chain.add(convolver);
-        chain.add(DynamicLoudnessProcessor::new(
-            channels,
-            sample_rate as u32,
-            dynamic_loudness_params,
-            dynamic_loudness_telemetry,
-        ));
-        chain.add(PeakLimiterProcessor::new(
-            channels,
-            sample_rate as u32,
-            limiter_params,
-        ));
-        (chain, convolver_disposal)
+        let sample_rate_f64 = sample_rate as f64;
+        let mut chain = DspChain::with_capacity(7, sample_rate)
+            .map_err(|error| format!("Failed to create DSP chain: {error}"))?;
+        chain
+            .add(VolumeProcessor::new(volume_params))
+            .map_err(|error| format!("Failed to add volume stage: {error}"))?;
+        chain
+            .add(EqProcessor::new(channels, sample_rate_f64, eq_params))
+            .map_err(|error| format!("Failed to add EQ stage: {error}"))?;
+        chain
+            .add(SaturationProcessor::new(channels, saturation_params))
+            .map_err(|error| format!("Failed to add saturation stage: {error}"))?;
+        chain
+            .add(CrossfeedProcessor::new(sample_rate_f64, crossfeed_params))
+            .map_err(|error| format!("Failed to add crossfeed stage: {error}"))?;
+
+        let convolver_control = ConvolverControl::new(convolver_enabled);
+        let convolver = ConvolverProcessor::new(convolver_control.clone())
+            .map_err(|error| format!("Failed to create convolver stage: {error}"))?;
+        // The liveness flag must be owned by the chain, not derived from core
+        // state, so the registry can tell an idle live chain from a dropped one.
+        let chain_alive = Arc::new(AtomicBool::new(true));
+        chain
+            .add(TrackedConvolverProcessor {
+                inner: convolver,
+                alive: Arc::clone(&chain_alive),
+            })
+            .map_err(|error| format!("Failed to add convolver stage: {error}"))?;
+
+        chain
+            .add(
+                DynamicLoudnessProcessor::new(
+                    channels,
+                    sample_rate,
+                    dynamic_loudness_params,
+                    dynamic_loudness_telemetry,
+                )
+                .map_err(|error| format!("Failed to create dynamic loudness stage: {error}"))?,
+            )
+            .map_err(|error| format!("Failed to add dynamic loudness stage: {error}"))?;
+        chain
+            .add(
+                PeakLimiterProcessor::new(channels, sample_rate, limiter_params)
+                    .map_err(|error| format!("Failed to create limiter stage: {error}"))?,
+            )
+            .map_err(|error| format!("Failed to add limiter stage: {error}"))?;
+
+        // `DspChain::add` validates that each stage is 1:1 at the chain rate but
+        // does NOT push that rate into the stage. Stages that carry their own
+        // rate state and were not given one at construction therefore start in
+        // core's internal default domain (`ConvolverProcessor::new` hardcodes
+        // 44_100 Hz). The convolver compares its kernel's rate against that
+        // stale field and silently passes audio through on every mismatch, so a
+        // chain built at any other rate would never convolve. Core's own
+        // `OutputChainBuilder::build_callback_chain` closes the same gap with
+        // this call after adding its stages; mirror it here.
+        chain
+            .set_sample_rate(sample_rate)
+            .map_err(|error| format!("Failed to set DSP chain sample rate: {error}"))?;
+
+        Ok((
+            chain,
+            ConvolverChainRegistration {
+                control: convolver_control,
+                chain_alive,
+            },
+        ))
     }
 
     /// Create a new lock-free DSP context.
@@ -585,7 +751,7 @@ impl LockfreeDspContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         channels: usize,
-        sample_rate: f64,
+        sample_rate: u32,
         eq_params: Arc<AtomicEqParams>,
         saturation_params: Arc<AtomicSaturationParams>,
         crossfeed_params: Arc<AtomicCrossfeedParams>,
@@ -594,10 +760,8 @@ impl LockfreeDspContext {
         noise_shaper_params: Arc<AtomicNoiseShaperParams>,
         dynamic_loudness_params: Arc<AtomicDynamicLoudnessParams>,
         dynamic_loudness_telemetry: Arc<AtomicDynamicLoudnessTelemetry>,
-    ) -> (Self, DspChain) {
-        let merged_convolver = Arc::new(ArcSwapOption::empty());
-        let merged_convolver_enabled = Arc::new(AtomicBool::new(false));
-        let (chain, convolver_disposal) = Self::build_dsp_chain(
+    ) -> Result<(Self, DspChain), String> {
+        let (chain, convolver_registration) = Self::build_dsp_chain(
             channels,
             sample_rate,
             Arc::clone(&eq_params),
@@ -608,9 +772,8 @@ impl LockfreeDspContext {
             Arc::clone(&noise_shaper_params),
             Arc::clone(&dynamic_loudness_params),
             Arc::clone(&dynamic_loudness_telemetry),
-            Arc::clone(&merged_convolver),
-            Arc::clone(&merged_convolver_enabled),
-        );
+            false,
+        )?;
 
         let ctx = Self {
             eq_params,
@@ -620,46 +783,98 @@ impl LockfreeDspContext {
             volume_params,
             noise_shaper_params,
             dynamic_loudness_params,
-            merged_convolver,
-            merged_convolver_enabled,
+            convolver_controls: parking_lot::Mutex::new(vec![RegisteredConvolver {
+                control: convolver_registration.control,
+                sample_rate_hz: sample_rate,
+                chain_alive: convolver_registration.chain_alive,
+            }]),
+            convolver_enabled: AtomicBool::new(false),
+            convolver_published_rate_hz: AtomicU32::new(0),
             external_ir_kernel: parking_lot::Mutex::new(None),
             fir_ir_kernel: parking_lot::Mutex::new(None),
-            convolver_disposal_slots: parking_lot::Mutex::new(vec![convolver_disposal]),
+            merged_ir_kernel: parking_lot::Mutex::new(None),
         };
 
-        (ctx, chain)
+        Ok((ctx, chain))
     }
 
-    /// Track a chain's convolver disposal slot so retired kernels get drained.
-    /// Every caller of [`Self::build_dsp_chain`] that installs the chain for
-    /// playback must register the returned slot here. Slots whose processor is
-    /// gone and that hold no kernel are pruned on the way in.
-    pub fn register_convolver_disposal_slot(&self, slot: Arc<ArcSwapOption<FFTConvolver>>) {
-        let mut slots = self.convolver_disposal_slots.lock();
-        slots.retain(|s| Arc::strong_count(s) > 1 || s.load().is_some());
-        slots.push(slot);
+    /// Track a chain's convolver control so published kernels reach it and its
+    /// retired kernels are reclaimed off the audio thread. Every caller of
+    /// [`Self::build_dsp_chain`] that installs the chain for playback must
+    /// register its returned [`ConvolverChainRegistration`] here together with
+    /// the chain's sample rate.
+    ///
+    /// Entries are pruned only once their owning chain has actually been
+    /// dropped, which the chain itself reports through
+    /// `TrackedConvolverProcessor::drop`. A live-but-idle chain — built but with
+    /// no IR loaded yet — must survive, otherwise a later IR/FIR load would
+    /// publish into nothing and convolution would silently stop. A pruned entry
+    /// is also drained first so its last retired kernel is freed here rather
+    /// than leaking with the registration.
+    ///
+    /// The currently merged kernel is published into the new control so a chain
+    /// built after a kernel load still convolves.
+    pub fn register_convolver_control(
+        &self,
+        registration: ConvolverChainRegistration,
+        sample_rate_hz: u32,
+    ) {
+        let ConvolverChainRegistration {
+            control,
+            chain_alive,
+        } = registration;
+
+        let enabled = self.convolver_enabled.load(Ordering::Acquire);
+        control.set_enabled(enabled);
+
+        let merged = self.merged_ir_kernel.lock().clone();
+        if let Some((ir, channels)) = merged {
+            match FFTConvolver::new(&ir, channels) {
+                Ok(kernel) => {
+                    if let Err(error) = control.publish_at_rate(kernel, sample_rate_hz) {
+                        log::warn!("Failed to seed convolver kernel for new chain: {error}");
+                    }
+                }
+                Err(error) => {
+                    log::warn!("Failed to build convolver kernel for new chain: {error}");
+                }
+            }
+        }
+
+        let mut controls = self.convolver_controls.lock();
+        controls.retain(|existing| {
+            if existing.chain_is_alive() {
+                return true;
+            }
+            // The consumer is gone, so nothing will adopt or retire again; drain
+            // whatever it parked before dropping the registration.
+            while existing.control.reclaim_retired() {}
+            false
+        });
+        controls.push(RegisteredConvolver {
+            control,
+            sample_rate_hz,
+            chain_alive,
+        });
     }
 
-    /// Drain retired kernels parked by the audio thread. Called from
-    /// non-realtime paths before publishing a new kernel so the large
-    /// deallocations happen here, and so kernel adoption never stalls on a
-    /// full disposal slot (core parks at most two retirees).
-    fn drain_retired_convolver_kernels(&self) {
-        for slot in self.convolver_disposal_slots.lock().iter() {
-            drop(slot.swap(None));
+    /// Reclaim kernels retired by the audio thread. Called from non-realtime
+    /// paths before publishing a new kernel so the large deallocations happen
+    /// here, and so kernel adoption never stalls on retirement backpressure.
+    fn reclaim_retired_convolver_kernels(&self) {
+        for registered in self.convolver_controls.lock().iter() {
+            while registered.control.reclaim_retired() {}
         }
     }
 
     fn rebuild_merged_convolver(&self) -> Result<(), String> {
-        self.drain_retired_convolver_kernels();
+        self.reclaim_retired_convolver_kernels();
         let external = self.external_ir_kernel.lock().clone();
         let fir = self.fir_ir_kernel.lock().clone();
 
         let merged = match (external, fir) {
             (None, None) => None,
-            (Some((ir, channels)), None) | (None, Some((ir, channels))) => {
-                Some(Arc::new(FFTConvolver::new(&ir, channels)))
-            }
+            (Some((ir, channels)), None) | (None, Some((ir, channels))) => Some((ir, channels)),
             (Some((external_ir, ext_channels)), Some((fir_ir, fir_channels))) => {
                 if ext_channels != fir_channels {
                     return Err(format!(
@@ -669,27 +884,47 @@ impl LockfreeDspContext {
                 }
 
                 let merged_ir = convolve_interleaved_ir(&external_ir, &fir_ir, ext_channels)?;
-                Some(Arc::new(FFTConvolver::new(&merged_ir, ext_channels)))
+                Some((merged_ir, ext_channels))
             }
         };
 
-        // Wait-free pointer swap — audio callback will pick up new convolver
-        // on next invocation via ArcSwap::load()
+        // The core owns the wait-free hand-off: the control publishes, the audio
+        // consumer adopts, and retired kernels come back here for disposal. Each
+        // live chain gets its own kernel instance in its own rate domain.
+        *self.merged_ir_kernel.lock() = merged.clone();
         match merged {
-            Some(conv) => {
-                // Publish the pointer before flipping the flag so a reader that
-                // observes `enabled == true` is guaranteed to also see the convolver.
-                self.merged_convolver.store(Some(conv));
-                self.merged_convolver_enabled.store(true, Ordering::Release);
+            Some((ir, channels)) => {
+                let controls = self.convolver_controls.lock();
+                let mut published_rate = 0u32;
+                for registered in controls.iter() {
+                    let kernel = FFTConvolver::new(&ir, channels)
+                        .map_err(|error| format!("Failed to build convolver kernel: {error}"))?;
+                    registered
+                        .control
+                        .publish_at_rate(kernel, registered.sample_rate_hz)
+                        .map_err(|error| format!("Failed to publish convolver kernel: {error}"))?;
+                    published_rate = registered.sample_rate_hz;
+                }
+                // Publish the kernel before enabling so a consumer that observes
+                // `enabled == true` is guaranteed to also find a kernel.
+                for registered in controls.iter() {
+                    registered.control.set_enabled(true);
+                }
+                self.convolver_enabled.store(true, Ordering::Release);
+                self.convolver_published_rate_hz
+                    .store(published_rate, Ordering::Release);
             }
             None => {
-                // Clear the flag before dropping the pointer so a reader never
-                // observes `enabled == true` with an absent convolver.
-                self.merged_convolver_enabled
-                    .store(false, Ordering::Release);
-                self.merged_convolver.store(None);
+                // Disable before dropping so a consumer never observes
+                // `enabled == true` with no kernel.
+                self.convolver_enabled.store(false, Ordering::Release);
+                self.convolver_published_rate_hz.store(0, Ordering::Release);
+                for registered in self.convolver_controls.lock().iter() {
+                    registered.control.set_enabled(false);
+                }
             }
         }
+        self.reclaim_retired_convolver_kernels();
         Ok(())
     }
 
@@ -767,13 +1002,89 @@ impl LockfreeDspContext {
     pub fn noise_shaper_params(&self) -> &Arc<AtomicNoiseShaperParams> {
         &self.noise_shaper_params
     }
+
+    /// Control-plane convolver enabled state, used to seed a chain built later.
+    pub fn convolver_is_enabled(&self) -> bool {
+        self.convolver_enabled.load(Ordering::Acquire)
+    }
+
+    /// Number of chains currently registered to receive published kernels.
+    #[cfg(test)]
+    fn registered_convolver_count(&self) -> usize {
+        self.convolver_controls.lock().len()
+    }
 }
 
-fn output_sample_rate(shared: &SharedState, resampler: &Option<StreamingResampler>) -> f64 {
+/// Output-domain noise shaper plus the lock-free parameter handle used to read
+/// its enabled state.
+///
+/// `audio-engine-core` 1.0 removed `NoiseShaperProcessor::refresh_is_enabled()`:
+/// the adapter now syncs its snapshot inside `process`. The callback still has
+/// to pick an output path before processing, so it reads the same lock-free
+/// parameter source the adapter will observe. Reading an atomic snapshot is
+/// allocation-free and lock-free, so it is safe on the audio thread.
+pub struct FinalNoiseShaper {
+    processor: NoiseShaperProcessor,
+    params: Arc<AtomicNoiseShaperParams>,
+}
+
+impl FinalNoiseShaper {
+    /// Build the output-domain shaper for `channels` at `sample_rate_hz`.
+    pub fn new(
+        channels: usize,
+        sample_rate_hz: u32,
+        params: Arc<AtomicNoiseShaperParams>,
+    ) -> Result<Self, String> {
+        let processor = NoiseShaperProcessor::new(channels, sample_rate_hz, Arc::clone(&params))
+            .map_err(|error| format!("Failed to create output noise shaper: {error}"))?;
+        Ok(Self { processor, params })
+    }
+
+    /// Read the control-plane enabled state the adapter will observe.
+    pub fn is_enabled(&self) -> bool {
+        self.params.is_enabled()
+    }
+
+    /// Apply output-domain shaping in place over one complete interleaved block.
+    pub fn process_in_place(
+        &mut self,
+        samples: &mut [f64],
+        channels: usize,
+    ) -> Result<(), crate::processor::ProcessError> {
+        let block = AudioBlockMut::new(samples, channels)?;
+        let _ = process_checked(&mut self.processor, ProcessBuffers::in_place(block))?;
+        Ok(())
+    }
+}
+/// Resample one processed source chunk into the preallocated leftover buffer.
+///
+/// `audio-engine-core` 1.0 requires caller-owned output storage, so the render
+/// loop reuses `scratch.resample_leftover` as that storage: the loop always
+/// drains and clears it first, and its capacity is reserved off the realtime
+/// thread by [`CallbackScratch::reserve_resample_leftover`]. Growing back to the
+/// existing capacity and truncating afterwards therefore neither allocates nor
+/// frees inside the callback.
+///
+/// Returns the number of interleaved output samples now held in `leftover`.
+fn resample_chunk_into_leftover(
+    resampler: &mut StreamingResampler,
+    input: &[f64],
+    leftover: &mut Vec<f64>,
+    channels: usize,
+) -> Result<usize, crate::processor::ProcessError> {
+    let capacity = leftover.capacity();
+    leftover.clear();
+    leftover.resize(capacity, 0.0);
+    let produced = resample_stream::resample_into(resampler, input, leftover, channels)?;
+    leftover.truncate(produced);
+    Ok(produced)
+}
+
+fn output_sample_rate(shared: &SharedState, resampler: &Option<StreamingResampler>) -> u32 {
     resampler
         .as_ref()
-        .map(|rs| rs.to_rate() as f64)
-        .unwrap_or_else(|| shared.sample_rate.load(Ordering::Relaxed).max(1) as f64)
+        .map(|rs| rs.to_rate())
+        .unwrap_or_else(|| shared.sample_rate.load(Ordering::Relaxed).max(1) as u32)
 }
 
 fn convolve_interleaved_ir(a: &[f64], b: &[f64], channels: usize) -> Result<Vec<f64>, String> {
@@ -875,7 +1186,7 @@ fn publish_callback_position_after_precheck(
 fn rebuild_dsp_chain_if_requested(
     shared: &SharedState,
     dsp_chain: &mut DspChain,
-    mut final_noise_shaper: Option<&mut NoiseShaperProcessor>,
+    mut final_noise_shaper: Option<&mut FinalNoiseShaper>,
     resampler: &Option<StreamingResampler>,
 ) {
     if shared
@@ -892,21 +1203,29 @@ fn rebuild_dsp_chain_if_requested(
         let retired_chain = std::mem::replace(dsp_chain, new_chain);
         shared.retire_audio_resource(RetiredAudioResource::Chain(retired_chain));
     } else {
-        let new_sr = shared.sample_rate.load(Ordering::Relaxed).max(1) as f64;
-        dsp_chain.set_sample_rate(new_sr);
-        dsp_chain.reset();
+        // The audio thread must never panic (error-handling.md): a rejected rate
+        // or a stage-level failure leaves the previous chain state in place and
+        // is recorded as a DSP error for the diagnostics plane.
+        let new_sr = shared.sample_rate.load(Ordering::Relaxed).max(1) as u32;
+        if dsp_chain.set_sample_rate(new_sr).is_err() || dsp_chain.reset().is_err() {
+            shared.mark_dsp_stage_error();
+        }
     }
 
     if let Some(noise_shaper) = final_noise_shaper.as_deref_mut() {
-        noise_shaper.set_sample_rate(output_sample_rate(shared, resampler));
-        noise_shaper.reset();
+        let output_rate = output_sample_rate(shared, resampler);
+        if noise_shaper.processor.set_sample_rate(output_rate).is_err()
+            || noise_shaper.processor.reset().is_err()
+        {
+            shared.mark_dsp_stage_error();
+        }
     }
 }
 
 fn reset_dsp_state_if_requested(
     shared: &SharedState,
     dsp_chain: &mut DspChain,
-    mut final_noise_shaper: Option<&mut NoiseShaperProcessor>,
+    mut final_noise_shaper: Option<&mut FinalNoiseShaper>,
     resampler: &mut Option<StreamingResampler>,
     scratch: &mut CallbackScratch,
 ) {
@@ -918,12 +1237,18 @@ fn reset_dsp_state_if_requested(
         return;
     }
 
-    dsp_chain.reset();
+    if dsp_chain.reset().is_err() {
+        shared.mark_dsp_stage_error();
+    }
     if let Some(noise_shaper) = final_noise_shaper.as_deref_mut() {
-        noise_shaper.reset();
+        if noise_shaper.processor.reset().is_err() {
+            shared.mark_dsp_stage_error();
+        }
     }
     if let Some(ref mut rs) = resampler {
-        rs.reset();
+        if rs.reset().is_err() {
+            shared.mark_dsp_stage_error();
+        }
     }
     clear_streaming_scratch(shared, scratch);
 }
@@ -1031,9 +1356,13 @@ fn try_activate_pending_v2(
 
     // Format state stays as published by the active session: the preload
     // session is built at the same target sample rate / channel count.
-    dsp_chain.reset();
+    if dsp_chain.reset().is_err() {
+        shared.mark_dsp_stage_error();
+    }
     if let Some(rs) = resampler.as_mut() {
-        rs.reset();
+        if rs.reset().is_err() {
+            shared.mark_dsp_stage_error();
+        }
     }
     scratch.resample_leftover.clear();
     scratch.resample_leftover_pos = 0;
@@ -1052,7 +1381,7 @@ fn try_activate_pending_v2(
 fn try_activate_pending_gapless(
     shared: &SharedState,
     dsp_chain: &mut DspChain,
-    mut final_noise_shaper: Option<&mut NoiseShaperProcessor>,
+    mut final_noise_shaper: Option<&mut FinalNoiseShaper>,
     loudness_state: &Arc<AtomicLoudnessState>,
     resampler: &mut Option<StreamingResampler>,
     scratch: &mut CallbackScratch,
@@ -1102,12 +1431,18 @@ fn try_activate_pending_gapless(
     let pending_gain_db = f64::from_bits(pending_gain_bits);
     loudness_state.set_target_gain(pending_gain_db);
 
-    dsp_chain.reset();
+    if dsp_chain.reset().is_err() {
+        shared.mark_dsp_stage_error();
+    }
     if let Some(noise_shaper) = final_noise_shaper.as_deref_mut() {
-        noise_shaper.reset();
+        if noise_shaper.processor.reset().is_err() {
+            shared.mark_dsp_stage_error();
+        }
     }
     if let Some(ref mut rs) = resampler {
-        rs.reset();
+        if rs.reset().is_err() {
+            shared.mark_dsp_stage_error();
+        }
     }
     scratch.resample_leftover.clear();
     scratch.resample_leftover_pos = 0;
@@ -1121,7 +1456,7 @@ fn handle_eof_or_gapless(
     data: &mut [f32],
     shared: &SharedState,
     dsp_chain: &mut DspChain,
-    final_noise_shaper: Option<&mut NoiseShaperProcessor>,
+    final_noise_shaper: Option<&mut FinalNoiseShaper>,
     loudness_state: &Arc<AtomicLoudnessState>,
     resampler: &mut Option<StreamingResampler>,
     scratch: &mut CallbackScratch,
@@ -1226,7 +1561,7 @@ fn render_audio_output(
         }
 
         let source_frames_needed = if let Some(rs) = resampler.as_ref() {
-            rs.input_frames_for_output_frames(frames_needed_out)
+            resample_stream::input_frames_for_output_frames(rs, frames_needed_out)
                 .max(MIN_RESAMPLE_SOURCE_FRAMES)
                 .min(AUDIO_PROCESS_BUFFER_FRAMES)
         } else {
@@ -1274,18 +1609,40 @@ fn render_audio_output(
         for sample in scratch.process_buffer.iter_mut() {
             *sample *= linear_gain;
         }
-        dsp_chain.process(&mut scratch.process_buffer, channels);
+        if dsp_chain
+            .process(&mut scratch.process_buffer, channels)
+            .is_err()
+        {
+            shared.mark_dsp_stage_error();
+        }
 
         if let Some(rs) = resampler.as_mut() {
-            let resampled = rs.process_chunk_borrowed(&scratch.process_buffer);
-            let resampled_samples = resampled.samples;
+            // The resampler writes directly into the (already drained) leftover
+            // buffer, then the consumed prefix is copied out and the remainder
+            // stays parked for the next callback.
+            let produced = match resample_chunk_into_leftover(
+                rs,
+                &scratch.process_buffer,
+                &mut scratch.resample_leftover,
+                channels,
+            ) {
+                Ok(produced) => produced,
+                Err(_) => {
+                    // The audio thread must never panic: count the stage failure
+                    // and emit silence for the rest of this callback.
+                    shared.mark_dsp_stage_error();
+                    scratch.resample_leftover.clear();
+                    scratch.resample_leftover_pos = 0;
+                    break;
+                }
+            };
 
             let mut chunk_idx = 0;
-            while samples_written < output_len && chunk_idx < resampled_samples.len() {
+            while samples_written < output_len && chunk_idx < produced {
                 if matches!(output_path, OutputPath::ResamplerOnly) {
-                    data[samples_written] = resampled_samples[chunk_idx] as f32;
+                    data[samples_written] = scratch.resample_leftover[chunk_idx] as f32;
                 } else {
-                    scratch.final_output[samples_written] = resampled_samples[chunk_idx];
+                    scratch.final_output[samples_written] = scratch.resample_leftover[chunk_idx];
                 }
                 samples_written += 1;
                 chunk_idx += 1;
@@ -1301,28 +1658,10 @@ fn render_audio_output(
                 );
             }
 
-            if chunk_idx < resampled_samples.len() {
-                // Safety net: leftover is drained (and cleared) before this render
-                // loop runs, so this extend is the only writer per callback. The
-                // reserve is sized off the realtime thread (at resampler-attach
-                // time) to the resampler's naive per-call output bound
-                // (`max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels)`),
-                // which is now a valid single-call ceiling because per-call Soxr
-                // output is capped via slicing. A failure here means the attach-time
-                // reserve was skipped or undersized, which would otherwise reallocate
-                // on the real-time audio thread.
-                let added = resampled_samples.len() - chunk_idx;
-                debug_assert!(
-                    scratch.resample_leftover.len() + added <= scratch.resample_leftover.capacity(),
-                    "resample_leftover would realloc in the audio callback: len {} + {} > cap {} \
-                     (attach-time reserve_resample_leftover was skipped or undersized)",
-                    scratch.resample_leftover.len(),
-                    added,
-                    scratch.resample_leftover.capacity()
-                );
-                scratch
-                    .resample_leftover
-                    .extend_from_slice(&resampled_samples[chunk_idx..]);
+            if chunk_idx < produced {
+                scratch.resample_leftover_pos = chunk_idx;
+            } else {
+                scratch.resample_leftover.clear();
                 scratch.resample_leftover_pos = 0;
             }
         } else {
@@ -1396,9 +1735,13 @@ fn render_streaming_audio_output(
         .then(|| shared.streaming_v2_rt.load());
     if let Some(rt) = v2_rt.as_ref().and_then(|guard| guard.as_ref()) {
         if consume_window_seek(shared, rt, scratch, current_pos) {
-            dsp_chain.reset();
+            if dsp_chain.reset().is_err() {
+                shared.mark_dsp_stage_error();
+            }
             if let Some(resampler) = resampler.as_mut() {
-                resampler.reset();
+                if resampler.reset().is_err() {
+                    shared.mark_dsp_stage_error();
+                }
             }
             scratch.resample_leftover.clear();
             scratch.resample_leftover_pos = 0;
@@ -1446,7 +1789,7 @@ fn render_streaming_audio_output(
         }
 
         let source_frames_needed = if let Some(rs) = resampler.as_ref() {
-            rs.input_frames_for_output_frames(frames_needed_out)
+            resample_stream::input_frames_for_output_frames(rs, frames_needed_out)
                 .max(MIN_RESAMPLE_SOURCE_FRAMES)
                 .min(AUDIO_PROCESS_BUFFER_FRAMES)
         } else {
@@ -1533,18 +1876,35 @@ fn render_streaming_audio_output(
         for sample in scratch.process_buffer.iter_mut() {
             *sample *= linear_gain;
         }
-        dsp_chain.process(&mut scratch.process_buffer, channels);
+        if dsp_chain
+            .process(&mut scratch.process_buffer, channels)
+            .is_err()
+        {
+            shared.mark_dsp_stage_error();
+        }
 
         if let Some(rs) = resampler.as_mut() {
-            let resampled = rs.process_chunk_borrowed(&scratch.process_buffer);
-            let resampled_samples = resampled.samples;
+            let produced = match resample_chunk_into_leftover(
+                rs,
+                &scratch.process_buffer,
+                &mut scratch.resample_leftover,
+                channels,
+            ) {
+                Ok(produced) => produced,
+                Err(_) => {
+                    shared.mark_dsp_stage_error();
+                    scratch.resample_leftover.clear();
+                    scratch.resample_leftover_pos = 0;
+                    break;
+                }
+            };
 
             let mut chunk_idx = 0;
-            while samples_written < output_len && chunk_idx < resampled_samples.len() {
+            while samples_written < output_len && chunk_idx < produced {
                 if matches!(output_path, OutputPath::ResamplerOnly) {
-                    data[samples_written] = resampled_samples[chunk_idx] as f32;
+                    data[samples_written] = scratch.resample_leftover[chunk_idx] as f32;
                 } else {
-                    scratch.final_output[samples_written] = resampled_samples[chunk_idx];
+                    scratch.final_output[samples_written] = scratch.resample_leftover[chunk_idx];
                 }
                 samples_written += 1;
                 chunk_idx += 1;
@@ -1560,28 +1920,10 @@ fn render_streaming_audio_output(
                 );
             }
 
-            if chunk_idx < resampled_samples.len() {
-                // Safety net: leftover is drained (and cleared) before this render
-                // loop runs, so this extend is the only writer per callback. The
-                // reserve is sized off the realtime thread (at resampler-attach
-                // time) to the resampler's naive per-call output bound
-                // (`max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels)`),
-                // which is now a valid single-call ceiling because per-call Soxr
-                // output is capped via slicing. A failure here means the attach-time
-                // reserve was skipped or undersized, which would otherwise reallocate
-                // on the real-time audio thread.
-                let added = resampled_samples.len() - chunk_idx;
-                debug_assert!(
-                    scratch.resample_leftover.len() + added <= scratch.resample_leftover.capacity(),
-                    "resample_leftover would realloc in the audio callback: len {} + {} > cap {} \
-                     (attach-time reserve_resample_leftover was skipped or undersized)",
-                    scratch.resample_leftover.len(),
-                    added,
-                    scratch.resample_leftover.capacity()
-                );
-                scratch
-                    .resample_leftover
-                    .extend_from_slice(&resampled_samples[chunk_idx..]);
+            if chunk_idx < produced {
+                scratch.resample_leftover_pos = chunk_idx;
+            } else {
+                scratch.resample_leftover.clear();
                 scratch.resample_leftover_pos = 0;
             }
         } else {
@@ -1674,7 +2016,7 @@ pub fn audio_callback_lockfree(
     data: &mut [f32],
     shared: &SharedState,
     dsp_chain: &mut DspChain,
-    mut final_noise_shaper: Option<&mut NoiseShaperProcessor>,
+    mut final_noise_shaper: Option<&mut FinalNoiseShaper>,
     loudness_state: &Arc<AtomicLoudnessState>,
     spectrum_tx: &Sender<SpectrumBatch>,
     channels: usize,
@@ -1700,10 +2042,11 @@ pub fn audio_callback_lockfree(
     );
     shared.mark_output_callback_activity();
 
-    let shaper_enabled = match final_noise_shaper.as_deref_mut() {
-        Some(noise_shaper) => noise_shaper.refresh_is_enabled(),
-        None => false,
-    };
+    // The shaper adapter now syncs its snapshot inside `process`, so the enabled
+    // decision is read from the same lock-free parameter source it will observe.
+    let shaper_enabled = final_noise_shaper
+        .as_deref()
+        .is_some_and(FinalNoiseShaper::is_enabled);
     let output_path = OutputPath::new(resampler.is_some(), shaper_enabled);
 
     if shared.state.load() != PlayerState::Playing {
@@ -1797,7 +2140,19 @@ pub fn audio_callback_lockfree(
             // computed, but the audio thread must never panic (error-handling.md):
             // if it is somehow absent, skip shaping and emit the unshaped buffer.
             if let Some(noise_shaper) = final_noise_shaper.as_deref_mut() {
-                noise_shaper.process_cached(&mut scratch.final_output[..output_len], channels);
+                match AudioBlockMut::new(&mut scratch.final_output[..output_len], channels) {
+                    Ok(block) => {
+                        if process_checked(
+                            &mut noise_shaper.processor,
+                            ProcessBuffers::in_place(block),
+                        )
+                        .is_err()
+                        {
+                            shared.mark_dsp_stage_error();
+                        }
+                    }
+                    Err(_) => shared.mark_dsp_stage_error(),
+                }
             }
         }
         for (dst, src) in data
@@ -1849,7 +2204,7 @@ mod tests {
         use_shaper: bool,
     ) -> CallbackScratchCapacities {
         let shared = prepare_playing_shared(TEST_FRAMES, TEST_CHANNELS);
-        let mut chain = DspChain::new(TEST_SAMPLE_RATE as f64);
+        let mut chain = DspChain::new(TEST_SAMPLE_RATE).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
@@ -1858,7 +2213,7 @@ mod tests {
             .then(|| StreamingResampler::new(TEST_CHANNELS, TEST_SAMPLE_RATE, 48_000).unwrap());
         let noise_shaper_params = Arc::new(AtomicNoiseShaperParams::new());
         noise_shaper_params.set_enabled(use_shaper);
-        let mut final_noise_shaper = NoiseShaperProcessor::new(
+        let mut final_noise_shaper = FinalNoiseShaper::new(
             TEST_CHANNELS,
             if use_resampler {
                 48_000
@@ -1866,7 +2221,8 @@ mod tests {
                 TEST_SAMPLE_RATE
             },
             Arc::clone(&noise_shaper_params),
-        );
+        )
+        .expect("final noise shaper");
 
         audio_callback_lockfree(
             &mut out,
@@ -2113,7 +2469,7 @@ mod tests {
     #[test]
     fn callback_renders_from_seek_slot_target_after_request() {
         let shared = prepare_playing_shared(TEST_FRAMES, TEST_CHANNELS);
-        let mut chain = DspChain::new(TEST_SAMPLE_RATE as f64);
+        let mut chain = DspChain::new(TEST_SAMPLE_RATE).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
@@ -2265,7 +2621,7 @@ mod tests {
         shared.channels.store(channels as u64, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
 
-        let mut chain = DspChain::new(96_000.0);
+        let mut chain = DspChain::new(96_000).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
@@ -2328,7 +2684,7 @@ mod tests {
         shared.channels.store(channels as u64, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
 
-        let mut chain = DspChain::new(44_100.0);
+        let mut chain = DspChain::new(44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
@@ -2365,11 +2721,11 @@ mod tests {
     fn callback_dynamic_leftover_reserve_absorbs_soxr_burst_without_realloc() {
         // Worst *supported* upsample ratio: 8 kHz source -> 384 kHz target (48x).
         // A tiny output buffer pins each source read at MIN_RESAMPLE_SOURCE_FRAMES.
-        // Per-call Soxr output is now capped to the naive ratio bound (the resampler
-        // slices its scratch), so the per-call burst can no longer exceed
-        // max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels). The
-        // leftover reserve, sized from that same bound at attach time, must absorb
-        // every call without reallocating, and the per-call cap must hold.
+        // Per-call resampler output is bounded by the core's exact rational
+        // ceiling plus backend burst allowance, so the per-call burst can no
+        // longer exceed max_output_samples_for_input(AUDIO_PROCESS_BUFFER_FRAMES).
+        // The leftover reserve, sized from that same bound at attach time, must
+        // absorb every call without reallocating, and the per-call cap must hold.
         let channels = 2;
         let frames = 8192;
         let shared = SharedState::new();
@@ -2382,18 +2738,20 @@ mod tests {
         shared.channels.store(channels as u64, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
 
-        let mut chain = DspChain::new(8_000.0);
+        let mut chain = DspChain::new(8_000).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
         let mut resampler = Some(StreamingResampler::new(channels, 8_000, 384_000).unwrap());
-        let per_call_cap = resampler
-            .as_ref()
-            .unwrap()
-            .max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels);
+        let per_call_cap = resample_stream::max_output_samples_for_input(
+            resampler.as_ref().unwrap(),
+            AUDIO_PROCESS_BUFFER_FRAMES,
+            channels,
+        )
+        .expect("per-call resampler output capacity");
         let mut scratch = CallbackScratch::new(channels);
         // Mirror the production attach path (output_stream.rs): size the leftover
-        // reserve to the resampler's per-call (naive ratio) output bound.
+        // reserve to the resampler's per-call output bound.
         scratch.reserve_resample_leftover(per_call_cap);
         let initial_capacity = scratch.resample_leftover.capacity();
 
@@ -2427,12 +2785,12 @@ mod tests {
             );
         }
 
-        // The per-call output cap must hold: slicing the resampler scratch bounds
-        // each callback's leftover to the naive ratio bound, so it never exceeds
-        // the attach-time reserve.
+        // The per-call output cap must hold: the core's exact rational bound
+        // sizes each callback's leftover, so it never exceeds the attach-time
+        // reserve.
         assert!(
             peak_leftover <= per_call_cap,
-            "per-call Soxr output cap violated: peak {} > naive bound {}",
+            "per-call Soxr output cap violated: peak {} > rational bound {}",
             peak_leftover,
             per_call_cap
         );
@@ -2461,7 +2819,7 @@ mod tests {
         shared.channels.store(2, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
 
-        let mut chain = DspChain::new(44_100.0);
+        let mut chain = DspChain::new(44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
@@ -2513,7 +2871,7 @@ mod tests {
         shared.pending_channels.store(2, Ordering::Relaxed);
         shared.pending_ready.store(true, Ordering::Release);
 
-        let mut chain = DspChain::new(44_100.0);
+        let mut chain = DspChain::new(44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
@@ -2563,7 +2921,7 @@ mod tests {
         shared.channels.store(2, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
 
-        let mut chain = DspChain::new(44_100.0);
+        let mut chain = DspChain::new(44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let (tx, _rx) = crossbeam::channel::bounded(16);
@@ -2597,13 +2955,14 @@ mod tests {
         shared.channels.store(2, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
 
-        let mut chain = DspChain::new(44_100.0);
+        let mut chain = DspChain::new(44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let noise_shaper_params = Arc::new(AtomicNoiseShaperParams::new());
         noise_shaper_params.set_enabled(false);
         let mut final_noise_shaper =
-            NoiseShaperProcessor::new(2, 44_100, Arc::clone(&noise_shaper_params));
+            FinalNoiseShaper::new(2, 44_100, Arc::clone(&noise_shaper_params))
+                .expect("final noise shaper");
         let (tx, _rx) = crossbeam::channel::bounded(16);
         let mut out = vec![0.0f32; 4];
         let mut scratch = CallbackScratch::new(2);
@@ -2635,13 +2994,14 @@ mod tests {
         shared.channels.store(2, Ordering::Relaxed);
         shared.state.store(PlayerState::Playing);
 
-        let mut chain = DspChain::new(44_100.0);
+        let mut chain = DspChain::new(44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         loudness.set_enabled(false);
         let noise_shaper_params = Arc::new(AtomicNoiseShaperParams::new());
         noise_shaper_params.set_enabled(false);
         let mut final_noise_shaper =
-            NoiseShaperProcessor::new(2, 44_100, Arc::clone(&noise_shaper_params));
+            FinalNoiseShaper::new(2, 44_100, Arc::clone(&noise_shaper_params))
+                .expect("final noise shaper");
         let mut resampler = Some(StreamingResampler::new(2, 44_100, 44_100).unwrap());
         let (tx, _rx) = crossbeam::channel::bounded(16);
         let mut out = vec![0.0f32; 4];
@@ -2676,7 +3036,7 @@ mod tests {
 
         let (_ctx, mut chain) = LockfreeDspContext::new(
             2,
-            44100.0,
+            44100,
             Arc::clone(&eq_params),
             Arc::clone(&sat_params),
             Arc::clone(&cross_params),
@@ -2685,16 +3045,15 @@ mod tests {
             Arc::clone(&ns_params),
             Arc::clone(&dl_params),
             Arc::clone(&dl_telemetry),
-        );
+        )
+        .expect("dsp context");
 
         // Test that we can update params while processing
         eq_params.set_band_gain(0, 3.0);
 
         let mut buffer = vec![0.5; 100];
         // Process through owned chain (no Mutex!)
-        chain.process(&mut buffer, 2);
-
-        // Should not panic
+        let _ = chain.process(&mut buffer, 2).expect("chain process");
     }
 
     #[test]
@@ -2704,9 +3063,9 @@ mod tests {
         // resampling (at the output rate) rather than inside the source-rate
         // chain. Pinning to the core descriptor list makes any upstream
         // reordering a visible, deliberate change here instead of silent drift.
-        let (chain, _disposal) = LockfreeDspContext::build_dsp_chain(
+        let (chain, _convolver_control) = LockfreeDspContext::build_dsp_chain(
             2,
-            48_000.0,
+            48_000,
             Arc::new(AtomicEqParams::new()),
             Arc::new(AtomicSaturationParams::new()),
             Arc::new(AtomicCrossfeedParams::new()),
@@ -2715,9 +3074,9 @@ mod tests {
             Arc::new(AtomicNoiseShaperParams::new()),
             Arc::new(AtomicDynamicLoudnessParams::new()),
             Arc::new(AtomicDynamicLoudnessTelemetry::new()),
-            Arc::new(ArcSwapOption::empty()),
-            Arc::new(AtomicBool::new(false)),
-        );
+            false,
+        )
+        .expect("dsp chain");
 
         let expected: Vec<&'static str> = crate::processor::callback_stage_names()
             .into_iter()
@@ -2731,7 +3090,7 @@ mod tests {
     fn publishing_kernel_drains_parked_retired_convolvers() {
         let (ctx, _chain) = LockfreeDspContext::new(
             2,
-            48000.0,
+            48000,
             Arc::new(AtomicEqParams::new()),
             Arc::new(AtomicSaturationParams::new()),
             Arc::new(AtomicCrossfeedParams::new()),
@@ -2740,21 +3099,263 @@ mod tests {
             Arc::new(AtomicNoiseShaperParams::new()),
             Arc::new(AtomicDynamicLoudnessParams::new()),
             Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+        )
+        .expect("dsp context");
+
+        // Register an extra chain's convolver control, like the WASAPI output
+        // path does, and drive its audio consumer by hand.
+        let (mut extra_chain, extra_registration) = LockfreeDspContext::build_dsp_chain(
+            2,
+            48000,
+            Arc::new(AtomicEqParams::new()),
+            Arc::new(AtomicSaturationParams::new()),
+            Arc::new(AtomicCrossfeedParams::new()),
+            Arc::new(AtomicPeakLimiterParams::new()),
+            Arc::new(AtomicVolumeParams::new()),
+            Arc::new(AtomicNoiseShaperParams::new()),
+            Arc::new(AtomicDynamicLoudnessParams::new()),
+            Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+            ctx.convolver_is_enabled(),
+        )
+        .expect("extra dsp chain");
+        let extra_control = extra_registration.control();
+        ctx.register_convolver_control(extra_registration, 48000);
+
+        // Both the context's own chain and the extra chain are live, so both must
+        // still be registered: registering a chain must never evict a live one.
+        assert_eq!(
+            ctx.registered_convolver_count(),
+            2,
+            "registering a second chain must not prune the live initial chain"
         );
 
-        // Simulate the audio thread having parked a retired kernel in a
-        // registered disposal slot (an extra chain's slot, like WASAPI's).
-        let extra_slot: Arc<ArcSwapOption<FFTConvolver>> = Arc::new(ArcSwapOption::empty());
-        extra_slot.store(Some(Arc::new(FFTConvolver::new(&[1.0, 0.0, 0.0, 0.0], 2))));
-        ctx.register_convolver_disposal_slot(Arc::clone(&extra_slot));
+        let mut buffer = vec![0.0f64; 512];
 
-        // Publishing a new kernel must drain every registered slot first, so
-        // adoption never stalls on a full disposal slot (core parks max two).
+        // First kernel: the audio consumer adopts it on its next process call.
+        ctx.set_external_ir_convolver(&[1.0, 0.0, 0.0, 0.0], 2)
+            .expect("first kernel publish");
+        let _ = extra_chain.process(&mut buffer, 2).expect("chain process");
+
+        // Second kernel: adopting it retires the first one on the audio thread,
+        // which must not free it there.
         ctx.set_external_ir_convolver(&[0.5, 0.0, 0.0, 0.0], 2)
-            .expect("kernel publish");
+            .expect("second kernel publish");
+        let _ = extra_chain.process(&mut buffer, 2).expect("chain process");
+        let retired = extra_control.status();
         assert!(
-            extra_slot.load().is_none(),
-            "retired kernel must be drained before a new kernel is published"
+            retired.retired_kernels > 0,
+            "adopting a newer kernel must retire the previous one"
+        );
+
+        // Publishing again must reclaim every parked retired kernel first, so
+        // adoption never stalls on retirement backpressure.
+        ctx.set_external_ir_convolver(&[0.25, 0.0, 0.0, 0.0], 2)
+            .expect("third kernel publish");
+        let drained = extra_control.status();
+        assert_eq!(
+            drained.pending_reclamations, 0,
+            "retired kernels must be reclaimed before a new kernel is published"
+        );
+        assert!(
+            drained.reclaimed_kernels >= retired.retired_kernels,
+            "every retired kernel must be reclaimed off the audio thread"
+        );
+    }
+
+    /// Blocks needed to drive the convolver's wet-activation ramp to steady state.
+    const CONVOLVER_RAMP_BLOCKS: usize = 8;
+
+    /// Regression: `DspChain::add` validates that a stage is 1:1 at the chain
+    /// rate but never pushes that rate into the stage. `ConvolverProcessor::new`
+    /// starts in core's internal 44_100 Hz default domain and passes audio
+    /// through whenever its kernel's rate does not match that field, so a chain
+    /// built at any other rate silently never convolved. `build_dsp_chain` must
+    /// publish the chain rate to its stages, as core's own
+    /// `OutputChainBuilder::build_callback_chain` does.
+    #[test]
+    fn built_chain_convolves_at_every_supported_sample_rate() {
+        for rate in [44_100_u32, 48_000, 96_000] {
+            let (ctx, mut chain) = LockfreeDspContext::new(
+                2,
+                rate,
+                Arc::new(AtomicEqParams::new()),
+                Arc::new(AtomicSaturationParams::new()),
+                Arc::new(AtomicCrossfeedParams::new()),
+                Arc::new(AtomicPeakLimiterParams::new()),
+                Arc::new(AtomicVolumeParams::new()),
+                Arc::new(AtomicNoiseShaperParams::new()),
+                Arc::new(AtomicDynamicLoudnessParams::new()),
+                Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+            )
+            .expect("dsp context");
+
+            // A chain with no kernel is a passthrough, not silence, so the
+            // no-kernel output is the only meaningful baseline to compare against.
+            let mut baseline = vec![0.5f64; 512];
+            for _ in 0..CONVOLVER_RAMP_BLOCKS {
+                baseline.fill(0.5);
+                let _ = chain.process(&mut baseline, 2).expect("chain process");
+            }
+
+            ctx.set_external_ir_convolver(&[0.25, 0.25], 2)
+                .expect("kernel publish");
+
+            let mut buffer = vec![0.5f64; 512];
+            for _ in 0..CONVOLVER_RAMP_BLOCKS {
+                buffer.fill(0.5);
+                let _ = chain.process(&mut buffer, 2).expect("chain process");
+            }
+
+            assert!(
+                buffer[0].abs() < baseline[0].abs() - 1e-6,
+                "a chain built at {rate} Hz never applied its kernel: {} vs \
+                 no-kernel passthrough {}",
+                buffer[0],
+                baseline[0]
+            );
+        }
+    }
+
+    /// Regression: `ConvolverControl::is_quiescent()` is core's teardown check
+    /// for a *stopped* publisher set, and it is also true for a live chain that
+    /// is merely idle (no IR loaded yet). Pruning the registry on it dropped the
+    /// initial — and still playing — chain as soon as a second chain registered,
+    /// after which a later IR load published into nothing and convolution went
+    /// silently inaudible. Registration liveness must follow the owning chain's
+    /// actual lifetime instead.
+    #[test]
+    fn registering_another_chain_keeps_idle_live_chain_convolving() {
+        let (ctx, mut initial_chain) = LockfreeDspContext::new(
+            2,
+            48_000,
+            Arc::new(AtomicEqParams::new()),
+            Arc::new(AtomicSaturationParams::new()),
+            Arc::new(AtomicCrossfeedParams::new()),
+            Arc::new(AtomicPeakLimiterParams::new()),
+            Arc::new(AtomicVolumeParams::new()),
+            Arc::new(AtomicNoiseShaperParams::new()),
+            Arc::new(AtomicDynamicLoudnessParams::new()),
+            Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+        )
+        .expect("dsp context");
+
+        // The initial chain is alive and installed in the callback, but has no
+        // kernel yet, so its control is idle and `is_quiescent()` reports true.
+        assert_eq!(ctx.registered_convolver_count(), 1);
+
+        // A track load rebuilds the chain (`rebuild_pending_dsp_chain`), which
+        // registers a second control while the first chain is still playing.
+        let (_second_chain, second_registration) = LockfreeDspContext::build_dsp_chain(
+            2,
+            48_000,
+            Arc::new(AtomicEqParams::new()),
+            Arc::new(AtomicSaturationParams::new()),
+            Arc::new(AtomicCrossfeedParams::new()),
+            Arc::new(AtomicPeakLimiterParams::new()),
+            Arc::new(AtomicVolumeParams::new()),
+            Arc::new(AtomicNoiseShaperParams::new()),
+            Arc::new(AtomicDynamicLoudnessParams::new()),
+            Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+            ctx.convolver_is_enabled(),
+        )
+        .expect("second dsp chain");
+        ctx.register_convolver_control(second_registration, 48_000);
+
+        assert_eq!(
+            ctx.registered_convolver_count(),
+            2,
+            "the live initial chain must not be pruned as if its consumer were gone"
+        );
+
+        // An IR loaded afterwards must still reach the initial, still-playing
+        // chain. Observe the kernel's actual effect rather than mere
+        // non-silence: a chain with no kernel passes audio through unchanged
+        // (`process_fixed_1_to_1` with no transform), so a non-silence assertion
+        // alone would also hold for a chain the kernel never reached. A 0.25
+        // single-frame impulse attenuates instead, which passthrough cannot fake.
+        let mut baseline = vec![0.5f64; 512];
+        for _ in 0..CONVOLVER_RAMP_BLOCKS {
+            baseline.fill(0.5);
+            let _ = initial_chain
+                .process(&mut baseline, 2)
+                .expect("chain process");
+        }
+
+        ctx.set_external_ir_convolver(&[0.25, 0.25], 2)
+            .expect("kernel publish");
+
+        let mut buffer = vec![0.5f64; 512];
+        // The convolver activates over a short wet ramp, so drive several blocks
+        // before observing steady-state output.
+        for _ in 0..CONVOLVER_RAMP_BLOCKS {
+            buffer.fill(0.5);
+            let _ = initial_chain
+                .process(&mut buffer, 2)
+                .expect("chain process");
+        }
+
+        assert!(
+            buffer.iter().any(|sample| sample.abs() > 1e-9),
+            "the initial chain must still produce audio after a later chain registered"
+        );
+        // The kernel must have actually been adopted by this chain's consumer.
+        assert!(
+            (buffer[0] - baseline[0]).abs() > 1e-6,
+            "the published kernel never reached the initial chain: output is \
+             identical to the no-kernel passthrough ({} vs {})",
+            buffer[0],
+            baseline[0]
+        );
+        assert!(
+            buffer[0].abs() < baseline[0].abs(),
+            "a 0.25 impulse must attenuate the initial chain's output ({} vs {})",
+            buffer[0],
+            baseline[0]
+        );
+    }
+
+    /// A chain that is genuinely dropped must not leak its registration forever;
+    /// the next registration prunes it and reclaims whatever it parked.
+    #[test]
+    fn dropping_a_chain_releases_its_convolver_registration() {
+        let (ctx, initial_chain) = LockfreeDspContext::new(
+            2,
+            48_000,
+            Arc::new(AtomicEqParams::new()),
+            Arc::new(AtomicSaturationParams::new()),
+            Arc::new(AtomicCrossfeedParams::new()),
+            Arc::new(AtomicPeakLimiterParams::new()),
+            Arc::new(AtomicVolumeParams::new()),
+            Arc::new(AtomicNoiseShaperParams::new()),
+            Arc::new(AtomicDynamicLoudnessParams::new()),
+            Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+        )
+        .expect("dsp context");
+
+        // The audio thread retires a chain by handing it to the control thread
+        // (`RetiredAudioResource::Chain`), which frees it here.
+        drop(initial_chain);
+
+        let (_replacement_chain, replacement_registration) = LockfreeDspContext::build_dsp_chain(
+            2,
+            48_000,
+            Arc::new(AtomicEqParams::new()),
+            Arc::new(AtomicSaturationParams::new()),
+            Arc::new(AtomicCrossfeedParams::new()),
+            Arc::new(AtomicPeakLimiterParams::new()),
+            Arc::new(AtomicVolumeParams::new()),
+            Arc::new(AtomicNoiseShaperParams::new()),
+            Arc::new(AtomicDynamicLoudnessParams::new()),
+            Arc::new(AtomicDynamicLoudnessTelemetry::new()),
+            ctx.convolver_is_enabled(),
+        )
+        .expect("replacement dsp chain");
+        ctx.register_convolver_control(replacement_registration, 48_000);
+
+        assert_eq!(
+            ctx.registered_convolver_count(),
+            1,
+            "a dropped chain's registration must be pruned, not retained forever"
         );
     }
 
@@ -2785,7 +3386,7 @@ mod tests {
         let dl_telemetry = Arc::new(AtomicDynamicLoudnessTelemetry::new());
         let (_ctx, mut chain) = LockfreeDspContext::new(
             2,
-            44100.0,
+            44100,
             eq_params,
             sat_params,
             cross_params,
@@ -2794,13 +3395,15 @@ mod tests {
             ns_params,
             dl_params,
             dl_telemetry,
-        );
+        )
+        .expect("dsp context");
         let loudness = Arc::new(AtomicLoudnessState::default());
         let (tx, _rx) = crossbeam::channel::bounded(16);
         let mut out = vec![0.0f32; 16];
         let mut scratch = CallbackScratch::new(2);
         let mut final_noise_shaper =
-            NoiseShaperProcessor::new(2, 44100, Arc::new(AtomicNoiseShaperParams::new()));
+            FinalNoiseShaper::new(2, 44100, Arc::new(AtomicNoiseShaperParams::new()))
+                .expect("final noise shaper");
 
         audio_callback_lockfree(
             &mut out,
@@ -2822,9 +3425,9 @@ mod tests {
     #[test]
     fn test_dsp_rebuild_swaps_prebuilt_chain() {
         let shared = SharedState::new();
-        let (initial, _disposal) = LockfreeDspContext::build_dsp_chain(
+        let (initial, _initial_control) = LockfreeDspContext::build_dsp_chain(
             2,
-            44100.0,
+            44100,
             Arc::new(AtomicEqParams::new()),
             Arc::new(AtomicSaturationParams::new()),
             Arc::new(AtomicCrossfeedParams::new()),
@@ -2833,12 +3436,12 @@ mod tests {
             Arc::new(AtomicNoiseShaperParams::new()),
             Arc::new(AtomicDynamicLoudnessParams::new()),
             Arc::new(AtomicDynamicLoudnessTelemetry::new()),
-            Arc::new(ArcSwapOption::empty()),
-            Arc::new(AtomicBool::new(false)),
-        );
-        let (rebuilt, _disposal) = LockfreeDspContext::build_dsp_chain(
+            false,
+        )
+        .expect("initial dsp chain");
+        let (rebuilt, _rebuilt_control) = LockfreeDspContext::build_dsp_chain(
             1,
-            48000.0,
+            48000,
             Arc::new(AtomicEqParams::new()),
             Arc::new(AtomicSaturationParams::new()),
             Arc::new(AtomicCrossfeedParams::new()),
@@ -2847,9 +3450,9 @@ mod tests {
             Arc::new(AtomicNoiseShaperParams::new()),
             Arc::new(AtomicDynamicLoudnessParams::new()),
             Arc::new(AtomicDynamicLoudnessTelemetry::new()),
-            Arc::new(ArcSwapOption::empty()),
-            Arc::new(AtomicBool::new(false)),
-        );
+            false,
+        )
+        .expect("rebuilt dsp chain");
         let _ = shared.pending_dsp_chain.push(rebuilt);
         shared.dsp_needs_rebuild.store(true, Ordering::Relaxed);
 
@@ -2859,7 +3462,8 @@ mod tests {
         let mut chain = initial;
         let mut scratch = CallbackScratch::new(1);
         let mut final_noise_shaper =
-            NoiseShaperProcessor::new(1, 44100, Arc::new(AtomicNoiseShaperParams::new()));
+            FinalNoiseShaper::new(1, 44100, Arc::new(AtomicNoiseShaperParams::new()))
+                .expect("final noise shaper");
 
         audio_callback_lockfree(
             &mut out,
@@ -2957,7 +3561,7 @@ mod tests {
         shared.streaming_v2_enabled.store(true, Ordering::Release);
         shared.publish_streaming_v2_rt(Some(Arc::clone(&rt)));
         let mut scratch = CallbackScratch::new(2);
-        let mut chain = DspChain::with_capacity(0, 44_100.0);
+        let mut chain = DspChain::with_capacity(0, 44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         let (spectrum_tx, _spectrum_rx) = crossbeam::channel::bounded(4);
         shared
@@ -3330,7 +3934,7 @@ mod tests {
         shared.state.store(PlayerState::Playing);
 
         let mut scratch = CallbackScratch::new(2);
-        let mut chain = DspChain::with_capacity(0, 44_100.0);
+        let mut chain = DspChain::with_capacity(0, 44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         let mut current_pos = geometry.slot_frames();
 
@@ -3477,7 +4081,7 @@ mod tests {
         shared.state.store(PlayerState::Playing);
 
         let mut scratch = CallbackScratch::new(2);
-        let mut chain = DspChain::with_capacity(0, 44_100.0);
+        let mut chain = DspChain::with_capacity(0, 44_100).expect("dsp chain");
         let loudness = Arc::new(AtomicLoudnessState::default());
         let mut current_pos = geometry.slot_frames();
         let mut output = [1.0; 8];

@@ -22,7 +22,7 @@ use super::output_stream::{
     ResamplerConfig,
 };
 use super::spectrum::SpectrumBatch;
-use super::state::{AudioCommand, PlayerState, SharedState};
+use super::state::{AudioCommand, PlayerState, SharedState, EVENT_LOAD_ERROR};
 use super::streaming::producer::{PersistentProducerHandle, ProducerReaper};
 use super::streaming::session::PersistentStreamingSession;
 #[cfg(windows)]
@@ -689,9 +689,9 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
     dsp_params.noise_shaper_params.set_bits(initial_output_bits);
 
     let initial_channels = shared_state.channels.load(Ordering::Relaxed).max(1) as usize;
-    let initial_sample_rate = shared_state.sample_rate.load(Ordering::Relaxed).max(1) as f64;
+    let initial_sample_rate = shared_state.sample_rate.load(Ordering::Relaxed).max(1) as u32;
 
-    let (dsp_ctx, initial_dsp_chain) = LockfreeDspContext::new(
+    let (dsp_ctx, initial_dsp_chain) = match LockfreeDspContext::new(
         initial_channels,
         initial_sample_rate,
         Arc::clone(&dsp_params.eq_params),
@@ -702,7 +702,19 @@ pub fn audio_thread_main(startup: AudioThreadStartup) {
         Arc::clone(&dsp_params.noise_shaper_params),
         Arc::clone(&dsp_params.dynamic_loudness_params),
         Arc::clone(&dsp_params.dynamic_loudness_telemetry),
-    );
+    ) {
+        Ok(built) => built,
+        Err(error) => {
+            // Without a DSP chain there is no audio thread to run. Surface the
+            // construction failure instead of panicking the process.
+            log::error!("Failed to initialize DSP context: {error}");
+            *shared_state.load_error.write() = Some(error);
+            shared_state
+                .event_flags
+                .fetch_or(EVENT_LOAD_ERROR, Ordering::Release);
+            return;
+        }
+    };
 
     let mut runtime = AudioThreadRuntime {
         cmd_rx,

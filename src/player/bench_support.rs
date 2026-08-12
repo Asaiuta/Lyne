@@ -24,8 +24,6 @@ use super::MediaSourceAccess;
 use crate::config::{PhaseResponse, ResampleQuality};
 use crate::decoder::{DecodeCancelToken, StreamingDecoder};
 use std::io::Write;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::time::Instant;
 
 /// Bench wrapper around a persistent streaming session plus its local WAV
@@ -44,7 +42,7 @@ fn seek_fixture_path() -> std::path::PathBuf {
 pub fn open_source_seek_bench() -> SourceSeekBench {
     let path = seek_fixture_path();
     write_seek_bench_wav(&path);
-    let cancel = || DecodeCancelToken::new(Arc::new(AtomicBool::new(false)));
+    let cancel = DecodeCancelToken::new;
     let opened = LocalFileSourceFactory
         .open(OpenRequest {
             generation: 1,
@@ -98,7 +96,7 @@ impl SourceSeekBench {
 
     /// Measure one fresh reopen + probe on the same source.
     pub fn reopen_probe(&mut self) -> u64 {
-        let cancel = || DecodeCancelToken::new(Arc::new(AtomicBool::new(false)));
+        let cancel = DecodeCancelToken::new;
         let started = Instant::now();
         let opened = LocalFileSourceFactory
             .open(OpenRequest {
@@ -206,6 +204,21 @@ pub use super::streaming::pcm_window::{
     PcmWindowReader, PcmWindowWriter, PublishedSlot, ReadSlot, SlotState, WriteSlot,
 };
 
+/// Construct an active playback window without exposing memory-ledger
+/// ownership choices to external benchmark targets.
+pub fn create_pcm_window_for_bench(
+    geometry: PcmWindowGeometry,
+    epoch: u64,
+    origin_frame: u64,
+) -> Result<PcmWindowParts, PcmWindowError> {
+    PcmWindow::create(
+        geometry,
+        epoch,
+        origin_frame,
+        DecodedMemoryOwner::ActiveWindow,
+    )
+}
+
 pub type SpectrumBenchSender = crossbeam::channel::Sender<SpectrumBatch>;
 pub type SpectrumBenchReceiver = crossbeam::channel::Receiver<SpectrumBatch>;
 
@@ -260,4 +273,58 @@ pub fn ensure_decoded_samples_fit_budget_for_bench(
         samples,
         existing_samples,
     )
+}
+
+/// Per-call output sample capacity for one input block, as production sizes it.
+///
+/// Mirrors `output_stream.rs`, which reserves the callback's resample leftover
+/// from exactly this bound.
+pub fn resample_output_capacity_for_bench(
+    resampler: &crate::processor::StreamingResampler,
+    input_frames: usize,
+    channels: usize,
+) -> Result<usize, String> {
+    super::resample_stream::max_output_samples_for_input(resampler, input_frames, channels)
+}
+
+/// Realtime driver path: resample one input block into caller-owned storage.
+///
+/// This is the exact helper the audio callback and the WASAPI loop use, so the
+/// benchmark measures the production streaming contract rather than a
+/// bench-local reimplementation. Returns interleaved output samples written.
+pub fn resample_into_for_bench(
+    resampler: &mut crate::processor::StreamingResampler,
+    input: &[f64],
+    output: &mut [f64],
+    channels: usize,
+) -> Result<usize, String> {
+    super::resample_stream::resample_into(resampler, input, output, channels)
+        .map_err(|error| format!("Resampling failed: {error}"))
+}
+
+/// Offline driver path: resample one input block and append it to an owned
+/// buffer, reusing `scratch` across calls.
+///
+/// This is the exact helper the offline decode and gapless preload paths use.
+pub fn resample_append_for_bench(
+    resampler: &mut crate::processor::StreamingResampler,
+    input: &[f64],
+    output: &mut Vec<f64>,
+    scratch: &mut Vec<f64>,
+    channels: usize,
+) -> Result<(), String> {
+    super::resample_stream::resample_append(resampler, input, output, scratch, channels)
+}
+
+/// Offline driver path: drain the resampler tail into an owned buffer.
+///
+/// This is the exact helper the offline decode and gapless preload paths use to
+/// finish a stream.
+pub fn resample_flush_for_bench(
+    resampler: &mut crate::processor::StreamingResampler,
+    output: &mut Vec<f64>,
+    scratch: &mut Vec<f64>,
+    channels: usize,
+) -> Result<(), String> {
+    super::resample_stream::flush_append(resampler, output, scratch, channels)
 }

@@ -44,8 +44,13 @@ fn analyze_ebu_r128_loudness(
     channels: usize,
     sample_rate: u32,
 ) -> Option<f64> {
-    let mut meter = crate::processor::LoudnessMeter::new(channels, sample_rate);
-    meter.process(samples);
+    let mut meter = crate::processor::LoudnessMeter::new(channels, sample_rate)
+        .inspect_err(|error| log::warn!("EBU R128 meter unavailable: {error}"))
+        .ok()?;
+    meter
+        .process(samples)
+        .inspect_err(|error| log::warn!("EBU R128 analysis failed: {error}"))
+        .ok()?;
     let loudness = meter.integrated_loudness();
     loudness.is_finite().then_some(loudness)
 }
@@ -75,7 +80,7 @@ pub(super) fn apply_loaded_track_loudness(
     shared_state.mark_loudness_started();
     loudness_state.set_smoothing(200.0, sample_rate);
 
-    let preamp = loudness_state.preamp_gain_db.load(Ordering::Relaxed);
+    let preamp = loudness_state.preamp_gain_db();
     match loudness_state.get_mode() {
         crate::config::NormalizationMode::Track | crate::config::NormalizationMode::Streaming => {}
         crate::config::NormalizationMode::Album => {
@@ -279,7 +284,7 @@ mod tests {
     #[test]
     fn replay_gain_track_mode_stores_target_gain_without_preamp() {
         let loudness_state = Arc::new(AtomicLoudnessState::default());
-        loudness_state.set_mode(NormalizationMode::ReplayGainTrack as u8);
+        loudness_state.set_normalization_mode(NormalizationMode::ReplayGainTrack);
         loudness_state.set_preamp_gain(-2.0);
 
         let metadata = TrackMetadata {
@@ -303,14 +308,14 @@ mod tests {
             -18.0,
         );
 
-        let target_gain = loudness_state.target_gain_db.load(Ordering::Relaxed);
+        let target_gain = loudness_state.target_gain_db();
         assert!((target_gain - 4.0).abs() < 1.0e-9);
     }
 
     #[test]
     fn cached_loudness_sets_track_target_gain_without_full_analysis() {
         let loudness_state = Arc::new(AtomicLoudnessState::default());
-        loudness_state.set_mode(NormalizationMode::Track as u8);
+        loudness_state.set_normalization_mode(NormalizationMode::Track);
         let metadata = TrackMetadata::default();
         let cached = CachedLoudness {
             integrated_lufs: -20.0,
@@ -332,14 +337,14 @@ mod tests {
             -18.0,
         );
 
-        let target_gain = loudness_state.target_gain_db.load(Ordering::Relaxed);
+        let target_gain = loudness_state.target_gain_db();
         assert!((target_gain - 6.0).abs() < 1.0e-9);
     }
 
     #[test]
     fn replay_gain_tag_takes_priority_over_cached_loudness() {
         let loudness_state = Arc::new(AtomicLoudnessState::default());
-        loudness_state.set_mode(NormalizationMode::ReplayGainTrack as u8);
+        loudness_state.set_normalization_mode(NormalizationMode::ReplayGainTrack);
         let metadata = TrackMetadata {
             rg_track_gain: Some(0.0),
             rg_track_peak: None,
@@ -365,14 +370,14 @@ mod tests {
             -18.0,
         );
 
-        let target_gain = loudness_state.target_gain_db.load(Ordering::Relaxed);
+        let target_gain = loudness_state.target_gain_db();
         assert!((target_gain - 4.0).abs() < 1.0e-9);
     }
 
     #[test]
     fn replay_gain_missing_tag_falls_back_to_cached_loudness() {
         let loudness_state = Arc::new(AtomicLoudnessState::default());
-        loudness_state.set_mode(NormalizationMode::ReplayGainTrack as u8);
+        loudness_state.set_normalization_mode(NormalizationMode::ReplayGainTrack);
         let metadata = TrackMetadata::default();
         let cached = CachedLoudness {
             integrated_lufs: -21.0,
@@ -394,7 +399,7 @@ mod tests {
             -18.0,
         );
 
-        let target_gain = loudness_state.target_gain_db.load(Ordering::Relaxed);
+        let target_gain = loudness_state.target_gain_db();
         assert!((target_gain - 7.0).abs() < 1.0e-9);
     }
 
@@ -410,7 +415,7 @@ mod tests {
             1,
             Some(6.0),
         ));
-        assert_eq!(loudness_state.target_gain_db.load(Ordering::Relaxed), 0.0);
+        assert_eq!(loudness_state.target_gain_db(), 0.0);
         assert_eq!(
             shared_state
                 .background_loudness_applied_ms
@@ -424,7 +429,7 @@ mod tests {
             2,
             Some(6.0),
         ));
-        assert_eq!(loudness_state.target_gain_db.load(Ordering::Relaxed), 6.0);
+        assert_eq!(loudness_state.target_gain_db(), 6.0);
         assert!(
             shared_state
                 .background_loudness_applied_ms

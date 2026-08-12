@@ -1,9 +1,10 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
+use audio_engine::decoder::MediaLocation;
 use audio_engine::processor::{
-    AtomicVolumeParams, AudioProcessor, GainRamp, NoiseShaper, NoiseShaperCurve, Saturation,
-    SaturationType, TrackLoudness, VolumeController, VolumeProcessor,
+    process_checked, AtomicVolumeParams, AudioBlockMut, NoiseShaper, NoiseShaperCurve,
+    ProcessBuffers, Saturation, SaturationType, StreamingProcessor, TrackLoudness, VolumeProcessor,
 };
 
 const SAMPLE_RATE: u32 = 48_000;
@@ -30,29 +31,14 @@ fn main() {
         &noise_ring_report,
     );
 
-    let volume_controller_report = benchmark_volume_controller(&corpus, iterations);
-    print_report(
-        "volume_controller_cached_one_minus",
-        &volume_controller_report,
-    );
-
     let volume_processor_report = benchmark_volume_processor(&corpus, iterations);
     print_report("volume_processor_local_current", &volume_processor_report);
 
     let saturation_report = benchmark_saturation(&corpus, iterations);
     print_report("saturation_hot_field_hoist", &saturation_report);
 
-    let ramp_report = benchmark_gain_ramp(frames * CHANNELS, iterations);
-    print_report("gain_ramp_cached_current", &ramp_report);
-
     let loudness_report = benchmark_loudness_gain_cache(iterations);
     print_report("loudness_gain_linear_cache", &loudness_report);
-
-    let gain_ramp_block_report = benchmark_gain_ramp_block_apply(&corpus, iterations);
-    print_report(
-        "gain_ramp_block_apply_vs_next_gain_loop",
-        &gain_ramp_block_report,
-    );
 
     let saturation_outer_match_report = benchmark_saturation_outer_dispatch(&corpus, iterations);
     print_report(
@@ -70,7 +56,6 @@ fn main() {
         for (name, report) in [
             ("noise_shaper_cached_scale_tpdf", &noise_report),
             ("volume_processor_local_current", &volume_processor_report),
-            ("gain_ramp_cached_current", &ramp_report),
             ("loudness_gain_linear_cache", &loudness_report),
         ] {
             assert!(
@@ -92,18 +77,22 @@ struct BenchReport {
 }
 
 fn benchmark_noise_shaper(corpus: &[f64], iterations: usize) -> BenchReport {
-    let mut current_check = NoiseShaper::new(CHANNELS, SAMPLE_RATE, 24);
+    let mut current_check =
+        NoiseShaper::new(CHANNELS, SAMPLE_RATE, 24).expect("valid benchmark noise shaper");
     let mut legacy_check = LegacyNoiseShaper::new(CHANNELS, SAMPLE_RATE, 24);
     assert_noise_outputs_match(&mut current_check, &mut legacy_check, corpus);
 
     let current_duration = measure(
         || {
-            let mut shaper = NoiseShaper::new(CHANNELS, SAMPLE_RATE, 24);
+            let mut shaper =
+                NoiseShaper::new(CHANNELS, SAMPLE_RATE, 24).expect("valid benchmark noise shaper");
             let mut sum = 0.0;
             for frame in 0..(corpus.len() / CHANNELS) {
                 for ch in 0..CHANNELS {
                     let idx = frame * CHANNELS + ch;
-                    sum += shaper.process_sample(black_box(corpus[idx]), ch);
+                    sum += shaper
+                        .process_sample(black_box(corpus[idx]), ch)
+                        .expect("benchmark shaper sample");
                 }
             }
             black_box(sum)
@@ -170,41 +159,15 @@ fn benchmark_noise_shaper_9tap_duplicated_ring(corpus: &[f64], iterations: usize
     )
 }
 
-fn benchmark_volume_controller(corpus: &[f64], iterations: usize) -> BenchReport {
-    assert_volume_controller_outputs_match(corpus);
-
-    let current_duration = measure(
-        || {
-            let mut volume = VolumeController::with_sample_rate(SAMPLE_RATE);
-            volume.set_target(0.25);
-            let mut buffer = corpus.to_vec();
-            volume.process(black_box(&mut buffer), CHANNELS);
-            black_box(buffer[buffer.len() - 1])
-        },
-        iterations,
-    );
-
-    let legacy_duration = measure(
-        || {
-            let mut volume = LegacyVolumeController::with_sample_rate(SAMPLE_RATE);
-            volume.set_target(0.25);
-            let mut buffer = corpus.to_vec();
-            volume.process(black_box(&mut buffer), CHANNELS);
-            black_box(buffer[buffer.len() - 1])
-        },
-        iterations,
-    );
-
-    report(current_duration, legacy_duration, corpus.len() * iterations)
-}
-
 fn benchmark_volume_processor(corpus: &[f64], iterations: usize) -> BenchReport {
     assert_volume_processor_outputs_match(corpus);
 
     let params = std::sync::Arc::new(AtomicVolumeParams::new());
     params.set_volume(0.25);
     let mut current = VolumeProcessor::new(std::sync::Arc::clone(&params));
-    current.set_sample_rate(SAMPLE_RATE_F64);
+    current
+        .set_sample_rate(SAMPLE_RATE)
+        .expect("valid benchmark sample rate");
     let mut legacy = LegacyVolumeProcessor::new(SAMPLE_RATE_F64, 0.25);
     let mut current_buffer = corpus.to_vec();
     let mut legacy_buffer = corpus.to_vec();
@@ -212,8 +175,8 @@ fn benchmark_volume_processor(corpus: &[f64], iterations: usize) -> BenchReport 
     let current_duration = measure(
         || {
             current_buffer.copy_from_slice(corpus);
-            current.reset();
-            current.process(black_box(&mut current_buffer), CHANNELS);
+            current.reset().expect("benchmark processor reset");
+            process_streaming_in_place(&mut current, black_box(&mut current_buffer), CHANNELS);
             black_box(current_buffer[current_buffer.len() - 1])
         },
         iterations,
@@ -263,39 +226,9 @@ fn benchmark_saturation(corpus: &[f64], iterations: usize) -> BenchReport {
     report(current_duration, legacy_duration, corpus.len() * iterations)
 }
 
-fn benchmark_gain_ramp(samples: usize, iterations: usize) -> BenchReport {
-    assert_gain_ramp_outputs_match(samples);
-
-    let current_duration = measure(
-        || {
-            let mut ramp = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-            let mut sum = 0.0;
-            for _ in 0..samples {
-                sum += ramp.next_gain();
-            }
-            black_box(sum)
-        },
-        iterations,
-    );
-
-    let legacy_duration = measure(
-        || {
-            let mut ramp = LegacyGainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-            let mut sum = 0.0;
-            for _ in 0..samples {
-                sum += ramp.next_gain();
-            }
-            black_box(sum)
-        },
-        iterations,
-    );
-
-    report(current_duration, legacy_duration, samples * iterations)
-}
-
 fn benchmark_loudness_gain_cache(iterations: usize) -> BenchReport {
     assert_loudness_gain_outputs_match();
-    let track = TrackLoudness::new("bench.wav", -18.0, -1.0, None, -14.0);
+    let track = TrackLoudness::new(&MediaLocation::local("bench.wav"), -18.0, -1.0, None, -14.0);
     let legacy = LegacyTrackLoudness {
         integrated_lufs: -18.0,
     };
@@ -327,56 +260,6 @@ fn benchmark_loudness_gain_cache(iterations: usize) -> BenchReport {
         current_duration,
         legacy_duration,
         calls_per_iteration * iterations,
-    )
-}
-
-fn benchmark_gain_ramp_block_apply(corpus: &[f64], iterations: usize) -> BenchReport {
-    assert_gain_ramp_block_apply_matches_next_gain_loop(corpus);
-    let mut current_buffer = corpus.to_vec();
-    let mut legacy_buffer = corpus.to_vec();
-    let mut original_buffer = corpus.to_vec();
-
-    let current_duration = measure(
-        || {
-            let mut ramp = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-            current_buffer.copy_from_slice(corpus);
-            for block in current_buffer.chunks_mut(CALLBACK_FRAMES * CHANNELS) {
-                ramp.apply(block);
-            }
-            black_box(current_buffer[current_buffer.len() / 2])
-        },
-        iterations,
-    );
-
-    let legacy_duration = measure(
-        || {
-            let mut ramp = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-            legacy_buffer.copy_from_slice(corpus);
-            for sample in &mut legacy_buffer {
-                *sample *= ramp.next_gain();
-            }
-            black_box(legacy_buffer[legacy_buffer.len() / 2])
-        },
-        iterations,
-    );
-
-    let original_duration = measure(
-        || {
-            let mut ramp = LegacyGainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-            original_buffer.copy_from_slice(corpus);
-            for sample in &mut original_buffer {
-                *sample *= ramp.next_gain();
-            }
-            black_box(original_buffer[original_buffer.len() / 2])
-        },
-        iterations,
-    );
-
-    report_with_first_pass(
-        current_duration,
-        legacy_duration,
-        original_duration,
-        corpus.len() * iterations,
     )
 }
 
@@ -459,6 +342,20 @@ fn benchmark_volume_lazy_settle(corpus: &[f64], iterations: usize) -> BenchRepor
         original_duration,
         corpus.len() * iterations,
     )
+}
+
+/// Drive a `StreamingProcessor` in place over one interleaved block.
+///
+/// `audio-engine-core` 1.0 replaced the old infallible `AudioProcessor` trait
+/// with the fallible `StreamingProcessor` contract, so the benchmark drives the
+/// adapter exactly as the production callback does.
+fn process_streaming_in_place(
+    processor: &mut impl StreamingProcessor,
+    buffer: &mut [f64],
+    channels: usize,
+) {
+    let block = AudioBlockMut::new(buffer, channels).expect("valid benchmark audio block");
+    let _ = process_checked(processor, ProcessBuffers::in_place(block)).expect("benchmark process");
 }
 
 fn configured_saturation() -> Saturation {
@@ -586,7 +483,9 @@ fn assert_noise_outputs_match(
     for frame in 0..(corpus.len() / CHANNELS) {
         for ch in 0..CHANNELS {
             let idx = frame * CHANNELS + ch;
-            let current_out = current.process_sample(corpus[idx], ch);
+            let current_out = current
+                .process_sample(corpus[idx], ch)
+                .expect("benchmark shaper sample");
             let legacy_out = legacy.process_sample(corpus[idx], ch);
             assert_eq!(current_out.to_bits(), legacy_out.to_bits());
         }
@@ -619,27 +518,17 @@ fn assert_noise_9tap_duplicated_ring_outputs_match(corpus: &[f64]) {
     }
 }
 
-fn assert_volume_controller_outputs_match(corpus: &[f64]) {
-    let mut current = VolumeController::with_sample_rate(SAMPLE_RATE);
-    let mut legacy = LegacyVolumeController::with_sample_rate(SAMPLE_RATE);
-    current.set_target(0.25);
-    legacy.set_target(0.25);
-    let mut current_buffer = corpus.to_vec();
-    let mut legacy_buffer = corpus.to_vec();
-    current.process(&mut current_buffer, CHANNELS);
-    legacy.process(&mut legacy_buffer, CHANNELS);
-    assert_max_abs_diff("VolumeController", &current_buffer, &legacy_buffer, 1.0e-14);
-}
-
 fn assert_volume_processor_outputs_match(corpus: &[f64]) {
     let params = std::sync::Arc::new(AtomicVolumeParams::new());
     params.set_volume(0.25);
     let mut current = VolumeProcessor::new(params);
-    current.set_sample_rate(SAMPLE_RATE_F64);
+    current
+        .set_sample_rate(SAMPLE_RATE)
+        .expect("valid benchmark sample rate");
     let mut legacy = LegacyVolumeProcessor::new(SAMPLE_RATE_F64, 0.25);
     let mut current_buffer = corpus.to_vec();
     let mut legacy_buffer = corpus.to_vec();
-    current.process(&mut current_buffer, CHANNELS);
+    process_streaming_in_place(&mut current, &mut current_buffer, CHANNELS);
     legacy.process(&mut legacy_buffer, CHANNELS);
     assert_max_abs_diff("VolumeProcessor", &current_buffer, &legacy_buffer, 1.0e-6);
 }
@@ -654,21 +543,8 @@ fn assert_saturation_outputs_match(corpus: &[f64]) {
     assert_max_abs_diff("Saturation", &current_buffer, &legacy_buffer, 1.0e-14);
 }
 
-fn assert_gain_ramp_outputs_match(samples: usize) {
-    let mut current = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-    let mut legacy = LegacyGainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-    for idx in 0..samples {
-        let current_gain = current.next_gain();
-        let legacy_gain = legacy.next_gain();
-        assert!(
-            (current_gain - legacy_gain).abs() <= 1.0e-12,
-            "GainRamp mismatch at {idx}: current={current_gain} legacy={legacy_gain}"
-        );
-    }
-}
-
 fn assert_loudness_gain_outputs_match() {
-    let current = TrackLoudness::new("bench.wav", -18.0, -1.0, None, -14.0);
+    let current = TrackLoudness::new(&MediaLocation::local("bench.wav"), -18.0, -1.0, None, -14.0);
     let legacy = LegacyTrackLoudness {
         integrated_lufs: -18.0,
     };
@@ -677,38 +553,6 @@ fn assert_loudness_gain_outputs_match() {
         let legacy_gain = legacy.gain_linear(target);
         assert_eq!(current_gain.to_bits(), legacy_gain.to_bits());
     }
-}
-
-fn assert_gain_ramp_block_apply_matches_next_gain_loop(corpus: &[f64]) {
-    let mut current = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-    let mut legacy = GainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-    let mut original = LegacyGainRamp::new(0.05, 0.95, SAMPLE_RATE, 250);
-    let mut current_buffer = corpus.to_vec();
-    let mut legacy_buffer = corpus.to_vec();
-    let mut original_buffer = corpus.to_vec();
-
-    for block in current_buffer.chunks_mut(CALLBACK_FRAMES * CHANNELS) {
-        current.apply(block);
-    }
-    for sample in &mut legacy_buffer {
-        *sample *= legacy.next_gain();
-    }
-    for sample in &mut original_buffer {
-        *sample *= original.next_gain();
-    }
-
-    assert_max_abs_diff(
-        "GainRampBlockApply",
-        &current_buffer,
-        &legacy_buffer,
-        1.0e-12,
-    );
-    assert_max_abs_diff(
-        "GainRampBlockApplyOriginal",
-        &current_buffer,
-        &original_buffer,
-        1.0e-12,
-    );
 }
 
 fn assert_saturation_outer_dispatch_outputs_match(corpus: &[f64]) {
@@ -993,42 +837,6 @@ impl DuplicatedRing9TapNoiseShaper {
     }
 }
 
-struct LegacyVolumeController {
-    current: f64,
-    target: f64,
-    smoothing: f64,
-}
-
-impl LegacyVolumeController {
-    fn with_sample_rate(sample_rate: u32) -> Self {
-        let smoothing_samples = 0.02 * sample_rate as f64;
-        Self {
-            current: 1.0,
-            target: 1.0,
-            smoothing: (-1.0 / smoothing_samples).exp(),
-        }
-    }
-
-    fn set_target(&mut self, volume: f64) {
-        self.target = volume.clamp(0.0, 1.0);
-    }
-
-    fn next_volume(&mut self) -> f64 {
-        self.current += (self.target - self.current) * (1.0 - self.smoothing);
-        self.current
-    }
-
-    fn process(&mut self, buffer: &mut [f64], channels: usize) {
-        let frames = buffer.len() / channels;
-        for frame in 0..frames {
-            let vol = self.next_volume();
-            for ch in 0..channels {
-                buffer[frame * channels + ch] *= vol;
-            }
-        }
-    }
-}
-
 struct LegacyVolumeProcessor {
     current_volume: f64,
     target: f64,
@@ -1110,37 +918,6 @@ impl LegacySaturation {
             } else {
                 *sample = dry;
             }
-        }
-    }
-}
-
-struct LegacyGainRamp {
-    from: f64,
-    to: f64,
-    total_samples: usize,
-    remaining: usize,
-}
-
-impl LegacyGainRamp {
-    fn new(from: f64, to: f64, sample_rate: u32, ramp_ms: u32) -> Self {
-        let total_samples = (sample_rate as u64 * ramp_ms as u64 / 1000) as usize;
-        let total_samples = total_samples.max(1);
-        Self {
-            from,
-            to,
-            total_samples,
-            remaining: total_samples,
-        }
-    }
-
-    fn next_gain(&mut self) -> f64 {
-        if self.remaining > 0 {
-            let progress = (self.total_samples - self.remaining) as f64 / self.total_samples as f64;
-            let gain = self.from + (self.to - self.from) * progress;
-            self.remaining -= 1;
-            gain
-        } else {
-            self.to
         }
     }
 }

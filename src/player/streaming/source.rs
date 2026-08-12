@@ -7,7 +7,7 @@ use std::time::UNIX_EPOCH;
 
 use thiserror::Error;
 
-use crate::decoder::{DecodeCancelToken, OpenedMediaSource};
+use crate::decoder::{DecodeCancelToken, MediaLocation, OpenedMediaSource};
 use crate::player::MediaSourceAccess;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -210,10 +210,14 @@ impl StreamSourceFactory for RemoteHttpSourceFactory {
         {
             return Err(StreamSourceError::IdentityMismatch);
         }
-        let source = OpenedMediaSource::open_path_with_http_policy(
-            request.path,
+        let path = request.path.to_string_lossy();
+        let validated_path =
+            crate::server::validate_path(&path).map_err(StreamSourceError::OpenRemote)?;
+        let location = MediaLocation::http(&validated_path)
+            .map_err(|error| StreamSourceError::OpenRemote(error.to_string()))?;
+        let source = OpenedMediaSource::open_with_credentials_and_cancel(
+            location,
             request.source_access.credentials(),
-            request.source_access.address_policy(),
             Some(request.cancel.clone()),
         )
         .map_err(|error| {
@@ -295,7 +299,7 @@ mod tests {
     }
 
     fn token(cancelled: bool) -> DecodeCancelToken {
-        DecodeCancelToken::new(Arc::new(AtomicBool::new(cancelled)))
+        DecodeCancelToken::from_flag(Arc::new(AtomicBool::new(cancelled)))
     }
 
     #[test]
@@ -318,8 +322,8 @@ mod tests {
         assert!(!opened.capabilities.reopen_for_seek);
         let decoder = StreamingDecoder::from_opened_source(opened.source, None)
             .expect("construct decoder without reopening path");
-        assert_eq!(decoder.info.sample_rate, 44_100);
-        assert_eq!(decoder.info.channels, 1);
+        assert_eq!(decoder.info().sample_rate, 44_100);
+        assert_eq!(decoder.info().channels, 1);
     }
 
     #[test]

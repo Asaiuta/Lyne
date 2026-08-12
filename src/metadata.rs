@@ -2,7 +2,7 @@ use lofty::file::AudioFile;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 
-use crate::decoder::{StreamingDecoder, TrackMetadata};
+use crate::decoder::{MediaLocation, StreamingDecoder, TrackMetadata};
 
 /// Metadata extracted via `lofty` (more reliable than Symphonia for tags/cover art).
 #[derive(Debug, Clone, Default)]
@@ -106,9 +106,9 @@ pub fn extract_lofty_metadata(path: &str) -> Option<LoftyMetadata> {
 pub fn read_local_metadata(path: &str) -> Result<LocalMetadata, String> {
     let mut result = LocalMetadata::default();
 
-    match StreamingDecoder::open(path) {
+    match StreamingDecoder::open(MediaLocation::local(path)) {
         Ok(decoder) => {
-            let info = decoder.info.clone();
+            let info = decoder.info().clone();
             result.metadata = info.metadata;
             result.duration_secs = info.duration_secs;
             result.sample_rate = Some(info.sample_rate);

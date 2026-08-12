@@ -339,7 +339,8 @@ mod tests {
 
     #[test]
     fn replaygain_state_is_derived_from_normalization_mode() {
-        let mut player = AudioPlayer::new(crate::config::EngineSettings::default());
+        let mut player =
+            AudioPlayer::new(crate::config::EngineSettings::default()).expect("player");
 
         for mode in [
             NormalizationMode::Track,

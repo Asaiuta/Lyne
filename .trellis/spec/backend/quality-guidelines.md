@@ -609,6 +609,218 @@ for sample_chunk in samples.chunks(CHUNK_SAMPLES) {
 
 ---
 
+## Realtime DSP chain construction contract
+
+### 1. Scope / Trigger
+
+Apply this contract when building, rebuilding, or replacing a `DspChain` for the
+realtime callback, when adding a stage that carries its own sample-rate or
+kernel state, or when changing convolver kernel publication.
+
+This boundary exists because `audio-engine-core` owns stage behavior while the
+application owns chain assembly, chain lifetime, and control-plane publication.
+A mistake here is silent: audio keeps flowing, but a stage stops contributing.
+
+### 2. Signatures
+
+```rust
+pub fn build_dsp_chain(/* ... */) -> Result<(DspChain, ConvolverChainRegistration), String>;
+
+pub fn register_convolver_control(
+    &self,
+    registration: ConvolverChainRegistration,
+    sample_rate_hz: u32,
+);
+```
+
+### 3. Contracts
+
+| Boundary | Contract |
+| --- | --- |
+| Chain rate publication | After adding every stage, call `chain.set_sample_rate(rate)` and propagate the error. `DspChain::add` validates that a stage is 1:1 at the chain rate but does **not** push that rate into the stage. |
+| Stage-local rate state | Assume any stage may carry its own rate field initialized to a core-internal default (`ConvolverProcessor::new` hardcodes 44_100 Hz). A stage whose rate disagrees with its published kernel may pass audio through untouched instead of failing. |
+| Registration lifetime | Track a convolver registration by the owning chain's actual lifetime, using an application-owned liveness flag dropped with the chain. Never prune by `ConvolverControl::is_quiescent()`: it is core's teardown check for a *stopped* publisher set and is also true for a live-but-idle chain that has no kernel yet. |
+| Registration coupling | A control handle must not be registrable without its liveness signal. Return them together from chain construction. |
+| Pruning a dead entry | Drain `reclaim_retired()` before dropping the registration so the consumer's last parked kernel is freed on the control thread. |
+| Publication ordering | Publish the kernel into every live registration before enabling, and disable before dropping, so a consumer never observes `enabled == true` with no kernel or the inverse. |
+| Kernel domain | Publish one kernel instance per live chain in that chain's own rate domain. |
+| Disposal thread | Kernels are reclaimed only on the control thread. The audio thread may retire, never free. |
+| Wrapping a core processor | A wrapper must forward every trait method the wrapped type overrides. An unforwarded override silently degrades to the trait default. Re-claim marker traits such as `FixedInPlaceProcessor` explicitly, and preserve `name()` so stage identity and canonical order are unchanged. |
+| Construction failure | `DspChain` construction is fallible. Every call site must propagate without panicking and without installing a partially built chain. |
+| Realtime stage failure | The callback cannot log or propagate. Count a rejected rate change, failed reset, or failed process through `SharedState::mark_dsp_stage_error()` and surface that counter in the diagnostics plane. A counter no reader consumes is not observability. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Chain built at a rate other than a stage's internal default | The stage still applies its effect; a rate mismatch must not silently become passthrough |
+| `chain.set_sample_rate` rejects the rate | Propagate the error; do not install the chain |
+| A second chain registers while the first is alive but idle | Both registrations survive |
+| A chain is genuinely dropped | Its registration is pruned and drained on the next registration, not retained forever |
+| A kernel is published after a later chain registered | Every live chain, including the original, receives it |
+| Realtime `set_sample_rate` / `reset` / `process` fails | Previous chain state stays in place and `mark_dsp_stage_error()` is called |
+
+### 5. Good/Base/Bad Cases
+
+- Good: the builder adds stages, publishes the chain rate, and returns the chain
+  with its convolver registration; a 48 kHz chain convolves.
+- Base: a chain built at the stage's internal default rate also works, and must
+  not be used as evidence that rate publication is unnecessary.
+- Bad: relying on `DspChain::add` to propagate the rate. Convolution then works
+  at 44.1 kHz and is silently inaudible at 48/96 kHz.
+- Bad: pruning registrations by `is_quiescent()`. A track load registers a new
+  chain, evicts the live one, and a later IR load publishes into nothing.
+
+### 6. Tests Required
+
+- A chain built at each supported rate (44.1/48/96 kHz) actually applies a
+  published kernel.
+- Registering a second chain keeps a live-but-idle chain registered, and a kernel
+  published afterwards reaches it.
+- A dropped chain's registration is pruned.
+- Retired kernels are reclaimed off the audio thread and adoption does not stall
+  on retirement backpressure.
+- Realtime tests must baseline against the **no-kernel passthrough** output, never
+  against silence, and must use a non-identity kernel. A convolver with no kernel
+  is a passthrough, and a single-frame unit impulse is the identity filter, so
+  either choice makes the assertion tautological.
+- Run `cargo test --lib player::callback`, `cargo clippy --workspace
+  --all-targets --locked`, and the callback chain/output-path benchmark gates
+  after changing this path.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+chain.add(ConvolverProcessor::new(control.clone())?)?;
+// Stage keeps its internal 44_100 Hz default; a 48 kHz kernel never matches.
+Ok((chain, control))
+```
+
+```rust
+// `is_quiescent()` is true for a live chain that has no kernel yet.
+controls.retain(|(existing, _)| !existing.is_quiescent());
+```
+
+#### Correct
+
+```rust
+chain.add(TrackedConvolverProcessor { inner, alive })?;
+chain
+    .set_sample_rate(sample_rate)
+    .map_err(|error| format!("Failed to set DSP chain sample rate: {error}"))?;
+```
+
+```rust
+controls.retain(|existing| {
+    if existing.chain_is_alive() {
+        return true;
+    }
+    while existing.control.reclaim_retired() {}
+    false
+});
+```
+
+---
+
+## Shared resample driver contract
+
+### 1. Scope / Trigger
+
+Apply this contract when a path needs to resample PCM: the realtime callback, the
+WASAPI loop, the streaming worker, gapless preload, offline decode, or a
+benchmark. `audio-engine-core` 1.0 exposes `StreamingResampler` only through the
+unified `StreamingProcessor` contract, where the caller owns input and output
+storage and must advance from the returned `ProcessProgress`.
+
+### 2. Signatures
+
+All resampling goes through `src/player/resample_stream.rs`:
+
+```rust
+pub(crate) fn max_output_samples_for_input(
+    resampler: &StreamingResampler,
+    input_frames: usize,
+    channels: usize,
+) -> Result<usize, String>;
+
+pub(crate) fn input_frames_for_output_frames(
+    resampler: &StreamingResampler,
+    output_frames: usize,
+) -> usize;
+
+pub(crate) fn resample_into(/* caller-owned output */) -> Result<usize, String>;
+pub(crate) fn drain_into(/* caller-owned output */) -> Result<(usize, bool), String>;
+pub(crate) fn resample_append(/* reused scratch + owned buffer */) -> Result<(), String>;
+pub(crate) fn flush_append(/* reused scratch + owned buffer */) -> Result<(), String>;
+```
+
+### 3. Contracts
+
+| Boundary | Contract |
+| --- | --- |
+| Single driver | This module is the only place that drives the resampler loop. No path may re-derive frame accounting inline. |
+| Allocation | Nothing in the driver allocates. Callers supply preallocated storage, which is what keeps the audio callback allocation-free. |
+| Output sizing | Size caller storage with `max_output_samples_for_input`, which mirrors the core's exact rational ceiling plus its fixed backend burst allowance. Do not hand-derive a ratio. |
+| Demand sizing | `input_frames_for_output_frames` is an estimate only. The authoritative accounting is each call's returned progress; never treat the estimate as exact. |
+| Realtime reserve | Reserve callback output storage off-thread against the same input bound the render loop caps input to, so the reserve cannot go stale. |
+| Realtime reuse | In the callback, reuse the reserved buffer via `clear()` + `resize(capacity)` + `truncate(produced)`. `resize` to exactly the current capacity does not reallocate, and `truncate` on a non-`Drop` element type only sets the length. |
+| Capacity exhaustion | Return an error rather than silently dropping or duplicating input frames. |
+| Resampler replacement | Never swap the resampler inside the callback; a new rate domain requires a new reserve computed off-thread. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Output storage smaller than the per-call bound | Return an error; do not partially consume input |
+| Zero `from_rate` or `to_rate` | Demand sizing degrades to the requested frame count instead of dividing by zero |
+| Capacity arithmetic overflows | Return an error before allocating or indexing |
+| Tail drain reaches the terminal state | Report it so the caller stops calling |
+
+### 5. Good/Base/Bad Cases
+
+- Good: the callback holds one reserve sized for the worst supported ratio and
+  resamples with no allocation across thousands of blocks.
+- Base: an offline decode path uses the `*_append` helpers with reused scratch, so
+  it allocates once rather than per chunk.
+- Bad: computing `input * to_rate / from_rate` inline at a call site. It drifts
+  from the core's ceiling plus burst allowance and eventually truncates audio.
+
+### 6. Tests Required
+
+- A no-realloc test that drives the callback path for many iterations at a
+  worst-case ratio (for example 8 kHz to 384 kHz) and asserts capacity never grows.
+- A capacity-exhaustion test asserting an error rather than silent frame loss.
+- Leftover parking/draining must preserve exact frame accounting across block
+  boundaries.
+- Keep the `assert_no_alloc` debug wrapper active on the output stream path.
+- Run `cargo test --lib player::callback` and the
+  `audio_resampler_streaming_perf` and `audio_callback_output_path_perf` gates
+  after changing this driver.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let out_frames = input_frames * to_rate as usize / from_rate as usize;
+let mut output = vec![0.0f64; out_frames * channels]; // allocates in the callback
+```
+
+#### Correct
+
+```rust
+let capacity = resample_stream::max_output_samples_for_input(resampler, input_frames, channels)?;
+// reserved off-thread; reused here without allocating
+scratch.clear();
+scratch.resize(scratch.capacity(), 0.0);
+let produced = resample_stream::resample_into(resampler, input, &mut scratch[..capacity], channels)?;
+scratch.truncate(produced);
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit tests
@@ -651,6 +863,9 @@ mod tests {
 
 - [ ] No allocations in audio callback path
 - [ ] No mutex/lock in audio callback path
+- [ ] A newly built `DspChain` publishes its sample rate to its stages
+- [ ] Convolver registrations are pruned by chain liveness, not `is_quiescent()`
+- [ ] New realtime diagnostic counters have an actual reader
 - [ ] All numeric user inputs are clamped
 - [ ] All errors have context (`.map_err()` with description)
 - [ ] Lock-free params used for audio thread communication

@@ -128,6 +128,7 @@ struct PlaybackDiagnostics {
     load_error_count: u64,
     underrun_count: u64,
     underrun_silence_frames: u64,
+    dsp_stage_error_count: u64,
     audio_buffer_output_shortfall_count: u64,
     audio_buffer_output_shortfall_frames: u64,
     streaming_output_shortfall_count: u64,
@@ -859,6 +860,7 @@ fn build_playback_diagnostics(data: &AppState) -> PlaybackDiagnostics {
         underrun_silence_frames: shared_state
             .audio_underrun_silence_frames
             .load(Ordering::Relaxed),
+        dsp_stage_error_count: shared_state.dsp_stage_error_count.load(Ordering::Relaxed),
         audio_buffer_output_shortfall_count: shared_state
             .audio_buffer_output_shortfall_count
             .load(Ordering::Relaxed),
@@ -965,7 +967,7 @@ mod tests {
 
         let app_db = Arc::new(AppDatabase::in_memory().unwrap());
         Arc::new(AppState {
-            player: Mutex::new(AudioPlayer::new(EngineSettings::default())),
+            player: Mutex::new(AudioPlayer::new(EngineSettings::default()).expect("player")),
             webdav_config: Mutex::new(WebDavConfig::default()),
             ncm_client: Arc::new(ncm_api_rs::create_client(None)),
             repo: crate::server::repository::AsyncRepo::new(Arc::clone(&app_db)),

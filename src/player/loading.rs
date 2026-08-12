@@ -15,7 +15,7 @@ use super::cache::{
     save_cache_with_header,
 };
 use super::state::{self, LoadResult, SharedState};
-use super::MediaSourceAccess;
+use super::{resample_stream, MediaSourceAccess};
 use crate::config::{EngineSettings, ResampleQuality};
 use crate::decoder::{DecodeCancelToken, StreamingDecoder};
 use crate::processor::{LoudnessDatabase, StreamingResampler};
@@ -29,7 +29,14 @@ pub(super) fn cached_loudness_from_db(
     source_access: &MediaSourceAccess,
 ) -> Option<state::CachedLoudness> {
     let db = db?;
-    match db.get_fresh(source_access.cache_key(path).as_ref()) {
+    let identity = match source_access.loudness_identity(path) {
+        Ok(identity) => identity,
+        Err(error) => {
+            log::warn!("Loudness cache identity failed for '{}': {}", path, error);
+            return None;
+        }
+    };
+    match db.get_fresh(&identity) {
         Ok(Some(track)) => {
             let cached = state::CachedLoudness::from_track(&track);
             if cached.is_some() {
@@ -93,11 +100,11 @@ pub(super) fn decode_file_internal(
 ) -> Result<LoadResult, String> {
     let decode_started_at = std::time::Instant::now();
     shared_state.mark_decode_started();
-    let cancel_token = DecodeCancelToken::new(Arc::clone(load_cancel));
-    let mut decoder = StreamingDecoder::open_with_http_policy(
-        path,
+    let cancel_token = DecodeCancelToken::from_flag(Arc::clone(load_cancel));
+    let location = source_access.media_location(path)?;
+    let mut decoder = StreamingDecoder::open_with_credentials_and_cancel(
+        location,
         source_access.credentials(),
-        source_access.address_policy(),
         Some(cancel_token),
     )
     .map_err(|e| {
@@ -105,7 +112,7 @@ pub(super) fn decode_file_internal(
         e.to_string()
     })?;
 
-    let info = decoder.info.clone();
+    let info = decoder.info().clone();
     let original_sr = info.sample_rate;
     let channels = info.channels;
     let cached_loudness = cached_loudness_from_db(loudness_db.as_deref(), path, source_access);
@@ -261,6 +268,7 @@ pub(super) fn decode_file_internal(
     let mut chunk_count = 0;
     let mut decoded_frames = 0_u64;
     let mut decoded_chunk = Vec::new();
+    let mut resample_scratch: Vec<f64> = Vec::new();
 
     while decoder
         .decode_next_into(&mut decoded_chunk)
@@ -292,7 +300,13 @@ pub(super) fn decode_file_internal(
                     existing_decoded_samples,
                 ),
             )?;
-            rs.process_chunk_append(&decoded_chunk, &mut samples);
+            resample_stream::resample_append(
+                rs,
+                &decoded_chunk,
+                &mut samples,
+                &mut resample_scratch,
+                channels,
+            )?;
         } else {
             record_budget_rejection(
                 shared_state,
@@ -333,7 +347,7 @@ pub(super) fn decode_file_internal(
     }
 
     if let Some(ref mut rs) = resampler {
-        rs.flush_into(&mut samples);
+        resample_stream::flush_append(rs, &mut samples, &mut resample_scratch, channels)?;
         record_budget_rejection(
             shared_state,
             ensure_decoded_samples_fit_budget(

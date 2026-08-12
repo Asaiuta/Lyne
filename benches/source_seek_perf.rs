@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
-use audio_engine::bench_gate::{self, exit_for, GateContext, GateMode, GateMetric};
+use audio_engine::bench_gate::{self, exit_for, GateContext, GateMetric, GateMode};
 use audio_engine::bench_provenance::{self, ProvenanceRequest};
 use audio_engine::player::bench_support::{
     open_source_seek_bench, pct_rank, relative_guard_violated, source_seek_bench_fixture_path,
@@ -83,12 +83,18 @@ struct GateJson {
 fn write_report(path: PathBuf, report: &SourceSeekReport) {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).unwrap_or_else(|error| {
-            panic!("failed to create report dir '{}': {error}", parent.display())
+            panic!(
+                "failed to create report dir '{}': {error}",
+                parent.display()
+            )
         });
     }
     let json = serde_json::to_vec_pretty(report).expect("source-seek report must serialize");
     std::fs::write(&path, json).unwrap_or_else(|error| {
-        panic!("failed to write source-seek report '{}': {error}", path.display())
+        panic!(
+            "failed to write source-seek report '{}': {error}",
+            path.display()
+        )
     });
     println!("source_seek_report path={}", path.display());
 }
@@ -110,7 +116,13 @@ fn main() {
     } else {
         (200, 20)
     };
-    let mode = if quick { "quick" } else if heavy { "heavy" } else { "full" };
+    let mode = if quick {
+        "quick"
+    } else if heavy {
+        "heavy"
+    } else {
+        "full"
+    };
 
     if gate_self_test {
         bench_gate::gate_self_test().expect("gate self-test failed");
@@ -146,7 +158,11 @@ fn main() {
 
     println!(
         "source_seek scenario=persistent count={} p50_ns={} p95_ns={} p99_ns={} max_ns={}",
-        persistent.count, persistent.p50_ns, persistent.p95_ns, persistent.p99_ns, persistent.max_ns
+        persistent.count,
+        persistent.p50_ns,
+        persistent.p95_ns,
+        persistent.p99_ns,
+        persistent.max_ns
     );
     println!(
         "source_seek scenario=reopen count={} p50_ns={} p95_ns={} p99_ns={} max_ns={}",
@@ -166,8 +182,14 @@ fn main() {
     // Gate evaluation (absolute budgets or integrity-only).
     let gate_json = if matches!(gate_mode, GateMode::Check | GateMode::Gate) {
         let metrics = [
-            GateMetric { name: "persistent_seek_p99_ns", value_ns: persistent.p99_ns as f64 },
-            GateMetric { name: "reopen_probe_p99_ns", value_ns: reopen.p99_ns as f64 },
+            GateMetric {
+                name: "persistent_seek_p99_ns",
+                value_ns: persistent.p99_ns as f64,
+            },
+            GateMetric {
+                name: "reopen_probe_p99_ns",
+                value_ns: reopen.p99_ns as f64,
+            },
         ];
         let ctx = GateContext {
             frame_period_ns: 1.0, // spec uses absolute budget_ns only
@@ -205,7 +227,10 @@ fn main() {
     };
 
     if let Some(gate) = &gate_json {
-        println!("source_seek gate={} verdict={} reason={}", gate.mode, gate.verdict, gate.reason);
+        println!(
+            "source_seek gate={} verdict={} reason={}",
+            gate.mode, gate.verdict, gate.reason
+        );
     }
 
     let provenance = bench_provenance::collect(&ProvenanceRequest {

@@ -166,7 +166,7 @@ impl AnalysisCancelToken {
     }
 
     pub(crate) fn decode_token(&self) -> crate::decoder::DecodeCancelToken {
-        crate::decoder::DecodeCancelToken::new(Arc::clone(&self.cancelled))
+        crate::decoder::DecodeCancelToken::from_flag(Arc::clone(&self.cancelled))
     }
 }
 
@@ -315,7 +315,9 @@ pub(crate) fn test_app_state_for_analysis(
 
     let app_db = Arc::new(AppDatabase::in_memory().unwrap());
     Arc::new(AppState {
-        player: Mutex::new(AudioPlayer::new(crate::config::EngineSettings::default())),
+        player: Mutex::new(
+            AudioPlayer::new(crate::config::EngineSettings::default()).expect("player"),
+        ),
         webdav_config: Mutex::new(WebDavConfig::default()),
         ncm_client: Arc::new(ncm_api_rs::create_client(None)),
         repo: repository::AsyncRepo::new(Arc::clone(&app_db)),
@@ -465,7 +467,10 @@ pub async fn run_server(
     };
 
     // Create player with config
-    let player = AudioPlayer::with_loudness_database(config.settings.clone(), loudness_db.clone());
+    let player = AudioPlayer::with_loudness_database(config.settings.clone(), loudness_db.clone())
+        .map_err(|error| {
+            std::io::Error::other(format!("Failed to initialize audio player: {error}"))
+        })?;
 
     let analysis_parallelism = config.server.analysis_max_concurrency;
     let analysis_blocking_threads = config.server.analysis_max_blocking_threads;

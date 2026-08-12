@@ -18,7 +18,6 @@ pub(crate) fn validate_path(path: &str) -> Result<String, String>;
 
 pub struct MediaSourceAccess {
     credentials: Option<HttpCredentials>,
-    address_policy: HttpAddressPolicy,
     source_key: Option<String>,
 }
 
@@ -57,13 +56,13 @@ one hour elapsed time.
 | Request-supplied HTTP(S) media URL | Validate through `validate_path` before queue persistence or playback. M3U/PLS entries use the same boundary as direct loads. |
 | Public/NCM/playlist media | Construct `MediaSourceAccess::public_only()` and persist `source_identity = 'public'`; never infer WebDAV authority from a matching URL. Playlist append/replace maps every validated entry through `QueueEntryInput::public` and uses the source-aware queue APIs. |
 | Playlist WebDAV URL | Reject `webdav://` and `webdavs://`; a playlist has no configured source identity with which to bind credentials. |
-| Configured WebDAV source | Require a persisted `source_key`, normalize the media URL against that source's origin and collection path, then construct one `MediaSourceAccess` containing both credentials and `HttpAddressPolicy::trusted_origin`. The configured origin may intentionally be a LAN/private address. |
+| Configured WebDAV source | Require a persisted `source_key`, normalize the media URL against that source's origin and collection path, then construct one `MediaSourceAccess` binding credentials to that source. `trusted_origin` validates that the configured origin is an HTTP(S) URL with a host; it no longer grants a private-address allowance, because the core removed every destination-policy opt-in. A source configured on a LAN/private address can therefore no longer be opened by the decoder. |
 | Source key omitted for indexed media | Infer from durable `library_root_memberships`; exactly one WebDAV owner grants configured access, no owner stays public-only, and multiple owners fail closed. |
 | Persistent queue replay/preload | Resolve the complete `QueueEntryRecord`, including `source_identity` and `source_key`; never select credentials from the process-global default WebDAV config. |
 | Duplicate queue URLs | Treat `entry_id` as the cursor and preserve `source_key`; path equality alone cannot identify an entry or authorize credentials. |
 | Library scan root without `source_key` | Treat as local only after local path validation. Reject HTTP(S), and reject leading `/` on Windows; on non-Windows, leading `/` remains a local absolute path. |
 | WebDAV response href | Resolve with `Url`, reject userinfo/query/fragment, require normalized scheme/host/effective-port equality, and require collection-path containment before returning a media URL. |
-| Credentialed redirect | The pinned core validates every destination. Trusted private-address allowance survives only same-origin hops; a rejected cross-address hop sends no second request. WebDAV PROPFIND rejects cross-origin redirects before another authenticated request. |
+| Credentialed redirect | The pinned core validates every destination unconditionally: a custom DNS resolver rejects loopback/private/link-local/CGNAT/reserved addresses, and `redirect::Policy::custom` re-resolves and re-validates every hop, erroring instead of following a rejected one. A rejected hop sends no second request. WebDAV PROPFIND additionally rejects cross-origin redirects before another authenticated request. |
 | WebDAV traversal identity | Normalize absolute href paths, query/fragment suffixes, percent encoding, separators, dot segments, trailing slashes, and ASCII case for cycle detection. |
 | Traversal bound or ASCII-case collision | Finish as partial, preserve unseen memberships, expose `scan_status = "partial"` and `partial_reason`, and keep the outer task terminal status as `success`. |
 | Cancellation, browse failure, or indexing write failure | Finish as an error and retain the last committed membership set. |
@@ -71,9 +70,12 @@ one hour elapsed time.
 DNS resolution and redirect-hop validation run in the HTTP client that actually
 opens the media. The app must not add a blocking Actix DNS preflight and claim
 rebinding protection. `audio-engine-core` revision
-`5389c32f66c52c2d0b870acdeae4b20cf9c9de47` owns the destination policy for
-decoder and AutoMix traffic; application code must pass the policy and
-credentials from the same `MediaSourceAccess` value.
+`af5899886939add755217cc72865ed8426e3d9cc` (1.0.1) owns the destination policy
+for decoder and AutoMix traffic. That policy is unconditional — there is no
+policy value to pass — so application code must not reimplement, relax, or claim
+to override it. What the application still owns is which configured source may
+attach credentials: `validate_path` for request-supplied URLs, source resolution,
+and `MediaSourceAccess` as the only producer of credentials.
 
 ## 4. Validation & Error Matrix
 

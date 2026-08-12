@@ -1,0 +1,93 @@
+src\lib.rs:33:69: error[E0432]: unresolved imports `processor::GainRamp`, `processor::VolumeController`: no `GainRamp` in `processor`, no `VolumeController` in `processor`
+src\player\callback.rs:27:49: error[E0432]: unresolved import `crate::processor::AudioProcessor`: no `AudioProcessor` in `processor`
+src\server\playback\automix_handlers.rs:60:27: error[E0425]: cannot find function `analyze_automix_with_http_policy_and_cancel` in module `crate::processor`: not found in `crate::processor`
+src\server\playback\automix_handlers.rs:56:50: error[E0599]: no method named `address_policy` found for struct `MediaSourceAccess` in the current scope: method not found in `MediaSourceAccess`
+src\server\playback\automix_handlers.rs:59:9: error[E0282]: type annotations needed for `Result<_, std::string::String>`
+src\player\callback.rs:385:12: error[E0599]: no method named `reset` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\callback.rs:558:52: error[E0308]: mismatched types: expected `u32`, found `f64`
+src\player\callback.rs:559:15: error[E0599]: no method named `add` found for enum `Result<T, E>` in the current scope
+src\player\callback.rs:560:15: error[E0599]: no method named `add` found for enum `Result<T, E>` in the current scope
+src\player\callback.rs:561:15: error[E0599]: no method named `add` found for enum `Result<T, E>` in the current scope
+src\player\callback.rs:562:15: error[E0599]: no method named `add` found for enum `Result<T, E>` in the current scope
+src\player\callback.rs:563:25: error[E0061]: this function takes 1 argument but 2 arguments were supplied
+src\player\callback.rs:564:44: error[E0599]: no method named `disposal_slot` found for enum `Result<T, E>` in the current scope: method not found in `Result<ConvolverProcessor, ProcessError>`
+src\player\callback.rs:565:15: error[E0599]: no method named `add` found for enum `Result<T, E>` in the current scope
+src\player\callback.rs:566:15: error[E0599]: no method named `add` found for enum `Result<T, E>` in the current scope
+src\player\callback.rs:572:15: error[E0599]: no method named `add` found for enum `Result<T, E>` in the current scope
+src\player\callback.rs:577:10: error[E0308]: mismatched types: expected `DspChain`, found `Result<DspChain, ProcessError>`
+src\player\callback.rs:682:50: error[E0308]: mismatched types: expected `Arc<FFTConvolver>`, found `Arc<Result<FFTConvolver, ProcessError>>`
+src\player\callback.rs:896:35: error[E0308]: mismatched types: expected `u32`, found `f64`
+src\player\callback.rs:901:22: error[E0599]: no method named `set_sample_rate` found for mutable reference `&mut NoiseShaperProcessor` in the current scope
+src\player\callback.rs:902:22: error[E0599]: no method named `reset` found for mutable reference `&mut NoiseShaperProcessor` in the current scope: method not found in `&mut NoiseShaperProcessor`
+src\player\callback.rs:923:22: error[E0599]: no method named `reset` found for mutable reference `&mut NoiseShaperProcessor` in the current scope: method not found in `&mut NoiseShaperProcessor`
+src\player\callback.rs:926:12: error[E0599]: no method named `reset` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\callback.rs:1036:12: error[E0599]: no method named `reset` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\callback.rs:1107:22: error[E0599]: no method named `reset` found for mutable reference `&mut NoiseShaperProcessor` in the current scope: method not found in `&mut NoiseShaperProcessor`
+src\player\callback.rs:1110:12: error[E0599]: no method named `reset` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\callback.rs:1229:16: error[E0599]: no method named `input_frames_for_output_frames` found for reference `&StreamingResampler` in the current scope: method not found in `&StreamingResampler`
+src\player\callback.rs:1280:32: error[E0599]: no method named `process_chunk_borrowed` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\callback.rs:1401:27: error[E0599]: no method named `reset` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\callback.rs:1449:16: error[E0599]: no method named `input_frames_for_output_frames` found for reference `&StreamingResampler` in the current scope: method not found in `&StreamingResampler`
+src\player\callback.rs:1539:32: error[E0599]: no method named `process_chunk_borrowed` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\callback.rs:1704:44: error[E0599]: no method named `refresh_is_enabled` found for mutable reference `&mut NoiseShaperProcessor` in the current scope: method not found in `&mut NoiseShaperProcessor`
+src\player\callback.rs:1800:30: error[E0599]: no method named `process_cached` found for mutable reference `&mut NoiseShaperProcessor` in the current scope
+src\player\effects_api.rs:113:9: error[E0063]: missing field `cutoff_hz` in initializer of `CrossfeedSettings`: missing `cutoff_hz`
+src\player\effects_api.rs:179:16: error[E0599]: no method named `set_enabled` found for enum `Result<T, E>` in the current scope: method not found in `Result<audio_engine_core::NoiseShaper, ProcessError>`
+src\player\effects_api.rs:180:29: error[E0308]: mismatched types: expected `NoiseShaper`, found `Result<NoiseShaper, ProcessError>`
+src\player\gapless.rs:239:5: error[E0308]: mismatched types: expected `f64`, found `Result<f64, ProcessError>`
+src\player\gapless.rs:266:41: error[E0599]: no function or associated item named `open_with_http_policy` found for struct `StreamingDecoder` in the current scope: function or associated item not found in `StreamingDecoder`
+src\player\gapless.rs:269:23: error[E0599]: no method named `address_policy` found for reference `&MediaSourceAccess` in the current scope: method not found in `&MediaSourceAccess`
+src\player\gapless.rs:272:15: error[E0282]: type annotations needed
+src\player\gapless.rs:327:19: error[E0282]: type annotations needed
+src\player\gapless.rs:356:16: error[E0599]: no method named `process_chunk_append` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\gapless.rs:382:12: error[E0599]: no method named `flush_into` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\loading.rs:32:24: error[E0308]: mismatched types: expected `&LoudnessSourceIdentity`, found `&str`
+src\player\loading.rs:96:24: error[E0061]: this function takes 0 arguments but 1 argument was supplied
+src\player\loading.rs:97:41: error[E0599]: no function or associated item named `open_with_http_policy` found for struct `StreamingDecoder` in the current scope: function or associated item not found in `StreamingDecoder`
+src\player\loading.rs:100:23: error[E0599]: no method named `address_policy` found for reference `&MediaSourceAccess` in the current scope: method not found in `&MediaSourceAccess`
+src\player\loading.rs:103:15: error[E0282]: type annotations needed
+src\player\loading.rs:267:19: error[E0282]: type annotations needed
+src\player\loading.rs:295:16: error[E0599]: no method named `process_chunk_append` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\loading.rs:336:12: error[E0599]: no method named `flush_into` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\output_stream.rs:269:23: error[E0599]: no method named `max_output_len_for_input` found for reference `&StreamingResampler` in the current scope: method not found in `&StreamingResampler`
+src\player\output_stream.rs:292:30: error[E0308]: mismatched types: expected `&mut NoiseShaperProcessor`, found `&mut Result<NoiseShaperProcessor, ...>`
+src\player\playback_config.rs:272:50: error[E0308]: mismatched types: expected `MediaLocation`, found `&str`
+src\player\playback_config.rs:274:28: error[E0616]: field `info` of struct `StreamingDecoder` is private: private field
+src\player\playback_config.rs:404:25: error[E0061]: this function takes 0 arguments but 1 argument was supplied
+src\player\spectrum.rs:86:71: error[E0599]: no method named `to_vec` found for enum `Result<T, E>` in the current scope: method not found in `Result<&[f32], ProcessError>`
+src\player\streaming\session.rs:122:70: error[E0616]: field `info` of struct `StreamingDecoderBuilder` is private: private field
+src\player\streaming\session.rs:181:32: error[E0616]: field `info` of struct `StreamingDecoderBuilder` is private: private field
+src\player\streaming\session.rs:188:42: error[E0616]: field `info` of struct `StreamingDecoderBuilder` is private: private field
+src\player\streaming\session.rs:192:36: error[E0616]: field `info` of struct `StreamingDecoderBuilder` is private: private field
+src\player\streaming\session.rs:272:28: error[E0616]: field `info` of struct `StreamingDecoderBuilder` is private: private field
+src\player\streaming\session.rs:273:30: error[E0616]: field `info` of struct `StreamingDecoderBuilder` is private: private field
+src\player\streaming\session.rs:357:31: error[E0599]: no method named `flush_borrowed` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\streaming\session.rs:392:23: error[E0599]: no method named `process_chunk_borrowed` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\streaming\session.rs:449:19: error[E0599]: no method named `reset` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\player\track_loudness.rs:48:11: error[E0599]: no method named `process` found for enum `Result<T, E>` in the current scope: method not found in `Result<LoudnessMeter, ProcessError>`
+src\player\track_loudness.rs:49:26: error[E0599]: no method named `integrated_loudness` found for enum `Result<T, E>` in the current scope: method not found in `Result<LoudnessMeter, ProcessError>`
+src\player\track_loudness.rs:78:33: error[E0616]: field `preamp_gain_db` of struct `AtomicLoudnessState` is private: private field
+src\player\mod.rs:152:57: error[E0599]: no method named `atomic_state` found for struct `MutexGuard<'_, RawMutex, Result<LoudnessNormalizer, ProcessError>>` in the current scope: method not found in `MutexGuard<'_, RawMutex, Result<LoudnessNormalizer, ProcessError>>`
+src\player\mod.rs:159:59: error[E0308]: mismatched types: expected `SpectrumAnalyzer`, found `Result<SpectrumAnalyzer, ProcessError>`
+src\player\mod.rs:272:13: error[E0308]: mismatched types: expected `Arc<Mutex<RawMutex, LoudnessNormalizer>>`, found `Arc<Mutex<RawMutex, Result<..., ...>>>`
+src\player\mod.rs:410:33: error[E0061]: this function takes 0 arguments but 1 argument was supplied
+src\server\playback\analysis.rs:174:36: error[E0609]: no field `track_id` on type `&TrackLoudness`: unknown field
+src\server\playback\analysis.rs:175:37: error[E0609]: no field `file_path` on type `&TrackLoudness`: unknown field
+src\server\playback\analysis.rs:190:24: error[E0308]: mismatched types: expected `&LoudnessSourceIdentity`, found `&str`
+src\server\playback\analysis.rs:211:23: error[E0609]: no field `file_path` on type `&TrackLoudness`: unknown field
+src\server\playback\analysis.rs:227:41: error[E0599]: no function or associated item named `open_with_http_policy` found for struct `StreamingDecoder` in the current scope: function or associated item not found in `StreamingDecoder`
+src\server\playback\analysis.rs:230:23: error[E0599]: no method named `address_policy` found for struct `MediaSourceAccess` in the current scope: method not found in `MediaSourceAccess`
+src\server\playback\analysis.rs:246:23: error[E0282]: type annotations needed
+src\server\playback\analysis.rs:253:15: error[E0599]: no method named `process` found for enum `Result<T, E>` in the current scope: method not found in `Result<LoudnessMeter, ProcessError>`
+src\server\playback\analysis.rs:257:33: error[E0599]: no method named `integrated_loudness` found for enum `Result<T, E>` in the current scope: method not found in `Result<LoudnessMeter, ProcessError>`
+src\server\playback\analysis.rs:263:32: error[E0599]: no method named `loudness_range` found for enum `Result<T, E>` in the current scope: method not found in `Result<LoudnessMeter, ProcessError>`
+src\server\playback\analysis.rs:264:34: error[E0599]: no method named `true_peak` found for enum `Result<T, E>` in the current scope: method not found in `Result<LoudnessMeter, ProcessError>`
+src\server\playback\analysis.rs:268:9: error[E0308]: mismatched types: expected `&MediaLocation`, found `&str`
+src\server\playback\analysis.rs:278:20: error[E0609]: no field `file_path` on type `TrackLoudness`: unknown field
+src\server\playback\library_scan.rs:1014:53: error[E0599]: no function or associated item named `open_with_http_policy` found for struct `StreamingDecoder` in the current scope: function or associated item not found in `StreamingDecoder`
+src\server\playback\library_scan.rs:1017:31: error[E0599]: no method named `address_policy` found for struct `MediaSourceAccess` in the current scope: method not found in `MediaSourceAccess`
+src\wasapi_output.rs:674:26: error[E0599]: no method named `input_frames_for_output_frames` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\wasapi_output.rs:700:40: error[E0599]: no method named `process_chunk_borrowed` found for mutable reference `&mut StreamingResampler` in the current scope: method not found in `&mut StreamingResampler`
+src\wasapi_output.rs:735:17: error[E0308]: mismatched types: expected `&mut NoiseShaperProcessor`, found `&mut Result<NoiseShaperProcessor, ...>`
+src\wasapi_output.rs:782:53: error[E0599]: no method named `refresh_is_enabled` found for mutable reference `&mut NoiseShaperProcessor` in the current scope: method not found in `&mut NoiseShaperProcessor`
+src\wasapi_output.rs:793:28: error[E0599]: no method named `process_cached` found for mutable reference `&mut NoiseShaperProcessor` in the current scope

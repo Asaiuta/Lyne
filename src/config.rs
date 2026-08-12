@@ -7,9 +7,89 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use audio_engine_core::config::{
-    CrossfeedConfig, DitherConfig, DynamicLoudnessConfig, LoudnessConfig, NormalizationMode,
-    PhaseResponse, ResampleQuality, SaturationConfig, SaturationType,
+    LoudnessConfig, NormalizationMode, PhaseResponse, ResampleQuality,
 };
+pub use audio_engine_core::processor::{SaturationQuality, SaturationType};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrossfeedConfig {
+    pub enabled: bool,
+    pub mix: f64,
+    pub cutoff_hz: f64,
+}
+
+impl Default for CrossfeedConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mix: 0.2,
+            cutoff_hz: 700.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DitherConfig {
+    pub enabled: bool,
+    pub noise_shaper_curve: crate::processor::NoiseShaperCurve,
+}
+
+impl Default for DitherConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            noise_shaper_curve: crate::processor::NoiseShaperCurve::Lipshitz5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicLoudnessConfig {
+    pub ref_volume_db: f64,
+    pub transition_db: f64,
+    pub strength: f64,
+    pub pre_gain_db: f64,
+    pub enabled: bool,
+}
+
+impl Default for DynamicLoudnessConfig {
+    fn default() -> Self {
+        Self {
+            ref_volume_db: -15.0,
+            transition_db: 25.0,
+            strength: 1.0,
+            pre_gain_db: -3.0,
+            enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaturationConfig {
+    pub sat_type: SaturationType,
+    pub quality: SaturationQuality,
+    pub drive: f64,
+    pub threshold: f64,
+    pub mix: f64,
+    pub input_gain_db: f64,
+    pub output_gain_db: f64,
+    pub enabled: bool,
+}
+
+impl Default for SaturationConfig {
+    fn default() -> Self {
+        Self {
+            sat_type: SaturationType::Tube,
+            quality: SaturationQuality::Direct,
+            drive: 0.25,
+            threshold: 0.88,
+            mix: 0.2,
+            input_gain_db: 0.0,
+            output_gain_db: 0.0,
+            enabled: false,
+        }
+    }
+}
 
 pub const ENV_AUDIO_CACHE_MAX_BYTES: &str = "AUDIO_CACHE_MAX_BYTES";
 pub const DEFAULT_CACHE_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;

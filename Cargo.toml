@@ -107,7 +107,7 @@ name = "source_seek_perf"
 harness = false
 
 [dependencies]
-audio-engine-core = { git = "https://github.com/Asaiuta/audio-engine-core", rev = "5389c32f66c52c2d0b870acdeae4b20cf9c9de47" }
+audio-engine-core = { git = "https://github.com/Asaiuta/audio-engine-core", rev = "af5899886939add755217cc72865ed8426e3d9cc" }
 audio-runtime-paths = { path = "crates/audio-runtime-paths" }
 # --- Core Audio ---
 lofty = "0.22"

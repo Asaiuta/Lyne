@@ -3,6 +3,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use audio_engine::decoder::MediaLocation;
 use audio_engine::StreamingDecoder;
 
 const CHANNELS: usize = 2;
@@ -130,11 +131,13 @@ fn benchmark_scenario(scenario: Scenario, fixture: &Path, iterations: usize) -> 
     for _ in 0..iterations {
         match scenario {
             Scenario::OpenOnly => {
-                let decoder = StreamingDecoder::open(black_box(fixture)).expect("fixture opens");
-                decoded_samples = decoder.info.total_frames.unwrap_or(TOTAL_FRAMES as u64) as usize
-                    * decoder.info.channels;
+                let decoder = StreamingDecoder::open(MediaLocation::local(black_box(fixture)))
+                    .expect("fixture opens");
+                let info = decoder.info();
+                decoded_samples =
+                    info.total_frames.unwrap_or(TOTAL_FRAMES as u64) as usize * info.channels;
                 chunks = 0;
-                black_box(decoder.info.sample_rate);
+                black_box(info.sample_rate);
             }
             Scenario::DecodeNextIntoDrain => {
                 let (samples, chunk_count) = decode_next_into_drain(fixture);
@@ -167,7 +170,7 @@ fn benchmark_scenario(scenario: Scenario, fixture: &Path, iterations: usize) -> 
 }
 
 fn decode_next_into_drain(fixture: &Path) -> (usize, usize) {
-    let mut decoder = StreamingDecoder::open(fixture).expect("fixture opens");
+    let mut decoder = StreamingDecoder::open(MediaLocation::local(fixture)).expect("fixture opens");
     let mut chunk = Vec::new();
     let mut decoded_samples = 0usize;
     let mut chunks = 0usize;
@@ -183,9 +186,11 @@ fn decode_next_into_drain(fixture: &Path) -> (usize, usize) {
 }
 
 fn decode_next_into_preload_append(fixture: &Path) -> (usize, usize) {
-    let mut decoder = StreamingDecoder::open(fixture).expect("fixture opens");
-    let total_frames = decoder.info.total_frames.unwrap_or(TOTAL_FRAMES as u64) as usize;
-    let mut all_samples = Vec::with_capacity(total_frames * decoder.info.channels);
+    let mut decoder = StreamingDecoder::open(MediaLocation::local(fixture)).expect("fixture opens");
+    let info = decoder.info();
+    let total_frames = info.total_frames.unwrap_or(TOTAL_FRAMES as u64) as usize;
+    let channels = info.channels;
+    let mut all_samples = Vec::with_capacity(total_frames * channels);
     let mut chunk = Vec::new();
     let mut chunks = 0usize;
 
@@ -205,7 +210,7 @@ fn decode_next_into_preload_append(fixture: &Path) -> (usize, usize) {
 }
 
 fn decode_next_vec_wrapper(fixture: &Path) -> (usize, usize) {
-    let mut decoder = StreamingDecoder::open(fixture).expect("fixture opens");
+    let mut decoder = StreamingDecoder::open(MediaLocation::local(fixture)).expect("fixture opens");
     let mut decoded_samples = 0usize;
     let mut chunks = 0usize;
 

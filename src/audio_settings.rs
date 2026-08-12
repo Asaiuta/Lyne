@@ -816,7 +816,7 @@ mod tests {
         let repository = create_settings_manager(&path);
         let settings = repository.lock().get_settings();
         let coordinator = AudioSettingsCoordinator::new(repository);
-        let player = AudioPlayer::new(settings);
+        let player = AudioPlayer::new(settings).expect("player");
         (path, coordinator, player)
     }
 
@@ -1040,7 +1040,7 @@ mod tests {
         let repository = create_settings_manager(&path);
         let settings = repository.lock().get_settings();
         let coordinator = AudioSettingsCoordinator::with_preview_ttl(repository, Duration::ZERO);
-        let mut player = AudioPlayer::new(settings);
+        let mut player = AudioPlayer::new(settings).expect("player");
         coordinator
             .preview_volume(&mut player, "playerbar", 1, 0.1)
             .expect("preview should succeed");

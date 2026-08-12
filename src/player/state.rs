@@ -615,6 +615,10 @@ pub struct SharedState {
     pub playback_progress_generation: AtomicU64,
     pub decode_budget_rejection_count: AtomicU64,
     pub audio_underrun_count: AtomicU64,
+    /// Count of DSP stage failures observed on the audio thread. The callback
+    /// must never panic, so a rejected rate/reset/process is counted here and
+    /// surfaced through the diagnostics plane instead.
+    pub dsp_stage_error_count: AtomicU64,
     pub audio_underrun_silence_frames: AtomicU64,
     pub audio_buffer_output_shortfall_count: AtomicU64,
     pub audio_buffer_output_shortfall_frames: AtomicU64,
@@ -845,6 +849,7 @@ impl SharedState {
             playback_progress_generation: AtomicU64::new(0),
             decode_budget_rejection_count: AtomicU64::new(0),
             audio_underrun_count: AtomicU64::new(0),
+            dsp_stage_error_count: AtomicU64::new(0),
             audio_underrun_silence_frames: AtomicU64::new(0),
             audio_buffer_output_shortfall_count: AtomicU64::new(0),
             audio_buffer_output_shortfall_frames: AtomicU64::new(0),
@@ -1264,6 +1269,15 @@ impl SharedState {
         self.streaming_ready_sent_ms.store(0, Ordering::Relaxed);
         self.streaming_ready_ms.store(0, Ordering::Relaxed);
         self.streaming_finished_ms.store(0, Ordering::Relaxed);
+    }
+
+    /// Record a DSP stage failure observed on the audio thread.
+    ///
+    /// The realtime callback cannot log, allocate, or propagate an error, so a
+    /// failed rate change, reset, or process call is counted here and read by
+    /// the diagnostics plane off the audio thread.
+    pub fn mark_dsp_stage_error(&self) {
+        self.dsp_stage_error_count.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn mark_audio_buffer_output_shortfall(&self, silence_frames: u64) {

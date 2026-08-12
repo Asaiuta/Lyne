@@ -33,7 +33,13 @@ impl AudioPlayer {
     }
 
     pub fn set_target_lufs(&mut self, target_lufs: f64) {
-        self.loudness_normalizer.lock().set_target_lufs(target_lufs);
+        if let Err(error) = self.loudness_normalizer.lock().set_target_lufs(target_lufs) {
+            // The core rejects non-finite / unrepresentable gains. Keep the
+            // previous normalizer state and do not persist a value the engine
+            // refused to apply.
+            log::warn!("Rejected target LUFS {target_lufs}: {error}");
+            return;
+        }
         self.config.loudness.target_lufs = target_lufs;
         if let Err(e) = self
             .cmd_tx
@@ -47,11 +53,16 @@ impl AudioPlayer {
     }
 
     pub fn set_album_gain(&self, gain_db: f64) {
-        self.loudness_normalizer.lock().set_album_gain(gain_db);
+        if let Err(error) = self.loudness_normalizer.lock().set_album_gain(gain_db) {
+            log::warn!("Rejected album gain {gain_db} dB: {error}");
+        }
     }
 
     pub fn set_preamp_gain(&self, gain_db: f64) {
-        self.loudness_normalizer.lock().set_preamp_gain(gain_db);
+        if let Err(error) = self.loudness_normalizer.lock().set_preamp_gain(gain_db) {
+            log::warn!("Rejected preamp gain {gain_db} dB: {error}");
+            return;
+        }
         if let Err(e) = self.cmd_tx.send(super::AudioCommand::RefreshLoadedLoudness) {
             log::warn!("Failed to send RefreshLoadedLoudness command: {}", e);
         }
@@ -112,6 +123,7 @@ impl AudioPlayer {
         let snapshot = self.lockfree_crossfeed_params.read();
         CrossfeedSettings {
             mix: snapshot.mix,
+            cutoff_hz: snapshot.cutoff_hz,
             enabled: snapshot.enabled,
         }
     }
@@ -170,14 +182,17 @@ impl AudioPlayer {
     /// Builds a detached noise shaper snapshot for inspection or tests.
     ///
     /// Mutating the returned value does not affect the real-time DSP chain.
-    pub fn noise_shaper_snapshot(&self) -> Arc<Mutex<crate::processor::NoiseShaper>> {
+    pub fn noise_shaper_snapshot(
+        &self,
+    ) -> Result<Arc<Mutex<crate::processor::NoiseShaper>>, String> {
         let channels = self.shared_state.channels.load(Ordering::Relaxed).max(1) as usize;
         let sample_rate = self.shared_state.sample_rate.load(Ordering::Relaxed).max(1) as u32;
         let bits = self.get_output_bits();
 
-        let mut shaper = crate::processor::NoiseShaper::new(channels, sample_rate, bits);
+        let mut shaper = crate::processor::NoiseShaper::new(channels, sample_rate, bits)
+            .map_err(|error| format!("Failed to build noise shaper snapshot: {error}"))?;
         shaper.set_enabled(self.dither_enabled);
-        Arc::new(Mutex::new(shaper))
+        Ok(Arc::new(Mutex::new(shaper)))
     }
 
     /// Get noise shaper curve name.
@@ -203,7 +218,11 @@ impl AudioPlayer {
         let snapshot = self.lockfree_eq_params.read();
 
         let mut eq = crate::processor::Equalizer::new(channels, sample_rate);
-        eq.set_all_bands(&snapshot.gains, sample_rate);
+        if let Err(error) = eq.set_all_bands(&snapshot.gains, sample_rate) {
+            // A detached snapshot is diagnostic only; report the rejected gains
+            // instead of silently returning a differently configured EQ.
+            log::warn!("Rejected EQ snapshot band gains: {error}");
+        }
         eq.set_enabled(snapshot.enabled);
         Arc::new(Mutex::new(eq))
     }

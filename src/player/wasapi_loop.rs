@@ -137,14 +137,22 @@ pub(super) fn handle_wasapi_exclusive(
         return WasapiPlaybackOutcome::Handled;
     }
 
-    let dsp_callback = build_wasapi_callback(
+    let dsp_callback = match build_wasapi_callback(
         shared_state,
         dsp_ctx,
         loudness_state,
         spectrum_tx,
         sample_rate,
         channels,
-    );
+    ) {
+        Ok(callback) => callback,
+        Err(error) => {
+            log::error!("Failed to build WASAPI DSP callback: {error}");
+            *shared_state.load_error.write() = Some(error);
+            shared_state.state.store(PlayerState::Stopped);
+            return WasapiPlaybackOutcome::Handled;
+        }
+    };
     let wasapi_device_id = selected_wasapi_device_id(shared_state);
 
     shared_state.mark_stream_build_started();
@@ -196,16 +204,16 @@ fn build_wasapi_callback(
     spectrum_tx: &Sender<SpectrumBatch>,
     sample_rate: u32,
     channels: usize,
-) -> crate::wasapi_output::DspCallback {
+) -> Result<crate::wasapi_output::DspCallback, String> {
     let cb_shared = Arc::clone(shared_state);
     let cb_loudness_state = Arc::clone(loudness_state);
     let cb_spectrum_tx = spectrum_tx.clone();
 
     let mut callback_scratch = CallbackScratch::new(channels);
 
-    let (mut wasapi_dsp_chain, convolver_disposal) = LockfreeDspContext::build_dsp_chain(
+    let (mut wasapi_dsp_chain, convolver_control) = LockfreeDspContext::build_dsp_chain(
         channels,
-        sample_rate as f64,
+        sample_rate,
         Arc::clone(&dsp_ctx.eq_params),
         Arc::clone(&dsp_ctx.saturation_params),
         Arc::clone(&dsp_ctx.crossfeed_params),
@@ -214,28 +222,29 @@ fn build_wasapi_callback(
         Arc::clone(&dsp_ctx.noise_shaper_params),
         Arc::clone(&dsp_ctx.dynamic_loudness_params),
         Arc::new(AtomicDynamicLoudnessTelemetry::new()),
-        Arc::clone(&dsp_ctx.merged_convolver),
-        Arc::clone(&dsp_ctx.merged_convolver_enabled),
-    );
-    dsp_ctx.register_convolver_disposal_slot(convolver_disposal);
+        dsp_ctx.convolver_is_enabled(),
+    )?;
+    dsp_ctx.register_convolver_control(convolver_control, sample_rate);
 
     let mut unused_resampler = None;
 
-    Box::new(move |data: &mut [f32], cb_channels: usize| -> bool {
-        audio_callback_lockfree(
-            data,
-            &cb_shared,
-            &mut wasapi_dsp_chain,
-            None,
-            &cb_loudness_state,
-            &cb_spectrum_tx,
-            cb_channels,
-            &mut unused_resampler,
-            &mut callback_scratch,
-        );
+    Ok(Box::new(
+        move |data: &mut [f32], cb_channels: usize| -> bool {
+            audio_callback_lockfree(
+                data,
+                &cb_shared,
+                &mut wasapi_dsp_chain,
+                None,
+                &cb_loudness_state,
+                &cb_spectrum_tx,
+                cb_channels,
+                &mut unused_resampler,
+                &mut callback_scratch,
+            );
 
-        cb_shared.state.load() == PlayerState::Stopped
-    })
+            cb_shared.state.load() == PlayerState::Stopped
+        },
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

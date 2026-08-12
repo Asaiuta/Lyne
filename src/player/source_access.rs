@@ -1,12 +1,12 @@
 use std::borrow::Cow;
 
-use crate::decoder::{HttpAddressPolicy, HttpCredentials};
+use crate::decoder::{HttpCredentials, MediaLocation};
+use crate::processor::LoudnessSourceIdentity;
 
 /// HTTP credentials and destination trust carried as one source-open contract.
 #[derive(Clone, Debug, Default)]
 pub struct MediaSourceAccess {
     credentials: Option<HttpCredentials>,
-    address_policy: HttpAddressPolicy,
     source_key: Option<String>,
 }
 
@@ -20,11 +20,13 @@ impl MediaSourceAccess {
         credentials: Option<HttpCredentials>,
         source_key: &str,
     ) -> Result<Self, String> {
-        let address_policy = HttpAddressPolicy::trusted_origin(origin)
+        let parsed = reqwest::Url::parse(origin)
             .map_err(|error| format!("Invalid trusted media origin: {error}"))?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            return Err("Invalid trusted media origin: expected an HTTP(S) URL with a host".into());
+        }
         Ok(Self {
             credentials,
-            address_policy,
             source_key: Some(source_key.to_string()),
         })
     }
@@ -33,8 +35,23 @@ impl MediaSourceAccess {
         self.credentials.as_ref()
     }
 
-    pub(crate) fn address_policy(&self) -> &HttpAddressPolicy {
-        &self.address_policy
+    pub(crate) fn media_location(&self, path: &str) -> Result<MediaLocation, String> {
+        if path.starts_with("http://") || path.starts_with("https://") {
+            MediaLocation::http(path).map_err(|error| format!("Invalid remote media URL: {error}"))
+        } else {
+            Ok(MediaLocation::local(path))
+        }
+    }
+
+    /// Typed loudness-cache identity for one media path.
+    ///
+    /// Deliberately not namespaced by `source_key`: the core keys HTTP rows by
+    /// URL and treats every HTTP row as stale, and local rows must keep their
+    /// pristine path so mtime/size freshness evidence still resolves.
+    pub(crate) fn loudness_identity(&self, path: &str) -> Result<LoudnessSourceIdentity, String> {
+        Ok(LoudnessSourceIdentity::from_location(
+            &self.media_location(path)?,
+        ))
     }
 
     pub(crate) fn has_credentials(&self) -> bool {

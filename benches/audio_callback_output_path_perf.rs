@@ -10,10 +10,11 @@ use std::time::Instant;
 use audio_engine::player::bench_support::{
     spectrum_channel_for_bench, SpectrumBenchSender, AUDIO_PROCESS_BUFFER_FRAMES,
 };
-use audio_engine::player::{audio_callback_lockfree, CallbackScratch, PlayerState, SharedState};
+use audio_engine::player::{
+    audio_callback_lockfree, CallbackScratch, FinalNoiseShaper, PlayerState, SharedState,
+};
 use audio_engine::processor::{
-    AtomicLoudnessState, AtomicNoiseShaperParams, DspChain, NoiseShaperCurve, NoiseShaperProcessor,
-    StreamingResampler,
+    AtomicLoudnessState, AtomicNoiseShaperParams, DspChain, NoiseShaperCurve, StreamingResampler,
 };
 use serde::Serialize;
 
@@ -62,7 +63,7 @@ impl Scenario {
 struct BenchFixture {
     shared: SharedState,
     chain: DspChain,
-    final_noise_shaper: NoiseShaperProcessor,
+    final_noise_shaper: FinalNoiseShaper,
     loudness: Arc<AtomicLoudnessState>,
     spectrum_tx: SpectrumBenchSender,
     resampler: Option<StreamingResampler>,
@@ -273,7 +274,11 @@ fn main() {
             binary_path: None,
             fixture_paths: Vec::new(),
             profile: Some(mode),
-            attribution: vec!["in-process", "no-cpal-device-write", "no-audible-end-to-end"],
+            attribution: vec![
+                "in-process",
+                "no-cpal-device-write",
+                "no-audible-end-to-end",
+            ],
         });
         write_report(
             path,
@@ -365,7 +370,7 @@ fn build_fixture(scenario: Scenario, frames: usize, callback_count: usize) -> Be
     shared.channels.store(CHANNELS as u64, Ordering::Relaxed);
     shared.state.store(PlayerState::Playing);
 
-    let chain = DspChain::new(SOURCE_SAMPLE_RATE as f64);
+    let chain = DspChain::new(SOURCE_SAMPLE_RATE).expect("valid benchmark DSP chain");
     let loudness = Arc::new(AtomicLoudnessState::default());
     loudness.set_enabled(false);
 
@@ -374,7 +379,8 @@ fn build_fixture(scenario: Scenario, frames: usize, callback_count: usize) -> Be
     noise_shaper_params.set_bits(24);
     noise_shaper_params.set_curve(NoiseShaperCurve::TpdfOnly);
     let final_noise_shaper =
-        NoiseShaperProcessor::new(CHANNELS, output_sample_rate(scenario), noise_shaper_params);
+        FinalNoiseShaper::new(CHANNELS, output_sample_rate(scenario), noise_shaper_params)
+            .expect("valid benchmark noise shaper");
 
     let resampler = if scenario.uses_resampler() {
         Some(

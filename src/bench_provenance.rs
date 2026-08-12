@@ -113,7 +113,11 @@ pub fn collect(request: &ProvenanceRequest<'_>) -> Provenance {
             .iter()
             .filter_map(|p| hash_file(p).map(|(name, sha256)| FixtureIdentity { name, sha256 }))
             .collect(),
-        attribution: request.attribution.iter().map(|s| (*s).to_owned()).collect(),
+        attribution: request
+            .attribution
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
     }
 }
 
@@ -136,7 +140,10 @@ pub fn compare(left: &Provenance, right: &Provenance) -> ComparisonResult {
             left.source.git_head, right.source.git_head
         ));
     }
-    match (&left.source.dirty_fingerprint, &right.source.dirty_fingerprint) {
+    match (
+        &left.source.dirty_fingerprint,
+        &right.source.dirty_fingerprint,
+    ) {
         (Some(l), Some(r)) if l != r => mismatches.push("dirty-tree-differs".to_owned()),
         (Some(_), Some(_)) => {}
         _ => mismatches.push("missing-dirty-fingerprint".to_owned()),
@@ -145,9 +152,7 @@ pub fn compare(left: &Provenance, right: &Provenance) -> ComparisonResult {
         (Some(l), Some(r)) if l.sha256 != r.sha256 => {
             mismatches.push("binary-sha-differs".to_owned())
         }
-        (Some(_), None) | (None, Some(_)) => {
-            mismatches.push("binary-identity-missing".to_owned())
-        }
+        (Some(_), None) | (None, Some(_)) => mismatches.push("binary-identity-missing".to_owned()),
         _ => {}
     }
     if left.host.os != right.host.os || left.host.arch != right.host.arch {
@@ -242,7 +247,9 @@ fn rustc_toolchain() -> Option<String> {
     if !out.status.success() {
         return None;
     }
-    String::from_utf8(out.stdout).ok().map(|s| s.trim().to_owned())
+    String::from_utf8(out.stdout)
+        .ok()
+        .map(|s| s.trim().to_owned())
 }
 
 fn host_identity() -> HostIdentity {
@@ -362,9 +369,10 @@ mod tests {
         let b = sample("abc", Some("fp"), true);
         let r = compare(&a, &b);
         assert!(!r.comparable);
-        assert!(r.mismatches.contains(&"missing-dirty-fingerprint".to_owned()));
+        assert!(r
+            .mismatches
+            .contains(&"missing-dirty-fingerprint".to_owned()));
     }
-
     #[test]
     fn binary_sha_mismatch_is_incomparable() {
         let mut a = sample("abc", Some("fp1"), true);

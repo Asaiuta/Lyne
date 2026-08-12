@@ -1,5 +1,4 @@
 use std::hint::black_box;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,11 +7,11 @@ use audio_engine::player::LockfreeDspContext;
 use audio_engine::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
     AtomicEqParams, AtomicNoiseShaperParams, AtomicPeakLimiterParams, AtomicSaturationParams,
-    AtomicVolumeParams, DspChain, FFTConvolver, NoiseShaperCurve, SaturationTypeValue, EQ_BANDS,
+    AtomicVolumeParams, DspChain, NoiseShaperCurve, SaturationTypeValue, EQ_BANDS,
 };
 
 const CHANNELS: usize = 2;
-const SAMPLE_RATE: f64 = 48_000.0;
+const SAMPLE_RATE: u32 = 48_000;
 const BUFFER_FRAMES: [usize; 4] = [64, 128, 256, 512];
 const WARMUP_BUFFERS: usize = 256;
 const NODE_ORDER: &str =
@@ -86,7 +85,7 @@ fn main() {
         } else {
             "full"
         },
-        SAMPLE_RATE as u32,
+        SAMPLE_RATE,
         CHANNELS,
         NODE_ORDER
     );
@@ -118,7 +117,7 @@ fn main() {
         }
     }
 
-    let frame_period_ns = 512.0 * 1_000_000_000.0 / SAMPLE_RATE;
+    let frame_period_ns = 512.0 * 1_000_000_000.0 / SAMPLE_RATE as f64;
     let ctx = GateContext {
         frame_period_ns,
         deadline_miss_rate: None,
@@ -247,14 +246,15 @@ fn build_chain_bundle(scenario: Scenario) -> ChainBundle {
         noise_shaper_params,
         dynamic_loudness_params,
         dynamic_loudness_telemetry,
-    );
+    )
+    .expect("valid benchmark DSP context");
 
     if matches!(scenario, Scenario::ActiveDspWithConvolver) {
-        ctx.merged_convolver_enabled.store(true, Ordering::Release);
-        ctx.merged_convolver.store(Some(Arc::new(FFTConvolver::new(
-            &synthetic_ir(256, CHANNELS),
-            CHANNELS,
-        ))));
+        // The core owns the kernel hand-off: publishing through the context
+        // reaches the chain's registered `ConvolverControl`, and the chain's
+        // consumer adopts it on its first process call during warm-up.
+        ctx.set_external_ir_convolver(&synthetic_ir(256, CHANNELS), CHANNELS)
+            .expect("publish benchmark convolver kernel");
     }
 
     ChainBundle { chain }
@@ -329,7 +329,10 @@ fn warm_chain(bundle: &mut ChainBundle, _scenario: Scenario, corpus: &[f64]) {
 
     for _ in 0..WARMUP_BUFFERS {
         scratch.copy_from_slice(corpus);
-        bundle.chain.process(black_box(&mut scratch), CHANNELS);
+        let _ = bundle
+            .chain
+            .process(black_box(&mut scratch), CHANNELS)
+            .expect("benchmark chain process");
     }
 }
 
@@ -339,7 +342,10 @@ fn measure_chain(chain: &mut DspChain, corpus: &[f64], frames: usize, iterations
 
     for _ in 0..iterations {
         scratch.copy_from_slice(black_box(corpus));
-        chain.process(black_box(&mut scratch), CHANNELS);
+        let progress = chain
+            .process(black_box(&mut scratch), CHANNELS)
+            .expect("benchmark chain process");
+        let _ = black_box(progress);
         black_box(&scratch);
     }
 
@@ -360,9 +366,9 @@ fn synthetic_buffer(frames: usize, channels: usize) -> Vec<f64> {
     let mut right_phase = 0.0_f64;
 
     for frame in 0..frames {
-        let t = frame as f64 / SAMPLE_RATE;
-        left_phase += std::f64::consts::TAU * (220.0 + 11.0 * (t * 3.0).sin()) / SAMPLE_RATE;
-        right_phase += std::f64::consts::TAU * (330.0 + 7.0 * (t * 5.0).cos()) / SAMPLE_RATE;
+        let t = frame as f64 / SAMPLE_RATE as f64;
+        left_phase += std::f64::consts::TAU * (220.0 + 11.0 * (t * 3.0).sin()) / SAMPLE_RATE as f64;
+        right_phase += std::f64::consts::TAU * (330.0 + 7.0 * (t * 5.0).cos()) / SAMPLE_RATE as f64;
         let envelope = 0.65 + 0.20 * (std::f64::consts::TAU * 1.7 * t).sin();
         let transient = if frame % 127 == 0 { 0.28 } else { 0.0 };
         let left =

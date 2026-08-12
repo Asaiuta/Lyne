@@ -13,7 +13,7 @@ pub mod wasapi_exclusive {
     use std::thread::{self, JoinHandle};
 
     use crate::config::{PhaseResponse, ResampleQuality};
-    use crate::processor::{AtomicNoiseShaperParams, NoiseShaperProcessor};
+    use crate::processor::AtomicNoiseShaperParams;
     use wasapi::{
         calculate_period_100ns, initialize_mta, DeviceEnumerator, Direction, SampleType,
         StreamMode, WaveFormat,
@@ -472,8 +472,11 @@ pub mod wasapi_exclusive {
             if is_float { "float" } else { "int" },
             blockalign
         );
-        let mut final_noise_shaper =
-            NoiseShaperProcessor::new(channels, actual_sample_rate as u32, noise_shaper_params);
+        let mut final_noise_shaper = crate::player::callback::FinalNoiseShaper::new(
+            channels,
+            actual_sample_rate as u32,
+            noise_shaper_params,
+        )?;
 
         // Get device period
         let (_def_period, min_period) = audio_client
@@ -559,6 +562,7 @@ pub mod wasapi_exclusive {
         let mut resample_leftover: Vec<f32> = Vec::with_capacity(16384 * channels);
         let mut resample_leftover_pos = 0usize;
         let mut resample_output_f64: Vec<f64> = Vec::with_capacity(8192 * channels);
+        let mut resample_scratch_f64: Vec<f64> = Vec::with_capacity(16384 * channels);
         let mut resample_scratch: Vec<f64> = Vec::with_capacity(16384 * channels);
 
         // P1-9 fix: Pre-allocate buffers used in the hot loop to avoid per-frame heap allocation
@@ -670,8 +674,11 @@ pub mod wasapi_exclusive {
                     }
 
                     let output_frames_remaining = (samples_to_write - samples_written) / channels;
-                    let source_frames_to_request = rs
-                        .input_frames_for_output_frames(output_frames_remaining)
+                    let source_frames_to_request =
+                        crate::player::resample_stream::input_frames_for_output_frames(
+                            rs,
+                            output_frames_remaining,
+                        )
                         .max(256)
                         .min(8192);
                     // P1-9 fix: Reuse pre-allocated temp buffer instead of allocating per iteration
@@ -697,8 +704,38 @@ pub mod wasapi_exclusive {
                     }
                     let temp_f64 = &resample_output_f64[..temp_samples];
 
-                    let resampled = rs.process_chunk_borrowed(temp_f64);
-                    let new_samples = resampled.samples.len();
+                    // The core streaming contract requires caller-owned output
+                    // storage; `resample_scratch_f64` is reused across iterations
+                    // so this loop keeps its steady-state allocation behavior.
+                    let required =
+                        match crate::player::resample_stream::max_output_samples_for_input(
+                            rs,
+                            source_frames_to_request,
+                            channels,
+                        ) {
+                            Ok(required) => required,
+                            Err(error) => {
+                                log::error!("WASAPI resampler capacity failed: {error}");
+                                is_eof = true;
+                                break;
+                            }
+                        };
+                    if resample_scratch_f64.len() < required {
+                        resample_scratch_f64.resize(required, 0.0);
+                    }
+                    let new_samples = match crate::player::resample_stream::resample_into(
+                        rs,
+                        temp_f64,
+                        &mut resample_scratch_f64[..required],
+                        channels,
+                    ) {
+                        Ok(produced) => produced,
+                        Err(error) => {
+                            log::error!("WASAPI resampling failed: {error}");
+                            is_eof = true;
+                            break;
+                        }
+                    };
                     if resample_leftover_pos >= resample_leftover.len() {
                         resample_leftover.clear();
                         resample_leftover_pos = 0;
@@ -707,7 +744,7 @@ pub mod wasapi_exclusive {
                     resample_leftover.resize(append_start + new_samples, 0.0);
                     for (dst, src) in resample_leftover[append_start..]
                         .iter_mut()
-                        .zip(resampled.samples.iter())
+                        .zip(resample_scratch_f64[..new_samples].iter())
                     {
                         *dst = *src as f32;
                     }
@@ -774,12 +811,12 @@ pub mod wasapi_exclusive {
     }
 
     fn apply_final_noise_shaper_to_f32(
-        final_noise_shaper: &mut NoiseShaperProcessor,
+        final_noise_shaper: &mut crate::player::callback::FinalNoiseShaper,
         output: &mut [f32],
         channels: usize,
         scratch: &mut Vec<f64>,
     ) {
-        if output.is_empty() || !final_noise_shaper.refresh_is_enabled() {
+        if output.is_empty() || !final_noise_shaper.is_enabled() {
             return;
         }
 
@@ -790,7 +827,14 @@ pub mod wasapi_exclusive {
         for (dst, src) in scratch[..sample_count].iter_mut().zip(output.iter()) {
             *dst = *src as f64;
         }
-        final_noise_shaper.process_cached(&mut scratch[..sample_count], channels);
+        if final_noise_shaper
+            .process_in_place(&mut scratch[..sample_count], channels)
+            .is_err()
+        {
+            // The WASAPI loop must keep feeding the device: emit the unshaped
+            // buffer rather than aborting playback on one shaping failure.
+            return;
+        }
         for (dst, src) in output.iter_mut().zip(scratch[..sample_count].iter()) {
             *dst = *src as f32;
         }
@@ -880,7 +924,8 @@ pub mod wasapi_exclusive {
         fn final_noise_shaper_disabled_leaves_output_and_scratch_untouched() {
             let params = Arc::new(AtomicNoiseShaperParams::new());
             params.set_enabled(false);
-            let mut processor = NoiseShaperProcessor::new(2, 48_000, params);
+            let mut processor = crate::player::callback::FinalNoiseShaper::new(2, 48_000, params)
+                .expect("final noise shaper");
             let mut output = vec![0.1f32, -0.2, 0.3, -0.4];
             let expected = output.clone();
             let mut scratch = Vec::new();
@@ -896,7 +941,8 @@ pub mod wasapi_exclusive {
             let params = Arc::new(AtomicNoiseShaperParams::new());
             params.set_enabled(true);
             params.set_curve(crate::processor::NoiseShaperCurve::TpdfOnly);
-            let mut processor = NoiseShaperProcessor::new(2, 48_000, params);
+            let mut processor = crate::player::callback::FinalNoiseShaper::new(2, 48_000, params)
+                .expect("final noise shaper");
             let mut output = vec![0.1f32, -0.2, 0.3, -0.4];
             let original = output.clone();
             let mut scratch = Vec::new();

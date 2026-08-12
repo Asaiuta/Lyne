@@ -7,7 +7,8 @@ use thiserror::Error;
 
 use crate::config::{PhaseResponse, ResampleQuality};
 use crate::decoder::StreamingDecoder;
-use crate::processor::StreamingResampler;
+use crate::player::resample_stream;
+use crate::processor::{StreamingProcessor, StreamingResampler};
 
 use super::memory::{process_decoded_memory_ledger, DecodedMemoryOwner, DecodedMemoryReservation};
 use super::pcm_window::{
@@ -27,6 +28,8 @@ use super::source::{
 
 const MIN_BACKPRESSURE_PARK: Duration = Duration::from_micros(250);
 const MAX_BACKPRESSURE_PARK: Duration = Duration::from_millis(8);
+/// Initial producer-thread resample scratch depth, in frames.
+const RESAMPLE_SCRATCH_FRAMES: usize = 16_384;
 
 #[derive(Clone, Copy)]
 pub(crate) struct LocalSessionConfig {
@@ -119,8 +122,9 @@ impl PersistentStreamingSession {
         } = opened;
         let builder = StreamingDecoder::probe_opened_source(source, None)
             .map_err(|error| StreamingSessionError::Decoder(error.to_string()))?;
-        let geometry = PcmWindowGeometry::for_capacity_bytes(builder.info.channels, capacity_bytes)
-            .map_err(|error| StreamingSessionError::Reservation(error.to_string()))?;
+        let geometry =
+            PcmWindowGeometry::for_capacity_bytes(builder.info().channels, capacity_bytes)
+                .map_err(|error| StreamingSessionError::Reservation(error.to_string()))?;
         let parts = PcmWindow::create(
             geometry,
             config.epoch,
@@ -178,18 +182,18 @@ impl PersistentStreamingSession {
             writer,
             reader,
         } = parts;
-        let channels = builder.info.channels;
+        let channels = builder.info().channels;
         if channels != writer.geometry().channels() {
             return Err(StreamingSessionError::ChannelMismatch {
                 source_channels: channels,
                 window_channels: writer.geometry().channels(),
             });
         }
-        let source_sample_rate = builder.info.sample_rate;
+        let source_sample_rate = builder.info().sample_rate;
         let output_sample_rate = config
             .target_output_sample_rate
             .unwrap_or(source_sample_rate);
-        let total_frames = builder.info.total_frames.map_or(0, |frames| {
+        let total_frames = builder.info().total_frames.map_or(0, |frames| {
             if source_sample_rate == output_sample_rate {
                 frames
             } else {
@@ -269,8 +273,8 @@ fn run_worker(
     rt: &StreamingRtView,
     control: &mut ProducerWorkerControl,
 ) -> Result<(), WorkerError> {
-    let channels = builder.info.channels;
-    let input_rate = builder.info.sample_rate;
+    let channels = builder.info().channels;
+    let input_rate = builder.info().sample_rate;
     let mut decoder = builder
         .build()
         .map_err(|error| WorkerError::Decoder(error.to_string()))?;
@@ -292,6 +296,13 @@ fn run_worker(
         (None, None)
     };
     let _reservations = (decoder_reservation, resampler_reservation);
+    // Producer-thread scratch for the streaming resampler contract. Allocated
+    // once here (never on the callback thread) and grown to the per-call output
+    // bound before each resample so steady-state publication does not allocate.
+    let mut resample_scratch: Vec<f64> = Vec::new();
+    if resampler.is_some() {
+        resample_scratch.resize(RESAMPLE_SCRATCH_FRAMES * channels.max(1), 0.0);
+    }
     let mut epoch = config.epoch;
     let mut origin_frame = config.origin_frame;
     let mut publisher = WindowSlotPublisher::new(writer, epoch, origin_frame);
@@ -352,9 +363,12 @@ fn run_worker(
             .map_err(|error| WorkerError::Decoder(error.to_string()))?
         else {
             if let Some(resampler) = resampler.as_mut() {
+                let (drained, _finished) =
+                    resample_stream::drain_into(resampler, &mut resample_scratch, channels)
+                        .map_err(|error| WorkerError::Resampler(error.to_string()))?;
                 if let Some(command) = append_all(
                     &mut publisher,
-                    resampler.flush_borrowed().samples,
+                    &resample_scratch[..drained],
                     rt,
                     control,
                     origin_frame,
@@ -389,7 +403,21 @@ fn run_worker(
             continue;
         };
         let mut output = if let Some(resampler) = resampler.as_mut() {
-            resampler.process_chunk_borrowed(decoded).samples
+            let input_frames = decoded.len() / channels.max(1);
+            let required =
+                resample_stream::max_output_samples_for_input(resampler, input_frames, channels)
+                    .map_err(WorkerError::Resampler)?;
+            if resample_scratch.len() < required {
+                resample_scratch.resize(required, 0.0);
+            }
+            let produced = resample_stream::resample_into(
+                resampler,
+                decoded,
+                &mut resample_scratch[..required],
+                channels,
+            )
+            .map_err(|error| WorkerError::Resampler(error.to_string()))?;
+            &resample_scratch[..produced]
         } else {
             decoded
         };
@@ -446,7 +474,9 @@ fn apply_source_seek(
         .seek(target_frame as f64 / f64::from(output_rate))
         .map_err(|error| WorkerError::Decoder(error.to_string()))?;
     if let Some(resampler) = resampler {
-        resampler.reset();
+        resampler
+            .reset()
+            .map_err(|error| WorkerError::Resampler(error.to_string()))?;
     }
     let realized_output_frame = decoder
         .current_frame()
@@ -681,7 +711,7 @@ mod tests {
                     generation,
                     intent: StreamOpenIntent::InitialPlayback,
                     path: &self.path,
-                    cancel: DecodeCancelToken::new(Arc::new(AtomicBool::new(false))),
+                    cancel: DecodeCancelToken::from_flag(Arc::new(AtomicBool::new(false))),
                     source_access: &crate::player::MediaSourceAccess::public_only(),
                     expected_identity: None,
                     fetch_policy: StreamFetchPolicy::LocalOnly,

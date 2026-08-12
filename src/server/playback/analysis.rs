@@ -171,8 +171,8 @@ pub(super) fn track_loudness_to_json(
     track_loudness: &crate::processor::TrackLoudness,
 ) -> serde_json::Value {
     serde_json::json!({
-        "track_id": track_loudness.track_id,
-        "file_path": track_loudness.file_path,
+        "track_id": track_loudness.source.cache_id(),
+        "file_path": track_loudness.source.display_label(),
         "integrated_lufs": track_loudness.integrated_lufs,
         "true_peak_dbtp": track_loudness.true_peak_dbtp,
         "loudness_range": track_loudness.loudness_range,
@@ -186,8 +186,15 @@ pub(super) fn try_get_cached_loudness(
     source_access: &crate::player::MediaSourceAccess,
 ) -> Option<crate::processor::TrackLoudness> {
     let db = data.analysis.loudness_db.as_ref()?;
+    let identity = match source_access.loudness_identity(path) {
+        Ok(identity) => identity,
+        Err(error) => {
+            log::warn!("Loudness cache identity failed for '{}': {}", path, error);
+            return None;
+        }
+    };
 
-    match db.get_fresh(source_access.cache_key(path).as_ref()) {
+    match db.get_fresh(&identity) {
         Ok(Some(track)) => {
             log::info!("Using cached loudness for: {}", path);
             Some(track)
@@ -208,7 +215,7 @@ pub(super) fn try_store_loudness(
         if let Err(e) = db.upsert(track) {
             log::warn!(
                 "Failed to store loudness cache for '{}': {}",
-                track.file_path,
+                track.source.display_label(),
                 e
             );
         }
@@ -224,17 +231,18 @@ pub(super) fn analyze_track_loudness(
     use crate::processor::{LoudnessMeter, TrackLoudness, DEFAULT_STREAMING_TARGET_LUFS};
 
     cancel_token.check()?;
-    let mut decoder = StreamingDecoder::open_with_http_policy(
-        &path,
+    let location = source_access.media_location(&path)?;
+    let mut decoder = StreamingDecoder::open_with_credentials_and_cancel(
+        location.clone(),
         source_access.credentials(),
-        source_access.address_policy(),
         Some(cancel_token.decode_token()),
     )
     .map_err(|e| format!("Failed to open file: {}", e))?;
 
-    let sample_rate = decoder.info.sample_rate;
-    let channels = decoder.info.channels;
-    let mut meter = LoudnessMeter::new(channels, sample_rate);
+    let sample_rate = decoder.info().sample_rate;
+    let channels = decoder.info().channels;
+    let mut meter = LoudnessMeter::new(channels, sample_rate)
+        .map_err(|e| format!("Failed to create loudness meter for '{}': {}", path, e))?;
 
     let mut total_samples = 0usize;
     let mut chunk = Vec::new();
@@ -250,7 +258,9 @@ pub(super) fn analyze_track_loudness(
         if sample_count == 0 {
             continue;
         }
-        meter.process(&chunk);
+        meter
+            .process(&chunk)
+            .map_err(|e| format!("Loudness analysis failed for '{}': {}", path, e))?;
         total_samples += sample_count;
     }
 
@@ -264,8 +274,8 @@ pub(super) fn analyze_track_loudness(
     let true_peak_linear = meter.true_peak().max(1e-10);
     let true_peak_dbtp = 20.0 * true_peak_linear.log10();
 
-    let mut track_loudness = TrackLoudness::new(
-        source_access.cache_key(&path).as_ref(),
+    let track_loudness = TrackLoudness::new(
+        &location,
         integrated_lufs,
         true_peak_dbtp,
         if loudness_range > 0.0 {
@@ -275,7 +285,6 @@ pub(super) fn analyze_track_loudness(
         },
         DEFAULT_STREAMING_TARGET_LUFS,
     );
-    track_loudness.file_path = path.clone();
 
     log::info!(
         "Loudness scan complete: {} -> {:.1} LUFS, {:.1} dBTP, {} samples",

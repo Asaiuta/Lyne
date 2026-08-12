@@ -269,9 +269,9 @@ impl AudioPlayer {
 
         const MAX_IR_BYTES: usize = 64 * 1024 * 1024;
 
-        let mut decoder = StreamingDecoder::open(path)
+        let mut decoder = StreamingDecoder::open(crate::decoder::MediaLocation::local(path))
             .map_err(|e| format!("Failed to open IR file '{}': {}", path, e))?;
-        let info = decoder.info.clone();
+        let info = decoder.info().clone();
         let ir_data = decoder
             .decode_all()
             .map_err(|e| format!("Failed to decode IR file '{}': {}", path, e))?;
@@ -401,7 +401,7 @@ impl AudioPlayer {
                 generation,
                 intent: crate::player::streaming::source::StreamOpenIntent::GaplessPreload,
                 path: std::path::Path::new(&path),
-                cancel: crate::decoder::DecodeCancelToken::new(Arc::clone(&cancel)),
+                cancel: crate::decoder::DecodeCancelToken::from_flag(Arc::clone(&cancel)),
                 source_access: &source_access,
                 expected_identity: None,
                 fetch_policy: if super::is_remote_http_path(&path) {
@@ -793,7 +793,7 @@ mod tests {
             ..EngineSettings::default()
         };
 
-        let player = AudioPlayer::new(settings);
+        let player = AudioPlayer::new(settings).expect("player");
         let volume = player.lockfree_volume_params.read();
         let eq = player.lockfree_eq_params.read();
         let noise_shaper = player.lockfree_noise_shaper_params.read();
@@ -826,7 +826,7 @@ mod tests {
             fir_taps: Some(511),
             ..EngineSettings::default()
         };
-        let mut player = AudioPlayer::new(fir_settings.clone());
+        let mut player = AudioPlayer::new(fir_settings.clone()).expect("player");
         assert!(player.is_fir_eq_enabled());
 
         let mut iir_settings = fir_settings;
@@ -895,7 +895,7 @@ mod tests {
         );
         assert!(shared.pending_buffer.load_full().is_none());
         assert!(!shared.pending_ready.load(Ordering::Acquire));
-        assert_eq!(loudness_state.target_gain_db.load(Ordering::Relaxed), 3.5);
+        assert_eq!(loudness_state.target_gain_db(), 3.5);
     }
 
     #[test]

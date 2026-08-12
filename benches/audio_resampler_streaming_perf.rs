@@ -5,6 +5,9 @@ use std::path::Path;
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
+use audio_engine::player::bench_support::{
+    resample_append_for_bench, resample_into_for_bench, resample_output_capacity_for_bench,
+};
 use audio_engine::processor::StreamingResampler;
 
 const CHANNELS: usize = 2;
@@ -36,24 +39,34 @@ const SCENARIOS: [Scenario; 3] = [
     },
 ];
 
+/// The production driver paths over the core's `StreamingProcessor` contract.
+///
+/// `audio-engine-core` 1.0 removed the old `process_chunk_*` inherent methods;
+/// every consumer now goes through `player::resample_stream`. These variants
+/// are those exact helpers, so the benchmark still covers the realtime
+/// caller-owned-output path and the offline appending path.
 #[derive(Clone, Copy)]
 enum ApiPath {
-    Borrowed,
+    /// Realtime path: whole input block into caller-owned output storage.
     Into,
+    /// Realtime path with output storage sized exactly to the per-call bound,
+    /// as the audio callback reserves it.
+    IntoExactCapacity,
+    /// Offline path: append into an owned buffer with reused scratch.
     Append,
 }
 
 impl ApiPath {
     fn name(self) -> &'static str {
         match self {
-            Self::Borrowed => "process_chunk_borrowed",
-            Self::Into => "process_chunk_into",
-            Self::Append => "process_chunk_append",
+            Self::Into => "resample_into",
+            Self::IntoExactCapacity => "resample_into_exact_capacity",
+            Self::Append => "resample_append",
         }
     }
 
     fn all() -> &'static [Self] {
-        &[Self::Borrowed, Self::Into, Self::Append]
+        &[Self::Into, Self::IntoExactCapacity, Self::Append]
     }
 }
 
@@ -121,7 +134,7 @@ fn main() {
                 );
 
                 if scenario.name == "music_44k1_to_48k"
-                    && matches!(api, ApiPath::Borrowed)
+                    && matches!(api, ApiPath::Into)
                     && frames == 512
                 {
                     gate_candidate = Some((report.ns_per_input_sample, 44_100));
@@ -133,6 +146,10 @@ fn main() {
     if matches!(gate_mode, GateMode::Check | GateMode::Gate) {
         let (ns_per_input_sample, from_rate) = gate_candidate.expect("gate scenario executed");
         let metric = GateMetric {
+            // Name kept stable so this gate stays comparable with its recorded
+            // budget and prior evidence. Its measured path is now the realtime
+            // `resample_into` driver, which replaced the removed
+            // `process_chunk_borrowed` inherent method in core 1.0.
             name: "music_44k1_to_48k_borrowed_512_ns_per_input_sample",
             value_ns: ns_per_input_sample,
         };
@@ -185,11 +202,19 @@ fn benchmark_api(
 }
 
 fn warm_resampler(resampler: &mut StreamingResampler, api: ApiPath, input: &[f64]) {
-    let mut output = vec![0.0; streaming_output_capacity(resampler, input.len())];
+    let mut output = vec![0.0; streaming_output_capacity(resampler, api, input.len())];
     let mut append_output = Vec::with_capacity(output.len());
+    let mut append_scratch = Vec::new();
 
     for _ in 0..WARMUP_BUFFERS {
-        run_api(resampler, api, input, &mut output, &mut append_output);
+        run_api(
+            resampler,
+            api,
+            input,
+            &mut output,
+            &mut append_output,
+            &mut append_scratch,
+        );
     }
 }
 
@@ -200,8 +225,9 @@ fn measure_resampler(
     input: &[f64],
     iterations: usize,
 ) -> Report {
-    let mut output = vec![0.0; streaming_output_capacity(resampler, input.len())];
+    let mut output = vec![0.0; streaming_output_capacity(resampler, api, input.len())];
     let mut append_output = Vec::with_capacity(output.len());
+    let mut append_scratch = Vec::new();
     let mut output_frames = 0usize;
     let start = Instant::now();
 
@@ -212,6 +238,7 @@ fn measure_resampler(
             black_box(input),
             &mut output,
             &mut append_output,
+            &mut append_scratch,
         );
     }
 
@@ -227,14 +254,21 @@ fn measure_resampler(
     }
 }
 
-fn streaming_output_capacity(resampler: &StreamingResampler, input_samples: usize) -> usize {
-    // SoX streaming resamplers can emit delayed output in bursts after internal
-    // buffering. Use a deliberately conservative caller scratch so this bench
-    // measures the API path rather than capacity edge behavior.
-    resampler
-        .max_output_len_for_input(input_samples)
-        .saturating_mul(8)
-        .saturating_add(8192)
+fn streaming_output_capacity(
+    resampler: &StreamingResampler,
+    api: ApiPath,
+    input_samples: usize,
+) -> usize {
+    let input_frames = input_samples / CHANNELS;
+    let exact = resample_output_capacity_for_bench(resampler, input_frames, CHANNELS)
+        .expect("resampler output capacity");
+    match api {
+        // Production sizes the realtime leftover from exactly this bound.
+        ApiPath::IntoExactCapacity => exact,
+        // A deliberately generous caller scratch, so these paths measure the
+        // driver rather than capacity edge behavior.
+        ApiPath::Into | ApiPath::Append => exact.saturating_mul(8).saturating_add(8192),
+    }
 }
 
 fn run_api(
@@ -243,23 +277,21 @@ fn run_api(
     input: &[f64],
     output: &mut [f64],
     append_output: &mut Vec<f64>,
+    append_scratch: &mut Vec<f64>,
 ) -> usize {
     match api {
-        ApiPath::Borrowed => {
-            let result = resampler.process_chunk_borrowed(input);
-            black_box(result.samples);
-            result.frames
-        }
-        ApiPath::Into => {
-            let frames = resampler.process_chunk_into(input, output);
-            black_box(&output[..frames * CHANNELS]);
-            frames
+        ApiPath::Into | ApiPath::IntoExactCapacity => {
+            let samples = resample_into_for_bench(resampler, input, output, CHANNELS)
+                .expect("benchmark resample_into");
+            black_box(&output[..samples]);
+            samples / CHANNELS
         }
         ApiPath::Append => {
             append_output.clear();
-            let frames = resampler.process_chunk_append(input, append_output);
+            resample_append_for_bench(resampler, input, append_output, append_scratch, CHANNELS)
+                .expect("benchmark resample_append");
             black_box(&append_output);
-            frames
+            append_output.len() / CHANNELS
         }
     }
 }

@@ -15,7 +15,7 @@ use super::buffer_budget::{
 use super::callback::normalize_channels;
 use super::loading::cached_loudness_from_db;
 use super::state::{CachedLoudness, SharedState};
-use super::MediaSourceAccess;
+use super::{resample_stream, MediaSourceAccess};
 use crate::config::EngineSettings;
 use crate::config::NormalizationMode;
 use crate::decoder::StreamingDecoder;
@@ -239,6 +239,10 @@ fn pending_loudness_gain_db(
     loudness_normalizer
         .lock()
         .calculate_gain_with_mode(samples, mode, metadata)
+        .unwrap_or_else(|error| {
+            log::warn!("Gapless preload loudness analysis failed: {error}");
+            0.0
+        })
 }
 
 /// Decode audio file to f64 sample buffer with cancellation support
@@ -263,20 +267,19 @@ fn decode_to_buffer_with_cancel(
     ),
     String,
 > {
-    let mut decoder = StreamingDecoder::open_with_http_policy(
-        path,
-        source_access.credentials(),
-        source_access.address_policy(),
-        None,
-    )
-    .map_err(|e| e.to_string())?;
+    let location = source_access.media_location(path)?;
+    let mut decoder =
+        StreamingDecoder::open_with_credentials(location, source_access.credentials())
+            .map_err(|e| e.to_string())?;
 
-    let original_sr = decoder.info.sample_rate;
-    let decoded_channels = decoder.info.channels;
+    let info = decoder.info();
+    let original_sr = info.sample_rate;
+    let decoded_channels = info.channels;
+    let declared_total_frames = info.total_frames;
     let need_resample = target_sr != original_sr;
 
     // Extract metadata before decoding
-    let metadata = decoder.info.metadata.clone();
+    let metadata = info.metadata.clone();
 
     let existing_decoded_samples = published_decoded_samples(shared);
     let output_sample_capacity = record_budget_rejection(
@@ -284,7 +287,7 @@ fn decode_to_buffer_with_cancel(
         reserve_decoded_buffer_capacity(
             DecodedBufferKind::GaplessPreload,
             path,
-            decoder.info.total_frames.unwrap_or(0),
+            declared_total_frames.unwrap_or(0),
             original_sr,
             target_sr,
             decoded_channels,
@@ -322,6 +325,7 @@ fn decode_to_buffer_with_cancel(
     };
 
     let mut chunk = Vec::new();
+    let mut resample_scratch: Vec<f64> = Vec::new();
     while decoder
         .decode_next_into(&mut chunk)
         .map_err(|e| e.to_string())?
@@ -353,7 +357,13 @@ fn decode_to_buffer_with_cancel(
                     existing_decoded_samples,
                 ),
             )?;
-            rs.process_chunk_append(&chunk, &mut samples);
+            resample_stream::resample_append(
+                rs,
+                &chunk,
+                &mut samples,
+                &mut resample_scratch,
+                decoded_channels,
+            )?;
         } else {
             record_budget_rejection(
                 shared,
@@ -379,7 +389,7 @@ fn decode_to_buffer_with_cancel(
     }
 
     if let Some(ref mut rs) = resampler {
-        rs.flush_into(&mut samples);
+        resample_stream::flush_append(rs, &mut samples, &mut resample_scratch, decoded_channels)?;
         record_budget_rejection(
             shared,
             ensure_decoded_samples_fit_budget(
@@ -510,11 +520,10 @@ mod tests {
     #[test]
     fn pending_loudness_uses_cached_gain_when_replaygain_tag_is_missing() {
         let config = EngineSettings::default();
-        let normalizer = Arc::new(parking_lot::Mutex::new(LoudnessNormalizer::new(
-            2,
-            44_100,
-            config.loudness.clone(),
-        )));
+        let normalizer = Arc::new(parking_lot::Mutex::new(
+            LoudnessNormalizer::new(2, 44_100, config.loudness.clone())
+                .expect("loudness normalizer"),
+        ));
         let cached = CachedLoudness {
             integrated_lufs: -20.0,
             true_peak_dbtp: -1.0,
@@ -537,11 +546,10 @@ mod tests {
     #[test]
     fn pending_loudness_replaygain_tag_takes_priority_over_cache() {
         let config = EngineSettings::default();
-        let normalizer = Arc::new(parking_lot::Mutex::new(LoudnessNormalizer::new(
-            2,
-            44_100,
-            config.loudness.clone(),
-        )));
+        let normalizer = Arc::new(parking_lot::Mutex::new(
+            LoudnessNormalizer::new(2, 44_100, config.loudness.clone())
+                .expect("loudness normalizer"),
+        ));
         let metadata = TrackMetadata {
             rg_track_gain: Some(0.0),
             rg_track_peak: None,

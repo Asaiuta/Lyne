@@ -318,10 +318,8 @@ mod derived {
         let corpus = synthetic_corpus(frames, CHANNELS);
 
         let noise = benchmark_noise_shaper(&corpus, iterations);
-        let volume_controller = benchmark_volume_controller(&corpus, iterations);
         let volume_processor = benchmark_volume_processor(&corpus, iterations);
         let saturation = benchmark_saturation(&corpus, iterations);
-        let gain_ramp_block = benchmark_gain_ramp_block_apply(&corpus, iterations);
         let volume_lazy_settle = benchmark_volume_lazy_settle(&corpus, iterations);
 
         vec![
@@ -331,13 +329,6 @@ mod derived {
                 "sample",
                 noise,
                 true,
-            ),
-            report_metric(
-                "volume_controller_cached_one_minus",
-                super::PathKind::Sample,
-                "sample",
-                volume_controller,
-                false,
             ),
             report_metric(
                 "volume_processor_local_current",
@@ -351,13 +342,6 @@ mod derived {
                 super::PathKind::Sample,
                 "sample",
                 saturation,
-                true,
-            ),
-            report_metric(
-                "gain_ramp_block_apply_vs_next_gain_loop",
-                super::PathKind::Sample,
-                "sample",
-                gain_ramp_block,
                 true,
             ),
             report_metric(
@@ -378,32 +362,15 @@ mod derived {
         } else {
             60
         };
-        let frames = if quick {
-            4_096
-        } else if heavy {
-            16_384
-        } else {
-            8_192
-        };
-        let gain_ramp = benchmark_gain_ramp(frames * CHANNELS, iterations);
         let loudness = benchmark_loudness_gain_cache(iterations);
 
-        vec![
-            report_metric(
-                "gain_ramp_cached_current",
-                super::PathKind::Control,
-                "call",
-                gain_ramp,
-                true,
-            ),
-            report_metric(
-                "loudness_gain_linear_cache",
-                super::PathKind::Control,
-                "call",
-                loudness,
-                true,
-            ),
-        ]
+        vec![report_metric(
+            "loudness_gain_linear_cache",
+            super::PathKind::Control,
+            "call",
+            loudness,
+            true,
+        )]
     }
 
     fn report_metric(

@@ -82,8 +82,14 @@ pub fn spectrum_thread_main(
                     }
 
                     let sr = shared.sample_rate.load(Ordering::Relaxed) as u32;
-                    let spectrum_data = analyzer.analyze(&buffer, sr);
-                    shared.spectrum_data.store(Arc::new(spectrum_data.to_vec()));
+                    match analyzer.analyze(&buffer, sr) {
+                        Ok(spectrum_data) => {
+                            shared.spectrum_data.store(Arc::new(spectrum_data.to_vec()));
+                        }
+                        Err(error) => {
+                            log::warn!("Spectrum analysis failed at {sr} Hz: {error}");
+                        }
+                    }
                     buffer.clear();
                 }
             }

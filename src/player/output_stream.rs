@@ -19,10 +19,11 @@ use super::callback::{
 use super::spectrum::SpectrumBatch;
 use super::state::{PlayerState, SharedState, EVENT_PLAYBACK_STARTED};
 use crate::config::{PhaseResponse, ResampleQuality};
+use crate::player::resample_stream;
 use crate::processor::{
     AtomicCrossfeedParams, AtomicDynamicLoudnessParams, AtomicDynamicLoudnessTelemetry,
     AtomicEqParams, AtomicLoudnessState, AtomicNoiseShaperParams, AtomicPeakLimiterParams,
-    AtomicSaturationParams, AtomicVolumeParams, NoiseShaperProcessor, StreamingResampler,
+    AtomicSaturationParams, AtomicVolumeParams, StreamingResampler,
 };
 
 const MAX_DAC_RATE: u32 = 384000;
@@ -133,14 +134,15 @@ pub(super) fn build_requested_output_stream(
     dsp_params: &DspParamRefs<'_>,
     resampler_config: ResamplerConfig,
 ) -> Result<BuiltOutputStream, String> {
-    let dsp_chain = owned_dsp_chain.take().unwrap_or_else(|| {
-        build_dsp_chain(
+    let dsp_chain = match owned_dsp_chain.take() {
+        Some(chain) => chain,
+        None => build_dsp_chain(
             output_plan.channels as usize,
-            output_plan.requested_sample_rate as f64,
+            output_plan.requested_sample_rate,
             context,
             dsp_params,
-        )
-    });
+        )?,
+    };
 
     log::info!("Building output stream...");
     let stream = build_output_stream_with_callback(
@@ -176,12 +178,8 @@ pub(super) fn build_fallback_output_stream(
         .into();
     let fallback_sample_rate = fallback_config.sample_rate.0;
     let fallback_channels = fallback_config.channels as usize;
-    let fallback_chain = build_dsp_chain(
-        fallback_channels,
-        fallback_sample_rate as f64,
-        context,
-        dsp_params,
-    );
+    let fallback_chain =
+        build_dsp_chain(fallback_channels, fallback_sample_rate, context, dsp_params)?;
 
     let stream = build_output_stream_with_callback(
         &output_plan.device,
@@ -205,11 +203,11 @@ pub(super) fn build_fallback_output_stream(
 
 fn build_dsp_chain(
     channels: usize,
-    sample_rate: f64,
+    sample_rate: u32,
     context: &OutputStreamContext<'_>,
     params: &DspParamRefs<'_>,
-) -> crate::processor::DspChain {
-    let (chain, convolver_disposal) = LockfreeDspContext::build_dsp_chain(
+) -> Result<crate::processor::DspChain, String> {
+    let (chain, convolver_control) = LockfreeDspContext::build_dsp_chain(
         channels,
         sample_rate,
         Arc::clone(params.eq_params),
@@ -220,13 +218,12 @@ fn build_dsp_chain(
         Arc::clone(params.noise_shaper_params),
         Arc::clone(params.dynamic_loudness_params),
         Arc::clone(params.dynamic_loudness_telemetry),
-        Arc::clone(&context.dsp_ctx.merged_convolver),
-        Arc::clone(&context.dsp_ctx.merged_convolver_enabled),
-    );
+        context.dsp_ctx.convolver_is_enabled(),
+    )?;
     context
         .dsp_ctx
-        .register_convolver_disposal_slot(convolver_disposal);
-    chain
+        .register_convolver_control(convolver_control, sample_rate);
+    Ok(chain)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -261,19 +258,20 @@ fn build_output_stream_with_callback(
     let mut scratch = CallbackScratch::new(channels);
     if let Some(resampler) = resampler.as_ref() {
         // The render loop feeds at most AUDIO_PROCESS_BUFFER_FRAMES of input per
-        // call (callback.rs `.min(AUDIO_PROCESS_BUFFER_FRAMES)`). Per-call Soxr
-        // output is now capped to the naive ratio bound (the resampler slices its
-        // scratch), so the leftover reserve only needs to cover one such call —
-        // ~2x tighter than the old absolute per-chunk capacity reserve.
-        scratch.reserve_resample_leftover(
-            resampler.max_output_len_for_input(AUDIO_PROCESS_BUFFER_FRAMES * channels),
-        );
+        // call (callback.rs `.min(AUDIO_PROCESS_BUFFER_FRAMES)`). Per-call output
+        // is capped to the core's exact rational bound, so the leftover reserve
+        // only needs to cover one such call.
+        scratch.reserve_resample_leftover(resample_stream::max_output_samples_for_input(
+            resampler,
+            AUDIO_PROCESS_BUFFER_FRAMES,
+            channels,
+        )?);
     }
-    let mut final_noise_shaper = NoiseShaperProcessor::new(
+    let mut final_noise_shaper = crate::player::callback::FinalNoiseShaper::new(
         channels,
         output_sample_rate,
         Arc::clone(context.dsp_ctx.noise_shaper_params()),
-    );
+    )?;
 
     device
         .build_output_stream(

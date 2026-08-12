@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use audio_engine::config::{PhaseResponse, ResampleQuality};
+use audio_engine::player::bench_support::{resample_append_for_bench, resample_flush_for_bench};
 use audio_engine::processor::{
     LoudnessMeter, NoiseShaper, NoiseShaperCurve, PeakLimiter, StreamingResampler,
 };
@@ -590,8 +591,11 @@ fn measure_limiter_transparent_thdn(
         LIMITER_THRESHOLD_DBFS,
         LIMITER_LOOKAHEAD_MS,
         LIMITER_RELEASE_MS,
-    );
-    limiter.process(&mut samples);
+    )
+    .map_err(|err| format!("failed to create limiter: {err}"))?;
+    limiter
+        .process(&mut samples, CHANNELS)
+        .map_err(|err| format!("limiter processing failed: {err}"))?;
     let mono = extract_channel(&samples, CHANNELS, 0);
     let fit = fit_sine(
         &mono,
@@ -619,8 +623,11 @@ fn measure_limiter(
         LIMITER_THRESHOLD_DBFS,
         LIMITER_LOOKAHEAD_MS,
         LIMITER_RELEASE_MS,
-    );
-    limiter.process(&mut samples);
+    )
+    .map_err(|err| format!("failed to create limiter: {err}"))?;
+    limiter
+        .process(&mut samples, CHANNELS)
+        .map_err(|err| format!("limiter processing failed: {err}"))?;
     let output_peak = max_abs(&samples);
     let output_peak_dbfs = dbfs(output_peak);
 
@@ -702,9 +709,12 @@ fn measure_noise_shaping(frames: usize) -> Result<NoiseShapingSection, String> {
 
     for curve in curves {
         let mut output = input.clone();
-        let mut shaper = NoiseShaper::new(1, SAMPLE_RATE, NOISE_SHAPER_BITS);
+        let mut shaper = NoiseShaper::new(1, SAMPLE_RATE, NOISE_SHAPER_BITS)
+            .map_err(|err| format!("failed to create noise shaper: {err}"))?;
         shaper.set_curve(curve);
-        shaper.process(&mut output, 1);
+        shaper
+            .process(&mut output, 1)
+            .map_err(|err| format!("noise shaper processing failed: {err}"))?;
 
         let error = output
             .iter()
@@ -1121,9 +1131,10 @@ fn measure_loudness_fixture(
 }
 
 fn measure_lyne_loudness(samples: &[f64]) -> LoudnessValues {
-    let mut meter = LoudnessMeter::new(CHANNELS, SAMPLE_RATE);
+    let mut meter =
+        LoudnessMeter::new(CHANNELS, SAMPLE_RATE).expect("valid benchmark loudness meter");
     for chunk in samples.chunks(CHANNELS * 1024) {
-        meter.process(chunk);
+        meter.process(chunk).expect("loudness meter processing");
     }
     LoudnessValues {
         integrated_lufs: meter.integrated_loudness(),
@@ -1321,17 +1332,23 @@ fn render_full_output_chain(
         FULL_OUTPUT_TRUE_PEAK_LIMIT_DBTP,
         LIMITER_LOOKAHEAD_MS,
         LIMITER_RELEASE_MS,
-    );
-    limiter.process(&mut output);
+    )
+    .map_err(|err| format!("failed to create output-chain limiter: {err}"))?;
+    limiter
+        .process(&mut output, channels)
+        .map_err(|err| format!("output-chain limiter processing failed: {err}"))?;
     let final_limiter_gain_reduction_db = limiter.gain_reduction_db();
 
     if source_sample_rate != RESAMPLE_TO {
         output = resample_interleaved(&output, channels, source_sample_rate, RESAMPLE_TO)?;
     }
 
-    let mut shaper = NoiseShaper::new(channels, RESAMPLE_TO, FULL_OUTPUT_CHAIN_BITS);
+    let mut shaper = NoiseShaper::new(channels, RESAMPLE_TO, FULL_OUTPUT_CHAIN_BITS)
+        .map_err(|err| format!("failed to create output-chain noise shaper: {err}"))?;
     shaper.set_curve(NoiseShaperCurve::auto_select(RESAMPLE_TO));
-    shaper.process(&mut output, channels);
+    shaper
+        .process(&mut output, channels)
+        .map_err(|err| format!("output-chain noise shaper processing failed: {err}"))?;
 
     for sample in &mut output {
         *sample = *sample as f32 as f64;
@@ -1356,10 +1373,11 @@ fn resample_mono(input: &[f64], from_rate: u32, to_rate: u32) -> Result<Vec<f64>
     let estimated_len = ((input.len() as f64 * to_rate as f64 / from_rate as f64).ceil() as usize)
         .saturating_add(256);
     let mut output = Vec::with_capacity(estimated_len);
+    let mut scratch = Vec::new();
     for chunk in input.chunks(4096) {
-        resampler.process_chunk_append(chunk, &mut output);
+        resample_append_for_bench(&mut resampler, chunk, &mut output, &mut scratch, 1)?;
     }
-    resampler.flush_into(&mut output);
+    resample_flush_for_bench(&mut resampler, &mut output, &mut scratch, 1)?;
     Ok(output)
 }
 
@@ -1386,10 +1404,11 @@ fn resample_interleaved(
         .saturating_add(256)
         * channels;
     let mut output = Vec::with_capacity(estimated_samples);
+    let mut scratch = Vec::new();
     for chunk in input.chunks(channels * 4096) {
-        resampler.process_chunk_append(chunk, &mut output);
+        resample_append_for_bench(&mut resampler, chunk, &mut output, &mut scratch, channels)?;
     }
-    resampler.flush_into(&mut output);
+    resample_flush_for_bench(&mut resampler, &mut output, &mut scratch, channels)?;
     Ok(output)
 }
 
@@ -1406,9 +1425,12 @@ fn synthetic_intersample_stress(frames: usize, sample_rate: u32) -> Vec<f64> {
 }
 
 fn measure_true_peak_db(samples: &[f64], channels: usize, sample_rate: u32) -> Result<f64, String> {
-    let mut meter = LoudnessMeter::new(channels, sample_rate);
+    let mut meter = LoudnessMeter::new(channels, sample_rate)
+        .map_err(|err| format!("failed to create true-peak meter: {err}"))?;
     for chunk in samples.chunks(channels * 4096) {
-        meter.process(chunk);
+        meter
+            .process(chunk)
+            .map_err(|err| format!("true-peak meter processing failed: {err}"))?;
     }
     let true_peak = meter.true_peak();
     if true_peak.is_finite() {

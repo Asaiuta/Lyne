@@ -6,8 +6,12 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use audio_engine::bench_provenance::{collect as collect_provenance, Provenance, ProvenanceRequest};
-use audio_engine::player::bench_support::{PcmWindow, PcmWindowAccessError, PcmWindowGeometry};
+use audio_engine::bench_provenance::{
+    collect as collect_provenance, Provenance, ProvenanceRequest,
+};
+use audio_engine::player::bench_support::{
+    create_pcm_window_for_bench, PcmWindowAccessError, PcmWindowGeometry,
+};
 use crossbeam::queue::ArrayQueue;
 use serde::Serialize;
 
@@ -234,7 +238,7 @@ fn benchmark_pcm_window(
     geometry: PcmWindowGeometry,
 ) -> TransportReport {
     let sequential_ns_per_slot = {
-        let mut parts = PcmWindow::create(geometry, EPOCH, 0).expect("window allocation");
+        let mut parts = create_pcm_window_for_bench(geometry, EPOCH, 0).expect("window allocation");
         let started_at = Instant::now();
         for sequence in 0..iterations as u64 {
             publish_and_consume(&mut parts.writer, &mut parts.reader, sequence, source);
@@ -243,7 +247,7 @@ fn benchmark_pcm_window(
     };
 
     let sequential_latency_ns = {
-        let mut parts = PcmWindow::create(geometry, EPOCH, 0).expect("window allocation");
+        let mut parts = create_pcm_window_for_bench(geometry, EPOCH, 0).expect("window allocation");
         let mut samples = Vec::with_capacity(iterations);
         for sequence in 0..iterations as u64 {
             let started_at = Instant::now();
@@ -254,7 +258,7 @@ fn benchmark_pcm_window(
     };
 
     let warm_allocations = {
-        let mut parts = PcmWindow::create(geometry, EPOCH, 0).expect("window allocation");
+        let mut parts = create_pcm_window_for_bench(geometry, EPOCH, 0).expect("window allocation");
         count_allocations(|| {
             for sequence in 0..iterations as u64 {
                 publish_and_consume(&mut parts.writer, &mut parts.reader, sequence, source);
@@ -349,7 +353,7 @@ fn pcm_window_cross_thread(
     source: &Arc<Vec<f64>>,
     geometry: PcmWindowGeometry,
 ) -> CrossThreadReport {
-    let parts = PcmWindow::create(geometry, EPOCH, 0).expect("window allocation");
+    let parts = create_pcm_window_for_bench(geometry, EPOCH, 0).expect("window allocation");
     let barrier = Arc::new(Barrier::new(3));
     let consumed_sequence = Arc::new(AtomicU64::new(0));
 

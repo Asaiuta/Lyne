@@ -30,10 +30,9 @@ pub use decoder::StreamingDecoder;
 pub use player::{AudioDeviceInfo, AudioPlayer, PlayerState, SharedState};
 pub use processor::{
     analyze_automix, AtomicLoudnessState, AutomixAnalysis, AutomixAnalysisMode,
-    AutomixAnalysisOptions, DatabaseStats, Equalizer, FFTConvolver, GainRamp, LoudnessDatabase,
-    LoudnessInfo, LoudnessMeter, LoudnessNormalizer, NoiseShaper, PeakLimiter, Resampler,
-    SpectrumAnalyzer, StreamingResampler, TrackLoudness, TruePeakDetector, VolumeController,
-    CURRENT_SCAN_VERSION,
+    AutomixAnalysisOptions, DatabaseStats, Equalizer, FFTConvolver, LoudnessDatabase, LoudnessInfo,
+    LoudnessMeter, LoudnessNormalizer, NoiseShaper, PeakLimiter, Resampler, SpectrumAnalyzer,
+    StreamingResampler, TrackLoudness, TruePeakDetector, CURRENT_SCAN_VERSION,
 };
 
 /// Library version

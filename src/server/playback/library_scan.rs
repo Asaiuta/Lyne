@@ -1011,15 +1011,14 @@ pub(super) fn scan_webdav_library(
 
             scanned += 1;
             cancel_token.check()?;
-            match crate::decoder::StreamingDecoder::open_with_http_policy(
-                &entry.url,
+            match crate::decoder::StreamingDecoder::open_with_credentials_and_cancel(
+                source_access.media_location(&entry.url)?,
                 source_access.credentials(),
-                source_access.address_policy(),
                 Some(cancel_token.decode_token()),
             ) {
                 Ok(decoder) => {
                     cancel_token.check()?;
-                    let info = decoder.info.clone();
+                    let info = decoder.info().clone();
                     match data.app_db.record_media_metadata(
                         &entry.url,
                         &info.metadata,

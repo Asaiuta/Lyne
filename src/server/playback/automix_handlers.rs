@@ -51,19 +51,21 @@ pub(super) async fn analyze_automix_track(
         }
     }
 
-    let path_for_job = path.clone();
+    let location_for_job = match resolved.access.media_location(&path) {
+        Ok(location) => location,
+        Err(error) => return bad_request_response(error),
+    };
     let credentials_for_job = resolved.access.credentials().cloned();
-    let address_policy_for_job = resolved.access.address_policy().clone();
     let options_for_job = options.clone();
 
     let result = run_analysis_job(&data, move |cancel_token| {
-        crate::processor::analyze_automix_with_http_policy_and_cancel(
-            path_for_job,
+        crate::processor::analyze_automix_with_cancel(
+            location_for_job,
             credentials_for_job,
-            address_policy_for_job,
             options_for_job,
             Some(cancel_token.decode_token()),
         )
+        .map_err(|error| error.to_string())
     })
     .await;
 

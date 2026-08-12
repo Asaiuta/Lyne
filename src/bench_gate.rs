@@ -326,10 +326,7 @@ pub fn finish(
                 Ok(spec) => spec,
                 Err(error) => {
                     eprintln!("[bench_gate] {error}");
-                    return (
-                        Verdict::misconfigured(error),
-                        None,
-                    );
+                    return (Verdict::misconfigured(error), None);
                 }
             };
             let verdict = match evaluate_gate(&spec, metrics, ctx) {
@@ -444,8 +441,7 @@ pub fn evaluate_gate(
             }
         }
         if let Some(p9999) = ctx.p9999_ns {
-            let budget =
-                deadline.target_p9999_fraction_of_period * ctx.frame_period_ns;
+            let budget = deadline.target_p9999_fraction_of_period * ctx.frame_period_ns;
             if p9999 > budget {
                 return Ok(Verdict::failed(format!(
                     "p99.99 {p9999} ns exceeds budget {budget} ns \
@@ -458,23 +454,17 @@ pub fn evaluate_gate(
 
     // Budget metrics
     for metric in metrics {
-        let Some(spec_metric) = spec
-            .metrics
-            .iter()
-            .find(|m| m.name == metric.name)
-        else {
+        let Some(spec_metric) = spec.metrics.iter().find(|m| m.name == metric.name) else {
             return Ok(Verdict::misconfigured(format!(
                 "measured metric '{}' has no matching entry in gate spec",
                 metric.name
             )));
         };
-        let budget_ns = spec_metric
-            .budget_ns
-            .or_else(|| {
-                spec_metric
-                    .budget_fraction_of_period
-                    .map(|f| f * ctx.frame_period_ns)
-            });
+        let budget_ns = spec_metric.budget_ns.or_else(|| {
+            spec_metric
+                .budget_fraction_of_period
+                .map(|f| f * ctx.frame_period_ns)
+        });
         if let Some(budget) = budget_ns {
             if metric.value_ns > budget {
                 return Ok(Verdict::failed(format!(
@@ -536,8 +526,7 @@ pub fn gate_self_test() -> Result<(), String> {
             value_ns: 1.0,
         }],
         &ctx,
-    )
-    ?;
+    )?;
     if pass.kind != VerdictKind::Passed {
         return Err(format!("expected Passed, got {:?}", pass.kind));
     }
@@ -549,10 +538,12 @@ pub fn gate_self_test() -> Result<(), String> {
             value_ns: 200_000.0,
         }],
         &ctx,
-    )
-    ?;
+    )?;
     if fail.kind != VerdictKind::Failed {
-        return Err(format!("expected Failed for over-budget, got {:?}", fail.kind));
+        return Err(format!(
+            "expected Failed for over-budget, got {:?}",
+            fail.kind
+        ));
     }
 
     let miss = evaluate_gate(
@@ -566,8 +557,7 @@ pub fn gate_self_test() -> Result<(), String> {
             deadline_miss_rate: Some(0.5),
             p9999_ns: Some(20.0),
         },
-    )
-    ?;
+    )?;
     if miss.kind != VerdictKind::Failed {
         return Err(format!(
             "expected Failed for deadline misses, got {:?}",
@@ -582,8 +572,7 @@ pub fn gate_self_test() -> Result<(), String> {
             value_ns: f64::NAN,
         }],
         &ctx,
-    )
-    ?;
+    )?;
     if integrity.kind != VerdictKind::IntegrityFailed {
         return Err(format!(
             "expected IntegrityFailed for NaN, got {:?}",
@@ -602,8 +591,7 @@ pub fn gate_self_test() -> Result<(), String> {
             value_ns: 1.0,
         }],
         &ctx,
-    )
-    ?;
+    )?;
     std::env::remove_var("BENCH_GATE_ENV_CLASS");
     if unsupported.kind != VerdictKind::Unsupported {
         return Err(format!(
@@ -643,11 +631,11 @@ mod tests {
 
     #[test]
     fn reject_unknown_fields() {
-        let result: Result<GateSpec, _> =
-            serde_json::from_str(r#"{"schema_version":1,"benchmark":"x","environment":{"class":"any"},"bogus":1}"#);
+        let result: Result<GateSpec, _> = serde_json::from_str(
+            r#"{"schema_version":1,"benchmark":"x","environment":{"class":"any"},"bogus":1}"#,
+        );
         assert!(result.is_err(), "unknown fields must be rejected");
     }
-
     #[test]
     fn pass_case() {
         let spec: GateSpec = serde_json::from_str(SPEC).unwrap();

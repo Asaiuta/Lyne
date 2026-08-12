@@ -8,7 +8,7 @@ mod audio_thread;
 pub mod bench_support;
 mod buffer_budget;
 mod cache;
-mod callback;
+pub(crate) mod callback;
 mod command_handlers;
 mod effects_api;
 mod fir_eq_api;
@@ -16,6 +16,7 @@ mod gapless;
 mod loading;
 mod output_stream;
 mod playback_config;
+pub(crate) mod resample_stream;
 mod source_access;
 mod spectrum;
 mod state;
@@ -26,7 +27,8 @@ mod wasapi_loop;
 
 // Re-exports
 pub use callback::{
-    audio_callback_lockfree, normalize_channels, CallbackScratch, LockfreeDspContext,
+    audio_callback_lockfree, normalize_channels, CallbackScratch, FinalNoiseShaper,
+    LockfreeDspContext,
 };
 pub use gapless::GaplessManager;
 pub(crate) use playback_config::{pending_promotion_readiness, PendingPromotionReadiness};
@@ -129,14 +131,14 @@ fn is_streaming_first_buffer_source_candidate(path: &str) -> bool {
 }
 
 impl AudioPlayer {
-    pub fn new(config: EngineSettings) -> Self {
+    pub fn new(config: EngineSettings) -> Result<Self, String> {
         Self::with_loudness_database(config, None)
     }
 
     pub fn with_loudness_database(
         config: EngineSettings,
         loudness_db: Option<Arc<LoudnessDatabase>>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let initial_config = config.clone();
         log::info!("Initializing AudioPlayer (lock-free mode)...");
         let shared_state = Arc::new(SharedState::new());
@@ -144,17 +146,17 @@ impl AudioPlayer {
 
         let thread_state = Arc::clone(&shared_state);
 
-        let loudness_normalizer = Arc::new(Mutex::new(LoudnessNormalizer::new(
-            2,
-            44100,
-            config.loudness.clone(),
-        )));
+        let loudness_normalizer = Arc::new(Mutex::new(
+            LoudnessNormalizer::new(2, 44100, config.loudness.clone())
+                .map_err(|error| format!("Failed to initialize loudness normalizer: {error}"))?,
+        ));
         let loudness_state = loudness_normalizer.lock().atomic_state();
 
         let (spectrum_tx, spectrum_rx) = crossbeam::channel::bounded::<SpectrumBatch>(256);
 
         let spec_state = Arc::clone(&shared_state);
-        let spec_analyzer = SpectrumAnalyzer::new(2048, 64);
+        let spec_analyzer = SpectrumAnalyzer::new(2048, 64)
+            .map_err(|error| format!("Failed to initialize spectrum analyzer: {error}"))?;
         thread::spawn(move || {
             spectrum_thread_main(spectrum_rx, spec_state, spec_analyzer);
         });
@@ -296,7 +298,7 @@ impl AudioPlayer {
         if let Err(error) = player.synchronize_engine_settings(&initial_config) {
             log::error!("Failed to hydrate initial audio settings: {}", error);
         }
-        player
+        Ok(player)
     }
 
     pub fn list_devices(&self) -> Vec<AudioDeviceInfo> {
@@ -407,7 +409,9 @@ impl AudioPlayer {
                         generation,
                         intent: crate::player::streaming::source::StreamOpenIntent::InitialPlayback,
                         path: std::path::Path::new(&path_owned),
-                        cancel: crate::decoder::DecodeCancelToken::new(Arc::clone(&load_cancel)),
+                        cancel: crate::decoder::DecodeCancelToken::from_flag(Arc::clone(
+                            &load_cancel,
+                        )),
                         source_access: &access_owned,
                         expected_identity: None,
                         fetch_policy: if is_remote_http_path(&path_owned) {
@@ -747,6 +751,7 @@ mod tests {
             use_cache,
             ..EngineSettings::default()
         })
+        .expect("player construction with default settings")
     }
 
     #[test]
@@ -824,7 +829,7 @@ mod tests {
     }
 
     fn build_resume_player() -> (AudioPlayer, Arc<SharedState>) {
-        let player = AudioPlayer::new(EngineSettings::default());
+        let player = AudioPlayer::new(EngineSettings::default()).expect("player");
         let shared = player.shared_state();
         shared.sample_rate.store(44_100, Ordering::Relaxed);
         shared.channels.store(2, Ordering::Relaxed);
@@ -898,7 +903,7 @@ mod tests {
 
     #[test]
     fn plain_full_buffer_seek_publishes_through_seek_slot() {
-        let mut player = AudioPlayer::new(EngineSettings::default());
+        let mut player = AudioPlayer::new(EngineSettings::default()).expect("player");
         let shared = player.shared_state();
         shared.sample_rate.store(44_100, Ordering::Relaxed);
         shared.total_frames.store(44_100 * 60, Ordering::Relaxed);

@@ -553,9 +553,9 @@ fn rebuild_pending_dsp_chain(
     sample_rate: u32,
 ) {
     while shared_state.pending_dsp_chain.pop().is_some() {}
-    let (rebuilt_chain, convolver_disposal) = LockfreeDspContext::build_dsp_chain(
+    let (rebuilt_chain, convolver_control) = match LockfreeDspContext::build_dsp_chain(
         channels,
-        sample_rate as f64,
+        sample_rate,
         Arc::clone(dsp_params.eq_params),
         Arc::clone(dsp_params.saturation_params),
         Arc::clone(dsp_params.crossfeed_params),
@@ -564,10 +564,17 @@ fn rebuild_pending_dsp_chain(
         Arc::clone(dsp_params.noise_shaper_params),
         Arc::clone(dsp_params.dynamic_loudness_params),
         Arc::clone(dsp_params.dynamic_loudness_telemetry),
-        Arc::clone(&dsp_ctx.merged_convolver),
-        Arc::clone(&dsp_ctx.merged_convolver_enabled),
-    );
-    dsp_ctx.register_convolver_disposal_slot(convolver_disposal);
+        dsp_ctx.convolver_is_enabled(),
+    ) {
+        Ok(built) => built,
+        Err(error) => {
+            // Keep the audio thread on its current chain rather than stalling the
+            // rebuild request with a half-built one.
+            log::error!("Failed to rebuild DSP chain: {error}");
+            return;
+        }
+    };
+    dsp_ctx.register_convolver_control(convolver_control, sample_rate);
     let _ = shared_state.pending_dsp_chain.push(rebuilt_chain);
 }
 
@@ -714,7 +721,7 @@ mod tests {
             let dynamic_loudness_telemetry = Arc::new(AtomicDynamicLoudnessTelemetry::new());
             let (dsp_ctx, _chain) = LockfreeDspContext::new(
                 2,
-                44_100.0,
+                44_100,
                 Arc::clone(&eq_params),
                 Arc::clone(&saturation_params),
                 Arc::clone(&crossfeed_params),
@@ -723,7 +730,8 @@ mod tests {
                 Arc::clone(&noise_shaper_params),
                 Arc::clone(&dynamic_loudness_params),
                 Arc::clone(&dynamic_loudness_telemetry),
-            );
+            )
+            .expect("dsp context");
 
             Self {
                 shared_state: Arc::new(SharedState::new()),
