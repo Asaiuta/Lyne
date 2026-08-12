@@ -4,5 +4,5 @@
 {"file": ".trellis/spec/backend/audio-settings-control-plane.md", "reason": "Config/parameter migration must preserve the single-writer settings path and app-owned settings ownership."}
 {"file": ".trellis/spec/backend/database-guidelines.md", "reason": "TrackLoudness/LoudnessSourceIdentity migration changes loudness cache keys and persisted identity semantics."}
 {"file": ".trellis/spec/backend/directory-structure.md", "reason": "Keeps new adapter code (MediaLocation conversion helpers) in the correct module layer."}
-{"file": ".trellis/tasks/08-12-audio-engine-core-1-0-integration/research/01-current-baseline.md", "reason": "Baseline revision, lock-hash restoration procedure, and the 97-lib/156-test error inventory that scopes this migration."}
+{"file": ".trellis/tasks/archive/2026-08/08-12-audio-engine-core-1-0-integration/research/01-current-baseline.md", "reason": "Baseline revision, lock-hash restoration procedure, and the 97-lib/156-test error inventory that scopes this migration."}
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Prevents duplicated MediaLocation/identity conversion helpers across decoder, loudness, scan, and bench call sites."}

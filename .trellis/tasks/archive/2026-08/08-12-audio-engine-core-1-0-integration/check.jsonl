@@ -3,4 +3,4 @@
 {"file": ".trellis/spec/backend/remote-fetch-boundaries.md", "reason": "Verify removal of core HTTP policy APIs did not weaken redirect/URL/cookie/SSRF enforcement at the app boundary."}
 {"file": ".trellis/spec/backend/audio-settings-control-plane.md", "reason": "Verify settings ownership and single-writer publication survived the config/parameter remap."}
 {"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify loudness identity/cache-key changes keep persistence and rescan semantics coherent."}
-{"file": ".trellis/tasks/08-12-audio-engine-core-1-0-integration/research/01-current-baseline.md", "reason": "Evidence limits: compile compatibility is not runtime/device evidence; verify no overclaimed integration."}
+{"file": ".trellis/tasks/archive/2026-08/08-12-audio-engine-core-1-0-integration/research/01-current-baseline.md", "reason": "Evidence limits: compile compatibility is not runtime/device evidence; verify no overclaimed integration."}
