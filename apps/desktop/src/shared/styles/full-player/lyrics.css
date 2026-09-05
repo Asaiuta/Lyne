@@ -230,7 +230,7 @@
   .full-player-lyric-menu-divider {
     width: 40px;
     height: 2px;
-    background: var(--full-player-cover-color-12);
+    background: var(--full-player-divider);
   }
 
   .full-player-lyric-menu-time {
@@ -254,7 +254,7 @@
     --full-player-button-icon-size: 30px;
     --full-player-button-radius: var(--radius-sm);
     --full-player-button-hover-scale: 1.1;
-    --full-player-button-hover-bg: var(--full-player-cover-color-14);
+    --full-player-button-hover-bg: var(--full-player-button-hover);
   }
 
   .full-player-lyric-menu-time {
@@ -262,9 +262,9 @@
     min-height: 28px;
     margin: 8px 0;
     padding: 4px 0;
-    border: 1px solid var(--full-player-cover-color-12);
-    background: var(--full-player-cover-color-14);
-    backdrop-filter: blur(10px);
+    border: 1px solid var(--full-player-control-border);
+    background: var(--full-player-control-solid);
+    backdrop-filter: var(--surface-backdrop-filter-tight);
     font-size: 12px;
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -280,7 +280,7 @@
   }
 
   .full-player-lyric-menu-time:hover:not(:disabled) {
-    background: var(--full-player-cover-color-28);
+    background: var(--full-player-control-hover-strong);
   }
 
   .full-player-lyric-menu-time:active:not(:disabled) {
@@ -298,8 +298,8 @@
   }
 
   .n-popover.n-popover-shared.full-player-lyric-offset-popover {
-    --n-color: var(--full-player-cover-color-20);
-    --n-text-color: var(--full-player-cover-color-82);
+    --n-color: var(--full-player-popover-surface);
+    --n-text-color: var(--full-player-naive-text);
     --n-padding: 8px;
     --n-border-radius: var(--radius-sm);
     --n-box-shadow:
@@ -330,13 +330,13 @@
   .full-player-lyric-offset-menu .offset-input .naive-input.n-input,
   .full-player-lyric-offset-menu .offset-input .naive-input-number-input.n-input {
     --n-caret-color: var(--full-player-ink);
-    --n-color: var(--full-player-cover-color-10);
-    --n-color-focus: var(--full-player-cover-color-10);
+    --n-color: var(--full-player-surface);
+    --n-color-focus: var(--full-player-surface);
     --n-text-color: var(--full-player-ink);
-    --n-border-hover: 1px solid var(--full-player-cover-color-28);
-    --n-border-focus: 1px solid var(--full-player-cover-color-28);
+    --n-border-hover: 1px solid var(--full-player-border-focus);
+    --n-border-focus: 1px solid var(--full-player-border-focus);
     --n-suffix-text-color: var(--full-player-ink);
-    --n-box-shadow-focus: 0 0 8px 0 var(--full-player-cover-color-30);
+    --n-box-shadow-focus: 0 0 8px 0 var(--full-player-focus-glow);
   }
 
   .full-player-lyric-offset-menu .offset-input input::selection {
@@ -348,12 +348,12 @@
     justify-content: center;
     border-radius: var(--radius-sm);
     color: var(--full-player-ink);
-    background: var(--full-player-cover-color-10);
+    background: var(--full-player-surface);
     transition:
       background-color 0.3s var(--ease-standard),
       opacity 0.3s var(--ease-standard);
   }
 
   .full-player-lyric-offset-menu .naive-button.player:hover:not(:disabled) {
-    background: var(--full-player-cover-color-28);
+    background: var(--full-player-control-hover-strong);
   }

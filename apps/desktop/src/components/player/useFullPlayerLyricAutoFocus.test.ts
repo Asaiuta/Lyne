@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveFullPlayerLyricScrollTarget } from "./useFullPlayerLyricAutoFocus";
+import {
+  createLatestAnimationFrameScheduler,
+  resolveFullPlayerLyricScrollTarget
+} from "./useFullPlayerLyricAutoFocus";
 
 test("full player lyric autofocus keeps current scroll origin when resolving the next target", () => {
   assert.equal(
@@ -39,4 +42,42 @@ test("full player lyric autofocus clamps configured lyric offsets to a useful ra
     }),
     40
   );
+});
+
+test("full player lyric autofocus scheduler keeps only the latest task per frame", () => {
+  const callbacks: Array<() => void> = [];
+  const cancelled: number[] = [];
+  const scheduler = createLatestAnimationFrameScheduler(
+    (callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    },
+    (handle) => cancelled.push(handle)
+  );
+  const calls: string[] = [];
+
+  scheduler.schedule(() => calls.push("first"));
+  scheduler.schedule(() => calls.push("latest"));
+  assert.equal(callbacks.length, 1);
+  callbacks[0]?.();
+  assert.deepEqual(calls, ["latest"]);
+  assert.deepEqual(cancelled, []);
+});
+
+test("full player lyric autofocus scheduler cancels pending work", () => {
+  const callbacks: Array<() => void> = [];
+  const cancelled: number[] = [];
+  const scheduler = createLatestAnimationFrameScheduler(
+    (callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    },
+    (handle) => cancelled.push(handle)
+  );
+
+  scheduler.schedule(() => {});
+  scheduler.cancel();
+  callbacks[0]?.();
+
+  assert.deepEqual(cancelled, [1]);
 });

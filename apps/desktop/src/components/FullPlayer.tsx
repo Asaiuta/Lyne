@@ -32,7 +32,7 @@ import { useFullPlayerMetaVisibility } from "./player/useFullPlayerMetaVisibilit
 import { useFullPlayerModes } from "./player/useFullPlayerModes";
 import { useFullPlayerProgress } from "./player/useFullPlayerProgress";
 import { usePlayerBarTimeFormat } from "./player/usePlayerBarTimeFormat";
-import { ncmSongLevelShortLabel } from "./player/usePlayerBarNcmQuality";
+import { usePlayerBarNcmQuality, ncmSongLevelShortLabel } from "./player/usePlayerBarNcmQuality";
 import { clamp01 } from "./player/time";
 import {
   IconRepeat,
@@ -41,7 +41,7 @@ import {
   IconVolumeMute
 } from "./icons";
 import { useUISettings } from "../shared/state/useUISettings";
-import type { LyricPriority } from "../shared/state/uiSettingsModel";
+import type { LyricPriority, NcmSongLevel } from "../shared/state/uiSettingsModel";
 import { persistUISettingField } from "../shared/state/uiSettingsStorage";
 import { usePlayback } from "../app/PlaybackContext";
 import { SImage } from "./SImage";
@@ -55,6 +55,7 @@ interface FullPlayerProps {
   onDownload?: () => void;
   onSelectArtist?: (artist: NcmArtistSummary) => void;
   onSelectAlbum?: (album: FullPlayerAlbumLink) => void;
+  onSelectQuality?: (level: NcmSongLevel) => void;
   onOpenLyricSettings?: () => void;
 }
 
@@ -129,6 +130,7 @@ export function FullPlayer(props: FullPlayerProps) {
   const uiSettings = useUISettings();
   const playback = usePlayback();
   const [volumePopoverOpen, setVolumePopoverOpen] = createSignal(false);
+  const [qualityPopoverOpen, setQualityPopoverOpen] = createSignal(false);
   const [lastAudibleVolume, setLastAudibleVolume] = createSignal(0.7);
   const [closePresence, setClosePresence] = createSignal<boolean>(props.isOpen);
   const [lyricOffsets, setLyricOffsets] = createSignal<Record<string, number>>(readLyricOffsetMap());
@@ -292,6 +294,31 @@ export function FullPlayer(props: FullPlayerProps) {
     if (!current) return t("fullPlayer.meta.quality.unknown");
     if (current.target_samplerate === null) return t("player.quality.source");
     return t("player.quality.upsampled", { value: current.target_samplerate });
+  };
+  const isOnlineNcmTrack = () => currentSongId() !== null;
+  const ncmQuality = usePlayerBarNcmQuality({
+    songId: currentSongId,
+    selectedLevel: () => uiSettings.ncmSongLevel,
+    t
+  });
+  const qualityTargetValue = () => {
+    const sampleRate = player()?.target_samplerate;
+    return sampleRate ? `${sampleRate} Hz` : t("player.quality.source");
+  };
+  const qualityResamplerValue = () => player()?.resample_quality || t("common.dash");
+  const qualityOutputBitsValue = () => {
+    const outputBits = player()?.output_bits;
+    return outputBits ? `${outputBits}-bit` : t("common.dash");
+  };
+  const qualityExclusiveValue = () => (player()?.exclusive_mode ? t("common.on") : t("common.off"));
+  const qualityDitherValue = () => (player()?.dither_enabled ? t("common.on") : t("common.off"));
+  const qualityLoudnessValue = () => (player()?.loudness_enabled ? t("common.on") : t("common.off"));
+  const handleSelectQuality = (level: NcmSongLevel) => {
+    setQualityPopoverOpen(false);
+    if (level === uiSettings.ncmSongLevel) {
+      return;
+    }
+    props.onSelectQuality?.(level);
   };
   const audioSourceText = () => {
     const sourceKey = resolveAudioSourceKey(player()?.file_path, currentSongId());
@@ -577,6 +604,37 @@ export function FullPlayer(props: FullPlayerProps) {
     onVolumeWheel: handleVolumeWheel,
     onOpenQueue: playback.openQueue
   });
+  const controlShellQuality = () => ({
+    open: qualityPopoverOpen(),
+    buttonValue: isOnlineNcmTrack() ? ncmQuality.selectedLabel() : qualityLabel(),
+    buttonLabel: t("player.aria.qualityPopover"),
+    dialogLabel: t("player.quality.title"),
+    mode: isOnlineNcmTrack() ? ("online" as const) : ("output" as const),
+    options: ncmQuality.state().options,
+    selectedLevel: isOnlineNcmTrack() ? uiSettings.ncmSongLevel : null,
+    loading: ncmQuality.state().status === "loading",
+    error: ncmQuality.state().error,
+    targetLabel: t("player.quality.target"),
+    targetValue: qualityTargetValue(),
+    resamplerLabel: t("player.quality.resampler"),
+    resamplerValue: qualityResamplerValue(),
+    outputBitsLabel: t("player.quality.outputBits"),
+    outputBitsValue: qualityOutputBitsValue(),
+    exclusiveLabel: t("player.quality.exclusive"),
+    exclusiveValue: qualityExclusiveValue(),
+    ditherLabel: t("player.quality.dither"),
+    ditherValue: qualityDitherValue(),
+    loudnessLabel: t("player.quality.loudness"),
+    loudnessValue: qualityLoudnessValue(),
+    hintLabel: t("player.quality.hint"),
+    onOpenChange: (open: boolean) => {
+      setQualityPopoverOpen(open);
+      if (open && isOnlineNcmTrack()) {
+        void ncmQuality.ensureLoaded();
+      }
+    },
+    onSelectLevel: handleSelectQuality
+  });
   const overlayMenuState = () => ({
     visible: metaVisible(),
     canShowPureLyrics: canShowPureLyrics(),
@@ -807,6 +865,7 @@ export function FullPlayer(props: FullPlayerProps) {
               actions={controlShellActions()}
               transport={controlShellTransport()}
               utility={controlShellUtility()}
+              quality={controlShellQuality()}
               onMouseEnter={handleControlEnter}
               onMouseLeave={handleControlLeave}
             />

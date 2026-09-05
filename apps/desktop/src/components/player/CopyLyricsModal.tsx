@@ -3,6 +3,7 @@ import type { LyricLine } from "../../shared/media/lyrics";
 import { useTranslation } from "../../shared/i18n";
 import { copyToClipboard } from "../../shared/utils/clipboard";
 import { NaiveButton, NaiveCheckbox, NaiveCheckboxGroup, NaiveScrollbar } from "../../shared/ui/naive";
+import "../../shared/styles/components/copy-lyrics-modal.css";
 import { Modal } from "../Modal";
 
 interface CopyLyricsModalProps {

@@ -5,7 +5,10 @@ import {
   FullPlayerTimeButton,
   FullPlayerTransportButton
 } from "./FullPlayerInteractions";
+import { PlayerQualityPopover } from "./PlayerQualityPopover";
 import { PlayerVolumePopover } from "./PlayerVolumePopover";
+import type { PlayerBarNcmQualityOption } from "./usePlayerBarNcmQuality";
+import type { NcmSongLevel } from "../../shared/state/uiSettingsModel";
 import {
   IconChevronDown,
   IconControls,
@@ -103,12 +106,40 @@ interface FullPlayerShellUtilitySection {
   onOpenQueue: () => void;
 }
 
+interface FullPlayerShellQualitySection {
+  open: boolean;
+  buttonValue: string;
+  buttonLabel: string;
+  dialogLabel: string;
+  mode: "online" | "output";
+  options: readonly PlayerBarNcmQualityOption[];
+  selectedLevel: NcmSongLevel | null;
+  loading: boolean;
+  error: string | null;
+  targetLabel: string;
+  targetValue: string;
+  resamplerLabel: string;
+  resamplerValue: string;
+  outputBitsLabel: string;
+  outputBitsValue: string;
+  exclusiveLabel: string;
+  exclusiveValue: string;
+  ditherLabel: string;
+  ditherValue: string;
+  loudnessLabel: string;
+  loudnessValue: string;
+  hintLabel: string;
+  onOpenChange: (open: boolean) => void;
+  onSelectLevel: (level: NcmSongLevel) => void;
+}
+
 interface FullPlayerControlShellProps {
   visible: boolean;
   labels: FullPlayerShellLabels;
   actions: FullPlayerShellActionsSection;
   transport: FullPlayerShellTransportSection;
   utility: FullPlayerShellUtilitySection;
+  quality?: FullPlayerShellQualitySection;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }
@@ -283,7 +314,41 @@ export function FullPlayerControlShell(props: FullPlayerControlShellProps) {
 
       <div class="full-player-control-side is-right">
         <Show when={props.utility.showPlayerQuality}>
-          <span class="full-player-quality-tag">{props.labels.qualityTag}</span>
+          <Show
+            when={props.quality}
+            fallback={<span class="full-player-quality-tag">{props.labels.qualityTag}</span>}
+          >
+            {(quality) => (
+              <PlayerQualityPopover
+                open={quality().open}
+                buttonValue={quality().buttonValue}
+                buttonLabel={quality().buttonLabel}
+                dialogLabel={quality().dialogLabel}
+                mode={quality().mode}
+                options={quality().options}
+                selectedLevel={quality().selectedLevel}
+                loading={quality().loading}
+                error={quality().error}
+                targetLabel={quality().targetLabel}
+                targetValue={quality().targetValue}
+                resamplerLabel={quality().resamplerLabel}
+                resamplerValue={quality().resamplerValue}
+                outputBitsLabel={quality().outputBitsLabel}
+                outputBitsValue={quality().outputBitsValue}
+                exclusiveLabel={quality().exclusiveLabel}
+                exclusiveValue={quality().exclusiveValue}
+                ditherLabel={quality().ditherLabel}
+                ditherValue={quality().ditherValue}
+                loudnessLabel={quality().loudnessLabel}
+                loudnessValue={quality().loudnessValue}
+                hintLabel={quality().hintLabel}
+                triggerClass="full-player-quality-tag full-player-quality-trigger"
+                popoverClass="full-player-quality-popover"
+                onOpenChange={quality().onOpenChange}
+                onSelectLevel={quality().onSelectLevel}
+              />
+            )}
+          </Show>
         </Show>
         <Show when={props.utility.showDesktopLyric}>
           <FullPlayerActionButton

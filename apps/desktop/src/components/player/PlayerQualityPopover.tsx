@@ -26,6 +26,8 @@ interface PlayerQualityPopoverProps {
   loudnessLabel: string;
   loudnessValue: string;
   hintLabel: string;
+  triggerClass?: string;
+  popoverClass?: string;
   onOpenChange: (open: boolean) => void;
   onSelectLevel?: (level: NcmSongLevel) => void;
 }
@@ -40,13 +42,15 @@ export function PlayerQualityPopover(props: PlayerQualityPopoverProps) {
       onOpenChange={props.onOpenChange}
       showArrow={false}
       raw
-      class="player-quality-popover"
+      class={`player-quality-popover${props.popoverClass ? ` ${props.popoverClass}` : ""}`}
       ariaLabel={props.dialogLabel}
       rootStyle={{ height: "26px" }}
       trigger={
         <button
           type="button"
-          class={`naive-tag naive-tag--primary player-inline-tag player-right-tag player-utility-hidden player-quality-tag cursor-pointer bg-transparent text-xs${props.open ? " is-open" : ""}`}
+          class={props.triggerClass !== undefined
+            ? `${props.triggerClass}${props.open ? " is-open" : ""}`
+            : `naive-tag naive-tag--primary player-inline-tag player-right-tag player-utility-hidden player-quality-tag cursor-pointer bg-transparent text-xs${props.open ? " is-open" : ""}`}
           aria-label={props.buttonLabel}
           title={props.buttonLabel}
           aria-haspopup="dialog"

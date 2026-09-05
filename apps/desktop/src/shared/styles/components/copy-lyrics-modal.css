@@ -1,0 +1,68 @@
+@layer components {
+  .copy-lyrics-modal {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .copy-lyrics-options {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .copy-lyrics-option-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+  }
+
+  .copy-lyrics-scroll {
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: color-mix(in oklch, var(--surface-2) 72%, transparent);
+  }
+
+  .copy-lyrics-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px;
+  }
+
+  .copy-lyrics-line-check {
+    align-items: flex-start;
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+  }
+
+  .copy-lyrics-line-check:hover {
+    background: color-mix(in oklch, var(--surface-3) 58%, transparent);
+  }
+
+  .copy-lyrics-line {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+    line-height: 1.45;
+  }
+
+  .copy-lyrics-line-main {
+    color: var(--text);
+    font-size: 14px;
+  }
+
+  .copy-lyrics-line-extra {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .copy-lyrics-empty {
+    display: grid;
+    min-height: 180px;
+    place-items: center;
+    color: var(--muted);
+  }
+}
