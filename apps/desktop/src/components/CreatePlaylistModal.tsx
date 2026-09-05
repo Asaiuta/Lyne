@@ -7,6 +7,8 @@ import { assertNcmOk, createPlaylist, type NcmCreatePlaylistType } from "../shar
 import { useTranslation } from "../shared/i18n";
 import {
   NaiveButton,
+  NaiveForm,
+  NaiveFormItem,
   NaiveInput,
   NaiveSelect,
   NaiveSwitch,
@@ -109,15 +111,13 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
       onClose={props.onClose}
       size="md"
     >
-      <form
-        class="create-playlist-modal"
+      <NaiveForm
         onSubmit={(event) => {
           event.preventDefault();
           void handleSubmit();
         }}
       >
-        <div class="create-playlist-field">
-          <span class="field-label">{t("playlist.create.name")}</span>
+        <NaiveFormItem label={t("playlist.create.name")} path="name">
           <NaiveInput
             type="text"
             value={name()}
@@ -125,14 +125,13 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
             onUpdateValue={setName}
             ariaLabel={t("playlist.create.name")}
           />
-        </div>
+        </NaiveFormItem>
 
         <Show
           when={props.mode === "local"}
           fallback={
             <>
-              <div class="create-playlist-field">
-                <span class="field-label">{t("playlist.create.type")}</span>
+              <NaiveFormItem label={t("playlist.create.type")} path="type">
                 <NaiveSelect
                   value={type()}
                   options={playlistTypeOptions()}
@@ -141,31 +140,32 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
                   }}
                   ariaLabel={t("playlist.create.type")}
                 />
-              </div>
+              </NaiveFormItem>
 
-              <div class="create-playlist-switch">
+              <NaiveFormItem
+                label={t("playlist.create.privacy")}
+                path="privacy"
+                labelPlacement="left"
+              >
                 <NaiveSwitch
                   checked={privacy()}
                   onChange={setPrivacy}
                   ariaLabel={t("playlist.create.privacy")}
                 />
-                <span>{t("playlist.create.privacy")}</span>
-              </div>
+              </NaiveFormItem>
             </>
           }
         >
-          <div class="create-playlist-field">
-            <span class="field-label">{t("playlist.create.description")}</span>
+          <NaiveFormItem label={t("playlist.create.description")} path="description">
             <NaiveInput
               type="textarea"
-              class="create-playlist-description"
               value={description()}
               placeholder={t("playlist.create.descriptionPlaceholder")}
               autosize={{ minRows: 2, maxRows: 4 }}
               onUpdateValue={setDescription}
               ariaLabel={t("playlist.create.description")}
             />
-          </div>
+          </NaiveFormItem>
         </Show>
 
         <Show when={feedback()}>
@@ -173,8 +173,8 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
             <div
               class={
                 current().tone === "error"
-                  ? "create-playlist-feedback status-error"
-                  : "create-playlist-feedback status-line"
+                  ? "status-error"
+                  : "status-line"
               }
               role="status"
             >
@@ -188,7 +188,6 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
           variant="primary"
           strong
           block
-          class="create-playlist-submit"
           disabled={!name().trim() || submitting()}
         >
           <IconPlus />
@@ -196,7 +195,7 @@ export function CreatePlaylistModal(props: CreatePlaylistModalProps) {
             {submitting() ? t("playlist.create.submitting") : t("playlist.create.submit")}
           </span>
         </NaiveButton>
-      </form>
+      </NaiveForm>
     </Modal>
   );
 }

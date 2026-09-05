@@ -18,37 +18,6 @@ export function Skeleton(props: SkeletonProps) {
   return <NaiveSkeleton {...props} />;
 }
 
-interface CoverGridSkeletonProps {
-  count?: number;
-  shape?: "square" | "round";
-}
-
-/**
- * Grid of 50 (configurable) card placeholders.
- * loading state where the `cover-grid` is filled with `n-skeleton` rows.
- */
-export function CoverGridSkeleton(props: CoverGridSkeletonProps) {
-  const total = () => props.count ?? 50;
-  const isRound = () => props.shape === "round";
-  const indexes = createMemo(() => buildIndexes(total()));
-  return (
-    <div class="album-grid skeleton-grid" aria-hidden="true">
-      <For each={indexes()}>
-        {() => (
-          <div class={`album-card skeleton-card${isRound() ? " album-card--round" : ""}`}>
-            <NaiveSkeleton
-              class="album-card-art"
-              shape={isRound() ? "circle" : "rect"}
-            />
-            <NaiveSkeleton class="skeleton-line skeleton-line--title" shape="text" />
-            <NaiveSkeleton class="skeleton-line" shape="text" />
-          </div>
-        )}
-      </For>
-    </div>
-  );
-}
-
 interface ListSkeletonProps {
   count?: number;
   rowHeight?: number;

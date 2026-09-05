@@ -29,9 +29,11 @@ test("top nav search uses the shared Naive input contract", () => {
 
 test("top nav search leaves visual states to NaiveInput", () => {
   const outerRule = /\.top-nav-search\s*\{([^}]*)\}/.exec(layoutCss)?.[1] ?? "";
-  const inputRule = /\.top-nav-search-input\.naive-input\s*\{([^}]*)\}/.exec(layoutCss)?.[1] ?? "";
+  const inputRules = [...layoutCss.matchAll(/\.top-nav-search-input\.naive-input\s*\{([^}]*)\}/g)]
+    .map((match) => match[1])
+    .join("\n");
 
   assert.equal(/(?:^|;)\s*(?:background|border|box-shadow)\s*:/.test(outerRule), false);
-  assert.equal(/--n-height:\s*40px;/.test(inputRule), true);
-  assert.equal(/--n-color(?:-focus|-disabled)?:\s*transparent;/.test(inputRule), false);
+  assert.equal(/--n-height:\s*40px;/.test(inputRules), true);
+  assert.equal(/--n-color(?:-focus|-disabled)?:\s*transparent;/.test(inputRules), false);
 });

@@ -8,7 +8,7 @@ import type {
   MediaSortOrder,
   MediaSortState
 } from "../../components/media/mediaListTypes";
-import { CoverGridSkeleton } from "../../components/page/Skeleton";
+import { CoverGridSkeleton } from "../../components/page/CoverGridSkeleton";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import type { LocalPlaylist } from "../../shared/api/types";
 import { createApiClient } from "../../shared/api/client";
@@ -80,7 +80,7 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
           <CoverGridSkeleton count={12} />
         ) : (
           <div class="local-playlist-placeholder" role="status">
-            <span class="empty-tab-icon" aria-hidden="true">
+            <span class="library-empty-state-icon" aria-hidden="true">
               <IconPlaylist />
             </span>
             <div class="local-playlist-placeholder-copy">
@@ -99,7 +99,7 @@ export function LibraryPlaylistsView(props: LibraryPlaylistsViewProps) {
         when={selectedPlaylist()}
         fallback={
           <div class="local-playlist-grid-view">
-            <div class="album-grid local-playlist-grid content-fade-in">
+            <div class="album-grid album-grid--dense album-grid--scroll content-fade-in">
               <For each={props.playlists}>
                 {(playlist) => (
                   <AlbumCard

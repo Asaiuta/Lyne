@@ -170,8 +170,8 @@ export function LibraryFoldersView(props: LibraryFoldersViewProps) {
     <Show
       when={props.nodes.length > 0}
       fallback={
-        <div class="empty-tab" role="status">
-          <span class="empty-tab-icon" aria-hidden="true">
+        <div class="library-empty-state" role="status">
+          <span class="library-empty-state-icon" aria-hidden="true">
             <IconFolder />
           </span>
           <span>{t("library.tabs.empty.folders")}</span>

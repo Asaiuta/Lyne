@@ -3,8 +3,9 @@ import { IconDeleteFilled, IconPlayFilled } from "../../components/icons";
 import { createApiClient } from "../../shared/api/client";
 import type { QueueEntry, QueueStatus, RequestState } from "../../shared/api/types";
 import { useTranslation } from "../../shared/i18n";
-import { NaiveButton } from "../../shared/ui/naive";
+import { NaiveButton, NaiveInput } from "../../shared/ui/naive";
 import type { TranslationKey } from "../../shared/i18n";
+import "../../shared/styles/pages/queue.css";
 
 const api = createApiClient();
 
@@ -229,14 +230,14 @@ export function QueuePage(props: QueuePageProps) {
         <span class="panel-meta">{t("queue.subtitle")}</span>
       </div>
 
-      <div class="settings-group">
+      <div class="queue-form-group">
         <label class="field-label" for="load-path">{t("queue.load.label")}</label>
-        <input
+        <NaiveInput
           id="load-path"
-          class="text-input"
+          class="queue-input"
           type="text"
           value={loadPath()}
-          onInput={(event) => setLoadPath(event.currentTarget.value)}
+          onUpdateValue={setLoadPath}
           placeholder={t("queue.load.placeholder")}
         />
         <NaiveButton
@@ -252,14 +253,14 @@ export function QueuePage(props: QueuePageProps) {
         </NaiveButton>
       </div>
 
-      <div class="settings-group">
+      <div class="queue-form-group">
         <label class="field-label" for="next-path">{t("queue.next.label")}</label>
-        <input
+        <NaiveInput
           id="next-path"
-          class="text-input"
+          class="queue-input"
           type="text"
           value={nextPath()}
-          onInput={(event) => setNextPath(event.currentTarget.value)}
+          onUpdateValue={setNextPath}
           placeholder={t("queue.next.placeholder")}
         />
         <div class="button-row">
@@ -288,7 +289,7 @@ export function QueuePage(props: QueuePageProps) {
         </div>
       </div>
 
-      <div class="settings-group">
+      <div class="queue-form-group">
         <div class="panel-subheader">
           <span class="field-label">{t("queue.persistent.title")}</span>
           <span class="panel-meta">{t(countKey(), { count: entries().length })}</span>
@@ -338,11 +339,11 @@ export function QueuePage(props: QueuePageProps) {
             </For>
           </ul>
         </Show>
-        <input
-          class="text-input"
+        <NaiveInput
+          class="queue-input"
           type="text"
           value={enqueuePath()}
-          onInput={(event) => setEnqueuePath(event.currentTarget.value)}
+          onUpdateValue={setEnqueuePath}
           placeholder={t("queue.persistent.placeholder")}
         />
         <div class="button-row">

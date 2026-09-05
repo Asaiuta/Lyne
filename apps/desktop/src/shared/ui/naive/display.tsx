@@ -54,6 +54,8 @@ export interface NaiveEmptyProps extends NaiveClassProps {
 }
 
 export interface NaiveDividerProps extends NaiveClassProps {
+  children?: JSX.Element;
+  titlePlacement?: "left" | "right" | "center";
   vertical?: boolean;
 }
 
@@ -152,16 +154,30 @@ export function NaiveBadge(props: NaiveBadgeProps): JSX.Element {
 }
 
 export function NaiveDivider(props: NaiveDividerProps): JSX.Element {
+  const hasTitle = () => !props.vertical && props.children != null;
+  const titlePlacement = () => props.titlePlacement ?? "center";
   return (
     <div
       class={joinClassNames(
         "naive-divider",
-        props.vertical ? "naive-divider--vertical" : false,
+        "n-divider",
+        props.vertical ? "naive-divider--vertical n-divider--vertical" : false,
+        hasTitle()
+          ? `naive-divider--titled naive-divider--title-position-${titlePlacement()} n-divider--title-position-${titlePlacement()}`
+          : "naive-divider--no-title n-divider--no-title",
         props.class
       )}
       role="separator"
-      aria-hidden="true"
-    />
+      aria-hidden={hasTitle() ? undefined : "true"}
+    >
+      <Show when={!props.vertical}>
+        <div class="naive-divider-line naive-divider-line--left n-divider__line n-divider__line--left" />
+        <Show when={hasTitle()}>
+          <div class="naive-divider-title n-divider__title">{props.children}</div>
+          <div class="naive-divider-line naive-divider-line--right n-divider__line n-divider__line--right" />
+        </Show>
+      </Show>
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 import { NaiveH2 } from "../shared/ui/naive";
+import "../shared/styles/components/content-cards.css";
 import { IconChevronRight } from "./icons";
 
 interface HorizontalCardRowProps {

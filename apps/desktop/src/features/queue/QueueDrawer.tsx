@@ -10,7 +10,7 @@ import {
   QUEUE_ROW_HEIGHT_PX,
   resolveQueueVisibleRange
 } from "./queueVirtualization";
-import "../../shared/styles/components/modals.css";
+import "../../shared/styles/components/queue-drawer.css";
 
 interface QueueDrawerProps {
   open: boolean;

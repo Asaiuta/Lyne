@@ -1,4 +1,30 @@
 import { formatDuration } from "../player/time";
+import { coverSizeUrl } from "../../shared/ui/coverSize";
+
+const NCM_COVER_HOST = "music.126.net";
+
+export const resolveMediaListArtworkUrl = (
+  artworkUrl: string | null | undefined,
+  songId: number | null | undefined
+): string | undefined => {
+  if (!artworkUrl || typeof songId !== "number" || !Number.isFinite(songId)) {
+    return artworkUrl ?? undefined;
+  }
+
+  try {
+    const parsed = new URL(artworkUrl);
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+      (parsed.hostname !== NCM_COVER_HOST && !parsed.hostname.endsWith(`.${NCM_COVER_HOST}`))
+    ) {
+      return artworkUrl;
+    }
+  } catch {
+    return artworkUrl;
+  }
+
+  return coverSizeUrl(artworkUrl, "s");
+};
 
 export const formatMediaDuration = (secs: number | null): string => formatDuration(secs, "—");
 

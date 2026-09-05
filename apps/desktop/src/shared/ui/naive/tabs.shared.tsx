@@ -171,22 +171,63 @@ export const createNaiveTabsSegmentCapsule = (
   const scheduleMeasure = (): void => {
     if (typeof window === "undefined") return;
     window.cancelAnimationFrame(animationFrame);
-    animationFrame = window.requestAnimationFrame(() => {
+    // Items are keyed by object identity; an async count update rebuilds the
+    // whole tab list, so the registered element can briefly be detached (or
+    // report a 0-size rect) mid-rebuild. Measuring that transient state would
+    // pin the capsule to a wrong/shrunk size until the next trigger. Retry a
+    // few frames before committing to a measurement; if the element is gone
+    // for good, fall back to hiding the capsule.
+    //
+    // Sizing/positioning intentionally uses layout offsets (offsetWidth /
+    // offsetHeight / offsetLeft chain) instead of getBoundingClientRect:
+    // rect values are visual-space and get distorted by ancestor transforms
+    // (page-enter scale, hero zoom), which would shrink the capsule to the
+    // animated scale; offset* are layout-space and always stable.
+    let retries = 0;
+    const measure = (): void => {
       if (!railEl) return;
       const activeEl = tabElements.get(value());
       if (!activeEl) {
+        if (retries < 3) {
+          retries += 1;
+          animationFrame = window.requestAnimationFrame(measure);
+          return;
+        }
         setCapsuleStyle({ opacity: 0, transform: "translate(0px, 0px)" });
         return;
       }
-      const railRect = railEl.getBoundingClientRect();
-      const activeRect = activeEl.getBoundingClientRect();
+      const stale = !activeEl.isConnected || activeEl.offsetWidth <= 0 || activeEl.offsetHeight <= 0;
+      if (stale) {
+        if (retries < 3) {
+          retries += 1;
+          animationFrame = window.requestAnimationFrame(measure);
+          return;
+        }
+        return;
+      }
+      // Layout-space position of the active tab relative to the rail,
+      // walking the offsetParent chain (the rail is position-relative). This
+      // mirrors naive-ui's segment capsule algorithm (offsetWidth/offsetLeft)
+      // and stays immune to ancestor transforms. The chain offset already
+      // starts at the rail's border-box origin (padding included), matching
+      // the capsule's absolute top/left baseline, so no padding subtraction
+      // is applied.
+      let offsetLeft = activeEl.offsetLeft;
+      let offsetTop = activeEl.offsetTop;
+      let ancestor = activeEl.offsetParent as HTMLElement | null;
+      while (ancestor && ancestor !== railEl) {
+        offsetLeft += ancestor.offsetLeft;
+        offsetTop += ancestor.offsetTop;
+        ancestor = ancestor.offsetParent as HTMLElement | null;
+      }
       setCapsuleStyle({
-        width: `${activeRect.width}px`,
-        height: `${activeRect.height}px`,
+        width: `${activeEl.offsetWidth}px`,
+        height: `${activeEl.offsetHeight}px`,
         opacity: 1,
-        transform: `translate(${activeRect.left - railRect.left}px, ${activeRect.top - railRect.top}px)`
+        transform: `translate(${Math.max(0, offsetLeft)}px, ${Math.max(0, offsetTop)}px)`
       });
-    });
+    };
+    animationFrame = window.requestAnimationFrame(measure);
   };
 
   const railRef = (el: HTMLElement): void => {

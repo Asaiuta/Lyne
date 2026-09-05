@@ -47,7 +47,7 @@ This package is an app-local facade layer for SPlayer/NaiveUI parity. The route 
 | `SImage` image route | `NImage` / `NImageGroup` | no Naive facade; base image/media behavior stays in `SImage`, while preview/lightbox/group navigation is owned by `05-24-ui-splayer-n-simage-preview-lightbox` | routed |
 | `NaiveAvatar` | `NAvatar` | handwritten display facade | initial |
 | `NaiveBadge` | `NBadge` | handwritten display facade | initial |
-| `NaiveDivider` | `NDivider` | handwritten display facade | initial |
+| `NaiveDivider` | `NDivider` | handwritten display facade; titled mode mirrors native 16px/24px/500 geometry | source-backed |
 | `NaiveEllipsis` | `NEllipsis` | handwritten display facade | initial |
 | `NaiveText` | `NText` | handwritten display facade | initial |
 | `NaiveH1` | `NH1` | handwritten typography facade, supports `prefix="bar"` | initial |

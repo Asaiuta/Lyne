@@ -1,5 +1,6 @@
 import { ErrorBoundary, type JSX } from "solid-js";
 import { NaiveAlert, NaiveButton } from "../shared/ui/naive";
+import "../shared/styles/components/panel-error-boundary.css";
 
 interface PanelErrorBoundaryProps {
   children: JSX.Element;

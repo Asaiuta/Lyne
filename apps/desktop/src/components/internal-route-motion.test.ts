@@ -53,8 +53,11 @@ test("all SPlayer-style internal routes use the shared motion lifecycle", () => 
 test("animated route bodies render from displayed state rather than the next target", () => {
   assertMatches(
     discoverSource,
-    /props\.discoverTabRequest\?\.version[\s\S]*setDiscoverTab\(normalizeDiscoverTab\(props\.discoverTabRequest\?\.tab\)\)/
+    /createSignal<DiscoverTab>\(\s*normalizeDiscoverTab\(props\.discoverTabRequest\?\.tab\)\s*\)/
   );
+  assertMatches(discoverSource, /const nextTab = normalizeDiscoverTab\(props\.discoverTabRequest\?\.tab\)/);
+  assertMatches(discoverSource, /activateDiscoverResources\(nextTab\)/);
+  assertMatches(discoverSource, /setDiscoverTab\(nextTab\)/);
   assertMatches(discoverSource, /displayedDiscoverTab\(\) === "playlists"/);
   assertDoesNotMatch(discoverSource, /<Show when=\{discoverTab\(\) ===/);
 

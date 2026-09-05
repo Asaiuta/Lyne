@@ -18,7 +18,10 @@ import { MediaListFloatTools } from "./MediaListFloatTools";
 import { MediaListRow } from "./MediaListRow";
 import { MediaSortPopover } from "./MediaSortPopover";
 import { SImage } from "../SImage";
-import { stripBracketedContent } from "./mediaListFormatting";
+import {
+  resolveMediaListArtworkUrl,
+  stripBracketedContent
+} from "./mediaListFormatting";
 import type { MediaListItem } from "../../shared/media/mediaListItem";
 import { displayNameFromSourcePath } from "../../shared/media/mediaPath";
 import {
@@ -424,11 +427,12 @@ export function MediaList<T extends MediaListItem>(props: MediaListProps<T>) {
     const title = searchableTitle(target);
     const subtitle = target.artist?.trim() || target.album?.trim() || target.source_path || "";
     const initial = (title.trim().slice(0, 1) || "#").toUpperCase();
+    const artworkUrl = resolveMediaListArtworkUrl(target.artworkUrl, target.songId);
     return (
       <div class="context-menu-song-card">
         <Show when={showArtwork()}>
           <Show
-            when={target.artworkUrl}
+            when={artworkUrl}
             fallback={
               <span class="context-menu-song-cover context-menu-song-cover-fallback">
                 {initial}

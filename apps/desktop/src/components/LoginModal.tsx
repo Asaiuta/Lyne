@@ -30,6 +30,7 @@ import {
   NaiveTabs,
   type NaiveTabItem
 } from "../shared/ui/naive";
+import "../shared/styles/components/login-modal.css";
 
 type LoginTab = "qr" | "phone";
 type SpecialLoginMode = "uid" | "cookie" | null;

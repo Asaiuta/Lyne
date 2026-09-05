@@ -1,4 +1,4 @@
-import { Show } from "solid-js";
+import { Show, createMemo } from "solid-js";
 import type { UISettings } from "../../shared/state/uiSettingsModel";
 import { NaiveTag, type NaiveTagTone } from "../../shared/ui/naive";
 import { SImage } from "../SImage";
@@ -15,7 +15,8 @@ import type { MediaRowAction } from "./mediaListTypes";
 import { displayNameFromSourcePath } from "../../shared/media/mediaPath";
 import {
   formatMediaDuration,
-  formatMediaSize
+  formatMediaSize,
+  resolveMediaListArtworkUrl
 } from "./mediaListFormatting";
 
 interface MediaListRowProps<T extends MediaListItem> {
@@ -64,6 +65,9 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
   const displayTitle = () => props.displaySongText(title());
   const credits = () =>
     props.item.artist ? props.displaySongText(props.item.artist) : props.emptyCreditsLabel;
+  const artworkUrl = createMemo<string | undefined>(() =>
+    resolveMediaListArtworkUrl(props.item.artworkUrl, props.item.songId)
+  );
   const artworkInitial = () => (title().trim().slice(0, 1) || "#").toUpperCase();
   const className = () =>
     [
@@ -158,15 +162,19 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
         <span class="media-cell media-cell-title" role="cell">
           <span class="media-row-title-wrap">
             <Show when={props.showArtwork}>
-              <Show when={props.item.artworkUrl}>
-                <span class="media-row-artwork" aria-hidden="true">
-                  <SImage src={props.item.artworkUrl} alt="" observeVisibility={true} shape="rect" aspect="square" />
-                </span>
-              </Show>
-              <Show when={!props.item.artworkUrl}>
-                <span class="media-row-artwork media-row-artwork-fallback" aria-hidden="true">
-                  {artworkInitial()}
-                </span>
+              <Show
+                when={artworkUrl()}
+                fallback={
+                  <span class="media-row-artwork media-row-artwork-fallback" aria-hidden="true">
+                    {artworkInitial()}
+                  </span>
+                }
+              >
+                {(url) => (
+                  <span class="media-row-artwork" aria-hidden="true">
+                    <SImage src={url()} alt="" observeVisibility={true} shape="rect" aspect="square" />
+                  </span>
+                )}
               </Show>
             </Show>
             <span class="media-row-copy">
@@ -230,9 +238,9 @@ export function MediaListRow<T extends MediaListItem>(props: MediaListRowProps<T
           <span class="media-cell media-cell-actions" role="cell">
             <button
               type="button"
-              class="row-action"
+              class="media-row-action"
               classList={{
-                "row-action-favorite": props.rowAction.kind === "favorite",
+                "media-row-action-favorite": props.rowAction.kind === "favorite",
                 "is-active": favoriteActive()
               }}
               aria-label={rowActionLabel()}

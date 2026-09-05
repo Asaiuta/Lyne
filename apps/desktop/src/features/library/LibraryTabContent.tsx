@@ -46,7 +46,7 @@ export function LibraryTabContent(props: LibraryTabContentProps) {
               fallback={<div class="status-line">{props.t("library.tracks.emptyFilter")}</div>}
             >
               <div class="local-library-empty" role="status">
-                <span class="empty-tab-icon" aria-hidden="true">
+                <span class="library-empty-state-icon" aria-hidden="true">
                   <IconMusic />
                 </span>
                 <span>{props.t("library.tracks.emptyAll")}</span>

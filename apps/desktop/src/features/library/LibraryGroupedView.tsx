@@ -84,8 +84,8 @@ export function LibraryGroupedView(props: LibraryGroupedViewProps) {
     <Show
       when={props.groups.length > 0}
       fallback={
-        <div class="empty-tab" role="status">
-          <span class="empty-tab-icon" aria-hidden="true">
+        <div class="library-empty-state" role="status">
+          <span class="library-empty-state-icon" aria-hidden="true">
             {iconForKind(props.kind)}
           </span>
           <span>{emptyLabel()}</span>

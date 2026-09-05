@@ -1,4 +1,5 @@
 import { Show } from "solid-js";
+import "../shared/styles/components/content-cards.css";
 import "../shared/styles/pages/album-grid.css";
 import { IconArtist, IconPlay } from "./icons";
 import { SImage } from "./SImage";

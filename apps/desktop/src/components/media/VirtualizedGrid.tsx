@@ -6,7 +6,8 @@ import {
   GRID_OVERSCAN_ROWS,
   GRID_VIRTUALIZE_THRESHOLD,
   type GridVisibleRange,
-  resolveGridVisibleRange
+  resolveGridVisibleRange,
+  shouldVirtualizeGrid
 } from "./gridVirtualization";
 
 interface VirtualizedGridProps<T> {
@@ -62,6 +63,14 @@ export function VirtualizedGrid<T>(props: VirtualizedGridProps<T>) {
   const commitMeasure = () => {
     scrollFrame = 0;
     if (!gridRef || typeof window === "undefined") return;
+    if (
+      !shouldVirtualizeGrid(
+        props.items.length,
+        props.virtualizeThreshold ?? GRID_VIRTUALIZE_THRESHOLD
+      )
+    ) {
+      return;
+    }
 
     const computed = window.getComputedStyle(gridRef);
     const nextRowGap = parseCssPixelValue(computed.rowGap);
@@ -81,6 +90,14 @@ export function VirtualizedGrid<T>(props: VirtualizedGridProps<T>) {
   };
 
   const scheduleMeasure = () => {
+    if (
+      !shouldVirtualizeGrid(
+        props.items.length,
+        props.virtualizeThreshold ?? GRID_VIRTUALIZE_THRESHOLD
+      )
+    ) {
+      return;
+    }
     if (scrollFrame !== 0) return;
     if (typeof window === "undefined") {
       commitMeasure();

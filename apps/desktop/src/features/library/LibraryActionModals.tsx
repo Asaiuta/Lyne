@@ -12,6 +12,7 @@ import {
   NaiveListItem,
   NaiveThing
 } from "../../shared/ui/naive";
+import "../../shared/styles/components/selection-action-modals.css";
 import type { LibraryListItem } from "./libraryViewTypes";
 
 interface LibraryPlaylistTargetModalProps {
@@ -97,7 +98,7 @@ export function LibraryPlaylistTargetModal(props: LibraryPlaylistTargetModalProp
     >
       <div class="local-action-modal">
         <Show when={hasItems()}>
-          <div class="local-action-summary">
+          <div class="selection-action-summary">
             {t("library.playlists.add.summary", { count: props.items.length })}
           </div>
         </Show>
@@ -107,23 +108,23 @@ export function LibraryPlaylistTargetModal(props: LibraryPlaylistTargetModalProp
             when={props.playlists.length > 0}
             fallback={<div class="status-line">{t("library.playlists.empty")}</div>}
           >
-            <NaiveList class="local-playlist-target-list" hoverable clickable>
+            <NaiveList class="playlist-target-list" hoverable clickable>
               <For each={props.playlists}>
                 {(playlist) => (
                   <NaiveListItem
-                    class="local-playlist-target"
+                    class="playlist-target"
                     onClick={() => void handleAdd(playlist.playlist_id)}
                     disabled={submittingPlaylistId() !== null || creating()}
                     prefix={
-                      <span class="local-playlist-target-icon" aria-hidden="true">
+                      <span class="playlist-target-icon" aria-hidden="true">
                         <IconPlaylist />
                       </span>
                     }
                   >
                     <NaiveThing
-                      class="local-playlist-target-copy"
-                      titleClass="local-playlist-target-name"
-                      descriptionClass="local-playlist-target-count"
+                      class="playlist-target-copy"
+                      titleClass="playlist-target-name"
+                      descriptionClass="playlist-target-count"
                       title={playlist.name}
                       description={t("library.group.songCount", { count: playlist.track_count })}
                     />
@@ -245,10 +246,10 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
       onClose={props.onClose}
       size="lg"
     >
-      <div class="local-batch-modal">
-        <div class="local-batch-table" role="table" aria-label={t("library.batch.title")}>
-          <div class="local-batch-row local-batch-head" role="row">
-            <span class="local-batch-cell local-batch-check" role="columnheader">
+      <div class="batch-selection-modal">
+        <div class="batch-selection-table" role="table" aria-label={t("library.batch.title")}>
+          <div class="batch-selection-row batch-selection-head" role="row">
+            <span class="batch-selection-cell batch-selection-check" role="columnheader">
               <NaiveCheckbox
                 size="small"
                 ariaLabel={t("library.batch.selectAll")}
@@ -256,16 +257,16 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
                 onUpdateChecked={toggleAll}
               />
             </span>
-            <span class="local-batch-cell local-batch-index" role="columnheader">#</span>
-            <span class="local-batch-cell" role="columnheader">{t("media.column.title")}</span>
-            <span class="local-batch-cell" role="columnheader">{t("media.sort.artist")}</span>
-            <span class="local-batch-cell" role="columnheader">{t("media.sort.album")}</span>
+            <span class="batch-selection-cell batch-selection-index" role="columnheader">#</span>
+            <span class="batch-selection-cell" role="columnheader">{t("media.column.title")}</span>
+            <span class="batch-selection-cell" role="columnheader">{t("media.sort.artist")}</span>
+            <span class="batch-selection-cell" role="columnheader">{t("media.sort.album")}</span>
           </div>
-          <div class="local-batch-body" role="rowgroup">
+          <div class="batch-selection-body" role="rowgroup">
             <For each={props.items}>
               {(item, index) => (
-                <div class="local-batch-row" role="row">
-                  <span class="local-batch-cell local-batch-check" role="cell">
+                <div class="batch-selection-row" role="row">
+                  <span class="batch-selection-cell batch-selection-check" role="cell">
                     <NaiveCheckbox
                       size="small"
                       ariaLabel={t("media.selection.item", { title: displayTitle(item) })}
@@ -273,14 +274,14 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
                       onUpdateChecked={() => toggleItem(item.id)}
                     />
                   </span>
-                  <span class="local-batch-cell local-batch-index" role="cell">{index() + 1}</span>
-                  <span class="local-batch-cell local-batch-title" role="cell" title={displayTitle(item)}>
+                  <span class="batch-selection-cell batch-selection-index" role="cell">{index() + 1}</span>
+                  <span class="batch-selection-cell batch-selection-title" role="cell" title={displayTitle(item)}>
                     {displayTitle(item)}
                   </span>
-                  <span class="local-batch-cell" role="cell">
+                  <span class="batch-selection-cell" role="cell">
                     {displayText(item.artist, t("library.group.unknownArtist"))}
                   </span>
-                  <span class="local-batch-cell" role="cell">
+                  <span class="batch-selection-cell" role="cell">
                     {displayText(item.album, t("library.group.unknownAlbum"))}
                   </span>
                 </div>
@@ -288,19 +289,19 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
             </For>
           </div>
         </div>
-        <div class="local-batch-footer">
-          <div class="local-batch-footer-left">
-            <span class="local-batch-count">
+        <div class="batch-selection-footer">
+          <div class="batch-selection-footer-left">
+            <span class="batch-selection-count">
               {t("library.selection.count", { count: selectedItems().length })}
             </span>
-            <div class="local-batch-range">
+            <div class="batch-selection-range">
               <NaiveButton variant="tertiary" onClick={() => setRangeOpen((open) => !open)}>
                 {t("library.batch.advancedFilter")}
               </NaiveButton>
               <Show when={rangeOpen()}>
-                <div class="local-batch-range-popover">
+                <div class="batch-selection-range-popover">
                   <NaiveInputNumber
-                    class="local-batch-range-input"
+                    class="batch-selection-range-input"
                     size="small"
                     min={1}
                     max={props.items.length}
@@ -311,7 +312,7 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
                   />
                   <span>-</span>
                   <NaiveInputNumber
-                    class="local-batch-range-input"
+                    class="batch-selection-range-input"
                     size="small"
                     min={1}
                     max={props.items.length}
@@ -327,7 +328,7 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
               </Show>
             </div>
           </div>
-          <div class="local-batch-actions">
+          <div class="batch-selection-actions">
             <NaiveButton
               variant="primary"
               strong
@@ -340,7 +341,7 @@ export function LibraryBatchModal(props: LibraryBatchModalProps) {
             <NaiveButton
               variant="primary"
               strong
-              class="danger-button"
+              class="library-danger-button"
               disabled={selectedItems().length === 0}
               onClick={handleDelete}
             >
@@ -392,7 +393,7 @@ export function LibraryConfirmActionModal(props: LibraryConfirmActionModalProps)
           <NaiveButton
             variant="primary"
             strong
-            class="danger-button"
+            class="library-danger-button"
             onClick={() => void handleConfirm()}
             disabled={submitting()}
           >
@@ -401,7 +402,7 @@ export function LibraryConfirmActionModal(props: LibraryConfirmActionModalProps)
         </div>
       }
     >
-      <div class="local-action-summary">{props.body}</div>
+      <div class="selection-action-summary">{props.body}</div>
     </Modal>
   );
 }
