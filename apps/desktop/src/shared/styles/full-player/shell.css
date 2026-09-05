@@ -1,35 +1,69 @@
   .full-player {
     --full-player-cover-color: var(--player-cover-color, var(--color-primary));
-    --full-player-cover-color-08: color-mix(in srgb, var(--full-player-cover-color) 8%, transparent);
-    --full-player-cover-color-09: color-mix(in srgb, var(--full-player-cover-color) 9%, transparent);
-    --full-player-cover-color-10: color-mix(in srgb, var(--full-player-cover-color) 10%, transparent);
-    --full-player-cover-color-12: color-mix(in srgb, var(--full-player-cover-color) 12%, transparent);
-    --full-player-cover-color-14: color-mix(in srgb, var(--full-player-cover-color) 14%, transparent);
-    --full-player-cover-color-18: color-mix(in srgb, var(--full-player-cover-color) 18%, transparent);
-    --full-player-cover-color-20: color-mix(in srgb, var(--full-player-cover-color) 20%, transparent);
-    --full-player-cover-color-22: color-mix(in srgb, var(--full-player-cover-color) 22%, transparent);
-    --full-player-cover-color-28: color-mix(in srgb, var(--full-player-cover-color) 28%, transparent);
-    --full-player-cover-color-30: color-mix(in srgb, var(--full-player-cover-color) 30%, transparent);
-    --full-player-cover-color-52: color-mix(in srgb, var(--full-player-cover-color) 52%, transparent);
-    --full-player-cover-color-58: color-mix(in srgb, var(--full-player-cover-color) 58%, transparent);
-    --full-player-cover-color-82: color-mix(in srgb, var(--full-player-cover-color) 82%, transparent);
-    --full-player-cover-color-90: color-mix(in srgb, var(--full-player-cover-color) 90%, transparent);
+
+    /* ── internal raw concentration ladder (08-03 review: keep the mix
+       ladder private; components consume the derived semantic tokens
+       below, never `--cover-mix-*` directly, so a design-language change
+       to one concentration touches a single derived token). ── */
+    --cover-mix-08: color-mix(in srgb, var(--full-player-cover-color) 8%, transparent);
+    --cover-mix-10: color-mix(in srgb, var(--full-player-cover-color) 10%, transparent);
+    --cover-mix-12: color-mix(in srgb, var(--full-player-cover-color) 12%, transparent);
+    --cover-mix-14: color-mix(in srgb, var(--full-player-cover-color) 14%, transparent);
+    --cover-mix-20: color-mix(in srgb, var(--full-player-cover-color) 20%, transparent);
+    --cover-mix-28: color-mix(in srgb, var(--full-player-cover-color) 28%, transparent);
+    --cover-mix-58: color-mix(in srgb, var(--full-player-cover-color) 58%, transparent);
+    --cover-mix-82: color-mix(in srgb, var(--full-player-cover-color) 82%, transparent);
+    --cover-mix-90: color-mix(in srgb, var(--full-player-cover-color) 90%, transparent);
+
+    /* ── ink family: text/icon legibility against the cover color ── */
     --full-player-ink: color-mix(in srgb, var(--full-player-cover-color) 34%, white 66%);
     --full-player-ink-strong: color-mix(in srgb, var(--full-player-cover-color) 24%, white 76%);
     --full-player-ink-soft: color-mix(in srgb, var(--full-player-ink) 68%, transparent);
     --full-player-ink-muted: color-mix(in srgb, var(--full-player-ink) 42%, transparent);
     --full-player-ink-active: color-mix(in srgb, var(--full-player-cover-color) 18%, white 82%);
-    --full-player-glass: var(--full-player-cover-color-08);
-    --full-player-glass-strong: var(--full-player-cover-color-14);
 
-    --full-player-border: var(--full-player-cover-color-10);
-    --full-player-border-strong: var(--full-player-cover-color-22);
-    --full-player-surface: var(--full-player-cover-color-08);
-    --full-player-progress-rail: var(--full-player-cover-color-20);
-    --full-player-naive-surface: var(--full-player-cover-color-20);
-    --full-player-naive-hover: var(--full-player-cover-color-09);
-    --full-player-naive-text: var(--full-player-cover-color-82);
-    --full-player-naive-text-muted: var(--full-player-ink-soft);
+    /* ── derived semantic tokens: surfaces ── */
+    --full-player-glass: var(--cover-mix-08);
+    --full-player-surface: var(--cover-mix-10);
+    --full-player-control-solid: var(--cover-mix-14);
+    --full-player-control-solid-active: var(--cover-mix-12);
+    --full-player-control-hover: var(--cover-mix-20);
+    --full-player-control-hover-strong: var(--cover-mix-28);
+    --full-player-play-surface: var(--cover-mix-20);
+    --full-player-popover-surface: var(--cover-mix-20);
+
+    /* ── derived semantic tokens: borders / lines ── */
+    --full-player-border: var(--cover-mix-10);
+    --full-player-control-border: var(--cover-mix-12);
+    --full-player-border-active: var(--cover-mix-20);
+    --full-player-border-focus: var(--cover-mix-28);
+    --full-player-panel-border: var(--cover-mix-58);
+    --full-player-divider: var(--cover-mix-12);
+
+    /* ── derived semantic tokens: focus / glow / accents ── */
+    --full-player-focus-ring: var(--cover-mix-28);
+    --full-player-focus-glow: var(--cover-mix-28);
+    --full-player-progress-glow: var(--cover-mix-28);
+    --full-player-thumb-ring: var(--cover-mix-08);
+    --full-player-selection: var(--cover-mix-20);
+    --full-player-badge: var(--cover-mix-20);
+    --full-player-progress-rail: var(--cover-mix-20);
+    --full-player-cover-gradient-mid: var(--cover-mix-20);
+    --full-player-cover-gradient-soft: var(--cover-mix-12);
+
+    /* ── derived semantic tokens: naive-ui bridge ── */
+    --full-player-naive-surface: var(--cover-mix-20);
+    --full-player-naive-hover: var(--cover-mix-08);
+    --full-player-naive-text: var(--cover-mix-82);
+
+    /* ── derived semantic tokens: sliders (rebindable per popover) ── */
+    --full-player-slider-fill: var(--cover-mix-90);
+    --full-player-slider-rail: var(--cover-mix-20);
+    --full-player-slider-rail-hover: var(--cover-mix-28);
+
+    /* ── derived semantic tokens: button hover bindings ── */
+    --full-player-button-hover: var(--cover-mix-14);
+    --full-player-button-hover-strong: var(--cover-mix-20);
 
     --full-player-fullscreen-gradient: 15%;
     position: fixed;
@@ -40,7 +74,7 @@
     height: auto;
     padding: 0;
     background: oklch(0 0 0 / 0.38);
-    backdrop-filter: blur(80px);
+    backdrop-filter: var(--full-player-shell-backdrop-filter);
     opacity: 0;
     pointer-events: none;
     transform: translateY(100%);
@@ -55,6 +89,10 @@
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
+  }
+
+  .full-player:not(.is-resource-active) {
+    backdrop-filter: none;
   }
 
   .full-player.is-meta-hidden {
@@ -75,6 +113,10 @@
     opacity: 1;
     transform: scale(1) translateY(0);
     filter: blur(0);
+  }
+
+  .full-player.expand-animation-flow:not(.is-resource-active) {
+    filter: none;
   }
 
   .full-player:not(.is-open) .full-player-overlay-menu,

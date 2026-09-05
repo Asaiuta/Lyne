@@ -266,23 +266,6 @@
     border-radius: var(--radius-card);
   }
 
-  .personal-fm-list .media-row-content {
-    padding: 8px 12px;
-    border-radius: var(--radius-card);
-    border: 1px solid var(--border-overlay);
-    background: color-mix(in oklch, var(--surface-2) 92%, transparent);
-  }
-
-  .personal-fm-list .media-row:hover .media-row-content {
-    border-color: var(--color-primary-tonal-58);
-    background: color-mix(in oklch, var(--surface-2) 92%, transparent);
-  }
-
-  .personal-fm-list .media-row.is-current .media-row-content {
-    border-color: var(--color-primary-tonal-58);
-    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
-  }
-
   .personal-fm-feedback {
     flex: none;
   }

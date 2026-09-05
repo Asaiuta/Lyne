@@ -1,0 +1,16 @@
+@layer components {
+  .ncm-update-playlist-modal {
+    display: grid;
+    gap: 16px;
+  }
+
+  .ncm-update-playlist-desc {
+    --n-height: 96px;
+    min-height: 96px;
+    line-height: 1.5;
+  }
+
+  .ncm-update-playlist-tag-select {
+    width: 100%;
+  }
+}

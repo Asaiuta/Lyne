@@ -12,34 +12,28 @@ function assertUniqueTokenNames(entries: readonly (readonly [`--${string}`, stri
   assert.equal(new Set(names).size, names.length);
 }
 
-test("neutral appearance token plan keeps runtime color writes on semantic roots", () => {
+test("appearance token plan keeps surface roots neutral and cover accent follow-through", () => {
   const plan = buildAppearanceColorTokenPlan({
-    playerFollowCoverColor: true,
-    themeGlobalColor: false
+    playerFollowCoverColor: true
   });
   const semantic = tokenMap(plan.semantic);
 
   assertUniqueTokenNames(plan.semantic);
-  assert.equal(plan.themeGlobalColor, false);
   assert.equal(semantic.get("--bg-dynamic"), "var(--bg-base)");
   assert.equal(semantic.get("--surface-container-dynamic"), "var(--surface-container-default)");
   assert.equal(semantic.get("--floating-surface-dynamic"), "var(--surface-2)");
   assert.equal(semantic.get("--player-cover-color"), "var(--player-cover-accent)");
 });
 
-test("global appearance token plan tints shell surfaces from theme palette aliases", () => {
+test("appearance token plan falls back to the neutral cover accent when cover following is off", () => {
   const plan = buildAppearanceColorTokenPlan({
-    playerFollowCoverColor: false,
-    themeGlobalColor: true
+    playerFollowCoverColor: false
   });
   const semantic = tokenMap(plan.semantic);
 
   assertUniqueTokenNames(plan.semantic);
-  assert.equal(plan.themeGlobalColor, true);
-  assert.equal(semantic.get("--bg-dynamic"), "var(--theme-background, var(--splayer-background, var(--bg-base)))");
-  assert.equal(
-    semantic.get("--surface-container-dynamic"),
-    "var(--theme-surface-container, var(--splayer-surface-container, var(--surface-container-default)))"
-  );
+  assert.equal(semantic.get("--bg-dynamic"), "var(--bg-base)");
+  assert.equal(semantic.get("--surface-container-dynamic"), "var(--surface-container-default)");
+  assert.equal(semantic.get("--floating-surface-dynamic"), "var(--surface-2)");
   assert.equal(semantic.get("--player-cover-color"), "var(--player-cover-accent-default)");
 });

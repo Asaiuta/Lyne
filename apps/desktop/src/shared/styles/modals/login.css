@@ -58,10 +58,15 @@
     background: color-mix(in oklch, var(--danger) 10%, transparent);
   }
 
-  .login-modal-feedback-neutral {
-    color: var(--text-soft);
-    background: color-mix(in oklch, var(--surface-2) 76%, transparent);
-  }
+.login-modal-feedback-neutral {
+  color: var(--text-soft);
+  background: color-mix(in oklch, var(--surface-2) 76%, transparent);
+}
+
+.login-modal-cookie-input {
+  --n-height: 120px;
+  min-height: 120px;
+}
 
   .login-modal-qr {
     display: flex;

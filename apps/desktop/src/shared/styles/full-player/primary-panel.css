@@ -190,7 +190,7 @@
     display: inline-flex;
     align-items: center;
     min-width: 0;
-    border: 1px solid var(--full-player-cover-color-58);
+    border: 1px solid var(--full-player-panel-border);
     border-radius: 8px;
     padding: 2px 6px;
     color: var(--full-player-ink);
@@ -214,7 +214,7 @@
   .full-player-meta-trigger:hover,
   .full-player-meta-trigger.is-open {
     border-color: var(--full-player-ink);
-    background: var(--full-player-cover-color-08);
+    background: var(--full-player-glass);
     opacity: 1;
   }
 
@@ -225,11 +225,11 @@
   .full-player-meta-popover.n-popselect-menu.n-base-select-menu {
     --full-player-meta-popover-ink: var(--full-player-ink, var(--player-cover-color, var(--color-primary)));
     --full-player-meta-popover-bg: var(
-      --full-player-cover-color-18,
-      color-mix(in srgb, var(--full-player-meta-popover-ink) 18%, transparent)
+      --full-player-cover-gradient-mid,
+      color-mix(in srgb, var(--full-player-meta-popover-ink) 20%, transparent)
     );
     --full-player-meta-popover-hover: var(
-      --full-player-cover-color-12,
+      --full-player-cover-gradient-soft,
       color-mix(in srgb, var(--full-player-meta-popover-ink) 12%, transparent)
     );
     min-width: 116px;
@@ -239,7 +239,7 @@
     color: var(--full-player-meta-popover-ink);
     background: var(--full-player-meta-popover-bg);
     box-shadow: 0 16px 38px rgb(0 0 0 / 0.22);
-    backdrop-filter: blur(18px);
+    backdrop-filter: var(--surface-backdrop-filter-popover);
   }
 
   .full-player-meta-popover .full-player-meta-option {

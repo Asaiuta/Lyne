@@ -68,7 +68,7 @@
     --full-player-button-icon-size: 24px;
     --full-player-button-radius: var(--radius-sm);
     --full-player-button-hover-scale: 1.05;
-    --full-player-button-hover-bg: var(--full-player-cover-color-14);
+    --full-player-button-hover-bg: var(--full-player-button-hover);
     --full-player-button-active-bg: transparent;
     --full-player-button-active-scale: 1;
     --full-player-button-disabled-opacity: 0.48;
@@ -144,7 +144,7 @@
   .full-player-action-button:focus-visible,
   .full-player-text-button:focus-visible,
   .full-player-meta-link:focus-visible {
-    outline: 2px solid var(--full-player-cover-color-28);
+    outline: 2px solid var(--full-player-focus-ring);
     outline-offset: 3px;
   }
 
@@ -194,7 +194,7 @@
     font-size: 10px;
     line-height: 16px;
     color: var(--full-player-ink);
-    background: var(--full-player-cover-color-20);
+    background: var(--full-player-badge);
     transform: translate(35%, -20%);
   }
 

@@ -1,4 +1,4 @@
-  .ncm-daily-detail {
+  .ncm-detail-surface {
     display: flex;
     flex-direction: column;
     gap: 20px;
@@ -217,7 +217,12 @@
     gap: 10px;
   }
 
-  .ncm-list-detail-menu button {
+  /*
+   * Toolbar action buttons only. Do not target .ncm-list-detail-tabs buttons —
+   * those are segment tabs inside a padded rail and must stay shorter than 40px.
+   */
+  .ncm-list-detail-menu-left > button,
+  .ncm-list-detail-menu-left .page-toolbar-button {
     height: 40px;
     transition:
       color 0.3s var(--ease-standard),
@@ -240,50 +245,10 @@
     height: 18px;
   }
 
-  .ncm-list-detail-tabs.segmented-tabs {
-    --segmented-gap: 2px;
-    --segmented-padding: 3px;
-    position: relative;
-    display: inline-flex;
-    align-items: center;
+  .ncm-list-detail-tabs {
+    --segmented-outline: 1px solid var(--n-tab-color-segment);
     width: 200px;
     min-width: 200px;
-    gap: var(--segmented-gap);
-    padding: var(--segmented-padding);
-    border: 0;
-    border-radius: 25px;
-    outline: 1px solid var(--border-faint);
-    background: var(--border-faint);
-    isolation: isolate;
-    overflow: hidden;
-  }
-
-  .ncm-list-detail-tabs .segmented-tab {
-    position: relative;
-    z-index: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 1 1 0;
-    min-width: 0;
-    height: 34px;
-    min-height: 34px;
-    gap: 2px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 25px;
-    color: var(--text-soft);
-    background: transparent;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .ncm-list-detail-tabs .segmented-tab-count {
-    margin-left: 2px;
-    font-size: 12px;
-    line-height: normal;
-    transform: translateY(-4px);
   }
 
   .ncm-list-detail.is-cover-hidden .ncm-list-detail-inner {
@@ -322,8 +287,8 @@
     pointer-events: none;
   }
 
-  .ncm-list-detail.is-compact .ncm-list-detail-menu button,
-  .ncm-list-detail.is-compact .ncm-list-detail-tabs {
+  .ncm-list-detail.is-compact .ncm-list-detail-menu-left > button,
+  .ncm-list-detail.is-compact .ncm-list-detail-menu-left .page-toolbar-button {
     height: 32px;
     min-height: 32px;
     font-size: 13px;
@@ -331,12 +296,6 @@
 
   .ncm-list-detail.is-compact .ncm-list-detail-play {
     padding-inline: 14px;
-  }
-
-  .ncm-list-detail.is-compact .ncm-list-detail-tabs .segmented-tab {
-    height: 24px;
-    min-height: 24px;
-    font-size: 13px;
   }
 
   @media (max-width: 1200px) {
@@ -354,8 +313,29 @@
       height: 180px;
     }
 
+    .ncm-list-detail:not(.is-compact) .ncm-list-detail-inner {
+      height: auto;
+      min-height: 180px;
+    }
+
+    .ncm-list-detail:not(.is-compact) .ncm-list-detail-cover {
+      --ncm-list-detail-mobile-cover-size: clamp(104px, 27cqi, 128px);
+      width: var(--ncm-list-detail-mobile-cover-size);
+      height: var(--ncm-list-detail-mobile-cover-size);
+      flex: 0 0 var(--ncm-list-detail-mobile-cover-size);
+      align-self: flex-start;
+      margin-right: 16px;
+    }
+
     .ncm-list-detail-data {
       padding-right: 0;
+    }
+
+    /* Wrapped metadata and actions must share flow on narrow detail headers. */
+    .ncm-list-detail:not(.is-compact) .ncm-list-detail-menu {
+      position: static;
+      margin-top: auto;
+      padding-top: 12px;
     }
 
     .ncm-list-detail-description {
@@ -363,222 +343,20 @@
     }
   }
 
-  .ncm-daily-detail-back {
+  .ncm-detail-back {
     align-self: flex-start;
     display: inline-flex;
     align-items: center;
     gap: 6px;
   }
 
-  .ncm-daily-detail-hero {
-    --ncm-daily-title-spacing: 12px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    text-align: center;
-    min-height: 300px;
-    padding: 28px var(--space-4) 34px;
-  }
-
-  .ncm-daily-detail-hero h2 {
-    margin: 0;
-    max-width: min(100%, 920px);
-    font-size: 55px;
-    font-weight: 700;
-    letter-spacing: 0;
-    animation: ncm-daily-fade-spacing 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  }
-
-  .ncm-daily-detail-hero .ncm-daily-detail-eyebrow {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
-    color: var(--text-muted, var(--text-placeholder));
-  }
-
-  .ncm-daily-detail-hero .ncm-daily-detail-meta {
-    margin: 6px 0 0;
-    color: var(--text-muted, var(--text-placeholder));
-    font-size: 16px;
-    opacity: 0;
-    animation: ncm-daily-fade-down 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.5s forwards;
-  }
-
-  .ncm-daily-detail-menu {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    margin-top: 30px;
-    opacity: 0;
-    animation: ncm-daily-fade-down 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.58s forwards;
-  }
-
-  .ncm-daily-play-all {
-    height: 44px;
-    padding-inline: 20px;
-    border-radius: var(--radius-pill);
-    font-weight: 700;
-  }
-
-  .ncm-daily-play-all svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  .ncm-daily-more {
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    justify-content: center;
-    border-radius: var(--radius-pill);
-  }
-
-  .ncm-daily-more svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  @keyframes ncm-daily-fade-spacing {
-    0% {
-      opacity: 0;
-      letter-spacing: 0;
-    }
-    100% {
-      opacity: 1;
-      letter-spacing: var(--ncm-daily-title-spacing);
-    }
-  }
-
-  @keyframes ncm-daily-fade-down {
-    0% {
-      opacity: 0;
-      transform: translateY(-10px);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .ncm-daily-detail-hero .ncm-detail-hero-cover {
-    width: 120px;
-    height: 120px;
-    border-radius: var(--radius-card);
-    object-fit: cover;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    margin-bottom: 8px;
-  }
-
-  .ncm-daily-detail-hero .ncm-detail-hero-cover--round {
-    border-radius: var(--radius-pill);
-  }
-
-  .ncm-artist-detail-hero {
-    gap: 8px;
-    min-height: 360px;
-  }
-
-  .ncm-album-detail-hero {
-    gap: 8px;
-    min-height: 350px;
-  }
-
-  .ncm-artist-detail-hero h2 {
-    margin-top: 2px;
-  }
-
-  .ncm-artist-alias {
-    margin: -2px 0 0;
-    max-width: min(100%, 720px);
-    color: var(--text-secondary);
-    font-size: 15px;
-  }
-
-  .ncm-artist-counts {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 6px;
-  }
-
-  .ncm-artist-count {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 34px;
-    padding: 0 12px;
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--border-overlay);
-    color: var(--text-soft);
-    background: var(--border-faint);
-    transition:
-      background-color var(--duration-fast) var(--ease-standard),
-      border-color var(--duration-fast) var(--ease-standard),
-      color var(--duration-fast) var(--ease-standard);
-  }
-
-  .ncm-artist-count:hover,
-  .ncm-artist-count.is-active {
-    color: var(--text);
-    border-color: var(--color-primary-tonal-45);
-    background: var(--color-primary-tonal-12);
-  }
-
-  .ncm-artist-count svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  .ncm-artist-description {
-    width: min(100%, 760px);
-    margin: 2px 0 0;
-    color: var(--text-secondary);
-    font-size: 14px;
-    line-height: 1.7;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .ncm-artist-actions {
-    margin-top: 14px;
-  }
-
-  .ncm-album-dynamic {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 4px;
-    color: var(--text-secondary);
-    font-size: 13px;
-  }
-
-  .ncm-album-dynamic span {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .ncm-album-dynamic svg {
-    width: 15px;
-    height: 15px;
-  }
-
-  .ncm-artist-subscribe.is-active {
+  .ncm-detail-subscribe.is-active {
     color: var(--accent-foreground);
     background: var(--accent);
     border-color: var(--accent);
   }
 
-  .ncm-artist-subscribe svg {
+  .ncm-detail-subscribe svg {
     width: 17px;
     height: 17px;
   }
@@ -658,115 +436,14 @@
     background: color-mix(in oklch, var(--surface-3) 94%, var(--text) 4%);
   }
 
-  .ncm-detail-page .ncm-list-detail-tabs.segmented-tabs {
-    --segmented-padding: 4px;
-    width: 200px;
-    min-width: 200px;
-    padding: var(--segmented-padding);
-    outline-color: color-mix(in oklch, var(--border) 36%, transparent);
-    background: color-mix(in oklch, var(--surface-2) 84%, transparent);
-  }
-
-  .ncm-detail-page .ncm-list-detail-tabs .segmented-tab {
-    height: 32px;
-    min-height: 32px;
-    color: var(--text-secondary);
-    font-size: 13px;
+  .ncm-detail-page .ncm-list-detail-tabs {
+    --n-tab-font-size: 13px;
   }
 
   .ncm-detail-page .media-list-header {
     height: 40px;
     padding: 6px 12px;
     color: var(--text-secondary);
-  }
-
-  .ncm-detail-page .media-row-content {
-    border-width: 1px;
-    border-color: color-mix(in oklch, var(--border) 30%, transparent);
-    border-radius: 8px;
-    background: color-mix(in oklch, var(--surface-container) 68%, transparent);
-  }
-
-  .ncm-detail-page .media-row:hover .media-row-content {
-    border-color: color-mix(in oklch, var(--border) 38%, transparent);
-    background: color-mix(in oklch, var(--surface-container) 88%, transparent);
-  }
-
-  .ncm-detail-page .media-row.is-current .media-row-content,
-  .ncm-detail-page .media-row.is-checked .media-row-content {
-    border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
-    background: color-mix(in oklch, var(--accent) 7%, var(--surface-container));
-  }
-
-  .ncm-detail-page .media-row-title {
-    font-size: 15px;
-  }
-
-  .ncm-detail-page .media-row-desc,
-  .ncm-detail-page .media-row-credits {
-    font-size: 12px;
-  }
-
-  .ncm-detail-page--artist .ncm-detail-tabs {
-    justify-content: stretch;
-    width: 100%;
-    margin-top: 4px;
-  }
-
-  .ncm-detail-page--artist .ncm-detail-tabs .segmented-tabs {
-    width: 100%;
-    border-radius: 6px;
-    border-color: transparent;
-    background: var(--surface-container);
-  }
-
-  .ncm-detail-page--artist .ncm-detail-tabs .segmented-tab {
-    flex: 1 1 0;
-    min-height: 30px;
-    border-radius: 5px;
-    color: var(--text);
-    font-size: 13px;
-  }
-
-  .ncm-detail-page--artist .ncm-artist-song-panel {
-    flex: 1 1 auto;
-    min-height: 0;
-    gap: 8px;
-  }
-
-  .ncm-detail-page--artist .ncm-artist-song-panel > .media-list-table {
-    flex: 1 1 auto;
-    height: auto;
-    min-height: 0;
-  }
-
-  .ncm-detail-page--artist .ncm-artist-order-inline {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-  }
-
-  .ncm-detail-page--artist .ncm-artist-order-inline .segmented-tabs {
-    --segmented-padding: 3px;
-    padding: 3px;
-    border-color: transparent;
-    background: color-mix(in oklch, var(--surface-2) 84%, transparent);
-  }
-
-  .ncm-detail-page--artist .ncm-artist-order-inline .segmented-tab {
-    min-height: 26px;
-    padding-inline: 10px;
-    font-size: 12px;
-  }
-
-  .ncm-detail-page--artist .ncm-artist-resource-grid {
-    grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
-    gap: 18px;
-  }
-
-  .ncm-detail-page--artist .ncm-artist-resource-grid--videos {
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 20px;
   }
 
   @media (max-width: 1200px) {
@@ -779,268 +456,4 @@
     .ncm-detail-page .ncm-list-detail {
       min-height: 180px;
     }
-
-    .ncm-detail-page .ncm-list-detail-inner {
-      height: 180px;
-    }
-
-    .ncm-detail-page--artist .ncm-detail-tabs {
-      margin-top: 0;
-    }
-  }
-
-  .ncm-artist-song-panel {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .ncm-artist-song-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    min-height: 34px;
-  }
-
-  .ncm-album-comments {
-    max-width: 960px;
-    width: 100%;
-    align-self: center;
-  }
-
-  .ncm-artist-resource-panel {
-    display: flex;
-    flex: 1 1 auto;
-    flex-direction: column;
-    min-height: 0;
-    gap: var(--space-3);
-    overflow: auto;
-  }
-
-  .ncm-artist-resource-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 20px;
-  }
-
-  .ncm-artist-resource-grid--videos {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  }
-
-  .ncm-artist-resource-grid--videos .album-card-art {
-    aspect-ratio: 16 / 9;
-  }
-
-  .ncm-video-detail {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    min-width: 0;
-  }
-
-  .ncm-video-detail .ncm-daily-detail-back {
-    margin-bottom: 20px;
-  }
-
-  .ncm-video-player-shell {
-    width: 100%;
-    overflow: hidden;
-    border-radius: 12px;
-    background: #050505;
-  }
-
-  .ncm-video-player {
-    display: block;
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    max-height: 520px;
-    background: #050505;
-    object-fit: contain;
-  }
-
-  .ncm-video-quality.segmented-tabs {
-    --segmented-gap: 4px;
-    --segmented-padding: 3px;
-    display: inline-flex;
-    align-self: flex-end;
-    gap: var(--segmented-gap);
-    margin-top: 12px;
-    padding: var(--segmented-padding);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-2, var(--border-faint));
-  }
-
-  .ncm-video-quality .segmented-tab,
-  .ncm-video-comment-tabs button,
-  .ncm-resource-comment-tabs .segmented-tab {
-    min-height: 26px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    color: var(--text-soft);
-    background: var(--surface-2, var(--border-faint));
-    font-size: 12px;
-    line-height: 1;
-    cursor: pointer;
-    transition:
-      color 0.18s var(--ease-standard),
-      background 0.18s var(--ease-standard);
-  }
-
-  .ncm-video-comment-tabs button:hover,
-  .ncm-video-comment-tabs button.is-active {
-    color: var(--accent);
-    background: transparent;
-  }
-
-  .ncm-video-detail-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-4);
-    min-height: 60px;
-    margin-bottom: 20px;
-    min-width: 0;
-  }
-
-  .ncm-video-detail-title {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    flex-direction: column;
-    justify-content: space-around;
-    min-height: 60px;
-    gap: 0;
-  }
-
-  .ncm-video-detail-title h2 {
-    margin: 0;
-    overflow-wrap: anywhere;
-    font-size: 28px;
-    font-weight: 700;
-    line-height: 30px;
-  }
-
-  .ncm-video-detail-meta,
-  .ncm-video-actions,
-  .ncm-video-tags {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .ncm-video-detail-meta span,
-  .ncm-video-actions span {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    min-height: 24px;
-    color: var(--text-soft);
-    font-size: 14px;
-    line-height: 1;
-  }
-
-  .ncm-video-detail-meta svg,
-  .ncm-video-actions svg {
-    width: 15px;
-    height: 15px;
-    color: var(--muted);
-  }
-
-  .ncm-video-menu {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 40px;
-    margin: 20px 0;
-    gap: 16px;
-  }
-
-  .ncm-video-artist {
-    display: inline-flex;
-    align-items: center;
-    align-self: flex-start;
-    gap: 10px;
-    max-width: 100%;
-    min-height: 40px;
-    margin-left: 8px;
-    padding: 0;
-    border: 0;
-    color: var(--text);
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .ncm-video-artist:hover strong {
-    color: var(--accent);
-  }
-
-  .ncm-video-artist-avatar {
-    width: 40px;
-    height: 40px;
-    flex: none;
-    border-radius: var(--radius-pill);
-  }
-
-  .ncm-video-artist span {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .ncm-video-artist strong {
-    max-width: min(420px, 70vw);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 16px;
-    font-weight: 700;
-    transition: color 0.18s var(--ease-standard);
-  }
-
-  .ncm-video-artist strong::after {
-    content: "查看详情";
-    display: block;
-    color: var(--text-soft);
-    font-size: 12px;
-    font-weight: 400;
-  }
-
-  .ncm-video-artist small {
-    color: var(--text-soft);
-    font-size: 12px;
-  }
-
-  .ncm-video-actions {
-    color: var(--text-soft);
-  }
-
-  .ncm-video-actions .naive-button {
-    min-height: 40px;
-    border-radius: 8px;
-  }
-
-  .ncm-video-description {
-    max-width: 840px;
-    margin: 0;
-    padding: 12px 6px;
-    border-top: 1px solid var(--border-faint);
-    border-bottom: 1px solid var(--border-faint);
-    color: var(--text-soft);
-    font-size: 14px;
-    line-height: 1.7;
-    white-space: pre-wrap;
-  }
-
-  .ncm-video-tags span {
-    display: inline-flex;
-    align-items: center;
-    min-height: 24px;
-    padding: 0 9px;
-    border-radius: var(--radius-pill);
-    color: var(--text-soft);
-    background: var(--surface-2, var(--border-faint));
-    font-size: 12px;
-    line-height: 1;
   }

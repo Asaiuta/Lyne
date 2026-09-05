@@ -24,9 +24,11 @@ import ncmDetailsCss from "./ncm-details.css?raw";
 import playlistDetailCss from "./playlist-detail.css?raw";
 import pageActionsCss from "./page-actions.css?raw";
 import personalFmCss from "./personal-fm.css?raw";
-import shellActionsCss from "../shell/actions.css?raw";
 import shellLayoutCss from "../shell/layout.css?raw";
+import shellOverridesCss from "../shell/unlayered-overrides.css?raw";
 import naiveButtonCss from "../../ui/naive/styles.css?raw";
+
+const shellCss = `${shellLayoutCss}\n${shellOverridesCss}`;
 
 const targetSources = [
   albumDetailSource,
@@ -151,11 +153,11 @@ test("migrated affordance surfaces contain no ghost-button contract", () => {
     ncmDetailsCss,
     pageActionsCss,
     playlistDetailCss,
-    shellActionsCss
+    shellCss
   ]) {
     assert.equal(/ghost-button/.test(css), false);
   }
-  assert.equal(/\.(?:primary-button|page-action)\b/.test(shellActionsCss), false);
+  assert.equal(/\.(?:primary-button|page-action)\b/.test(shellCss), false);
   assert.equal(
     /personal-fm-(?:play|icon-button):hover[^\{]*\{[^}]*transform\s*:/s.test(
       personalFmCss

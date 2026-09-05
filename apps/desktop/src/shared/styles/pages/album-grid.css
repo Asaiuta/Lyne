@@ -6,6 +6,11 @@
     min-width: 0;
   }
 
+  .cover-list-grid {
+    width: 100%;
+    padding: 20px 4px;
+  }
+
   .album-grid .album-card {
     width: 100%;
   }
@@ -29,16 +34,24 @@
     contain: layout paint;
   }
 
-  .local-playlist-grid.album-grid {
+  .album-grid--dense {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 20px;
     align-content: start;
   }
 
-  .local-playlist-grid.album-grid .album-card-art {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1 / 1;
+  .album-grid--scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px 4px 24px;
+    scrollbar-width: none;
+  }
+
+  .album-grid--scroll::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 
   .playlist-grid-section {

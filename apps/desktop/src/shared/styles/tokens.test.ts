@@ -112,39 +112,20 @@ test("cover blur keeps menu and modal surface tokens on opaque semantic roots", 
 
   assert.equal(
     readDeclarationValue(block, "--surface-container"),
-    "var(--surface-container-opaque-dynamic, var(--surface-container-opaque-default))"
+    "var(--surface-container-opaque-default)"
   );
   assert.equal(
     readDeclarationValue(block, "--floating-surface"),
-    "var(--floating-surface-opaque-dynamic, var(--floating-surface-opaque-default))"
+    "var(--floating-surface-opaque-default)"
   );
   assert.equal(
     readDeclarationValue(block, "--player-bar-surface"),
-    "var(--player-bar-surface-opaque-dynamic, var(--player-bar-surface-default))"
+    "var(--player-bar-surface-default)"
   );
 });
 
-test("global color mode gives cover blur opaque theme-colored floating surfaces", () => {
-  assert.equal(
-    /--surface-container-opaque-dynamic:\s*var\(--theme-surface-container\);/.test(tokensCss),
-    true
-  );
-  assert.equal(
-    /--floating-surface-opaque-dynamic:\s*var\(--theme-surface-container\);/.test(tokensCss),
-    true
-  );
-  assert.equal(
-    /--player-bar-surface-opaque-dynamic:\s*var\(--theme-surface-container\);/.test(tokensCss),
-    true
-  );
-});
-
-test("media cards stay neutral by default and become palette-tinted only in global color mode", () => {
+test("media cards stay neutral and are never palette-tinted", () => {
   const rootBlock = readRootTokenBlock();
-  const globalColorMatch = /\[data-theme-global-color="true"\]\s*\{([\s\S]*?)\n\}/.exec(tokensCss);
-  if (globalColorMatch === null) {
-    throw new Error("global color token block not found");
-  }
 
   assert.equal(readDeclarationValue(rootBlock, "--media-card-border"), "var(--border-subtle)");
   assert.equal(readDeclarationValue(rootBlock, "--media-card-border-emphasis"), "var(--border-strong)");
@@ -153,11 +134,8 @@ test("media cards stay neutral by default and become palette-tinted only in glob
     "color-mix(in oklch, var(--surface-3) 74%, var(--surface-2))"
   );
   assert.equal(
-    readDeclarationValue(globalColorMatch[1], "--media-card-border-emphasis"),
-    "var(--color-primary-tonal-58)"
-  );
-  assert.equal(
-    readDeclarationValue(globalColorMatch[1], "--media-card-selected-bg"),
-    "color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2))"
+    /\[data-theme-global-color="true"\]/.test(tokensCss),
+    false,
+    "global color mode block was removed"
   );
 });

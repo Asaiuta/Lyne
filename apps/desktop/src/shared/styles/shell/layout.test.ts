@@ -387,9 +387,27 @@ test("sidebar playlist content uses retained expanded and stable compact variant
     true
   );
   assert.equal(
-    /class="sidebar-playlist-compact-content"[\s\S]*?hidden=\{!collapsePresentation\(\)\.compactContentVisible\}[\s\S]*?renderCollapsedPlaylistGroup\(groupKey\)/.test(
+    /class="sidebar-playlist-compact-content"[\s\S]*?hidden=\{!collapsePresentation\(\)\.compactContentVisible\}[\s\S]*?aria-hidden=\{!collapsed\(\)\}[\s\S]*?inert=\{!collapsed\(\)\}[\s\S]*?renderCollapsedPlaylistGroup\(groupKey\)/.test(
       sidebarSource
     ),
+    true,
+    "compact icons stay mounted for opacity crossfade and only become interactive when collapsed"
+  );
+  assert.equal(
+    /const showPlaylistDivider = \(\): boolean =>[\s\S]*?showCreatedPlaylistGroup\(\) \|\| showCollectedPlaylistGroup\(\)/.test(
+      sidebarSource
+    ),
+    true,
+    "playlist dividers stay mounted across collapse; only content groups gate them"
+  );
+  assert.equal(
+    /index\(\) > 0 && !collapsed\(\)/.test(sidebarSource),
+    false,
+    "nav group dividers must not unmount when the rail collapses"
+  );
+  const collapsedDividerRule = readRule(".sidebar.is-collapsed .sidebar-menu-divider");
+  assert.equal(
+    /width:\s*calc\(var\(--sidebar-width-collapsed\) - 24px\);/.test(collapsedDividerRule),
     true
   );
 
@@ -403,6 +421,51 @@ test("sidebar playlist content uses retained expanded and stable compact variant
     /transition:\s*opacity\s+var\(--motion-duration-spatial\)/.test(playlistCopyRule),
     true,
     "the leak fix must preserve the playlist copy fade"
+  );
+
+  const expandedContentRule = readRule(".sidebar-playlist-expanded-content");
+  assert.equal(/width:\s*var\(--sidebar-width\);/.test(expandedContentRule), true);
+  assert.equal(/min-width:\s*var\(--sidebar-width\);/.test(expandedContentRule), true);
+  assert.equal(/max-width:\s*var\(--sidebar-width\);/.test(expandedContentRule), true);
+  assert.equal(
+    /transition:\s*opacity\s+var\(--motion-duration-spatial\)/.test(expandedContentRule),
+    true,
+    "expanded playlist chrome must fade with the spatial collapse rhythm"
+  );
+  assert.equal(
+    /contain:\s*(?:layout|paint)/.test(expandedContentRule),
+    false,
+    "the fixed expanded playlist width must not add the rejected containment candidate"
+  );
+  assert.equal(
+    /\.sidebar-local-playlists-body \.sidebar-playlist-list\s*\{[^}]*width:\s*var\(--sidebar-width\)/.test(
+      layoutCss
+    ),
+    false,
+    "offline and online expanded playlists must share one fixed-width owner"
+  );
+
+  const compactContentRule = readRule(".sidebar-playlist-compact-content");
+  assert.equal(/opacity:\s*0;/.test(compactContentRule), true);
+  assert.equal(
+    /transition:\s*opacity\s+var\(--motion-duration-spatial\)/.test(compactContentRule),
+    true,
+    "compact playlist icons must fade with the spatial collapse rhythm"
+  );
+  const collapsedExpandedRule = readRule(
+    ".sidebar.is-collapsed .sidebar-playlist-expanded-content:not([hidden])"
+  );
+  assert.equal(/opacity:\s*0;/.test(collapsedExpandedRule), true);
+  const collapsedCompactRule = readRule(
+    ".sidebar.is-collapsed .sidebar-playlist-compact-content:not([hidden])"
+  );
+  assert.equal(/opacity:\s*1;/.test(collapsedCompactRule), true);
+  assert.equal(
+    /sidebar-playlist-group:has\(\.sidebar-playlist-expanded-content:not\(\[hidden\]\)\)[\s\S]*?sidebar-playlist-compact-content:not\(\[hidden\]\)\s*\{[\s\S]*?position:\s*absolute;/.test(
+      layoutCss
+    ),
+    true,
+    "motion dual-mount must overlay compact icons without stealing layout height"
   );
 });
 
@@ -485,7 +548,7 @@ test("offline local playlists keep a normal nav entry outside the managed body",
   assert.equal(/font-size:\s*13px;/.test(playlistNameRule), true);
 
   const playlistEntryRule = readRule(
-    ".sidebar-local-playlists-body .sidebar-playlist-entry"
+    ".sidebar-playlist-expanded-content .sidebar-playlist-entry"
   );
   assert.equal(/content-visibility:\s*auto;/.test(playlistEntryRule), true);
   assert.equal(
@@ -493,7 +556,7 @@ test("offline local playlists keep a normal nav entry outside the managed body",
     true
   );
   const coveredEntryRule = readRule(
-    ".sidebar-local-playlists-body .sidebar-playlist-entry.is-cover-visible"
+    ".sidebar-playlist-expanded-content .sidebar-playlist-entry.is-cover-visible"
   );
   assert.equal(/contain-intrinsic-size:\s*50px;/.test(coveredEntryRule), true);
   assert.equal(
@@ -501,18 +564,6 @@ test("offline local playlists keep a normal nav entry outside the managed body",
       sidebarSource
     ),
     true
-  );
-
-  const localPlaylistListRule = readRule(
-    ".sidebar-local-playlists-body .sidebar-playlist-list"
-  );
-  assert.equal(/width:\s*var\(--sidebar-width\);/.test(localPlaylistListRule), true);
-  assert.equal(/min-width:\s*var\(--sidebar-width\);/.test(localPlaylistListRule), true);
-  assert.equal(/max-width:\s*var\(--sidebar-width\);/.test(localPlaylistListRule), true);
-  assert.equal(
-    /contain:\s*(?:layout|paint)/.test(localPlaylistListRule),
-    false,
-    "the fixed second-level width must not add the rejected containment candidate"
   );
 });
 

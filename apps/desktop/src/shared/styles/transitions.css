@@ -84,6 +84,17 @@
   transform: translateY(-5px) scale(0.99);
 }
 
+@keyframes floating-layer-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ── mask-left ───────────────────────────────────────────────────── */
 .page-mask-left-enter-active {
   transition: clip-path var(--motion-duration-reveal) var(--motion-ease-reveal);
@@ -141,7 +152,6 @@ html[data-window-visible="false"] :is(
   .marquee-content.is-scrolling,
   .sidebar-nav-action--heart.is-active,
   .transport-spinner,
-  .online-discover-load-more .load-more-button-spinner,
   .ncm-resource-comment-action:disabled svg,
   .ncm-home-feed-skeleton .card-row-title::before,
   .ncm-home-feed-skeleton-cover,
@@ -165,7 +175,6 @@ html[data-window-visible="false"] :is(
     .marquee-content.is-scrolling,
     .sidebar-nav-action--heart.is-active,
     .transport-spinner,
-    .online-discover-load-more .load-more-button-spinner,
     .ncm-resource-comment-action:disabled svg,
     .ncm-home-feed-skeleton .card-row-title::before,
     .ncm-home-feed-skeleton-cover,

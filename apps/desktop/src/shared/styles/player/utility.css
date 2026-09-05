@@ -160,4 +160,10 @@
     animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .command-error-toast {
+      animation: none;
+    }
+  }
+
 }

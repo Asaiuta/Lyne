@@ -1,0 +1,85 @@
+.ncm-detail-page--artist .ncm-detail-tabs {
+  justify-content: stretch;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.ncm-detail-page--artist .ncm-detail-tabs .segmented-tabs {
+  width: 100%;
+  --segmented-outline: 0;
+  --segmented-surface: var(--surface-container);
+  --n-tab-border-radius: 6px;
+  --n-tab-font-size: 13px;
+  --n-tab-text-color: var(--text);
+  --n-tab-text-color-hover: var(--text);
+  --n-tab-text-color-active: var(--text);
+}
+
+.ncm-detail-page--artist .ncm-artist-song-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 8px;
+}
+
+.ncm-detail-page--artist .ncm-artist-song-panel > .media-list-table {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.ncm-detail-page--artist .ncm-artist-order-inline {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ncm-detail-page--artist .ncm-artist-order-inline .segmented-tabs {
+  --segmented-outline: 0;
+  --segmented-surface: color-mix(in oklch, var(--surface-2) 84%, transparent);
+  --n-tab-padding: 0 10px;
+  --n-tab-font-size: 12px;
+}
+
+.ncm-detail-page--artist .ncm-artist-resource-grid {
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 18px;
+}
+
+.ncm-detail-page--artist .ncm-artist-resource-grid--videos {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.ncm-artist-song-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ncm-artist-resource-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-3);
+  overflow: auto;
+}
+
+.ncm-artist-resource-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 20px;
+}
+
+.ncm-artist-resource-grid--videos {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.ncm-artist-resource-grid--videos .album-card-art {
+  aspect-ratio: 16 / 9;
+}
+
+@media (max-width: 1200px) {
+  .ncm-detail-page--artist .ncm-detail-tabs {
+    margin-top: 0;
+  }
+}

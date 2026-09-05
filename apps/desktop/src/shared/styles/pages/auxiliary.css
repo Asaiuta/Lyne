@@ -93,21 +93,13 @@
 
   .auxiliary-page-menu .n-tabs {
     --n-tab-border-radius: var(--radius-pill);
+    --n-tabs-rail-outline: 1px solid var(--n-tab-color-segment);
     width: 200px;
     height: 40px;
   }
 
   .auxiliary-page-streaming .n-tabs {
     width: 260px;
-  }
-
-  .auxiliary-page-menu .n-tabs-tab {
-    min-height: 32px;
-  }
-
-  .auxiliary-page-menu .n-tabs-rail {
-    min-height: 40px;
-    outline: 1px solid var(--naive-tabs-color-segment);
   }
 
   .auxiliary-page-body {

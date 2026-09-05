@@ -1,0 +1,83 @@
+  .online-search-page {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .online-search-title {
+    margin-top: 12px;
+    margin-bottom: 12px;
+    color: var(--muted);
+    font-size: 22px;
+    line-height: normal;
+  }
+
+  .online-search-title h1 {
+    display: inline-block;
+    margin: 0 8px 0 0;
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 700;
+    line-height: normal;
+    letter-spacing: 0;
+  }
+
+  .online-search-title span {
+    display: inline-block;
+  }
+
+  .online-search-tabs {
+    display: flex;
+    min-width: 0;
+    justify-content: flex-start;
+    width: 100%;
+    margin-bottom: 12px;
+  }
+
+  .online-search-tabs .online-search-segment-tabs.n-tabs {
+    width: 100%;
+  }
+
+  .online-search-card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 20px;
+  }
+
+  .online-search-card-grid--artists {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+
+  .online-search-card-grid--videos {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+
+  .online-search-card-grid--videos .album-card-art {
+    aspect-ratio: 16 / 9;
+  }
+
+  .online-search-router {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .online-search-router > .media-list-table {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .online-search-router > .album-grid {
+    overflow: auto;
+    padding: 20px 4px;
+  }
+
+  @media (max-width: 768px) {
+    .online-search-tabs {
+      width: 100%;
+      justify-content: stretch;
+    }
+  }

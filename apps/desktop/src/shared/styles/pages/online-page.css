@@ -1,0 +1,21 @@
+  .online-page {
+    gap: 18px;
+  }
+
+  .online-page .page-header {
+    gap: 10px;
+  }
+
+  .online-page .page-header-top {
+    align-items: flex-end;
+  }
+
+  .online-page .page-header-meta {
+    justify-content: flex-start;
+    font-size: 17px;
+    line-height: 1.45;
+  }
+
+  .online-page .page-header-row {
+    align-items: center;
+  }

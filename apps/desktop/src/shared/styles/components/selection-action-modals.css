@@ -1,0 +1,207 @@
+@layer components {
+  .selection-action-summary {
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .playlist-target-list {
+    display: flex;
+    max-height: 260px;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .playlist-target {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    min-height: 56px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-sm);
+    color: var(--text-soft);
+    background: color-mix(in oklch, var(--surface-2) 82%, transparent);
+    text-align: left;
+  }
+
+  .playlist-target:hover:not(:disabled) {
+    border-color: var(--color-primary-tonal-58);
+    color: var(--text);
+  }
+
+  .playlist-target-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    background: var(--color-primary-tonal-12);
+  }
+
+  .playlist-target-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .playlist-target-icon img {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: cover;
+  }
+
+  .playlist-target-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .playlist-target-name,
+  .playlist-target-count {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .playlist-target-name {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .playlist-target-count {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .batch-selection-modal {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .batch-selection-table {
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-lg);
+    background: color-mix(in oklch, var(--surface-1) 86%, transparent);
+  }
+
+  .batch-selection-row {
+    display: grid;
+    grid-template-columns: 48px 72px minmax(180px, 1.35fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr);
+    align-items: center;
+    min-height: 42px;
+    border-bottom: 1px solid var(--border-overlay);
+    color: var(--text-soft);
+    font-size: 13px;
+  }
+
+  .batch-selection-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    min-height: 40px;
+    color: var(--muted);
+    background: var(--floating-surface);
+    font-weight: 600;
+  }
+
+  .batch-selection-body {
+    max-height: 60vh;
+    overflow: auto;
+  }
+
+  .batch-selection-body .batch-selection-row {
+    cursor: pointer;
+    transition:
+      color var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .batch-selection-body .batch-selection-row:hover {
+    color: var(--text);
+    background: color-mix(in oklch, var(--accent) 10%, transparent);
+  }
+
+  .batch-selection-body .batch-selection-row:last-child {
+    border-bottom: 0;
+  }
+
+  .batch-selection-cell {
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .batch-selection-check {
+    display: grid;
+    place-items: center;
+    padding: 0;
+  }
+
+  .batch-selection-check .naive-checkbox {
+    flex: none;
+  }
+
+  .batch-selection-index {
+    color: var(--muted);
+  }
+
+  .batch-selection-title {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .batch-selection-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .batch-selection-footer-left,
+  .batch-selection-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .batch-selection-count {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .batch-selection-range {
+    position: relative;
+  }
+
+  .batch-selection-range-popover {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 360px;
+    padding: 10px;
+    border: 1px solid var(--floating-border);
+    border-radius: var(--radius-lg);
+    background: var(--floating-surface);
+    box-shadow: var(--floating-shadow);
+  }
+
+  .batch-selection-range-input {
+    width: 96px;
+  }
+}

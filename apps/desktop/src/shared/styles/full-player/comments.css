@@ -121,7 +121,7 @@
   }
 
   .full-player-comment-action:hover:not(:disabled) {
-    background: var(--full-player-cover-color-28);
+    background: var(--full-player-control-hover-strong);
   }
 
   .full-player-comment-action:disabled {
@@ -154,7 +154,7 @@
 
   .full-player-comment-panel ::selection {
     color: var(--full-player-ink-active);
-    background: var(--full-player-cover-color-20);
+    background: var(--full-player-selection);
   }
 
   .full-player-comment-section {

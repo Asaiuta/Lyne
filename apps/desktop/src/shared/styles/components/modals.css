@@ -1,5 +1,1 @@
 @import "../modals/base.css" layer(components);
-@import "../modals/queue-drawer.css" layer(components);
-@import "../modals/login.css" layer(components);
-@import "../modals/cards.css" layer(components);
-@import "../modals/category-load-settings.css";

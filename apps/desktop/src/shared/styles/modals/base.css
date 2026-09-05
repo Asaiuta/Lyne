@@ -74,6 +74,17 @@
     color: var(--muted);
     background: color-mix(in oklch, var(--surface-2) 76%, transparent);
     border: 1px solid var(--border-overlay);
+    transition:
+      transform var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard),
+      opacity var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .modal-card-close > svg {
+    width: 18px;
+    height: 18px;
   }
 
   .modal-card-close:hover {
@@ -107,153 +118,10 @@
     width: min(100%, 980px);
   }
 
-  .media-comments-modal {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    max-height: min(62vh, 640px);
-    overflow-y: auto;
-    padding-right: 4px;
-  }
-
-  .media-comments-section {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .media-comments-section h4 {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-    color: var(--text);
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .media-comments-section h4 span {
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .media-comment-item {
-    display: grid;
-    grid-template-columns: 38px minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  .media-comment-avatar {
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    background: color-mix(in oklch, var(--surface-3) 82%, transparent);
-    object-fit: cover;
-  }
-
-  .media-comment-body {
-    min-width: 0;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .media-comment-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-
-  .media-comment-meta span:first-child {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-soft);
-    font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .media-comment-body p {
-    margin: 6px 0 0;
-    color: var(--text);
-    font-size: 13px;
-    line-height: 1.65;
-    white-space: pre-wrap;
-  }
-
-  .media-comment-like {
-    display: inline-flex;
-    margin-top: 8px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-
-  .copy-lyrics-modal {
-    display: flex;
-    min-height: 0;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .copy-lyrics-options {
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .copy-lyrics-option-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 18px;
-  }
-
-  .copy-lyrics-scroll {
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    background: color-mix(in oklch, var(--surface-2) 72%, transparent);
-  }
-
-  .copy-lyrics-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px;
-  }
-
-  .copy-lyrics-line-check {
-    align-items: flex-start;
-    width: 100%;
-    padding: 8px;
-    border-radius: 6px;
-  }
-
-  .copy-lyrics-line-check:hover {
-    background: color-mix(in oklch, var(--surface-3) 58%, transparent);
-  }
-
-  .copy-lyrics-line {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 3px;
-    line-height: 1.45;
-  }
-
-  .copy-lyrics-line-main {
-    color: var(--text);
-    font-size: 14px;
-  }
-
-  .copy-lyrics-line-extra {
-    color: var(--muted);
-    font-size: 12px;
-  }
-
-  .copy-lyrics-empty {
-    display: grid;
-    min-height: 180px;
-    place-items: center;
-    color: var(--muted);
+  @media (prefers-reduced-motion: reduce) {
+    .modal-backdrop,
+    .modal-card,
+    .modal-card-close {
+      transition: none;
+    }
   }

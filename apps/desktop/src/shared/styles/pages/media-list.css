@@ -1,4 +1,4 @@
-  .row-action {
+  .media-row-action {
     display: grid;
     place-items: center;
     width: 32px;
@@ -8,9 +8,27 @@
     color: var(--accent);
     background: transparent;
     cursor: pointer;
+    transition:
+      transform var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard),
+      opacity var(--duration-fast) var(--ease-standard),
+      border-color var(--duration-fast) var(--ease-standard);
   }
 
-  .row-action:hover:not(:disabled) {
+  .media-row-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .media-row-action > svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .media-row-action:hover:not(:disabled) {
     color: var(--accent-strong);
     background: transparent;
     transform: scale(1.15);
@@ -116,10 +134,10 @@
     width: 100%;
     height: 100%;
     padding: 8px 12px;
-    border-radius: var(--radius-card);
-    border: 2px solid var(--media-card-border);
+    border-radius: 8px;
+    border: 1px solid color-mix(in oklch, var(--border) 30%, transparent);
     color: var(--text-soft);
-    background: var(--surface-container);
+    background: color-mix(in oklch, var(--surface-container) 68%, transparent);
     transition:
       transform 0.1s var(--ease-standard),
       background-color 0.3s var(--ease-standard),
@@ -128,13 +146,13 @@
   }
 
   .media-row:hover .media-row-content {
-    border-color: var(--media-card-border-emphasis);
-    background: var(--media-card-hover-bg);
+    border-color: color-mix(in oklch, var(--border) 38%, transparent);
+    background: color-mix(in oklch, var(--surface-container) 88%, transparent);
   }
 
   .media-row.is-current .media-row-content {
-    border-color: var(--media-card-border-emphasis);
-    background: var(--media-card-selected-bg);
+    border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+    background: color-mix(in oklch, var(--accent) 7%, var(--surface-container));
     color: var(--text);
   }
 
@@ -144,8 +162,8 @@
   }
 
   .media-row.is-checked .media-row-content {
-    border-color: var(--media-card-border-emphasis);
-    background: var(--media-card-checked-bg);
+    border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+    background: color-mix(in oklch, var(--accent) 7%, var(--surface-container));
   }
 
   .media-current-mark {
@@ -312,9 +330,7 @@
   }
 
   .media-row-title-text,
-  .media-row-credits,
-  .queue-item-path,
-  .library-root-path {
+  .media-row-credits {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -391,7 +407,7 @@
     align-items: center;
     min-width: 0;
     max-width: 100%;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 400;
     color: var(--text);
   }
@@ -404,7 +420,7 @@
     max-width: 100%;
     margin-top: 2px;
     color: var(--muted);
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .media-row-title-text {
@@ -503,4 +519,100 @@
     align-items: center;
     justify-content: center;
     width: 40px;
+  }
+
+  /* MediaList owns the popover and floating controls it renders. */
+  .media-sort-popover {
+    z-index: var(--z-context-menu);
+    border: 1px solid var(--floating-border);
+    border-radius: var(--floating-radius);
+    background: var(--floating-surface);
+    box-shadow: var(--floating-shadow);
+  }
+
+  .media-sort-popover-body {
+    display: flex;
+    padding: 12px;
+  }
+
+  .media-sort-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .media-sort-label {
+    margin-bottom: 8px;
+    padding-left: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .media-sort-radio-group {
+    width: 120px;
+  }
+
+  .media-sort-radio-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .media-sort-radio.n-radio {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+    min-height: 28px;
+    padding: 4px 8px;
+    border-radius: var(--radius-xs);
+    color: var(--text-soft);
+    font-size: 13px;
+    transition: background-color 0.3s var(--ease-standard);
+  }
+
+  .media-sort-radio.n-radio:hover {
+    color: var(--text);
+    background: color-mix(in oklch, var(--surface-3) 84%, transparent);
+  }
+
+  .media-sort-divider {
+    width: 1px;
+    height: auto;
+    margin: 0 12px;
+    align-self: stretch;
+  }
+
+  .media-list-float-tools {
+    position: fixed;
+    right: 40px;
+    bottom: 120px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .media-list-float-button {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-pill);
+    color: var(--text-soft);
+    background: var(--floating-surface);
+    box-shadow: var(--floating-shadow);
+    pointer-events: auto;
+    transition: opacity 0.3s var(--ease-standard);
+  }
+
+  .media-list-float-button.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .media-list-float-button svg {
+    width: 22px;
+    height: 22px;
   }

@@ -169,20 +169,6 @@
     min-width: 0;
   }
 
-  .song-wiki-section-title {
-    display: flex;
-    align-items: center;
-    min-height: 28px;
-  }
-
-  .song-wiki-section-title h3 {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text);
-  }
-
   .song-wiki-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -415,23 +401,6 @@
 
   .song-wiki-similar .media-list-table {
     border-radius: var(--radius-card);
-  }
-
-  .song-wiki-similar .media-row-content {
-    padding: 8px 12px;
-    border-radius: var(--radius-card);
-    border: 1px solid var(--border-overlay);
-    background: color-mix(in oklch, var(--surface-2) 92%, transparent);
-  }
-
-  .song-wiki-similar .media-row:hover .media-row-content {
-    border-color: var(--color-primary-tonal-58);
-    background: color-mix(in oklch, var(--surface-2) 92%, transparent);
-  }
-
-  .song-wiki-similar .media-row.is-current .media-row-content {
-    border-color: var(--color-primary-tonal-58);
-    background: color-mix(in oklch, var(--color-primary-container) 50%, var(--surface-2));
   }
 
   .song-wiki-empty {

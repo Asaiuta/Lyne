@@ -1,0 +1,18 @@
+  .online-page.is-recommend-page {
+    width: 100%;
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+
+  .online-recommend-subtitle {
+    margin: -4px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .online-recommend-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }

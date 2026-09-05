@@ -1,3 +1,14 @@
+  .status-line {
+    color: var(--muted);
+  }
+
+  .status-stack {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
   /* ── Skeleton primitives (shared) ── */
   .skeleton {
     display: inline-block;
@@ -21,11 +32,6 @@
   .skeleton--text {
     height: 14px;
     border-radius: 4px;
-  }
-
-
-  .skeleton-grid {
-    padding: 20px 4px;
   }
 
   .skeleton-card {

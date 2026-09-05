@@ -7,6 +7,7 @@ import {
   createDefaultPalette,
   createMonotonousPalette,
   createPaletteFromExtractedSource,
+  createPaletteSourceCache,
   createPaletteFromSeed,
   createPaletteFromSource,
   extractPaletteSourceFromPixels
@@ -91,4 +92,69 @@ test("createPaletteFromExtractedSource keeps non-monotone covers on Material sou
   assert.equal(palette.theme.primary, "rgb(220 226 249)");
   assert.equal(palette.theme.background, "rgb(42 48 66)");
   assert.equal(palette.theme.surfaceContainer, "rgb(33 39 57)");
+});
+
+test("palette source cache reuses a successful extraction and refreshes its LRU position", async () => {
+  const calls: string[] = [];
+  const cache = createPaletteSourceCache(async (coverUrl) => {
+    calls.push(coverUrl);
+    return { sourceArgb: coverUrl.length, isMonotonous: false };
+  }, 2);
+
+  const first = await cache.get("cover-a");
+  const second = await cache.get("cover-a");
+
+  assert.equal(first, second);
+  assert.deepEqual(calls, ["cover-a"]);
+});
+
+test("palette source cache coalesces concurrent extraction for the same cover", async () => {
+  let resolveExtraction: ((value: { sourceArgb: number; isMonotonous: false }) => void) | undefined;
+  let callCount = 0;
+  const cache = createPaletteSourceCache(() => {
+    callCount += 1;
+    return new Promise((resolve) => {
+      resolveExtraction = resolve;
+    });
+  });
+
+  const first = cache.get("cover-pending");
+  const second = cache.get("cover-pending");
+  assert.equal(first, second);
+  await Promise.resolve();
+  assert.equal(callCount, 1);
+  resolveExtraction?.({ sourceArgb: 123, isMonotonous: false });
+  assert.deepEqual(await Promise.all([first, second]), [
+    { sourceArgb: 123, isMonotonous: false },
+    { sourceArgb: 123, isMonotonous: false }
+  ]);
+});
+
+test("palette source cache evicts the least recently used cover", async () => {
+  const calls: string[] = [];
+  const cache = createPaletteSourceCache(async (coverUrl) => {
+    calls.push(coverUrl);
+    return { sourceArgb: coverUrl.charCodeAt(0), isMonotonous: false };
+  }, 2);
+
+  await cache.get("a");
+  await cache.get("b");
+  await cache.get("a");
+  await cache.get("c");
+  await cache.get("b");
+
+  assert.deepEqual(calls, ["a", "b", "c", "b"]);
+});
+
+test("palette source cache does not retain transient null failures", async () => {
+  let callCount = 0;
+  const cache = createPaletteSourceCache(async () => {
+    callCount += 1;
+    return null;
+  });
+
+  await cache.get("cover-failed");
+  await cache.get("cover-failed");
+
+  assert.equal(callCount, 2);
 });

@@ -5,7 +5,7 @@
     display: flex;
     justify-content: flex-end;
     background: color-mix(in oklch, var(--overlay) 42%, transparent);
-    backdrop-filter: blur(12px) saturate(0.92);
+    backdrop-filter: var(--queue-drawer-backdrop-filter);
     animation: queue-drawer-fade-in var(--duration-fast) var(--ease-standard);
   }
 

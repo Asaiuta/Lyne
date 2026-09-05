@@ -3,9 +3,6 @@ import { DEFAULT_THEME_SEED_HEX, paletteEngine, type DynamicPalette } from "../t
 
 const CUSTOM_CSS_STYLE_ID = "audioplayer-custom-css";
 const THEME_PRIMARY = "var(--theme-primary, var(--splayer-primary, var(--color-primary)))";
-const THEME_BACKGROUND = "var(--theme-background, var(--splayer-background, var(--bg-base)))";
-const THEME_SURFACE_CONTAINER =
-  "var(--theme-surface-container, var(--splayer-surface-container, var(--surface-container-default)))";
 const PLAYER_BAR_THEME_ACCENT = THEME_PRIMARY;
 const FULL_PLAYER_COVER_ACCENT = "var(--player-cover-accent)";
 const FULL_PLAYER_DEFAULT_ACCENT = "var(--player-cover-accent-default)";
@@ -15,10 +12,9 @@ type CssTokenEntry = readonly [CssTokenName, string];
 
 export interface AppearanceColorTokenPlan {
   readonly semantic: readonly CssTokenEntry[];
-  readonly themeGlobalColor: boolean;
 }
 
-type AppearanceColorSettings = Pick<UISettings, "playerFollowCoverColor" | "themeGlobalColor">;
+type AppearanceColorSettings = Pick<UISettings, "playerFollowCoverColor">;
 
 const FONT_STACKS: Record<UISettings["globalFont"], string | null> = {
   default: null,
@@ -51,31 +47,12 @@ function setTokenEntries(root: HTMLElement, entries: readonly CssTokenEntry[]): 
   entries.forEach(([name, value]) => root.style.setProperty(name, value));
 }
 
-function syncColorModeAttributes(root: HTMLElement, settings: Pick<AppearanceColorSettings, "themeGlobalColor">): void {
-  if (settings.themeGlobalColor) {
-    root.dataset.themeGlobalColor = "true";
-  } else {
-    delete root.dataset.themeGlobalColor;
-  }
-}
-
 function semanticTokenEntries(settings: AppearanceColorSettings): readonly CssTokenEntry[] {
-  const surfaceEntries: readonly CssTokenEntry[] = settings.themeGlobalColor
-    ? [
-        ["--bg-dynamic", THEME_BACKGROUND],
-        ["--surface-container-dynamic", THEME_SURFACE_CONTAINER],
-        ["--player-bar-surface-dynamic", THEME_SURFACE_CONTAINER],
-        ["--floating-surface-dynamic", THEME_SURFACE_CONTAINER]
-      ]
-    : [
-        ["--bg-dynamic", "var(--bg-base)"],
-        ["--surface-container-dynamic", "var(--surface-container-default)"],
-        ["--player-bar-surface-dynamic", "var(--player-bar-surface-default)"],
-        ["--floating-surface-dynamic", "var(--surface-2)"]
-      ];
-
   return [
-    ...surfaceEntries,
+    ["--bg-dynamic", "var(--bg-base)"],
+    ["--surface-container-dynamic", "var(--surface-container-default)"],
+    ["--player-bar-surface-dynamic", "var(--player-bar-surface-default)"],
+    ["--floating-surface-dynamic", "var(--surface-2)"],
     ["--accent-dynamic", THEME_PRIMARY],
     ["--player-bar-accent-dynamic", PLAYER_BAR_THEME_ACCENT],
     [
@@ -87,14 +64,12 @@ function semanticTokenEntries(settings: AppearanceColorSettings): readonly CssTo
 
 export function buildAppearanceColorTokenPlan(settings: AppearanceColorSettings): AppearanceColorTokenPlan {
   return {
-    semantic: semanticTokenEntries(settings),
-    themeGlobalColor: settings.themeGlobalColor
+    semantic: semanticTokenEntries(settings)
   };
 }
 
 function applyAppearanceColorTokenPlan(settings: AppearanceColorSettings, root: HTMLElement): void {
   const plan = buildAppearanceColorTokenPlan(settings);
-  syncColorModeAttributes(root, plan);
   setTokenEntries(root, plan.semantic);
 }
 
@@ -173,10 +148,28 @@ export function applyUserAppearanceSettings(
   options: { executeJs?: boolean } = {}
 ): void {
   if (typeof document === "undefined") return;
-  applyAccentColor(settings);
+  // With cover-following themes the cover effect (useAppController) is the
+  // single writer of --color-*/--theme-*; seeding here would flash the seed
+  // palette over the async cover palette (and silently win when cover
+  // extraction fails). The semantic token plan is idempotent and stays.
+  if (settings.themeFollowCover) {
+    applyAppearanceColorTokenPlan(settings, document.documentElement);
+  } else {
+    applyAccentColor(settings);
+  }
   applyGlobalFont(settings);
   applyCustomCss(settings.customCss);
   if (options.executeJs) {
     executeCustomJs(settings.customJs);
   }
+}
+
+/**
+ * Explicit seed-palette writer used by the cover effect as its no-cover
+ * fallback. Unaffected by `themeFollowCover`, so a missing/failed cover
+ * source always lands back on the manual seed instead of a stale palette.
+ */
+export function applyAccentPalette(settings: UISettings): void {
+  if (typeof document === "undefined") return;
+  applyAccentColor(settings);
 }

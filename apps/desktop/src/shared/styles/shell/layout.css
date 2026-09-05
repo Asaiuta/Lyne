@@ -75,10 +75,6 @@
     scrollbar-gutter: stable;
   }
 
-  .content-area:has(> .panel-library) {
-    padding-bottom: 0;
-  }
-
   .sidebar {
     position: relative;
     z-index: 1;
@@ -94,11 +90,9 @@
     );
     --sidebar-primary: var(--naive-primary-color);
     --sidebar-primary-soft: var(--muted);
-    --sidebar-selected-bg: var(--state-selected-on-surface);
     --sidebar-selected-bg-alpha: var(--naive-primary-color-10);
     --sidebar-hover-bg: var(--state-hover-on-surface);
     --sidebar-divider: var(--border-overlay);
-    --sidebar-icon-bg: var(--state-hover-on-surface);
     --sidebar-toggle-bar: var(--muted-soft);
     --sidebar-toggle-bar-hover: var(--muted);
     --sidebar-bezier: var(--motion-ease-decelerate);
@@ -308,6 +302,7 @@
   }
 
   .sidebar-playlist-group {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -317,6 +312,40 @@
     display: flex;
     flex-direction: column;
     gap: 0;
+    /* Keep expanded playlist geometry at the open rail width so collapse only
+       clips/fades text instead of reflowing names every animation frame. */
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    max-width: var(--sidebar-width);
+    opacity: 1;
+    transition: opacity var(--motion-duration-spatial) var(--motion-ease-decelerate);
+  }
+
+  .sidebar.is-collapsed .sidebar-playlist-expanded-content:not([hidden]) {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sidebar-playlist-compact-content {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-duration-spatial) var(--motion-ease-decelerate);
+  }
+
+  /* While both layers are mounted for motion, pin the compact icon over the
+     section header so it can fade in without stealing layout height. */
+  .sidebar-playlist-group:has(.sidebar-playlist-expanded-content:not([hidden]))
+    .sidebar-playlist-compact-content:not([hidden]) {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1;
+  }
+
+  .sidebar.is-collapsed .sidebar-playlist-compact-content:not([hidden]) {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .sidebar-playlist-expanded-content[hidden],
@@ -327,9 +356,18 @@
   .sidebar-menu-divider {
     flex: none;
     width: 204px;
+    max-width: calc(100% - 36px);
     height: 1px;
     margin: 6px 18px;
     background: var(--sidebar-divider);
+  }
+
+  /* Keep group separators visible in the narrow rail; size to the current
+     inline track instead of the expanded 204px chrome width. */
+  .sidebar.is-collapsed .sidebar-menu-divider {
+    width: calc(var(--sidebar-width-collapsed) - 24px);
+    max-width: calc(100% - 24px);
+    margin: 6px 12px;
   }
 
   .sidebar-section-header {
@@ -758,18 +796,12 @@
     min-height: 0;
   }
 
-  .sidebar-local-playlists-body .sidebar-playlist-list {
-    width: var(--sidebar-width);
-    min-width: var(--sidebar-width);
-    max-width: var(--sidebar-width);
-  }
-
-  .sidebar-local-playlists-body .sidebar-playlist-entry {
+  .sidebar-playlist-expanded-content .sidebar-playlist-entry {
     content-visibility: auto;
     contain-intrinsic-size: var(--sidebar-item-height);
   }
 
-  .sidebar-local-playlists-body .sidebar-playlist-entry.is-cover-visible {
+  .sidebar-playlist-expanded-content .sidebar-playlist-entry.is-cover-visible {
     contain-intrinsic-size: 50px;
   }
 
@@ -1104,21 +1136,7 @@
   }
 
   .top-nav-icon-button,
-
-
-  .window-control-button,
-
-
-  .transport-button,
-
-
-  .row-action,
-
-
-  .modal-card-close,
-
-
-  .player-time-toggle {
+  .window-control-button {
     transition:
       transform var(--duration-fast) var(--ease-standard),
       background-color var(--duration-fast) var(--ease-standard),
@@ -1134,15 +1152,7 @@
   }
 
   .top-nav-icon-button svg,
-
-
-  .window-control-button svg,
-
-
-  .row-action svg,
-
-
-  .modal-card-close svg {
+  .window-control-button svg {
     width: 18px;
     height: 18px;
   }
@@ -1940,5 +1950,12 @@
     .top-nav-search-wrap.is-open {
       left: 0;
       width: calc(100% - 20px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-playlist-source-popover.is-naive-popselect-transition.is-open,
+    .sidebar-playlist-source-popover.is-naive-popselect-transition.is-closing {
+      animation: none;
     }
   }

@@ -8,16 +8,11 @@
   outline: none;
 }
 
-/* These compatibility surfaces intentionally outrank layered component rules.
-   Keep the historical cascade while route-owned CSS leaves the startup graph. */
+/* These player compatibility surfaces intentionally outrank layered component
+   rules because their portals and cover layers are mounted outside page roots. */
 .player-bar-cover,
 .player-progress-edge,
-.full-player-progress,
-.library-root,
-.queue-item,
-.history-item,
-.online-playlist-card,
-.login-modal-feedback {
+.full-player-progress {
   background: color-mix(in oklch, var(--surface-2) 80%, transparent);
   border: 1px solid var(--border-overlay);
 }

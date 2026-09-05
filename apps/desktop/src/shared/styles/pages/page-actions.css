@@ -119,6 +119,19 @@ button.load-more-button {
   min-width: 0;
 }
 
+.button-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.load-more-button-row {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0 8px;
+}
+
 .load-more-button-spinner {
   display: inline-flex;
   width: 14px;
@@ -134,41 +147,41 @@ button.load-more-button {
   opacity: 0.5;
 }
 
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--secondary,
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--secondary.is-active,
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--icon,
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--icon.is-active {
   color: rgb(51 54 57);
   background: rgb(46 51 56 / 0.05);
 }
 
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--secondary:hover:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--secondary:focus-visible:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--secondary.is-active:hover:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--icon:hover:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--icon:focus-visible:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--icon.is-active:hover:not(:disabled) {
   color: rgb(51 54 57);
   background: rgb(46 51 56 / 0.09);
 }
 
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--secondary:active:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--secondary.is-active:active:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--icon:active:not(:disabled),
-:root[data-theme="light"]:not([data-theme-global-color="true"])
+:root[data-theme="light"]
   button.page-toolbar-button.page-toolbar-button--icon.is-active:active:not(:disabled) {
   background: rgb(46 51 56 / 0.13);
 }

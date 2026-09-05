@@ -1,0 +1,13 @@
+@layer components {
+  .page-section-heading.naive-heading {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.6;
+    color: var(--text);
+  }
+}

@@ -1,4 +1,2 @@
 @import "../shell/layout.css" layer(components);
-@import "../shell/actions.css" layer(components);
-@import "../shell/settings.css" layer(components);
 @import "../shell/unlayered-overrides.css";

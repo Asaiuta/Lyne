@@ -49,6 +49,10 @@ export interface ExtractedPaletteSource {
   readonly isMonotonous: boolean;
 }
 
+export interface PaletteSourceCache {
+  readonly get: (coverUrl: string) => Promise<ExtractedPaletteSource | null>;
+}
+
 const SAMPLE_SIZE = 50;
 export const DEFAULT_THEME_SEED_HEX = "#fe7971";
 const DEFAULT_SEED_ARGB = argbFromHex(DEFAULT_THEME_SEED_HEX);
@@ -99,6 +103,7 @@ const DARK_SURFACE_CONTAINER_TONE = 16;
 const MONOTONOUS_CHANNEL_THRESHOLD = 5;
 const TOP_FREQUENT_COLOR_COUNT = 5;
 const SCORE_COLOR_COUNT = 50;
+const PALETTE_SOURCE_CACHE_LIMIT = 20;
 
 function readScheme(root: HTMLElement = document.documentElement): ThemeScheme {
   return root.dataset.theme === "light" ? "light" : "dark";
@@ -324,14 +329,55 @@ export function extractPaletteSourceFromPixels(pixels: Uint8ClampedArray): Extra
   return sourceArgb === null ? null : { sourceArgb, isMonotonous: false };
 }
 
+export function createPaletteSourceCache(
+  loader: (coverUrl: string) => Promise<ExtractedPaletteSource | null>,
+  maxEntries: number = PALETTE_SOURCE_CACHE_LIMIT
+): PaletteSourceCache {
+  const entries = new Map<string, ExtractedPaletteSource>();
+  const inFlight = new Map<string, Promise<ExtractedPaletteSource | null>>();
+  const limit = Math.max(0, Math.trunc(maxEntries));
+
+  const get = (coverUrl: string): Promise<ExtractedPaletteSource | null> => {
+    const cached = entries.get(coverUrl);
+    if (cached) {
+      entries.delete(coverUrl);
+      entries.set(coverUrl, cached);
+      return Promise.resolve(cached);
+    }
+
+    const pending = inFlight.get(coverUrl);
+    if (pending) return pending;
+
+    const request = Promise.resolve()
+      .then(() => loader(coverUrl))
+      .then((source) => {
+        if (source !== null && limit > 0 && inFlight.get(coverUrl) === request) {
+          entries.set(coverUrl, source);
+          while (entries.size > limit) {
+            const oldestKey = entries.keys().next().value;
+            if (oldestKey === undefined) break;
+            entries.delete(oldestKey);
+          }
+        }
+        return source;
+      });
+    inFlight.set(coverUrl, request);
+    const clearRequest = () => {
+      if (inFlight.get(coverUrl) === request) inFlight.delete(coverUrl);
+    };
+    void request.then(clearRequest, clearRequest);
+    return request;
+  };
+
+  return { get };
+}
+
 export async function extractSourceColor(coverUrl: string | null): Promise<number | null> {
   const source = await extractPaletteSource(coverUrl);
   return source?.sourceArgb ?? (source?.isMonotonous ? MONOTONOUS_SOURCE_ARGB : null);
 }
 
-export async function extractPaletteSource(coverUrl: string | null): Promise<ExtractedPaletteSource | null> {
-  if (!coverUrl || typeof window === "undefined") return null;
-
+async function extractPaletteSourceUncached(coverUrl: string): Promise<ExtractedPaletteSource | null> {
   let image: HTMLImageElement;
   try {
     image = await loadImage(coverUrl);
@@ -353,6 +399,15 @@ export async function extractPaletteSource(coverUrl: string | null): Promise<Ext
   } finally {
     canvas.remove();
   }
+}
+
+const paletteSourceCache = createPaletteSourceCache(extractPaletteSourceUncached);
+
+export function extractPaletteSource(
+  coverUrl: string | null
+): Promise<ExtractedPaletteSource | null> {
+  if (!coverUrl || typeof window === "undefined") return Promise.resolve(null);
+  return paletteSourceCache.get(coverUrl);
 }
 
 export async function applyCover(
@@ -391,6 +446,7 @@ export const paletteEngine = {
   applySeed,
   createDefaultPalette,
   createMonotonousPalette,
+  createPaletteSourceCache,
   createPaletteFromExtractedSource,
   createPaletteFromSource,
   createPaletteFromSeed,

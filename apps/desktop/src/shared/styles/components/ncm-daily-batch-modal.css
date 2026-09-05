@@ -1,0 +1,17 @@
+@layer components {
+  .ncm-daily-batch-modal {
+    gap: 18px;
+  }
+
+  .ncm-daily-batch-playlists {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 2px;
+  }
+
+  .ncm-daily-batch-targets {
+    max-height: 190px;
+  }
+}

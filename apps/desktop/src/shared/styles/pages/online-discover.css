@@ -1,11 +1,6 @@
-  .online-page {
-    gap: 18px;
-  }
-
   .online-page.is-discover-page {
     --online-discover-control-color: var(--text-secondary);
     --online-discover-control-muted-color: var(--text-placeholder);
-    --online-discover-control-bg: var(--border-faint);
     --online-discover-control-bg-hover: var(--state-hover-on-surface);
     --online-discover-control-bg-active: color-mix(in oklch, var(--surface-3) 82%, var(--text) 8%);
     --online-discover-control-border: var(--border-overlay);
@@ -17,19 +12,11 @@
     --online-discover-entry-capsule-bg: color-mix(in oklch, var(--naive-tabs-color-segment) 90%, var(--text) 6%);
     --online-discover-entry-capsule-bg-hover: color-mix(in oklch, var(--naive-tabs-color-segment) 86%, var(--text) 8%);
     --online-discover-entry-capsule-bg-active: color-mix(in oklch, var(--naive-tabs-color-segment) 82%, var(--text) 10%);
-    --online-discover-card-hover-bg: var(--state-hover-on-surface);
-    --online-discover-card-border: var(--border-overlay);
-    --online-discover-card-border-hover: var(--state-pressed-on-surface);
   }
 
-  .online-page.is-recommend-page {
-    width: 100%;
-    max-width: 1500px;
-    margin: 0 auto;
-  }
-
-  .online-page .page-header {
-    gap: 10px;
+  .online-page.is-discover-page:has(.online-discover-view) {
+    /* Detail routes do not render this marker and keep the shared page gap. */
+    gap: 0;
   }
 
   .online-page.is-discover-page .page-header {
@@ -38,42 +25,12 @@
     justify-content: flex-start;
   }
 
-  .online-page .page-header-top {
-    align-items: flex-end;
-  }
-
   .online-page.is-discover-page .page-header-top {
     height: 40px;
     margin-top: 12px;
   }
 
-  .online-page .page-header-meta {
-    justify-content: flex-start;
-    font-size: 17px;
-    line-height: 1.45;
-  }
-
-  .online-recommend-subtitle {
-    margin: 0;
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 1.4;
-    margin-top: -4px;
-  }
-
-  .online-page .page-header-row {
-    align-items: center;
-  }
-
-  .online-recommend-stage {
-    display: flex;
-    flex-direction: column;
-    gap: 22px;
-  }
-
   .online-discover-section,
-
-
   .online-discover-card-stack {
     display: flex;
     flex-direction: column;
@@ -84,6 +41,7 @@
     background: transparent;
     box-shadow: none;
   }
+
   .online-discover-view {
     display: flex;
     flex-direction: column;
@@ -98,8 +56,14 @@
     margin-top: 0;
   }
 
+  .online-page.is-discover-page:has(.online-discover-view) .online-discover-playlists > .online-discover-menu,
+  .online-page.is-discover-page:has(.online-discover-view) .online-discover-artists > .online-discover-filter-menu:first-child,
+  .online-page.is-discover-page:has(.online-discover-view) .online-discover-new > .online-discover-menu,
+  .online-page.is-discover-page:has(.online-discover-view) .online-discover-videos > .online-discover-menu:first-child {
+    margin-top: 20px;
+  }
+
   .online-discover-cat-button,
-  .online-discover-mini-tabs,
   .online-discover-filter-menu button {
     display: inline-flex;
     align-items: center;
@@ -175,31 +139,10 @@
   }
 
   .online-discover-mini-tabs.n-tabs {
-    --n-tab-text-color: var(--online-discover-control-muted-color);
-    --n-tab-text-color-hover: var(--text);
-    --n-tab-text-color-active: var(--text);
-    --n-bar-color: var(--online-discover-control-border-hover);
     --n-tab-border-radius: 25px;
+    --n-tabs-rail-outline: 1px solid var(--n-tab-color-segment);
     width: 140px;
     height: 40px;
-    min-height: 40px;
-    border-radius: 25px;
-    outline: 0;
-  }
-
-  .online-discover-mini-tabs .n-tabs-rail {
-    min-height: 40px;
-  }
-
-  .online-discover-mini-tabs .n-tabs-tab {
-    height: 32px;
-    min-height: 32px;
-    font-size: 13px;
-  }
-
-  .online-discover-mini-tabs .n-tabs-tab:focus-visible {
-    outline: none;
-    box-shadow: inset 0 0 0 1px var(--online-discover-control-border-hover);
   }
 
   .online-discover-filter-menu {
@@ -257,27 +200,6 @@
     margin-left: 0;
   }
 
-  .online-page.is-discover-page .page-header-tabs .discover-primary-tabs.n-tabs {
-    --n-tab-text-color: var(--online-discover-control-muted-color);
-    --n-tab-text-color-hover: var(--text);
-    --n-tab-text-color-active: var(--text);
-    --n-bar-color: var(--online-discover-control-border-hover);
-    --n-tab-border-radius: 6px;
-    height: 40px;
-    min-height: 40px;
-  }
-
-  .online-page.is-discover-page .page-header-tabs .discover-primary-tabs .n-tabs-rail {
-    min-height: 40px;
-  }
-
-  .online-page.is-discover-page .page-header-tabs .discover-primary-tabs .n-tabs-tab {
-    min-height: 34px;
-    padding: 0;
-    font-size: 14px;
-    font-weight: 500;
-  }
-
   .online-discover-section > .online-result-panel-head {
     display: none;
   }
@@ -291,304 +213,38 @@
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 
-  .online-discover-section .album-card,
-  .ncm-home-feed .album-card {
-    width: 100%;
+  .online-discover-videos .online-discover-video-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+
+  .online-discover-video-grid .album-card-art {
+    aspect-ratio: 16 / 9;
+  }
+
+  .online-discover-section .media-list-table {
+    background: transparent;
+    box-shadow: none;
+    border-color: var(--border-faint);
+  }
+
+  .online-discover-toplists {
     gap: 0;
   }
 
-  .media-sort-popover {
-    z-index: var(--z-context-menu);
-    border: 1px solid var(--floating-border);
-    border-radius: var(--floating-radius);
-    background: var(--floating-surface);
-    box-shadow: var(--floating-shadow);
-  }
-
-  .media-sort-popover-body {
-    display: flex;
-    padding: 12px;
-  }
-
-  .media-sort-group {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .media-sort-label {
-    margin-bottom: 8px;
-    padding-left: 4px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-
-  .media-sort-radio-group {
-    width: 120px;
-  }
-
-  .media-sort-radio-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .media-sort-radio.n-radio {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    gap: 8px;
-    min-height: 28px;
-    padding: 4px 8px;
-    border-radius: var(--radius-xs);
-    color: var(--text-soft);
-    font-size: 13px;
-    transition: background-color 0.3s var(--ease-standard);
-  }
-
-  .media-sort-radio.n-radio:hover {
-    color: var(--text);
-    background: color-mix(in oklch, var(--surface-3) 84%, transparent);
-  }
-
-  .media-sort-divider {
-    width: 1px;
-    height: auto;
-    margin: 0 12px;
-    align-self: stretch;
-    background: var(--border-overlay);
-  }
-
-  .media-list-float-tools {
-    position: fixed;
-    right: 40px;
-    bottom: 120px;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    pointer-events: none;
-  }
-
-  .media-list-float-button {
-    display: grid;
-    place-items: center;
-    width: 42px;
-    height: 42px;
-    border: 1px solid var(--online-discover-card-border, var(--border-overlay));
-    border-radius: var(--radius-pill);
-    color: var(--text-soft);
-    background: var(--floating-surface);
-    box-shadow: var(--floating-shadow);
-    pointer-events: auto;
-    transition: opacity 0.3s var(--ease-standard);
-  }
-
-  .media-list-float-button.is-hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .media-list-float-button svg {
-    width: 22px;
-    height: 22px;
-  }
-
-  .online-discover-section .album-card-art,
-  .ncm-home-feed .album-card-art {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1 / 1;
-    border-radius: var(--radius-card-prominent);
-    box-shadow: 0 0 4px 2px rgba(0, 0, 0, 0.1);
-  }
-
-  .online-discover-section .album-card-copy,
-  .ncm-home-feed .album-card-copy {
-    padding: 12px;
-  }
-
-  .online-discover-section .album-card-title,
-  .ncm-home-feed .album-card-title {
-    display: -webkit-box;
-    font-size: 16px;
-    font-weight: 500;
-    line-height: 1.35;
-    white-space: normal;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  .online-discover-section .album-card-subtitle,
-  .ncm-home-feed .album-card-subtitle {
-    margin-top: 2px;
-    font-size: 13px;
-    line-height: 1.35;
-  }
-
-  .online-discover-section .album-card--round .album-card-art,
-  .ncm-home-feed .album-card--round .album-card-art {
-    border-radius: var(--radius-pill);
-  }
-
-  .online-discover-section .album-card--round .album-card-copy,
-  .ncm-home-feed .album-card--round .album-card-copy {
-    align-items: center;
-    padding: 0 12px;
-    text-align: center;
-  }
-
-  .online-discover-section .album-card,
-  .ncm-home-feed .album-card {
-    border-radius: 16px;
-    transition:
-      background-color 0.3s var(--ease-standard),
-      transform 0.3s var(--ease-standard);
-  }
-
-  .online-discover-section .album-card:hover,
-  .ncm-home-feed .album-card:hover {
-    background: var(--online-discover-card-hover-bg, var(--state-hover-on-surface));
-  }
-
-  .online-discover-section .album-card:hover .album-card-art,
-  .ncm-home-feed .album-card:hover .album-card-art {
-    transform: none;
-    box-shadow: 0 0 4px 2px rgba(0, 0, 0, 0.1);
-  }
-
-  .online-discover-section .album-card:hover .album-card-art-img,
-  .ncm-home-feed .album-card:hover .album-card-art-img {
-    transform: scale(1.1);
-    filter: brightness(0.8);
-  }
-
-  .online-discover-section .album-card-play-btn,
-  .ncm-home-feed .album-card-play-btn {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.4);
-  }
-
-  .online-discover-section .album-card-play-btn:active,
-  .ncm-home-feed .album-card-play-btn:active {
-    background: rgba(255, 255, 255, 0.2);
-  }
-
-  .online-discover-section .album-card.is-cover-hidden,
-  .ncm-home-feed .album-card.is-cover-hidden {
-    min-height: 80px;
-    padding: 0;
-    overflow: hidden;
-    border: 2px solid var(--online-discover-card-border, var(--border-overlay));
-    background: var(--surface-2);
-  }
-
-  .online-discover-section .album-card.is-cover-hidden:hover,
-  .ncm-home-feed .album-card.is-cover-hidden:hover {
-    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
-  }
-
-  .online-discover-section .album-card.is-cover-hidden .album-card-copy,
-  .ncm-home-feed .album-card.is-cover-hidden .album-card-copy {
-    height: 100%;
-    justify-content: center;
-  }
-
-  .online-discover-section .album-card.is-cover-hidden .album-card-title,
-  .ncm-home-feed .album-card.is-cover-hidden .album-card-title {
-    font-size: 18px;
-    font-weight: 700;
-  }
-
-  .online-discover-section .album-card--round .album-card-art,
-  .ncm-home-feed .album-card--round .album-card-art {
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .online-discover-section .album-card--round .album-card-art-img,
-  .ncm-home-feed .album-card--round .album-card-art-img {
-    inset: 12px;
-    width: auto;
-    height: auto;
-    border-radius: var(--radius-pill);
-  }
-
-  .online-discover-section .album-card--round:hover,
-  .ncm-home-feed .album-card--round:hover {
-    background: transparent;
-  }
-
-  .online-discover-section .album-card--round:hover .album-card-art,
-  .ncm-home-feed .album-card--round:hover .album-card-art {
-    box-shadow: none;
-  }
-
-  .online-discover-section .album-card--round:hover .album-card-art-img,
-  .ncm-home-feed .album-card--round:hover .album-card-art-img {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  }
-
-  .online-discover-divider {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin: 0;
-    color: var(--text-placeholder);
-    font-size: 14px;
-    font-weight: 500;
-  }
-
-  .online-discover-divider::before,
-  .online-discover-divider::after {
-    content: "";
-    height: 1px;
-    flex: 1;
-    background: var(--state-hover-on-surface);
-  }
-
-  .online-toplist-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 20px;
-  }
-
-  @media (min-width: 600px) {
-    .online-toplist-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 1180px) and (min-width: 861px) {
-    .online-toplist-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 860px) {
-    .online-toplist-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .online-discover-section,
-    .online-discover-card-stack {
-      padding: 18px;
-    }
-  }
-
-  @media (min-width: 1181px) {
-    .online-toplist-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
+  .online-discover-divider--selected {
+    margin-bottom: 0;
   }
 
   .online-toplist-card {
     display: flex;
+    width: 100%;
     height: 160px;
     min-width: 0;
+    flex-direction: column;
     padding: 16px;
     border-radius: var(--radius-card);
-    border: 1px solid var(--border-faint);
-    background: var(--border-faint);
+    border: 1px solid var(--naive-border-color);
+    background: var(--naive-card-color);
     color: inherit;
     text-align: left;
     cursor: pointer;
@@ -598,21 +254,20 @@
   }
 
   .online-toplist-card:hover {
-    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
+    border-color: var(--state-pressed-on-surface);
   }
 
   .online-toplist-card:focus-visible {
     outline: none;
-    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
+    border-color: var(--state-pressed-on-surface);
     box-shadow: 0 0 0 3px var(--online-discover-control-ring);
   }
 
   .online-toplist-card:active {
-    border-color: var(--online-discover-card-border-hover, var(--state-pressed-on-surface));
+    border-color: var(--state-pressed-on-surface);
   }
 
-  .online-toplist-card:hover .online-toplist-cover img {
-    transform: scale(1.1);
+  .online-toplist-card:hover .online-toplist-cover .s-image-media {
     filter: brightness(0.4);
   }
 
@@ -620,39 +275,69 @@
     opacity: 1;
   }
 
-  .online-toplist-card.is-cover-hidden {
-    height: auto;
-    min-height: 128px;
-  }
-
   .online-toplist-card--skeleton {
     cursor: default;
     pointer-events: none;
   }
 
-  .online-toplist-card--skeleton .online-toplist-cover {
-    box-shadow: none;
+  .online-toplist-title-row {
+    display: flex;
+    min-width: 0;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    line-height: normal;
+  }
+
+  .online-toplist-title {
+    min-width: 0;
+    overflow: hidden;
+    flex: 1 1 auto;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .online-toplist-desc {
+    min-width: 0;
+    max-width: 48%;
+    overflow: hidden;
+    flex: 0 1 auto;
+    color: var(--naive-text-color-3);
+    font-size: 12px;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .online-toplist-content-row {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
   }
 
   .online-toplist-cover {
     position: relative;
-    width: 128px;
-    height: 128px;
-    flex: 0 0 128px;
+    width: auto;
+    height: 100%;
+    min-height: 0;
+    aspect-ratio: 1 / 1;
+    flex: none;
     margin-right: 20px;
     overflow: hidden;
     border-radius: var(--radius-sm);
-    background: var(--border-overlay);
+    background: var(--surface-3);
     box-shadow: none;
   }
 
-  .online-toplist-cover img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition:
-      filter var(--duration-base) var(--ease-standard),
-      transform var(--duration-base) var(--ease-standard);
+  .online-toplist-card--skeleton .online-toplist-cover {
+    display: block;
+    border-radius: var(--radius-sm);
   }
 
   .online-toplist-cover-play {
@@ -671,7 +356,7 @@
     height: 36px;
   }
 
-  .online-toplist-cover span {
+  .online-toplist-cover-fallback {
     display: grid;
     width: 100%;
     height: 100%;
@@ -681,73 +366,44 @@
     color: var(--text-secondary);
   }
 
-  .online-toplist-copy {
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    flex-direction: column;
-    justify-content: space-evenly;
-    gap: 4px;
-  }
-
-  .online-toplist-copy strong {
-    overflow: hidden;
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1.25;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .online-toplist-desc {
-    overflow: hidden;
-    color: var(--text-placeholder);
-    font-size: 13px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .online-toplist-songs {
     display: flex;
     min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
     flex-direction: column;
-    gap: 8px;
+    justify-content: space-evenly;
   }
 
   .online-toplist-song {
-    display: flex;
+    display: block;
     min-width: 0;
-    align-items: baseline;
-    gap: 6px;
-    color: var(--text-secondary);
-    font-size: 13px;
-    line-height: 1.25;
-  }
-
-  .online-toplist-song span {
     overflow: hidden;
-    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.5;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .online-toplist-song small {
-    overflow: hidden;
-    min-width: 42px;
-    color: var(--text-placeholder);
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: var(--naive-text-color-3);
+    font-size: inherit;
+  }
+
+  .online-toplist-song small::before {
+    margin: 0 4px;
+    content: "-";
   }
 
   .online-toplist-skeleton-title {
-    width: 72%;
-    height: 20px;
+    width: 38%;
+    height: 18px;
   }
 
   .online-toplist-skeleton-desc {
-    width: 54%;
-    height: 14px;
+    width: 24%;
+    height: 12px;
   }
 
   .online-toplist-skeleton-song {
@@ -763,10 +419,11 @@
     width: 66%;
   }
 
-  .ncm-home-feed {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+  @media (max-width: 860px) {
+    .online-discover-section,
+    .online-discover-card-stack {
+      padding: 18px;
+    }
   }
 
   @media (max-width: 600px) {

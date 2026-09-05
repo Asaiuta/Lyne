@@ -169,68 +169,12 @@
     white-space: nowrap;
   }
 
-  @keyframes floating-layer-enter {
-    from {
-      opacity: 0;
-      transform: translateY(4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
-    .context-menu,
-    .top-nav-search-panel,
-    .top-nav-search-history,
     .player-inline-menu-popover,
     .player-volume-popover,
     .player-quality-popover,
-    .player-controls-popover,
-    .player-progress-tooltip,
-    .command-error-toast,
-    .select-input-dropdown,
-    .settings-search-results,
-    .cat-modal,
-    .settings-modal-card,
-    .modal-card {
+    .player-controls-popover {
       animation: none;
     }
-
-    .n-popover.n-popover-shared,
-    .n-dropdown.n-dropdown-menu,
-    .sidebar-playlist-source-popover.is-naive-popselect-transition.is-open,
-    .sidebar-playlist-source-popover.is-naive-popselect-transition.is-closing {
-      animation: none;
-    }
-  }
-
-  .select-input-dropdown {
-    z-index: var(--z-modal-popover);
-    border: 1px solid var(--floating-border);
-    border-radius: var(--floating-radius);
-    background: var(--floating-surface);
-    box-shadow: var(--floating-shadow);
-    animation: floating-layer-enter var(--duration-fast) var(--ease-standard);
-  }
-
-  .settings-search-results {
-    z-index: var(--z-modal-popover);
-    border: 1px solid var(--floating-border);
-    border-radius: 8px;
-    background: var(--floating-surface);
-    box-shadow: var(--floating-shadow);
-    animation: settings-search-fade-down 0.15s ease;
-    max-height: calc(75vh - 280px);
-  }
-
-  .settings-search-input {
-    border-radius: 8px;
-  }
-
-  .settings-search-result:hover,
-  .settings-search-result.is-active {
-    background: var(--state-hover-on-surface);
   }
 }

@@ -52,7 +52,7 @@
     inset: 0;
     border-radius: var(--radius-pill);
     background: var(--full-player-ink-active);
-    box-shadow: 0 0 18px var(--full-player-cover-color-28);
+    box-shadow: 0 0 18px var(--full-player-progress-glow);
     min-width: 0;
     transform: scaleX(var(--full-player-progress-scale, 0));
     transform-origin: left center;
@@ -67,7 +67,7 @@
     border-radius: 50%;
     background: var(--full-player-ink-active);
     box-shadow:
-      0 0 0 2px var(--full-player-cover-color-08),
+      0 0 0 2px var(--full-player-thumb-ring),
       0 2px 8px oklch(0 0 0 / 0.3);
     opacity: 0;
     transform: translateY(-50%) scale(0.6);
@@ -117,18 +117,18 @@
     --full-player-button-icon-size: 28px;
     margin: 0 12px;
     color: var(--full-player-ink-active);
-    background-color: var(--full-player-cover-color-14);
+    background-color: var(--full-player-control-solid);
     border-color: transparent;
     box-shadow: none;
   }
 
   .full-player-transport .transport-primary:hover:not(:disabled) {
     color: var(--full-player-ink-active);
-    background-color: var(--full-player-cover-color-20);
+    background-color: var(--full-player-control-hover);
   }
 
   .full-player-transport .transport-primary:active:not(:disabled) {
-    background-color: var(--full-player-cover-color-12);
+    background-color: var(--full-player-control-solid-active);
   }
 
   .full-player-quality-tag {
@@ -136,7 +136,7 @@
     align-items: center;
     min-height: 26px;
     padding: 0 8px;
-    border: 1px solid var(--full-player-cover-color-10);
+    border: 1px solid var(--full-player-border);
     border-radius: var(--radius-sm);
     color: var(--full-player-ink);
     background: transparent;
@@ -144,21 +144,49 @@
     white-space: nowrap;
   }
 
+  .full-player-quality-trigger {
+    cursor: pointer;
+    font: inherit;
+    transition:
+      color 0.2s var(--ease-standard),
+      background-color 0.2s var(--ease-standard),
+      border-color 0.2s var(--ease-standard);
+  }
+
+  .full-player-quality-trigger:hover,
+  .full-player-quality-trigger.is-open {
+    color: var(--full-player-ink-active);
+    border-color: var(--full-player-border-active);
+    background: var(--full-player-surface);
+  }
+
+  .n-popover.n-popover-shared.full-player-quality-popover,
+  .n-popover.n-popover-shared.full-player-volume-popover {
+    --full-player-popover-cover-color: var(--color-primary);
+    --full-player-naive-surface: color-mix(in srgb, var(--full-player-popover-cover-color) 20%, transparent);
+    --full-player-naive-text: color-mix(in srgb, var(--full-player-popover-cover-color) 82%, transparent);
+    --n-color: var(--full-player-naive-surface);
+    --n-text-color: var(--full-player-naive-text);
+    --n-suffix-color: var(--full-player-naive-text);
+    background-color: var(--n-color);
+  }
+
+  .n-popover.n-popover-shared.full-player-quality-popover {
+    --full-player-naive-hover: color-mix(in srgb, var(--full-player-popover-cover-color) 12%, transparent);
+    --full-player-ink-active: color-mix(in srgb, var(--full-player-popover-cover-color) 18%, white 82%);
+    --n-option-text-color: var(--full-player-naive-text);
+    --n-option-color-hover: var(--full-player-naive-hover);
+    --player-bar-accent: var(--full-player-ink-active);
+  }
+
   .full-player-volume {
     position: relative;
   }
 
   .n-popover.n-popover-shared.full-player-volume-popover {
-    --full-player-popover-cover-color: var(--color-primary);
-    --n-color: var(--full-player-naive-surface);
-    --n-text-color: var(--full-player-naive-text);
-    --n-suffix-color: var(--full-player-naive-text);
-    --full-player-naive-surface: color-mix(in srgb, var(--full-player-popover-cover-color) 20%, transparent);
-    --full-player-naive-text: color-mix(in srgb, var(--full-player-popover-cover-color) 82%, transparent);
-    --full-player-cover-color-20: color-mix(in srgb, var(--full-player-popover-cover-color) 20%, transparent);
-    --full-player-cover-color-28: color-mix(in srgb, var(--full-player-popover-cover-color) 28%, transparent);
-    --full-player-cover-color-90: color-mix(in srgb, var(--full-player-popover-cover-color) 90%, transparent);
-    background-color: var(--n-color);
+    --full-player-slider-fill: color-mix(in srgb, var(--full-player-popover-cover-color) 90%, transparent);
+    --full-player-slider-rail: color-mix(in srgb, var(--full-player-popover-cover-color) 20%, transparent);
+    --full-player-slider-rail-hover: color-mix(in srgb, var(--full-player-popover-cover-color) 28%, transparent);
   }
 
   .full-player-volume-popover {
@@ -176,13 +204,13 @@
   }
 
   .full-player-volume-popover .naive-slider.n-slider.volume-slider {
-    --n-fill-color: var(--full-player-cover-color-90);
-    --n-fill-color-hover: var(--full-player-cover-color-90);
-    --n-handle-color: var(--full-player-cover-color-90);
+    --n-fill-color: var(--full-player-slider-fill);
+    --n-fill-color-hover: var(--full-player-slider-fill);
+    --n-handle-color: var(--full-player-slider-fill);
     --n-handle-size: 18px;
     --n-rail-width-vertical: 4px;
-    --n-rail-color: var(--full-player-cover-color-20);
-    --n-rail-color-hover: var(--full-player-cover-color-28);
+    --n-rail-color: var(--full-player-slider-rail);
+    --n-rail-color-hover: var(--full-player-slider-rail-hover);
     --n-handle-box-shadow:
       0 1px 4px 0 rgb(0 0 0 / 0.3),
       inset 0 0 1px 0 rgb(0 0 0 / 0.05);

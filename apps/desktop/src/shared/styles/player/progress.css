@@ -132,4 +132,10 @@
     opacity: 0.32;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .player-progress-tooltip {
+      animation: none;
+    }
+  }
+
 }

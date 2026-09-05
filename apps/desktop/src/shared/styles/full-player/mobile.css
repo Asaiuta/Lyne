@@ -230,13 +230,22 @@
     padding: 0 10px;
   }
 
+  .full-player-mobile-mode-button,
+  .full-player-mobile-control-button,
+  .full-player-mobile-play-button {
+    --full-player-button-radius: var(--radius-pill);
+    --full-player-button-active-scale: 0.95;
+  }
+
+  .full-player-mobile-mode-button,
+  .full-player-mobile-control-button {
+    --full-player-button-hover-bg: transparent;
+    --full-player-button-hover-scale: 1;
+  }
+
   .full-player-mobile-mode-button {
     --full-player-button-size: 40px;
     --full-player-button-icon-size: 24px;
-    --full-player-button-radius: var(--radius-pill);
-    --full-player-button-hover-bg: transparent;
-    --full-player-button-hover-scale: 1;
-    --full-player-button-active-scale: 0.95;
     opacity: 0.8;
   }
 
@@ -247,28 +256,22 @@
   .full-player-mobile-control-button {
     --full-player-button-size: 50px;
     --full-player-button-icon-size: 36px;
-    --full-player-button-radius: var(--radius-pill);
-    --full-player-button-hover-bg: transparent;
-    --full-player-button-hover-scale: 1;
-    --full-player-button-active-scale: 0.95;
   }
 
   .full-player-mobile-play-button {
     --full-player-button-size: 60px;
     --full-player-button-icon-size: 40px;
-    --full-player-button-radius: var(--radius-pill);
-    --full-player-button-hover-bg: var(--full-player-cover-color-20);
-    --full-player-button-active-scale: 0.95;
+    --full-player-button-hover-bg: var(--full-player-button-hover-strong);
     color: var(--full-player-ink-active);
-    background-color: var(--full-player-cover-color-20);
+    background-color: var(--full-player-play-surface);
   }
 
   .full-player-mobile-play-button:hover:not(:disabled) {
-    background-color: var(--full-player-cover-color-20);
+    background-color: var(--full-player-play-surface);
   }
 
   .full-player-mobile-play-button:active {
-    background-color: var(--full-player-cover-color-12);
+    background-color: var(--full-player-control-solid-active);
   }
 
   .full-player-mobile-lyric-page {

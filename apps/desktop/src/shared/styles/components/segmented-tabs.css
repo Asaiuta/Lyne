@@ -1,0 +1,91 @@
+@layer components {
+  .naive-tabs.n-tabs.segmented-tabs {
+    --segmented-surface: var(--border-faint);
+    --segmented-text-color: var(--text-placeholder);
+    --segmented-hover-color: var(--text);
+    --segmented-active-bg: var(--accent);
+    --segmented-active-color: var(--accent-foreground);
+    --segmented-outline: 0;
+    --n-tabs-rail-outline: var(--segmented-outline);
+    --n-color-segment: var(--segmented-surface);
+    --n-tab-color-segment: var(--segmented-active-bg);
+    --n-tab-text-color: var(--segmented-text-color);
+    --n-tab-text-color-hover: var(--segmented-hover-color);
+    --n-tab-text-color-active: var(--segmented-active-color);
+    --n-tab-border-radius: var(--radius-pill);
+    display: inline-flex;
+    width: max-content;
+    max-width: 100%;
+  }
+
+  .naive-tabs.n-tabs.segmented-tabs .segmented-tab {
+    height: var(--segmented-tab-height, auto);
+    min-height: var(--segmented-tab-min-height, 0);
+  }
+
+  .naive-tabs.n-tabs.segmented-tabs.segmented-tabs--compact {
+    --n-tab-font-size: 13px;
+    --n-tab-padding: 0;
+    --segmented-tab-height: 26px;
+    --segmented-tab-min-height: 26px;
+    height: 32px;
+    min-height: 32px;
+  }
+
+  .naive-tabs.n-tabs.segmented-tabs.segmented-tabs--surface {
+    --segmented-surface: color-mix(in oklch, var(--surface-2) 84%, transparent);
+    --segmented-text-color: var(--text-secondary);
+    --segmented-hover-color: var(--text);
+    --segmented-active-bg: color-mix(in oklch, var(--surface-3) 86%, var(--text) 8%);
+    --segmented-active-color: var(--text);
+  }
+
+  .naive-tabs.n-tabs.segmented-tabs.segmented-tabs--tonal {
+    --segmented-surface: var(--surface-2, var(--border-faint));
+    --segmented-text-color: var(--text-soft);
+    --segmented-hover-color: var(--accent);
+    --segmented-active-bg: color-mix(in oklch, var(--accent) 13%, transparent);
+    --segmented-active-color: var(--accent);
+  }
+
+  .segmented-tab-count {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2px;
+    font-size: 0.86em;
+    line-height: 1;
+    transform: translateY(-4px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .naive-tabs.n-tabs.n-tabs--segment-type.segmented-tabs .n-tabs-capsule,
+    .naive-tabs.n-tabs.n-tabs--segment-type.segmented-tabs .n-tabs-tab {
+      transition: none;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .naive-tabs.n-tabs.segmented-tabs,
+    .naive-tabs.n-tabs.segmented-tabs.segmented-tabs--compact {
+      display: block;
+      width: 100%;
+      height: auto;
+      min-height: 0;
+    }
+
+    .naive-tabs.n-tabs.n-tabs--segment-type.segmented-tabs .n-tabs-nav {
+      display: none;
+    }
+
+    .segmented-tabs-select {
+      display: block !important;
+      width: 100%;
+      min-height: 42px;
+      padding-inline: 14px;
+      border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+      border-radius: var(--radius-md);
+      color: var(--text);
+      background: color-mix(in oklch, var(--surface-2) 86%, transparent);
+    }
+  }
+}

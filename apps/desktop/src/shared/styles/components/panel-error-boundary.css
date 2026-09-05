@@ -1,0 +1,13 @@
+@layer components {
+  .panel-error-boundary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    min-height: 120px;
+    padding: var(--space-4);
+    border: 1px solid color-mix(in oklch, var(--danger) 42%, transparent);
+    border-radius: var(--radius-card);
+    background: color-mix(in oklch, var(--danger) 8%, var(--surface-1));
+  }
+}
