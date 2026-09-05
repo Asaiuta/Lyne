@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: root Rust workspace
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The pinned audio-engine-core revision probes SoXR through pkg-config
+      # and converts the MinGW import surface for this MSVC consumer.
+      - name: Set up MSYS2 with SoXR and pkg-config
+        uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-libsoxr
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-tools
+
+      - name: Expose MSYS2 SoXR to the MSVC build
+        shell: pwsh
+        run: |
+          $mingw = "${{ steps.msys2.outputs.msys2-location }}\mingw64"
+          "$mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "PKG_CONFIG_PATH=$mingw\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Activate the repository Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # CI validates the exact audio-engine-core rev pinned in Cargo.toml and
+      # Cargo.lock. Unpushed or unpinned core work is intentionally excluded.
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+  tauri:
+    name: Tauri Rust crate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Activate the repository Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Format
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
+
+      - name: Check
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked
+
+      - name: Test
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+
+  frontend:
+    name: frontend
+    runs-on: windows-latest
+    env:
+      # Electron is retained only for opt-in comparison benchmarks. The Tauri
+      # frontend gates do not need its runtime binary.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Activate the declared npm version
+        run: npm install --global npm@11.6.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # The standard build already includes the release-input bundle budget.
+      - name: Build and enforce bundle budget
+        run: npm run build
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

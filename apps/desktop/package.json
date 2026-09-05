@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.6.0",
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11 <12"
+  },
   "scripts": {
     "dev": "vite",
     "dev:tauri": "npm run build:sidecar:dev && vite",
@@ -47,6 +52,7 @@
     "@tauri-apps/cli": "^2.0.0",
     "@unocss/transformer-variant-group": "^66.6.8",
     "electron": "^39.4.0",
+    "esbuild": "^0.21.5",
     "typescript": "^5.6.3",
     "unocss": "^66.6.8",
     "vite": "^5.4.8",
