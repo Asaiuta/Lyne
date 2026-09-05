@@ -63,10 +63,25 @@ test-results/
 
 
 # Temp files
-.tmp-*/
+/*.backup
+/*.zip
+.tmp-*
 .tmp/
 tmp/
+.sidebar-*.out
+.playwright-cli/
 apps/desktop/vite.config.ts.timestamp-*.mjs
+
+# Agent / benchmark runtime artifacts
+.aec_*
+.aec_vendor/
+.pi-subagents/
+.trellis_legacy_prds.txt
+/nul
+/output/
+/apps/desktop/apps/
+/apps/desktop/.memory-sidecar-samples.csv
+/apps/desktop/.tauri-dev-live-current.stamp
 
 # Local experiments / vendored sources
 libebur128/
