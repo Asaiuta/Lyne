@@ -116,7 +116,6 @@ export function useDetailNavigation(ctx: DetailNavigationContext) {
     isTogglingPlaylistSubscribe: playlistNav.isTogglingPlaylistSubscribe,
     playlistDetailTab: playlistNav.playlistDetailTab,
     playlistFilter: playlistNav.playlistFilter,
-    isPlaylistDetailScrolled: playlistNav.isPlaylistDetailScrolled,
     selectedDailySongs: dailySongsNav.selectedDailySongs,
     dailySongsState: dailySongsNav.dailySongsState,
     dailySongsUpdatedAt: dailySongsNav.dailySongsUpdatedAt,
@@ -181,7 +180,6 @@ export function useDetailNavigation(ctx: DetailNavigationContext) {
     exitVideo: videoNav.exitVideo,
     handleBackToPlaylists: playlistNav.handleBackToPlaylists,
     clearAllDetailViews,
-    handlePlaylistTrackScroll: playlistNav.handlePlaylistTrackScroll,
 
     filteredPlaylistTracks: playlistNav.filteredPlaylistTracks,
     playlistTrackCount: playlistNav.playlistTrackCount,

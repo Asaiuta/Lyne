@@ -2,14 +2,20 @@ import { For, Match, Show, Switch, createMemo } from "solid-js";
 import type { Accessor } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { RouteContentTransition } from "../../../components/RouteContentTransition";
+import {
+  SegmentedTabs,
+  type SegmentedTabItem
+} from "../../../components/page/SegmentedTabs";
 import { NcmMediaList } from "../NcmMediaList";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
-import { NaiveH1, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
+import { NaiveH1 } from "../../../shared/ui/naive";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import type { PlaybackController } from "../shared/playback";
 import type { FeedCardItem, OnlineTrackItem, SearchTab } from "../shared/types";
+import "../../../shared/styles/pages/online-search.css";
+import "../../../shared/styles/pages/online-shared.css";
 
 export interface SearchModeProps {
   searchTab: SearchTab;
@@ -35,7 +41,7 @@ export interface SearchModeProps {
 export function SearchMode(props: SearchModeProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
-  const tabItems = createMemo<ReadonlyArray<NaiveTabItem<SearchTab>>>(() => [
+  const tabItems = createMemo<ReadonlyArray<SegmentedTabItem<SearchTab>>>(() => [
     { value: "songs", label: t("ncm.tabs.songs") },
     { value: "playlists", label: t("ncm.tabs.playlists") },
     { value: "artists", label: t("ncm.tabs.artists") },
@@ -56,12 +62,12 @@ export function SearchMode(props: SearchModeProps) {
         </span>
       </div>
       <div class="online-search-tabs">
-        <NaiveTabs
+        <SegmentedTabs
           class="online-search-segment-tabs"
           value={props.searchTab}
           onChange={props.onSearchTabChange}
           items={tabItems()}
-          type="segment"
+          variant="surface"
           ariaLabel={t("ncm.tabs.aria")}
         />
       </div>
@@ -259,7 +265,7 @@ interface SearchEmptyStateProps {
 
 function SearchEmptyState(props: SearchEmptyStateProps) {
   return (
-    <div class="online-search-empty">
+    <div class="online-empty-state">
       <strong>{props.title}</strong>
       <span>{props.hint}</span>
     </div>

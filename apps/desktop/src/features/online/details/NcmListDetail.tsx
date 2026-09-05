@@ -6,6 +6,7 @@ import { SegmentedTabs, type SegmentedTabItem, type SegmentedTabsVariant } from 
 import { PageToolbarButton } from "../../../components/page/PageToolbarButton";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
 import { NaiveH2, NaiveP } from "../../../shared/ui/naive";
+import "../../../shared/styles/pages/ncm-details.css";
 
 export interface NcmListDetailMetaItem {
   icon: JSX.Element;
@@ -141,6 +142,7 @@ export function NcmListDetail(props: NcmListDetailProps) {
                 <Show when={tabs().length > 0}>
                   <SegmentedTabs
                     class="ncm-list-detail-tabs"
+                    density={props.compact ? "compact" : "regular"}
                     variant={props.tabVariant ?? "surface"}
                     value={activeTab()}
                     onChange={(next) => props.onTabChange?.(next)}

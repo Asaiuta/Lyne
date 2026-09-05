@@ -32,7 +32,6 @@ export function OnlinePlaylistDetailRoute(props: OnlinePlaylistDetailRouteProps)
       isLoadingTracks={props.detailNav.isLoadingPlaylistTracks()}
       isLoadingDetail={props.detailNav.isLoadingPlaylistDetail()}
       isTogglingSubscribe={props.detailNav.isTogglingPlaylistSubscribe()}
-      isScrolled={props.detailNav.isPlaylistDetailScrolled()}
       filter={props.detailNav.playlistFilter()}
       detailTab={props.detailNav.playlistDetailTab()}
       setFilter={props.detailNav.setPlaylistFilter}
@@ -44,7 +43,6 @@ export function OnlinePlaylistDetailRoute(props: OnlinePlaylistDetailRouteProps)
       onPlaylistUpdated={props.detailNav.updateSelectedPlaylist}
       onNavigateToSongWiki={props.onNavigateToSongWiki}
       onNavigateToMv={props.onNavigateToMv}
-      onScroll={props.detailNav.handlePlaylistTrackScroll}
       loginProfile={props.loginProfile}
       setFeedback={props.setFeedback}
       playback={props.playback}

@@ -39,6 +39,8 @@ import type { OnlineTrackItem } from "../shared/types";
 import { DailySongsBatchModal } from "./DailySongsBatchModal";
 import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
 import { UpdatePlaylistModal } from "./UpdatePlaylistModal";
+import "../../../shared/styles/pages/ncm-details.css";
+import "../../../shared/styles/pages/playlist-detail.css";
 
 export interface PlaylistDetailProps {
   playlist: OnlinePlaylistSummary | null;
@@ -50,7 +52,6 @@ export interface PlaylistDetailProps {
   isLoadingTracks: boolean;
   isLoadingDetail: boolean;
   isTogglingSubscribe: boolean;
-  isScrolled: boolean;
   filter: string;
   detailTab: "songs" | "comments";
   setFilter: (value: string) => void;
@@ -65,7 +66,6 @@ export interface PlaylistDetailProps {
   onReorderTracks?: (fromIndex: number, toIndex: number) => void | Promise<void>;
   onNavigateToSongWiki?: (track: OnlineTrackItem) => void;
   onNavigateToMv?: (track: OnlineTrackItem) => void;
-  onScroll: (event: Event) => void;
   showCommentsTab?: boolean;
   emptyStateText?: string;
   sourcePlaylistId?: number;
@@ -367,6 +367,7 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                           <Show when={showCommentsTab()}>
                             <SegmentedTabs
                               class="playlist-detail-tabs"
+                              density={compact() ? "compact" : "regular"}
                               variant="surface"
                               ariaLabel={t("ncm.playlist.tabs.aria")}
                               value={props.detailTab}
@@ -402,7 +403,6 @@ export function PlaylistDetail(props: PlaylistDetailProps) {
                       onEnqueue={(item) => void props.playback.enqueueOnlineTrack(item)}
                       onContextAction={handleContextAction}
                       contextActions={mediaContextActions()}
-                      onScroll={props.onScroll}
                       draggable={Boolean(props.onReorderTracks) && props.filter.trim().length === 0}
                       onReorder={(fromIndex, toIndex) => void props.onReorderTracks?.(fromIndex, toIndex)}
                       isLoading={props.isLoadingTracks}

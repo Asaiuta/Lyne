@@ -11,13 +11,14 @@ import {
   IconThumbDown
 } from "../../components/icons";
 import type { MediaContextAction } from "../../components/media/mediaContextActions";
+import { PageSectionHeading } from "../../components/page/PageSectionHeading";
 import { SImage } from "../../components/SImage";
 import { createApiClient } from "../../shared/api/client";
 import { usePlayback } from "../../app/PlaybackContext";
 import { useTranslation } from "../../shared/i18n";
 import { useNcmAccount } from "../../shared/state/NcmAccountContext";
 import { useUISettings } from "../../shared/state/useUISettings";
-import { NaiveButton, NaiveH2, NaiveH3 } from "../../shared/ui/naive";
+import { NaiveButton, NaiveH2 } from "../../shared/ui/naive";
 import { NcmMediaList } from "./NcmMediaList";
 import {
   createErrorMessageReader,
@@ -27,6 +28,8 @@ import {
 import { createPlaybackController } from "./shared/playback";
 import type { Feedback, OnlineTrackItem } from "./shared/types";
 import "../../shared/styles/pages/personal-fm.css";
+import "../../shared/styles/pages/online-page.css";
+import "../../shared/styles/pages/online-shared.css";
 
 const api = createApiClient();
 
@@ -52,6 +55,7 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
     api,
     t,
     onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onApplyPlayerState: playbackContext.applyPlayerState,
     onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });
@@ -302,9 +306,7 @@ export function PersonalFmPage(props: PersonalFmPageProps) {
           </section>
 
           <section class="personal-fm-list">
-            <div class="song-wiki-section-title">
-              <NaiveH3>{t("ncm.fm.queue")}</NaiveH3>
-            </div>
+            <PageSectionHeading>{t("ncm.fm.queue")}</PageSectionHeading>
             <NcmMediaList
               items={tracks()}
               rowHeight={74}

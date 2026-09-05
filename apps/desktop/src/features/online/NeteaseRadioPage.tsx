@@ -10,8 +10,11 @@ import {
   IconFormatListFilled
 } from "../../components/icons";
 import { NcmMediaList } from "./NcmMediaList";
+import { BackToTop } from "../../components/page/BackToTop";
 import { PageBackButton } from "../../components/page/PageBackButton";
-import { PageHeader } from "../../components/page/PageHeader";
+import { PageBody } from "../../components/page/PageBody";
+import { PageStickyHeader } from "../../components/page/PageStickyHeader";
+import { PageSurface } from "../../components/page/PageSurface";
 import { SegmentedTabs } from "../../components/page/SegmentedTabs";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { createApiClient } from "../../shared/api/client";
@@ -29,8 +32,20 @@ import {
 import { useTranslation } from "../../shared/i18n";
 import { useUISettings } from "../../shared/state/useUISettings";
 import { ncmDjRadioPageUrl } from "../../shared/api/ncm/urls";
-import { NaiveH2, NaiveSkeleton, NaiveSpin, NaiveTabs, type NaiveTabItem } from "../../shared/ui/naive";
-import "../../shared/styles/pages/cloud-search-liked-radio.css";
+import {
+  NaiveButton,
+  NaiveGrid,
+  NaiveGridItem,
+  NaiveH1,
+  NaiveH3,
+  NaiveSkeleton,
+  NaiveSpin,
+  NaiveTabs,
+  type NaiveTabItem
+} from "../../shared/ui/naive";
+import "../../shared/styles/pages/online-catalog-cards.css";
+import "../../shared/styles/pages/online-page.css";
+import "../../shared/styles/pages/radio.css";
 import {
   type RadioCategory,
   type RadioCategorySection,
@@ -52,7 +67,6 @@ type RadioDetailTab = "programs" | "comments";
 
 const CARD_LIMIT = 20;
 const PROGRAM_LIMIT = 500;
-const COLLAPSED_CATEGORY_COUNT = 6;
 const api = createApiClient();
 
 const safeLoad = async <T,>(load: () => Promise<T>, fallback: T): Promise<T> => {
@@ -112,15 +126,24 @@ function RadioCardGrid(props: {
 
 function RadioCategorySkeleton() {
   return (
-    <div class="radio-category-grid is-loading" aria-hidden="true">
+    <NaiveGrid
+      class="radio-category-grid is-loading"
+      cols="3 400:4 600:5 800:6 1000:7"
+      xGap={20}
+      yGap={20}
+      collapsed
+      role="presentation"
+    >
       <For each={Array.from({ length: 20 }, (_, index) => index)}>
         {() => (
-          <div class="radio-category-card radio-category-card--skeleton">
-            <NaiveSkeleton shape="text" />
-          </div>
+          <NaiveGridItem>
+            <div class="radio-category-card radio-category-card--skeleton">
+              <NaiveSkeleton shape="text" />
+            </div>
+          </NaiveGridItem>
         )}
       </For>
-    </div>
+    </NaiveGrid>
   );
 }
 
@@ -136,7 +159,6 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
   const [isLoadingRadioTracks, setIsLoadingRadioTracks] = createSignal<boolean>(false);
   const [radioProgramLoadCount, setRadioProgramLoadCount] = createSignal<number>(0);
   const [isTogglingRadioSub, setIsTogglingRadioSub] = createSignal<boolean>(false);
-  const [isRadioListScrolled, setIsRadioListScrolled] = createSignal<boolean>(false);
   const [feedback, setFeedback] = createSignal<Feedback>({ tone: "neutral", message: "" });
   const [categoryTab, setCategoryTab] = createSignal<RadioTab>("hot");
   const [radioDetailTab, setRadioDetailTab] = createSignal<RadioDetailTab>("programs");
@@ -146,6 +168,7 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
     api,
     t,
     onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onApplyPlayerState: playbackContext.applyPlayerState,
     onStateRefresh: playbackContext.refreshState,
     setFeedback: (tone, message) => setFeedback({ tone, message })
   });
@@ -193,7 +216,6 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
   );
 
   const categoryItems = createMemo(() => categories() ?? []);
-  const hasOverflowCategories = createMemo(() => categoryItems().length > COLLAPSED_CATEGORY_COUNT);
   const sections = createMemo<RadioCategorySection[]>(() => categorySections() ?? []);
   const categoryTabs = createMemo<ReadonlyArray<NaiveTabItem<RadioTab>>>(() => [
     { value: "hot", label: t("ncm.radio.tab.hot") },
@@ -279,7 +301,6 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
     setRadioDetailInfo(null);
     setRadioTracks([]);
     setRadioProgramLoadCount(0);
-    setIsRadioListScrolled(false);
     setRadioDetailTab("programs");
     setIsLoadingRadioTracks(true);
     try {
@@ -376,15 +397,13 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
   );
   const setRadioDetailTabWithReset = (next: RadioDetailTab) => {
     setRadioDetailTab(next);
-    setIsRadioListScrolled(false);
-  };
-  const handleRadioTrackScroll = (event: Event) => {
-    const target = event.currentTarget as HTMLElement;
-    setIsRadioListScrolled(target.scrollTop > 10);
   };
 
   return (
-    <div class="panel panel-page online-page is-radio-page radio-page">
+    <div
+      class="panel panel-page online-page is-radio-page radio-page"
+      classList={{ "is-radio-detail-view": selectedRadio() !== null }}
+    >
       <Show
         when={selectedRadio()}
         fallback={
@@ -401,9 +420,7 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
             <Show
               when={selectedCategory()}
               fallback={
-                <>
-                  <PageHeader title={t("ncm.radio.title")} meta={<span>{t("ncm.radio.meta")}</span>} />
-
+                <div class="radio-home-view">
                   <section class="radio-type">
                     <Show
                       when={categoryItems().length > 0}
@@ -417,84 +434,110 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
                         )
                       }
                     >
-                      <div
-                        class={`radio-category-grid content-fade-in${
-                          !categoriesExpanded() && hasOverflowCategories() ? " is-collapsed" : ""
-                        }`}
+                      <NaiveGrid
+                        class="radio-category-grid content-fade-in"
+                        cols="3 400:4 600:5 800:6 1000:7"
+                        xGap={20}
+                        yGap={20}
+                        collapsed={!categoriesExpanded()}
                       >
                         <For each={categoryItems()}>
                           {(item) => (
-                            <button type="button" class="radio-category-card radio-category-card--item" onClick={() => setSelectedCategory(item)}>
-                              <span>{item.name}</span>
-                            </button>
+                            <NaiveGridItem>
+                              <button
+                                type="button"
+                                class="radio-category-card radio-category-card--item"
+                                onClick={() => setSelectedCategory(item)}
+                              >
+                                <span>{item.name}</span>
+                              </button>
+                            </NaiveGridItem>
                           )}
                         </For>
-                        <Show when={hasOverflowCategories()}>
-                          <button
-                            type="button"
-                            class="radio-category-card radio-category-card--toggle"
-                            onClick={() => setCategoriesExpanded(!categoriesExpanded())}
-                          >
-                            {categoriesExpanded() ? <IconChevronUp /> : <IconChevronDown />}
-                            <span>{categoriesExpanded() ? t("ncm.radio.categories.collapse") : t("ncm.radio.categories.expand")}</span>
-                          </button>
-                        </Show>
-                      </div>
+                        <NaiveGridItem class="radio-category-grid-suffix" suffix>
+                          {({ overflow }) => (
+                            <button
+                              type="button"
+                              class="radio-category-card radio-category-card--toggle"
+                              onClick={() => setCategoriesExpanded((expanded) => !expanded)}
+                            >
+                              {overflow ? <IconChevronDown /> : <IconChevronUp />}
+                              <span>
+                                {overflow
+                                  ? t("ncm.radio.categories.expand")
+                                  : t("ncm.radio.categories.collapse")}
+                              </span>
+                            </button>
+                          )}
+                        </NaiveGridItem>
+                      </NaiveGrid>
                     </Show>
                   </section>
 
-                  <section class="online-discover-section radio-rec">
-                    <div class="radio-section-title">
-                      <NaiveH2>{t("ncm.radio.section.hot")}</NaiveH2>
-                    </div>
-                    <RadioCardGrid items={hotRadios() ?? []} hiddenCover={uiSettings.hiddenCovers.radio} emptyText={emptyText()} onSelectRadio={openRadioDetail} />
-                  </section>
+                  <div class="radio-home-recommendations">
+                    <section class="radio-rec online-catalog-context">
+                      <NaiveH3 class="radio-section-title" prefix="bar">
+                        {t("ncm.radio.section.hot")}
+                      </NaiveH3>
+                      <RadioCardGrid
+                        items={hotRadios() ?? []}
+                        hiddenCover={uiSettings.hiddenCovers.radio}
+                        emptyText={emptyText()}
+                        onSelectRadio={openRadioDetail}
+                      />
+                    </section>
 
-                  <For each={sections()}>
-                    {(section) => (
-                      <section class="online-discover-section radio-rec">
-                        <button
-                          type="button"
-                          class="radio-section-title radio-section-title--clickable"
-                          onClick={() => setSelectedCategory({ id: section.id, name: section.name })}
-                        >
-                          <NaiveH2>{section.name}</NaiveH2>
-                          <span aria-hidden="true"><IconChevronRight /></span>
-                        </button>
-                        <RadioCardGrid items={section.radios} hiddenCover={uiSettings.hiddenCovers.radio} emptyText={emptyText()} onSelectRadio={openRadioDetail} />
-                      </section>
-                    )}
-                  </For>
-                </>
+                    <For each={sections()}>
+                      {(section) => (
+                        <section class="radio-rec online-catalog-context">
+                          <button
+                            type="button"
+                            class="radio-section-title-action"
+                            onClick={() => setSelectedCategory({ id: section.id, name: section.name })}
+                          >
+                            <NaiveH3 class="radio-section-title" prefix="bar">
+                              <span>{section.name}</span>
+                              <IconChevronRight />
+                            </NaiveH3>
+                          </button>
+                          <RadioCardGrid
+                            items={section.radios}
+                            hiddenCover={uiSettings.hiddenCovers.radio}
+                            emptyText={emptyText()}
+                            onSelectRadio={openRadioDetail}
+                          />
+                        </section>
+                      )}
+                    </For>
+                  </div>
+                </div>
               }
             >
               {(category) => (
-                <>
-                  <PageHeader
-                    title={category().name}
-                    actions={
-                      <PageToolbarButton
-                        variant="secondary"
-                        class="radio-category-back-button"
-                        onClick={() => setSelectedCategory(null)}
-                      >
-                        <IconChevronLeft />
-                        {t("ncm.radio.back")}
-                      </PageToolbarButton>
-                    }
-                    tabs={
-                      <div class="radio-category-tabs">
-                        <NaiveTabs
-                          value={categoryTab()}
-                          onChange={setCategoryTab}
-                          items={categoryTabs()}
-                          type="segment"
-                          ariaLabel={t("ncm.radio.tabs.aria")}
-                        />
-                      </div>
-                    }
+                <div class="radio-category-view">
+                  <header class="radio-category-heading">
+                    <NaiveButton
+                      class="radio-category-back-button"
+                      onClick={() => setSelectedCategory(null)}
+                      round
+                      secondary
+                      size="medium"
+                      strong
+                    >
+                      <IconChevronLeft />
+                      {t("ncm.radio.back")}
+                    </NaiveButton>
+                    <NaiveH1 class="radio-category-title">{category().name}</NaiveH1>
+                  </header>
+                  <NaiveTabs
+                    class="radio-category-tabs"
+                    value={categoryTab()}
+                    onChange={setCategoryTab}
+                    items={categoryTabs()}
+                    type="segment"
+                    ariaLabel={t("ncm.radio.tabs.aria")}
                   />
-                  <section class="online-discover-section radio-rec">
+                  <section class="radio-rec radio-category-results online-catalog-context">
                     <RadioCardGrid
                       items={activeCategoryItems()}
                       hiddenCover={uiSettings.hiddenCovers.radio}
@@ -505,118 +548,131 @@ export function NeteaseRadioPage(props: NeteaseRadioPageProps) {
                       <div class="panel-note">{t("ncm.radio.loading")}</div>
                     </Show>
                   </section>
-                </>
+                </div>
               )}
             </Show>
           </Show>
         }
       >
         {(radio) => (
-          <>
-            <Show when={!props.isDetailRoute}>
-              <PageBackButton
-                ariaLabel={t("ncm.radio.back")}
-                class="radio-inline-back-button"
-                onClick={() => {
-                  setSelectedRadio(null);
-                  setRadioDetailInfo(null);
-                  setRadioTracks([]);
-                  setRadioProgramLoadCount(0);
-                  setRadioDetailTabWithReset("programs");
-                }}
-              />
-            </Show>
-            <section class="online-discover-section radio-rec">
-              <NcmListDetail
-                title={radio().title}
-                coverUrl={radio().coverUrl}
-                hiddenCover={uiSettings.hiddenCovers.radio}
-                compact={isRadioListScrolled()}
-                showCoverMask
-                playCount={radio().playCount}
-                description={radio().description ?? radio().subtitle ?? radioDetailMeta()}
-                metaItems={radioDetailMetaItems()}
-                playLabel={radioPlayLabel()}
-                playDisabled={radioTracks().length === 0}
-                loading={isLoadingRadioTracks()}
-                onPlay={() => {
-                  void playback.playAll(radioTracks());
-                }}
-                activeTab={radioDetailTab()}
-                onTabChange={(next) => setRadioDetailTabWithReset(next === "comments" ? "comments" : "programs")}
-                tabs={[
-                  { value: "programs", label: t("ncm.radio.tab.programs"), count: radioDetailInfo()?.programCount },
-                  { value: "comments", label: t("ncm.playlist.tab.comments") }
-                ]}
-                actionButtons={
-                  <>
-                    <PageToolbarButton
-                      variant="secondary"
-                      class="radio-subscribe-button"
-                      active={isRadioSubscribed()}
-                      disabled={isTogglingRadioSub()}
-                      onClick={() => void toggleRadioSub()}
-                    >
-                      <Show when={isTogglingRadioSub()} fallback={isRadioSubscribed() ? <IconFavoriteFilled /> : <IconFavoriteBorderFilled />}>
-                        <NaiveSpin size={17} ariaHidden />
+          <PageSurface
+            class="radio-detail-view"
+            persistKey={`radio:${radio().id}`}
+            resetKey={radio().id}
+          >
+            <PageStickyHeader threshold={10}>
+              {({ compact }) => (
+                <>
+                  <Show when={!props.isDetailRoute}>
+                    <PageBackButton
+                      ariaLabel={t("ncm.radio.back")}
+                      class="radio-inline-back-button"
+                      onClick={() => {
+                        setSelectedRadio(null);
+                        setRadioDetailInfo(null);
+                        setRadioTracks([]);
+                        setRadioProgramLoadCount(0);
+                        setRadioDetailTabWithReset("programs");
+                      }}
+                    />
+                  </Show>
+                  <section class="radio-detail-content">
+                    <NcmListDetail
+                      title={radio().title}
+                      coverUrl={radio().coverUrl}
+                      hiddenCover={uiSettings.hiddenCovers.radio}
+                      compact={compact()}
+                      showCoverMask
+                      playCount={radio().playCount}
+                      description={radio().description ?? radio().subtitle ?? radioDetailMeta()}
+                      metaItems={radioDetailMetaItems()}
+                      playLabel={radioPlayLabel()}
+                      playDisabled={radioTracks().length === 0}
+                      loading={isLoadingRadioTracks()}
+                      onPlay={() => {
+                        void playback.playAll(radioTracks());
+                      }}
+                      activeTab={radioDetailTab()}
+                      onTabChange={(next) => setRadioDetailTabWithReset(next === "comments" ? "comments" : "programs")}
+                      tabs={[
+                        { value: "programs", label: t("ncm.radio.tab.programs"), count: radioDetailInfo()?.programCount },
+                        { value: "comments", label: t("ncm.playlist.tab.comments") }
+                      ]}
+                      actionButtons={
+                        <>
+                          <PageToolbarButton
+                            variant="secondary"
+                            class="radio-subscribe-button"
+                            active={isRadioSubscribed()}
+                            disabled={isTogglingRadioSub()}
+                            onClick={() => void toggleRadioSub()}
+                          >
+                            <Show when={isTogglingRadioSub()} fallback={isRadioSubscribed() ? <IconFavoriteFilled /> : <IconFavoriteBorderFilled />}>
+                              <NaiveSpin size={17} ariaHidden />
+                            </Show>
+                            {radioSubLabel()}
+                          </PageToolbarButton>
+                          <PageToolbarButton variant="secondary" class="radio-source-button" onClick={() => openRadioSource(radio().id)}>
+                            <IconFormatListFilled />
+                            {t("ncm.playlist.openSource")}
+                          </PageToolbarButton>
+                        </>
+                      }
+                    />
+                    <SegmentedTabs
+                      class="radio-detail-tabs radio-detail-tabs--mobile"
+                      density={compact() ? "compact" : "regular"}
+                      variant="surface"
+                      value={radioDetailTab()}
+                      onChange={(next) => setRadioDetailTabWithReset(next === "comments" ? "comments" : "programs")}
+                      items={[
+                        { value: "programs", label: t("ncm.radio.tab.programs") },
+                        { value: "comments", label: t("ncm.playlist.tab.comments") }
+                      ]}
+                      ariaLabel={t("ncm.radio.detailTabs.aria")}
+                    />
+                    <PageBody class="radio-detail-body">
+                      <Show
+                        when={radioDetailTab() === "programs"}
+                        fallback={
+                          <ResourceCommentsPanel
+                            class="radio-detail-comments"
+                            resourceId={radio().id}
+                            resourceType={7}
+                            title={t("ncm.playlist.tab.comments")}
+                            grouped
+                            pageScrollRoot
+                          />
+                        }
+                      >
+                        <NcmMediaList
+                          items={radioTracks()}
+                          currentSourcePath={playbackContext.currentTrackPath()}
+                          currentSongId={playbackContext.currentSongId()}
+                          isPlayingNow={playbackContext.isPlaying()}
+                          hideArtwork={uiSettings.hiddenCovers.radio}
+                          onPlay={(item) => void playback.playOnlineTrack(item)}
+                          onEnqueue={(item) => void playback.enqueueOnlineTrack(item)}
+                          onContextAction={(action, item) => {
+                            if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
+                          }}
+                          isLoading={isLoadingRadioTracks()}
+                          emptyState={<div class="panel-note">{emptyText()}</div>}
+                        />
                       </Show>
-                      {radioSubLabel()}
-                    </PageToolbarButton>
-                    <PageToolbarButton variant="secondary" class="radio-source-button" onClick={() => openRadioSource(radio().id)}>
-                      <IconFormatListFilled />
-                      {t("ncm.playlist.openSource")}
-                    </PageToolbarButton>
-                  </>
-                }
-              />
-              <div class="radio-detail-tabs radio-detail-tabs--mobile">
-                <SegmentedTabs
-                  variant="surface"
-                  value={radioDetailTab()}
-                  onChange={(next) => setRadioDetailTabWithReset(next === "comments" ? "comments" : "programs")}
-                  items={[
-                    { value: "programs", label: t("ncm.radio.tab.programs") },
-                    { value: "comments", label: t("ncm.playlist.tab.comments") }
-                  ]}
-                  ariaLabel={t("ncm.radio.detailTabs.aria")}
-                />
-              </div>
-              <Show
-                when={radioDetailTab() === "programs"}
-                fallback={
-                  <ResourceCommentsPanel
-                    class="radio-detail-comments"
-                    resourceId={radio().id}
-                    resourceType={7}
-                    title={t("ncm.playlist.tab.comments")}
-                    grouped
-                  />
-                }
-              >
-                <NcmMediaList
-                  items={radioTracks()}
-                  currentSourcePath={playbackContext.currentTrackPath()}
-                  currentSongId={playbackContext.currentSongId()}
-                  isPlayingNow={playbackContext.isPlaying()}
-                  hideArtwork={uiSettings.hiddenCovers.radio}
-                  onPlay={(item) => void playback.playOnlineTrack(item)}
-                  onEnqueue={(item) => void playback.enqueueOnlineTrack(item)}
-                  onContextAction={(action, item) => {
-                    if (action === "song-wiki") props.onNavigateToSongWiki?.(item);
-                  }}
-                  onScroll={handleRadioTrackScroll}
-                  isLoading={isLoadingRadioTracks()}
-                  emptyState={<div class="panel-note">{emptyText()}</div>}
-                />
-              </Show>
-              <Show when={feedback().tone === "error"}>
-                <div class="panel-note">{feedback().message}</div>
-              </Show>
-              <Show when={feedback().tone === "success"}>
-                <div class="panel-note">{feedback().message}</div>
-              </Show>
-            </section>
-          </>
+                    </PageBody>
+                    <Show when={feedback().tone === "error"}>
+                      <div class="panel-note radio-detail-feedback">{feedback().message}</div>
+                    </Show>
+                    <Show when={feedback().tone === "success"}>
+                      <div class="panel-note radio-detail-feedback">{feedback().message}</div>
+                    </Show>
+                  </section>
+                </>
+              )}
+            </PageStickyHeader>
+            <BackToTop label={t("media.scroll.top")} />
+          </PageSurface>
         )}
       </Show>
     </div>

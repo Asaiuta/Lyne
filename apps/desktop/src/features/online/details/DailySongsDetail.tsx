@@ -19,6 +19,8 @@ import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedbac
 import type { PlaybackController } from "../shared/playback";
 import type { NcmProfile, OnlineTrackItem } from "../shared/types";
 import { DailySongsBatchModal } from "./DailySongsBatchModal";
+import "../../../shared/styles/pages/ncm-details.css";
+import "../../../shared/styles/pages/ncm-daily-detail.css";
 
 export interface DailySongsDetailProps {
   loginProfile: NcmProfile | null;
@@ -117,12 +119,12 @@ export function DailySongsDetail(props: DailySongsDetailProps) {
   };
 
   return (
-    <PageSurface class="ncm-daily-detail" persistKey="discover:daily" resetKey={props.updatedAt}>
+    <PageSurface class="ncm-detail-surface" persistKey="discover:daily" resetKey={props.updatedAt}>
       <PageHero size="lg">
         <Show when={(props.showInlineBack ?? true) && props.onBack}>
           <PageBackButton
             ariaLabel={t("ncm.daily.backToFeed")}
-            class="ncm-daily-detail-back"
+            class="ncm-detail-back"
             onClick={() => props.onBack?.()}
           />
         </Show>

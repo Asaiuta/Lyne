@@ -14,6 +14,7 @@ import type { PlaybackController } from "../shared/playback";
 import type { FeedCardItem, NcmProfile, OnlineTrackItem } from "../shared/types";
 import { createDetailViewReporter, type OnlineDetailViewReporterProps } from "../shared/detailViewReporter";
 import { useDetailNavigation } from "../shared/useDetailNavigation";
+import "../../../shared/styles/pages/online-recommend.css";
 
 export interface RecommendModeProps extends OnlineDetailViewReporterProps {
   loginProfile: Accessor<NcmProfile | null>;

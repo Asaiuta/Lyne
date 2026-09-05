@@ -42,7 +42,6 @@ export function OnlineLikedPlaylistDetailRoute(props: OnlineLikedPlaylistDetailR
       isLoadingTracks={props.detailNav.isLoadingPlaylistTracks()}
       isLoadingDetail={props.detailNav.isLoadingPlaylistDetail()}
       isTogglingSubscribe={props.detailNav.isTogglingPlaylistSubscribe()}
-      isScrolled={props.detailNav.isPlaylistDetailScrolled()}
       filter={props.detailNav.playlistFilter()}
       detailTab={props.detailNav.playlistDetailTab()}
       setFilter={props.detailNav.setPlaylistFilter}
@@ -56,7 +55,6 @@ export function OnlineLikedPlaylistDetailRoute(props: OnlineLikedPlaylistDetailR
       onReorderTracks={props.detailNav.reorderPlaylistTracks}
       onNavigateToSongWiki={props.onNavigateToSongWiki}
       onNavigateToMv={props.onNavigateToMv}
-      onScroll={props.detailNav.handlePlaylistTrackScroll}
       showCommentsTab={false}
       emptyStateText={t("ncm.liked.empty")}
       sourcePlaylistId={props.detailNav.selectedPlaylist()?.id}

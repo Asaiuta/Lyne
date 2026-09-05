@@ -27,8 +27,7 @@ import { OnlineDailySongsRoute } from "./details/OnlineDailySongsRoute";
 import { OnlineStandalonePlaylistDetailRoute } from "./details/OnlineStandalonePlaylistDetailRoute";
 import { OnlineVideoDetailRoute } from "./details/OnlineVideoDetailRoute";
 import type { DiscoverTab } from "../../shared/ui/navigation";
-import "../../shared/styles/components/online-pages.css";
-import "../../shared/styles/pages/cloud-search-liked-radio.css";
+import "../../shared/styles/pages/online-page.css";
 
 const api = createApiClient();
 
@@ -82,6 +81,7 @@ export function NeteasePage(props: NeteasePageProps) {
     api,
     t,
     onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onApplyPlayerState: playbackContext.applyPlayerState,
     onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });

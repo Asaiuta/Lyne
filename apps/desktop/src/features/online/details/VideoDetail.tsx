@@ -16,6 +16,8 @@ import { NaiveButton, NaiveH2, NaiveP } from "../../../shared/ui/naive";
 import type { FeedCardItem } from "../shared/types";
 import { parseVideoDetail, parseVideoSource, type VideoDetailInfo, type VideoSource } from "../videoParsers";
 import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
+import "../../../shared/styles/pages/ncm-details.css";
+import "../../../shared/styles/pages/ncm-video-detail.css";
 
 export interface VideoDetailProps {
   video: FeedCardItem | null;
@@ -131,7 +133,7 @@ export function VideoDetail(props: VideoDetailProps) {
         <Show when={(props.showInlineBack ?? true) && props.onBack}>
           <PageBackButton
             ariaLabel={t("ncm.video.backToFeed")}
-            class="ncm-daily-detail-back"
+            class="ncm-detail-back"
             onClick={() => props.onBack?.()}
           />
         </Show>
@@ -171,6 +173,7 @@ export function VideoDetail(props: VideoDetailProps) {
         <Show when={sources().length > 1}>
           <SegmentedTabs
             class="ncm-video-quality"
+            density="compact"
             variant="tonal"
             ariaLabel={t("ncm.video.quality")}
             value={activeQualityValue()}
@@ -238,7 +241,6 @@ export function VideoDetail(props: VideoDetailProps) {
         <ResourceCommentsPanel
           resourceId={currentVideoId()}
           resourceType={commentsResourceType()}
-          class="ncm-video-comments"
           title={t("ncm.video.comments")}
         />
       </PageBody>

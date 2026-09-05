@@ -29,6 +29,7 @@ import {
 import { useTranslation } from "../../../shared/i18n";
 import { useNcmAccount } from "../../../shared/state/NcmAccountContext";
 import { NaiveH3, NaiveP, NaiveSpin, NaiveText } from "../../../shared/ui/naive";
+import "../../../shared/styles/pages/ncm-comments.css";
 
 type ResourceCommentSort = "hot" | "new";
 type CommentFeedback = {
@@ -568,6 +569,7 @@ export function ResourceCommentsPanel(props: ResourceCommentsPanelProps) {
           </NaiveH3>
           <SegmentedTabs
             class="ncm-resource-comment-tabs"
+            density="compact"
             variant="tonal"
             value={commentSort()}
             onChange={(next) => setCommentSort(next === "new" ? "new" : "hot")}

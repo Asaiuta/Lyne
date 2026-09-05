@@ -6,8 +6,10 @@ import { PageHeader } from "../../../components/page/PageHeader";
 import { RouteContentTransition } from "../../../components/RouteContentTransition";
 import { useTranslation } from "../../../shared/i18n";
 import { createApiClient } from "../../../shared/api/client";
+import { cacheFetch } from "../../../shared/state/cacheFetch";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { usePresenceTransition } from "../../../shared/ui/usePresenceTransition";
+import { scheduleIdlePreload } from "../../../shared/ui/idlePreload";
 import { NaiveP, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
 import { OnlineLikedPlaylistDetailRoute } from "../details/OnlineLikedPlaylistDetailRoute";
 import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
@@ -40,8 +42,38 @@ import {
   DiscoverToplistShowcase
 } from "./discoverShowcases";
 import { DISCOVER_TABS, normalizeDiscoverTab } from "../../../shared/ui/navigation";
+import "../../../shared/styles/modals/category-modal.css";
+import "../../../shared/styles/pages/online-catalog-cards.css";
+import "../../../shared/styles/pages/online-discover.css";
 
 const api = createApiClient();
+const DISCOVER_STATIC_CACHE_TTL_MS = 10 * 60 * 1000;
+
+const loadDiscoverPlaylistCategories = () =>
+  cacheFetch(
+    "ncm.discover.playlist-categories",
+    () => api.getNcmDiscoverPlaylistCategories(),
+    DISCOVER_STATIC_CACHE_TTL_MS
+  );
+
+const loadDiscoverToplists = () =>
+  cacheFetch(
+    "ncm.discover.toplists",
+    () => api.listNcmDiscoverToplists(),
+    DISCOVER_STATIC_CACHE_TTL_MS
+  );
+
+const DISCOVER_TOPLIST_IDLE_TIMING = {
+  idleTimeout: 1500,
+  fallbackDelay: 800
+} as const;
+const DISCOVER_TOPLIST_PRELOAD_DELAY_MS = 6000;
+
+const DISCOVER_SONGS_IDLE_TIMING = {
+  idleTimeout: 2400,
+  fallbackDelay: 1400
+} as const;
+const DISCOVER_SONGS_PRELOAD_DELAY_MS = 9000;
 
 const toFeedCardItem = (item: DiscoverCardItem): FeedCardItem => ({
   id: item.id,
@@ -79,7 +111,9 @@ export function DiscoverMode(props: DiscoverModeProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
 
-  const [discoverTab, setDiscoverTab] = createSignal<DiscoverTab>("playlists");
+  const [discoverTab, setDiscoverTab] = createSignal<DiscoverTab>(
+    normalizeDiscoverTab(props.discoverTabRequest?.tab)
+  );
 
   const [discoverPlaylistKind, setDiscoverPlaylistKind] = createSignal<DiscoverPlaylistKind>("normal");
   const [discoverArtistInitial, setDiscoverArtistInitial] = createSignal<number | string>(-1);
@@ -200,17 +234,53 @@ export function DiscoverMode(props: DiscoverModeProps) {
     { defer: true }
   ));
 
-  const [discoverToplists] = createResource(() =>
-    safeLoadDiscover(() => api.listNcmDiscoverToplists(), [])
+  const [shouldLoadToplists, setShouldLoadToplists] = createSignal<boolean>(false);
+  const [shouldLoadSongs, setShouldLoadSongs] = createSignal<boolean>(false);
+  const [discoverToplists] = createResource(
+    () => shouldLoadToplists() || null,
+    () => safeLoadDiscover(loadDiscoverToplists, [])
   );
   const [discoverSongs] = createResource(
-    () => selectedNewArea().songType,
+    () => shouldLoadSongs() ? selectedNewArea().songType : null,
     (type) => safeLoadDiscover(() => api.listNcmDiscoverSongs({ type }), [])
   );
 
+  const activateDiscoverResources = (tab: DiscoverTab) => {
+    if (tab === "toplists") setShouldLoadToplists(true);
+    if (tab === "new" && discoverNewKind() === "songs") setShouldLoadSongs(true);
+  };
+
+  const setDiscoverNewKindAndLoad = (kind: DiscoverNewKind) => {
+    if (kind === "songs") setShouldLoadSongs(true);
+    setDiscoverNewKind(kind);
+  };
+
+  onMount(() => {
+    let cancelToplistsIdle: (() => void) | undefined;
+    let cancelSongsIdle: (() => void) | undefined;
+    const toplistsTimer = window.setTimeout(() => {
+      cancelToplistsIdle = scheduleIdlePreload(
+        () => setShouldLoadToplists(true),
+        DISCOVER_TOPLIST_IDLE_TIMING
+      );
+    }, DISCOVER_TOPLIST_PRELOAD_DELAY_MS);
+    const songsTimer = window.setTimeout(() => {
+      cancelSongsIdle = scheduleIdlePreload(
+        () => setShouldLoadSongs(true),
+        DISCOVER_SONGS_IDLE_TIMING
+      );
+    }, DISCOVER_SONGS_PRELOAD_DELAY_MS);
+    onCleanup(() => {
+      window.clearTimeout(toplistsTimer);
+      window.clearTimeout(songsTimer);
+      cancelToplistsIdle?.();
+      cancelSongsIdle?.();
+    });
+  });
+
   onMount(async () => {
     try {
-      const categories = await api.getNcmDiscoverPlaylistCategories();
+      const categories = await loadDiscoverPlaylistCategories();
       setCatTypes(categories.categories);
       setCatEntries(categories.entries);
       setHqCatNames(new Set(categories.hqNames));
@@ -226,7 +296,9 @@ export function DiscoverMode(props: DiscoverModeProps) {
       () => props.discoverTabRequest?.version,
       (version) => {
         if (version === undefined || version === 0) return;
-        setDiscoverTab(normalizeDiscoverTab(props.discoverTabRequest?.tab));
+        const nextTab = normalizeDiscoverTab(props.discoverTabRequest?.tab);
+        activateDiscoverResources(nextTab);
+        setDiscoverTab(nextTab);
       }
     )
   );
@@ -298,6 +370,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
 
   const pageTitle = () => t("ncm.title.discover");
   const setDiscoverTabAndPersist = (tab: DiscoverTab) => {
+    activateDiscoverResources(tab);
     setDiscoverTab(tab);
     props.onDiscoverTabChange?.(tab);
   };
@@ -472,7 +545,7 @@ export function DiscoverMode(props: DiscoverModeProps) {
                   <DiscoverNewShowcase
                     newAreas={DISCOVER_NEW_AREAS}
                     discoverNewKind={discoverNewKind()}
-                    setDiscoverNewKind={setDiscoverNewKind}
+                    setDiscoverNewKind={setDiscoverNewKindAndLoad}
                     discoverNewAreaIndex={discoverNewAreaIndex()}
                     setDiscoverNewAreaIndex={setDiscoverNewAreaIndex}
                     discoverSectionTitle={discoverSectionTitle(displayedDiscoverTab())}

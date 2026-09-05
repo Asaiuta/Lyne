@@ -1,18 +1,25 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, type JSX } from "solid-js";
 import type { Resource } from "solid-js";
 import { AlbumCard } from "../../../components/AlbumCard";
 import { EmptyState } from "../../../components/EmptyState";
 import { IconPlay } from "../../../components/icons";
 import { VirtualizedGrid } from "../../../components/media/VirtualizedGrid";
 import { NcmMediaList } from "../NcmMediaList";
-import { CoverGridSkeleton } from "../../../components/page/Skeleton";
+import { CoverGridSkeleton } from "../../../components/page/CoverGridSkeleton";
 import { LoadMoreButton } from "../../../components/page/LoadMoreButton";
 import { SImage } from "../../../components/SImage";
 import { usePlayback } from "../../../app/PlaybackContext";
 import { useTranslation } from "../../../shared/i18n";
 import { useUISettings } from "../../../shared/state/useUISettings";
 import { coverSizeUrl } from "../../../shared/ui/coverSize";
-import { NaiveSkeleton, NaiveTabs, type NaiveTabItem } from "../../../shared/ui/naive";
+import {
+  NaiveDivider,
+  NaiveGrid,
+  NaiveGridItem,
+  NaiveSkeleton,
+  NaiveTabs,
+  type NaiveTabItem
+} from "../../../shared/ui/naive";
 import { DISCOVER_PAGE_LIMIT, isTranslationKey } from "../shared/parsers";
 import type { PlaybackController } from "../shared/playback";
 import type {
@@ -52,7 +59,7 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
     { value: "hq", label: t("ncm.discover.playlists.hq") }
   ]);
   return (
-    <section class="online-discover-section online-discover-playlists">
+    <section class="online-discover-section online-discover-playlists online-catalog-context">
       <div class="online-discover-menu">
         <button
           ref={(element) => props.setCatButtonRef(element)}
@@ -90,7 +97,7 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
         }
       >
         <VirtualizedGrid
-          class="album-grid content-fade-in"
+          class="album-grid cover-list-grid content-fade-in"
           items={props.allPlaylists}
           renderItem={(item) => (
             <AlbumCard
@@ -108,7 +115,7 @@ export function DiscoverPlaylistShowcase(props: DiscoverPlaylistShowcaseProps) {
         />
       </Show>
       <Show when={props.hasMorePlaylists && props.allPlaylists.length > 0}>
-        <div class="online-discover-load-more">
+        <div class="load-more-button-row">
           <LoadMoreButton
             label={t("ncm.discover.loadMore")}
             loading={props.isLoadingPlaylists}
@@ -140,7 +147,7 @@ export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
   return (
-    <section class="online-discover-section online-discover-artists">
+    <section class="online-discover-section online-discover-artists online-catalog-context">
       <div class="online-discover-filter-menu">
         <For each={props.artistInitials}>
           {(item) => (
@@ -175,7 +182,7 @@ export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
         }
       >
         <VirtualizedGrid
-          class="album-grid content-fade-in"
+          class="album-grid cover-list-grid content-fade-in"
           items={props.allArtists}
           estimatedRowHeight={180}
           renderItem={(item) => (
@@ -192,7 +199,7 @@ export function DiscoverArtistShowcase(props: DiscoverArtistShowcaseProps) {
         />
       </Show>
       <Show when={props.hasMoreArtists && props.allArtists.length > 0}>
-        <div class="online-discover-load-more">
+        <div class="load-more-button-row">
           <LoadMoreButton
             label={t("ncm.discover.loadMore")}
             loading={props.isLoadingArtists}
@@ -210,26 +217,116 @@ export interface DiscoverToplistShowcaseProps {
   onLoadPlaylist: (playlist: OnlinePlaylistSummary) => void | Promise<void>;
 }
 
-function OfficialToplistSkeleton() {
+interface OfficialToplistGridProps {
+  children: JSX.Element;
+  loading?: boolean;
+}
+
+function OfficialToplistGrid(props: OfficialToplistGridProps) {
   return (
-    <div class="online-toplist-grid online-toplist-grid--loading" aria-hidden="true">
-      <For each={Array.from({ length: 6 }, (_, index) => index)}>
+    <NaiveGrid
+      class={`online-toplist-grid${props.loading ? " online-toplist-grid--loading" : " content-fade-in"}`}
+      cols="1 600:2 1000:3"
+      xGap={20}
+      yGap={20}
+      role="presentation"
+    >
+      {props.children}
+    </NaiveGrid>
+  );
+}
+
+interface OfficialToplistCardProps {
+  coverVisible: boolean;
+  item: DiscoverToplistItem;
+  onClick: () => void;
+}
+
+function OfficialToplistCard(props: OfficialToplistCardProps) {
+  return (
+    <button
+      type="button"
+      class={`online-toplist-card${props.coverVisible ? "" : " is-cover-hidden"}`}
+      onClick={props.onClick}
+    >
+      <div class="online-toplist-title-row">
+        <strong class="online-toplist-title">{props.item.title}</strong>
+        <Show when={props.item.subtitle}>
+          {(subtitle) => <span class="online-toplist-desc">{subtitle()}</span>}
+        </Show>
+      </div>
+      <div class="online-toplist-content-row">
+        <Show when={props.coverVisible}>
+          <div class="online-toplist-cover" aria-hidden="true">
+            <Show
+              when={props.item.coverUrl}
+              fallback={<span class="online-toplist-cover-fallback">{props.item.title.slice(0, 1)}</span>}
+            >
+              {(coverUrl) => (
+                <SImage
+                  src={coverSizeUrl(coverUrl(), "m")}
+                  alt=""
+                  observeVisibility={true}
+                  shape="rect"
+                  aspect="square"
+                />
+              )}
+            </Show>
+            <span class="online-toplist-cover-play" aria-hidden="true">
+              <IconPlay />
+            </span>
+          </div>
+        </Show>
+        <div class="online-toplist-songs">
+          <For each={props.item.tracks.slice(0, 3)}>
+            {(track, index) => (
+              <span class="online-toplist-song">
+                <span>{index() + 1}. {track.title}</span>
+                <Show when={track.artist}>
+                  {(artist) => <small>{artist()}</small>}
+                </Show>
+              </span>
+            )}
+          </For>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+interface OfficialToplistSkeletonProps {
+  coverVisible: boolean;
+}
+
+function OfficialToplistSkeleton(props: OfficialToplistSkeletonProps) {
+  return (
+    <OfficialToplistGrid loading>
+      <For each={Array.from({ length: 4 }, (_, index) => index)}>
         {() => (
-          <div class="online-toplist-card online-toplist-card--skeleton">
-            <NaiveSkeleton class="online-toplist-cover" />
-            <div class="online-toplist-copy">
-              <NaiveSkeleton class="online-toplist-skeleton-title" shape="text" />
-              <NaiveSkeleton class="online-toplist-skeleton-desc" shape="text" />
-              <div class="online-toplist-songs">
-                <NaiveSkeleton class="online-toplist-skeleton-song" shape="text" />
-                <NaiveSkeleton class="online-toplist-skeleton-song" shape="text" />
-                <NaiveSkeleton class="online-toplist-skeleton-song" shape="text" />
+          <NaiveGridItem>
+            <div
+              class={`online-toplist-card online-toplist-card--skeleton${props.coverVisible ? "" : " is-cover-hidden"}`}
+              aria-hidden="true"
+            >
+              <div class="online-toplist-title-row">
+                <NaiveSkeleton class="online-toplist-skeleton-title" shape="text" />
+                <NaiveSkeleton class="online-toplist-skeleton-desc" shape="text" />
+              </div>
+              <div class="online-toplist-content-row">
+                <Show when={props.coverVisible}>
+                  <NaiveSkeleton class="online-toplist-cover" />
+                </Show>
+                <div class="online-toplist-songs">
+                  <NaiveSkeleton class="online-toplist-skeleton-song" shape="text" />
+                  <NaiveSkeleton class="online-toplist-skeleton-song" shape="text" />
+                  <NaiveSkeleton class="online-toplist-skeleton-song" shape="text" />
+                </div>
               </div>
             </div>
-          </div>
+          </NaiveGridItem>
         )}
       </For>
-    </div>
+    </OfficialToplistGrid>
   );
 }
 
@@ -240,61 +337,38 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
   const selectedItems = () => (props.discoverToplists() ?? []).filter((item) => !item.isOfficial);
   const isLoading = () => props.discoverToplists.loading;
   return (
-    <section class="online-discover-section online-discover-toplists">
-      <div class="online-discover-divider"><span>{t("ncm.discover.toplists.official")}</span></div>
+    <section class="online-discover-section online-discover-toplists online-catalog-context">
+      <NaiveDivider class="online-discover-divider">
+        {t("ncm.discover.toplists.official")}
+      </NaiveDivider>
       <Show
         when={officialItems().length > 0}
         fallback={
           isLoading() ? (
-            <OfficialToplistSkeleton />
+            <OfficialToplistSkeleton coverVisible={!uiSettings.hiddenCovers.toplist} />
           ) : (
             <EmptyState description={t("ncm.home.empty")} size="sm" />
           )
         }
       >
-        <div class="online-toplist-grid content-fade-in">
+        <OfficialToplistGrid>
           <For each={officialItems()}>
             {(item) => (
-              <button
-                type="button"
-                class={`online-toplist-card${uiSettings.hiddenCovers.toplist ? " is-cover-hidden" : ""}`}
-                onClick={() =>
-                  void props.onLoadPlaylist(playlistSummaryFromDiscoverCard(item))
-                }
-              >
-                <Show when={!uiSettings.hiddenCovers.toplist}>
-                  <div class="online-toplist-cover" aria-hidden="true">
-                    <Show when={item.coverUrl} fallback={<span>{item.title.slice(0, 1)}</span>}>
-                      {(coverUrl) => <SImage src={coverSizeUrl(coverUrl(), "m")} alt="" observeVisibility={true} shape="rect" aspect="square" />}
-                    </Show>
-                    <span class="online-toplist-cover-play" aria-hidden="true">
-                      <IconPlay />
-                    </span>
-                  </div>
-                </Show>
-                <div class="online-toplist-copy">
-                  <strong>{item.title}</strong>
-                  <Show when={item.subtitle}>
-                    {(subtitle) => <span class="online-toplist-desc">{subtitle()}</span>}
-                  </Show>
-                  <div class="online-toplist-songs">
-                    <For each={item.tracks.slice(0, 3)}>
-                      {(track, index) => (
-                        <span class="online-toplist-song">
-                          <span>{index() + 1}. {track.title}</span>
-                          <small>{track.artist ?? ""}</small>
-                        </span>
-                      )}
-                    </For>
-                  </div>
-                </div>
-              </button>
+              <NaiveGridItem>
+                <OfficialToplistCard
+                  item={item}
+                  coverVisible={!uiSettings.hiddenCovers.toplist}
+                  onClick={() => void props.onLoadPlaylist(playlistSummaryFromDiscoverCard(item))}
+                />
+              </NaiveGridItem>
             )}
           </For>
-        </div>
+        </OfficialToplistGrid>
       </Show>
 
-      <div class="online-discover-divider"><span>{t("ncm.discover.toplists.selected")}</span></div>
+      <NaiveDivider class="online-discover-divider online-discover-divider--selected">
+        {t("ncm.discover.toplists.selected")}
+      </NaiveDivider>
       <Show
         when={selectedItems().length > 0}
         fallback={
@@ -305,7 +379,7 @@ export function DiscoverToplistShowcase(props: DiscoverToplistShowcaseProps) {
           )
         }
       >
-        <div class="album-grid content-fade-in">
+        <div class="album-grid cover-list-grid content-fade-in">
           <For each={selectedItems()}>
             {(item) => (
               <AlbumCard
@@ -365,7 +439,7 @@ export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
   const { t } = useTranslation();
   const uiSettings = useUISettings();
   return (
-    <section class="online-discover-section online-discover-videos">
+    <section class="online-discover-section online-discover-videos online-catalog-context">
       <div class="online-discover-menu online-discover-menu--stacked">
         <div class="online-discover-filter-menu">
           <For each={props.mvAreas}>
@@ -411,7 +485,7 @@ export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
         }
       >
         <VirtualizedGrid
-          class="album-grid online-search-card-grid--videos content-fade-in"
+          class="album-grid cover-list-grid online-discover-video-grid content-fade-in"
           items={props.allVideos}
           estimatedRowHeight={220}
           renderItem={(item) => (
@@ -426,7 +500,7 @@ export function DiscoverMvShowcase(props: DiscoverMvShowcaseProps) {
         />
       </Show>
       <Show when={props.hasMoreVideos && props.allVideos.length > 0}>
-        <div class="online-discover-load-more">
+        <div class="load-more-button-row">
           <LoadMoreButton
             label={t("ncm.discover.loadMore")}
             loading={props.isLoadingVideos}
@@ -447,7 +521,7 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
   const hasVisibleItems = () => (props.discoverNewKind === "albums" ? props.allAlbums.length > 0 : songs().length > 0);
 
   return (
-    <section class="online-discover-section online-discover-new">
+    <section class="online-discover-section online-discover-new online-catalog-context">
       <div class="online-discover-menu">
         <div class="online-discover-filter-menu">
           <button type="button" class={props.discoverNewKind === "albums" ? "is-active" : ""} onClick={() => props.setDiscoverNewKind("albums")}>
@@ -498,7 +572,7 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
         }>
           <div class="online-discover-card-stack content-fade-in">
             <VirtualizedGrid
-              class="album-grid"
+              class="album-grid cover-list-grid"
               items={props.allAlbums}
               renderItem={(item) => (
                 <AlbumCard
@@ -511,7 +585,7 @@ export function DiscoverNewShowcase(props: DiscoverNewShowcaseProps) {
               )}
             />
             <Show when={props.hasMoreAlbums}>
-              <div class="online-discover-load-more">
+              <div class="load-more-button-row">
                 <LoadMoreButton
                   label={t("ncm.discover.loadMore")}
                   loading={props.isLoadingAlbums}

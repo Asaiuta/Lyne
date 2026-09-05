@@ -25,6 +25,8 @@ import type { PlaybackController } from "../shared/playback";
 import type { FeedCardItem, OnlineTrackItem } from "../shared/types";
 import { NcmListDetail, type NcmListDetailMetaItem } from "./NcmListDetail";
 import { ResourceCommentsPanel } from "./ResourceCommentsPanel";
+import "../../../shared/styles/pages/ncm-details.css";
+import "../../../shared/styles/pages/ncm-album-detail.css";
 
 export interface AlbumDetailProps {
   album: FeedCardItem | null;
@@ -99,7 +101,7 @@ export function AlbumDetail(props: AlbumDetailProps) {
   });
   return (
     <Show when={album()}>
-      <PageSurface class="ncm-daily-detail ncm-detail-page ncm-detail-page--album" persistKey={`discover:album:${albumId()}`} resetKey={albumId()}>
+      <PageSurface class="ncm-detail-surface ncm-detail-page ncm-detail-page--album" persistKey={`discover:album:${albumId()}`} resetKey={albumId()}>
         <PageStickyHeader threshold={10}>
           {({ compact }) => (
             <>
@@ -108,7 +110,7 @@ export function AlbumDetail(props: AlbumDetailProps) {
                   {(onBack) => (
                     <PageBackButton
                       ariaLabel={t("ncm.album.backToFeed")}
-                      class="ncm-daily-detail-back"
+                      class="ncm-detail-back"
                       onClick={onBack()}
                     />
                   )}
@@ -143,7 +145,7 @@ export function AlbumDetail(props: AlbumDetailProps) {
                   actionButtons={
                     <PageToolbarButton
                       variant="secondary"
-                      class="ncm-artist-subscribe"
+                      class="ncm-detail-subscribe"
                       active={props.detail?.subscribed === true}
                       disabled={props.isLoadingDetail || props.isTogglingSubscribe}
                       onClick={() => void props.onToggleSubscribe()}
@@ -157,6 +159,7 @@ export function AlbumDetail(props: AlbumDetailProps) {
                 />
                 <div class="ncm-detail-tabs ncm-detail-tabs--mobile">
                   <SegmentedTabs
+                    density={compact() ? "compact" : "regular"}
                     variant="surface"
                     value={detailTab()}
                     onChange={(next) => setDetailTab(next === "comments" ? "comments" : "songs")}

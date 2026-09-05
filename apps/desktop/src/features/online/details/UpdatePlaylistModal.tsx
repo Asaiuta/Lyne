@@ -8,10 +8,13 @@ import type { OnlinePlaylistSummary } from "../ncmPlaylistSummary";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import {
   NaiveButton,
+  NaiveForm,
+  NaiveFormItem,
   NaiveInput,
   NaiveSelect,
   type NaiveSelectOption
 } from "../../../shared/ui/naive";
+import "../../../shared/styles/components/ncm-update-playlist-modal.css";
 
 interface UpdatePlaylistModalProps {
   open: boolean;
@@ -113,15 +116,15 @@ export function UpdatePlaylistModal(props: UpdatePlaylistModalProps) {
       onClose={props.onClose}
       size="md"
     >
-      <form
+      <NaiveForm
         class="ncm-update-playlist-modal"
+        showFeedback={false}
         onSubmit={(event) => {
           event.preventDefault();
           void submit();
         }}
       >
-        <div class="create-playlist-field">
-          <span class="field-label">{t("ncm.playlist.name")}</span>
+        <NaiveFormItem label={t("ncm.playlist.name")} path="name">
           <NaiveInput
             type="text"
             value={name()}
@@ -131,9 +134,8 @@ export function UpdatePlaylistModal(props: UpdatePlaylistModalProps) {
             onUpdateValue={setName}
             ariaLabel={t("ncm.playlist.name")}
           />
-        </div>
-        <div class="create-playlist-field">
-          <span class="field-label">{t("ncm.playlist.description")}</span>
+        </NaiveFormItem>
+        <NaiveFormItem label={t("ncm.playlist.description")} path="description">
           <NaiveInput
             type="textarea"
             class="ncm-update-playlist-desc"
@@ -145,9 +147,12 @@ export function UpdatePlaylistModal(props: UpdatePlaylistModalProps) {
             onUpdateValue={setDesc}
             ariaLabel={t("ncm.playlist.description")}
           />
-        </div>
-        <div class="ncm-update-playlist-tags">
-          <span class="field-label">{t("ncm.playlist.tags")}</span>
+        </NaiveFormItem>
+        <NaiveFormItem
+          class="ncm-update-playlist-tags"
+          label={t("ncm.playlist.tags")}
+          path="tags"
+        >
           <Show
             when={availableTags().length > 0}
             fallback={<div class="status-line">{loadingTags() ? t("ncm.playlist.loadingTags") : t("ncm.playlist.noTags")}</div>}
@@ -165,19 +170,18 @@ export function UpdatePlaylistModal(props: UpdatePlaylistModalProps) {
               ariaLabel={t("ncm.playlist.tags")}
             />
           </Show>
-        </div>
+        </NaiveFormItem>
         <NaiveButton
           nativeType="submit"
           variant="primary"
           strong
           block
-          class="create-playlist-submit"
           disabled={!canSubmit()}
         >
           <IconPlaylist />
           <span>{submitting() ? t("ncm.playlist.updating") : t("ncm.playlist.edit")}</span>
         </NaiveButton>
-      </form>
+      </NaiveForm>
     </Modal>
   );
 }

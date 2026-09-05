@@ -31,7 +31,9 @@ import type { Feedback, OnlineTrackItem } from "./shared/types";
 import { NcmMediaList } from "./NcmMediaList";
 import { PageSearchInput } from "../../components/page/PageSearchInput";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
-import "../../shared/styles/pages/cloud-search-liked-radio.css";
+import "../../shared/styles/pages/cloud.css";
+import "../../shared/styles/pages/online-page.css";
+import "../../shared/styles/pages/online-shared.css";
 
 const api = createApiClient();
 const CLOUD_PAGE_LIMIT = 500;
@@ -131,6 +133,7 @@ export function CloudPage(props: CloudPageProps) {
     api,
     t,
     onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onApplyPlayerState: playbackContext.applyPlayerState,
     onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });
@@ -404,10 +407,9 @@ export function CloudPage(props: CloudPageProps) {
         </section>
 
         <section class="cloud-toolbar">
-          <div class="playlist-detail-menu-left">
+          <div class="cloud-toolbar-actions">
             <PageToolbarButton
               variant="primary"
-              class="playlist-detail-play"
               onClick={() => void playAll()}
               disabled={isLoading() || filteredTracks().length === 0}
             >
@@ -421,7 +423,6 @@ export function CloudPage(props: CloudPageProps) {
             </PageToolbarButton>
             <PageToolbarButton
               variant="icon"
-              class="playlist-detail-icon-button"
               onClick={() => void loadCloudTracks(() => false, { force: true })}
               disabled={isLoading()}
               title={t("ncm.cloud.refresh")}
@@ -441,7 +442,6 @@ export function CloudPage(props: CloudPageProps) {
             >
               <PageToolbarButton
                 variant="icon"
-                class="playlist-detail-icon-button"
                 title={t("ncm.cloud.batch")}
                 ariaLabel={t("ncm.cloud.batch")}
                 ariaHasPopup="menu"
@@ -453,7 +453,7 @@ export function CloudPage(props: CloudPageProps) {
           </div>
           <Show when={tracks().length > 0}>
             <PageSearchInput
-              class="playlist-detail-search cloud-search"
+              class="cloud-search"
               value={searchValue()}
               placeholder={t("ncm.cloud.searchPlaceholder")}
               onUpdateValue={setSearchValue}
@@ -491,7 +491,7 @@ export function CloudPage(props: CloudPageProps) {
           deleteActionLabel={t("ncm.cloud.deleteAction")}
           isLoading={isLoading()}
           emptyState={
-            <div class="online-search-empty">
+            <div class="online-empty-state">
               <IconCloud />
               <strong>
                 {showInitialLoading()

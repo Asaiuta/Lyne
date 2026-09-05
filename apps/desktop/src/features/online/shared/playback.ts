@@ -1,4 +1,5 @@
 import type { ApiClient, ResolveNcmTrackInput } from "../../../shared/api/client";
+import type { PlayerState } from "../../../shared/api/types";
 import type { NcmSongLevel } from "../../../shared/state/uiSettingsModel";
 import { readUISettingField } from "../../../shared/state/uiSettingsStorage";
 import type { NcmTrackReference } from "../ncmPlayback";
@@ -13,6 +14,7 @@ export interface PlaybackContext {
   api: ApiClient;
   t: Translator;
   onRegisterPlayback: (track: NcmTrackReference) => void;
+  onApplyPlayerState?: (state: PlayerState) => void;
   onStateRefresh: (expectedPath?: string | null) => Promise<void>;
   setFeedback: FeedbackSetter;
 }
@@ -43,7 +45,15 @@ export interface PlaybackController {
 }
 
 export function createPlaybackController(ctx: PlaybackContext): PlaybackController {
-  const { api, t, onRegisterPlayback, onStateRefresh, setFeedback } = ctx;
+  const {
+    api,
+    t,
+    onRegisterPlayback,
+    onApplyPlayerState,
+    onStateRefresh,
+    setFeedback
+  } = ctx;
+  let playRequestGeneration = 0;
 
   const readErrorMessage = createErrorMessageReader(t);
 
@@ -61,14 +71,26 @@ export function createPlaybackController(ctx: PlaybackContext): PlaybackControll
   });
 
   const playOnlineTrack = async (item: OnlineTrackItem) => {
+    const requestGeneration = ++playRequestGeneration;
     setFeedback("neutral", t("ncm.feedback.initial"));
     try {
       const result = await api.playNcmTrack(buildResolveInput(item));
       onRegisterPlayback(result.track);
-      await onStateRefresh(result.track.streamUrl);
-      setFeedback("neutral", t("ncm.feedback.initial"));
+      if (requestGeneration !== playRequestGeneration) return;
+
+      if (onApplyPlayerState) {
+        onApplyPlayerState(result.state);
+      } else {
+        await onStateRefresh(result.track.streamUrl);
+      }
+
+      if (requestGeneration === playRequestGeneration) {
+        setFeedback("neutral", t("ncm.feedback.initial"));
+      }
     } catch (error) {
-      setFeedback("error", readErrorMessage(error));
+      if (requestGeneration === playRequestGeneration) {
+        setFeedback("error", readErrorMessage(error));
+      }
     }
   };
 

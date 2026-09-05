@@ -33,11 +33,12 @@ import {
   IconStar
 } from "../../components/icons";
 import { PageBackButton } from "../../components/page/PageBackButton";
+import { PageSectionHeading } from "../../components/page/PageSectionHeading";
 import { PageToolbarButton } from "../../components/page/PageToolbarButton";
 import { NcmMediaList } from "./NcmMediaList";
 import "../../shared/styles/pages/song-wiki.css";
 import { SImage } from "../../components/SImage";
-import { NaiveH2, NaiveH3, NaiveSkeleton, NaiveSpin } from "../../shared/ui/naive";
+import { NaiveH2, NaiveSkeleton, NaiveSpin } from "../../shared/ui/naive";
 import { createErrorMessageReader, type FeedbackSetter } from "./shared/feedback";
 import { createPlaybackController, type PlaybackController } from "./shared/playback";
 import type { FeedCardItem, Feedback, OnlineTrackItem } from "./shared/types";
@@ -105,6 +106,7 @@ export function SongWikiPage(props: SongWikiPageProps) {
     api,
     t,
     onRegisterPlayback: playbackContext.registerNcmPlayback,
+    onApplyPlayerState: playbackContext.applyPlayerState,
     onStateRefresh: playbackContext.refreshState,
     setFeedback: setRawFeedback
   });
@@ -381,9 +383,7 @@ export function SongWikiPage(props: SongWikiPageProps) {
                 <SongWikiAchievementsSection model={viewModel()} />
                 <Show when={(viewModel()?.similarSongIds.length ?? 0) > 0}>
                   <section class="song-wiki-section song-wiki-similar">
-                    <div class="song-wiki-section-title">
-                      <NaiveH3>{t("ncm.songWiki.sections.similar")}</NaiveH3>
-                    </div>
+                    <PageSectionHeading>{t("ncm.songWiki.sections.similar")}</PageSectionHeading>
                     <NcmMediaList
                       items={similarSongs()}
                       rowHeight={72}
@@ -421,10 +421,8 @@ function SongWikiStorySection(props: { model: SongWikiViewModel | null }) {
   return (
     <Show when={story()}>
       {(item) => (
-        <section class="song-wiki-section">
-          <div class="song-wiki-section-title">
-            <NaiveH3>{t("ncm.songWiki.sections.story")}</NaiveH3>
-          </div>
+      <section class="song-wiki-section">
+          <PageSectionHeading>{t("ncm.songWiki.sections.story")}</PageSectionHeading>
           <div class="song-wiki-card-grid is-story">
             <Show when={item().firstListen}>
               {(first) => (
@@ -463,9 +461,7 @@ function SongWikiBasicSection(props: { model: SongWikiViewModel | null }) {
   return (
     <Show when={(props.model?.basicInfo.length ?? 0) > 0}>
       <section class="song-wiki-section">
-        <div class="song-wiki-section-title">
-          <NaiveH3>{t("ncm.songWiki.sections.basic")}</NaiveH3>
-        </div>
+        <PageSectionHeading>{t("ncm.songWiki.sections.basic")}</PageSectionHeading>
         <div class="song-wiki-card-grid">
           <For each={props.model?.basicInfo ?? []}>
             {(item) => (
@@ -495,9 +491,7 @@ function SongWikiSheetSection(props: {
   return (
     <Show when={(props.model?.sheets.length ?? 0) > 0}>
       <section class="song-wiki-section">
-        <div class="song-wiki-section-title">
-          <NaiveH3>{t("ncm.songWiki.sections.sheets")}</NaiveH3>
-        </div>
+        <PageSectionHeading>{t("ncm.songWiki.sections.sheets")}</PageSectionHeading>
         <div class="song-wiki-sheets">
           <For each={props.model?.sheets ?? []}>
             {(sheet) => {
@@ -583,9 +577,7 @@ function SongWikiAchievementsSection(props: { model: SongWikiViewModel | null })
   return (
     <Show when={(props.model?.achievements.length ?? 0) > 0}>
       <section class="song-wiki-section">
-        <div class="song-wiki-section-title">
-          <NaiveH3>{t("ncm.songWiki.sections.achievements")}</NaiveH3>
-        </div>
+        <PageSectionHeading>{t("ncm.songWiki.sections.achievements")}</PageSectionHeading>
         <div class="song-wiki-achievements">
           <For each={props.model?.achievements ?? []}>
             {(item) => (

@@ -4,9 +4,15 @@ import { Modal } from "../../../components/Modal";
 import { SImage } from "../../../components/SImage";
 import { createApiClient, type NcmTrackSummary } from "../../../shared/api/client";
 import { useTranslation } from "../../../shared/i18n";
-import { NaiveButton, NaiveInputNumber } from "../../../shared/ui/naive";
+import {
+  NaiveButton,
+  NaiveForm,
+  NaiveFormItem,
+  NaiveInputNumber
+} from "../../../shared/ui/naive";
 import { createErrorMessageReader, type FeedbackSetter } from "../shared/feedback";
 import type { OnlineTrackItem } from "../shared/types";
+import "../../../shared/styles/components/ncm-cloud-match-modal.css";
 
 interface CloudMatchModalProps {
   open: boolean;
@@ -151,22 +157,22 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
       onClose={props.onClose}
       size="md"
     >
-      <form
+      <NaiveForm
         class="ncm-cloud-match-modal"
+        showFeedback={false}
         onSubmit={(event) => {
           event.preventDefault();
           void submit();
         }}
       >
-        <div class="create-playlist-field">
-          <span class="field-label">{t("ncm.cloud.match.sourceId")}</span>
+        <NaiveFormItem label={t("ncm.cloud.match.sourceId")} path="sourceId">
           <NaiveInputNumber
             value={props.item?.songId ?? null}
             showButton={false}
             disabled
             ariaLabel={t("ncm.cloud.match.sourceId")}
           />
-        </div>
+        </NaiveFormItem>
 
         <div class="ncm-cloud-match-source">
           <div class="ncm-cloud-match-cover">
@@ -184,8 +190,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
           </div>
         </div>
 
-        <div class="create-playlist-field">
-          <span class="field-label">{t("ncm.cloud.match.targetId")}</span>
+        <NaiveFormItem label={t("ncm.cloud.match.targetId")} path="targetId">
           <div class="ncm-cloud-match-target-row">
             <NaiveInputNumber
               value={targetId()}
@@ -210,7 +215,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
               <span>{isVerified() ? t("ncm.cloud.match.verified") : t("ncm.cloud.match.verify")}</span>
             </NaiveButton>
           </div>
-        </div>
+        </NaiveFormItem>
 
         <Show when={verifiedTrack()}>
           {(track) => (
@@ -258,7 +263,7 @@ export function CloudMatchModal(props: CloudMatchModalProps) {
             <span>{submitting() ? t("ncm.cloud.match.submitting") : t("ncm.cloud.match.submit")}</span>
           </NaiveButton>
         </div>
-      </form>
+      </NaiveForm>
     </Modal>
   );
 }

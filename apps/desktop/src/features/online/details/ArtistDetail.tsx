@@ -28,6 +28,8 @@ import type { ArtistDetailInfo } from "../artistParsers";
 import type { PlaybackController } from "../shared/playback";
 import type { FeedCardItem, OnlineTrackItem } from "../shared/types";
 import { NcmListDetail } from "./NcmListDetail";
+import "../../../shared/styles/pages/ncm-details.css";
+import "../../../shared/styles/pages/ncm-artist-detail.css";
 
 type ArtistDetailTab = "songs" | "albums" | "videos";
 type ArtistCountKey = "songs" | "albums" | "videos";
@@ -121,7 +123,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
   };
   return (
     <Show when={artist()}>
-      <PageSurface class="ncm-daily-detail ncm-detail-page ncm-detail-page--artist" persistKey={`discover:artist:${artistId()}`} resetKey={artistId()}>
+      <PageSurface class="ncm-detail-surface ncm-detail-page ncm-detail-page--artist" persistKey={`discover:artist:${artistId()}`} resetKey={artistId()}>
         <PageStickyHeader threshold={10}>
           {({ compact }) => (
             <>
@@ -129,7 +131,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
                 <Show when={(props.showInlineBack ?? true) && props.onBack}>
                   <PageBackButton
                     ariaLabel={t("ncm.artist.backToFeed")}
-                    class="ncm-daily-detail-back"
+                    class="ncm-detail-back"
                     onClick={() => props.onBack?.()}
                   />
                 </Show>
@@ -151,7 +153,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
                   <>
                     <PageToolbarButton
                       variant="secondary"
-                      class="ncm-artist-subscribe"
+                      class="ncm-detail-subscribe"
                       active={props.detail?.followed === true}
                       disabled={props.isLoadingDetail || props.isTogglingSubscribe}
                       onClick={() => void props.onToggleSubscribe()}
@@ -164,6 +166,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
                     <Show when={detailTab() === "songs"}>
                       <div class="ncm-artist-order-inline">
                         <SegmentedTabs
+                          density="compact"
                           variant="surface"
                           value={props.trackOrder}
                           onChange={(next) => void props.onChangeTrackOrder(next === "time" ? "time" : "hot")}
@@ -211,7 +214,7 @@ export function ArtistDetail(props: ArtistDetailProps) {
                         hideTopScrollTool
                       />
                       <Show when={props.hasMoreTracks && props.tracks.length > 0}>
-                        <div class="online-discover-load-more">
+                        <div class="load-more-button-row">
                           <LoadMoreButton
                             label={t("ncm.discover.loadMore")}
                             loading={props.isLoading}
@@ -318,7 +321,7 @@ function ArtistResourceGrid(props: ArtistResourceGridProps) {
         </div>
       </Show>
       <Show when={props.hasMore && props.items.length > 0}>
-        <div class="online-discover-load-more">
+        <div class="load-more-button-row">
           <LoadMoreButton
             label={props.loadMoreText}
             loading={props.isLoading}

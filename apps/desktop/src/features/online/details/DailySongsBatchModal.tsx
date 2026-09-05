@@ -24,6 +24,8 @@ import {
   refreshNcmUserPlaylistGroupsCache,
   subscribeNcmUserPlaylistGroups
 } from "../ncmPlaylistSummaryCache";
+import "../../../shared/styles/components/selection-action-modals.css";
+import "../../../shared/styles/components/ncm-daily-batch-modal.css";
 
 interface DailySongsBatchModalProps {
   open: boolean;
@@ -223,10 +225,10 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
       onClose={props.onClose}
       size="lg"
     >
-      <div class="local-batch-modal ncm-daily-batch-modal">
-        <div class="local-batch-table" role="table" aria-label={t("ncm.daily.batch")}>
-          <div class="local-batch-row local-batch-head" role="row">
-            <span class="local-batch-cell local-batch-check" role="columnheader">
+      <div class="batch-selection-modal ncm-daily-batch-modal">
+        <div class="batch-selection-table" role="table" aria-label={t("ncm.daily.batch")}>
+          <div class="batch-selection-row batch-selection-head" role="row">
+            <span class="batch-selection-cell batch-selection-check" role="columnheader">
               <NaiveCheckbox
                 size="small"
                 ariaLabel={t("library.batch.selectAll")}
@@ -234,16 +236,16 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
                 onUpdateChecked={toggleAll}
               />
             </span>
-            <span class="local-batch-cell local-batch-index" role="columnheader">#</span>
-            <span class="local-batch-cell" role="columnheader">{t("media.column.title")}</span>
-            <span class="local-batch-cell" role="columnheader">{t("media.sort.artist")}</span>
-            <span class="local-batch-cell" role="columnheader">{t("media.sort.album")}</span>
+            <span class="batch-selection-cell batch-selection-index" role="columnheader">#</span>
+            <span class="batch-selection-cell" role="columnheader">{t("media.column.title")}</span>
+            <span class="batch-selection-cell" role="columnheader">{t("media.sort.artist")}</span>
+            <span class="batch-selection-cell" role="columnheader">{t("media.sort.album")}</span>
           </div>
-          <div class="local-batch-body" role="rowgroup">
+          <div class="batch-selection-body" role="rowgroup">
             <For each={props.items}>
               {(item, index) => (
-                <div class="local-batch-row" role="row">
-                  <span class="local-batch-cell local-batch-check" role="cell">
+                <div class="batch-selection-row" role="row">
+                  <span class="batch-selection-cell batch-selection-check" role="cell">
                     <NaiveCheckbox
                       size="small"
                       ariaLabel={t("media.selection.item", { title: displayTitle(item) })}
@@ -251,14 +253,14 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
                       onUpdateChecked={() => toggleItem(item.id)}
                     />
                   </span>
-                  <span class="local-batch-cell local-batch-index" role="cell">{index() + 1}</span>
-                  <span class="local-batch-cell local-batch-title" role="cell" title={displayTitle(item)}>
+                  <span class="batch-selection-cell batch-selection-index" role="cell">{index() + 1}</span>
+                  <span class="batch-selection-cell batch-selection-title" role="cell" title={displayTitle(item)}>
                     {displayTitle(item)}
                   </span>
-                  <span class="local-batch-cell" role="cell">
+                  <span class="batch-selection-cell" role="cell">
                     {displayText(item.artist, t("library.group.unknownArtist"))}
                   </span>
-                  <span class="local-batch-cell" role="cell">
+                  <span class="batch-selection-cell" role="cell">
                     {displayText(item.album, t("library.group.unknownAlbum"))}
                   </span>
                 </div>
@@ -267,19 +269,19 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
           </div>
         </div>
 
-        <div class="local-batch-footer">
-          <div class="local-batch-footer-left">
-            <span class="local-batch-count">
+        <div class="batch-selection-footer">
+          <div class="batch-selection-footer-left">
+            <span class="batch-selection-count">
               {t("library.selection.count", { count: selectedItems().length })}
             </span>
-            <div class="local-batch-range">
+            <div class="batch-selection-range">
               <NaiveButton variant="tertiary" onClick={() => setRangeOpen((open) => !open)}>
                 {t("library.batch.advancedFilter")}
               </NaiveButton>
               <Show when={rangeOpen()}>
-                <div class="local-batch-range-popover">
+                <div class="batch-selection-range-popover">
                   <NaiveInputNumber
-                    class="local-batch-range-input"
+                    class="batch-selection-range-input"
                     size="small"
                     min={1}
                     max={props.items.length}
@@ -290,7 +292,7 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
                   />
                   <span>-</span>
                   <NaiveInputNumber
-                    class="local-batch-range-input"
+                    class="batch-selection-range-input"
                     size="small"
                     min={1}
                     max={props.items.length}
@@ -306,7 +308,7 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
               </Show>
             </div>
           </div>
-          <div class="local-batch-actions">
+          <div class="batch-selection-actions">
             <Show when={props.sourcePlaylistId !== undefined}>
               <NaiveButton
                 variant="tertiary"
@@ -329,26 +331,26 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
         </div>
 
         <div class="ncm-daily-batch-playlists">
-          <div class="local-action-summary">
+          <div class="selection-action-summary">
             {props.loginProfile
               ? t("library.playlists.add.summary", { count: selectedItems().length })
               : t("ncm.empty.loginRequired")}
           </div>
           <Show when={props.loginProfile}>
-            <NaiveList class="local-playlist-target-list ncm-daily-batch-targets" hoverable clickable>
+            <NaiveList class="playlist-target-list ncm-daily-batch-targets" hoverable clickable>
               <NaiveListItem
-                class="local-playlist-target"
+                class="playlist-target"
                 onClick={() => setCreatePlaylistOpen(true)}
                 disabled={busy()}
                 prefix={
-                  <span class="local-playlist-target-icon" aria-hidden="true">
+                  <span class="playlist-target-icon" aria-hidden="true">
                     <IconPlus />
                   </span>
                 }
               >
                 <NaiveThing
-                  class="local-playlist-target-copy"
-                  titleClass="local-playlist-target-name"
+                  class="playlist-target-copy"
+                  titleClass="playlist-target-name"
                   title={t("playlist.create.title")}
                 />
               </NaiveListItem>
@@ -359,11 +361,11 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
                 <For each={playlists()}>
                   {(playlist, index) => (
                     <NaiveListItem
-                      class="local-playlist-target"
+                      class="playlist-target"
                       onClick={() => void addToPlaylist(playlist)}
                       disabled={selectedItems().length === 0 || busy()}
                       prefix={
-                        <span class="local-playlist-target-icon" aria-hidden="true">
+                        <span class="playlist-target-icon" aria-hidden="true">
                           <Show when={playlist.coverUrl} fallback={<IconPlaylist />}>
                             {(coverUrl) => <SImage src={coverSizeUrl(coverUrl(), "s")} alt="" observeVisibility={true} shape="rect" aspect="square" />}
                           </Show>
@@ -371,9 +373,9 @@ export function DailySongsBatchModal(props: DailySongsBatchModalProps) {
                       }
                     >
                       <NaiveThing
-                        class="local-playlist-target-copy"
-                        titleClass="local-playlist-target-name"
-                        descriptionClass="local-playlist-target-count"
+                        class="playlist-target-copy"
+                        titleClass="playlist-target-name"
+                        descriptionClass="playlist-target-count"
                         title={index() === 0 ? t("ncm.liked.title") : playlist.name}
                         description={
                           submittingPlaylistId() === playlist.id

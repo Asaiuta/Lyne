@@ -51,7 +51,6 @@ export function createPlaylistDetailNavigation(ctx: PlaylistDetailNavigationCont
   const [isTogglingPlaylistSubscribe, setIsTogglingPlaylistSubscribe] = createSignal<boolean>(false);
   const [playlistDetailTab, setPlaylistDetailTab] = createSignal<"songs" | "comments">("songs");
   const [playlistFilter, setPlaylistFilter] = createSignal<string>("");
-  const [isPlaylistDetailScrolled, setIsPlaylistDetailScrolled] = createSignal<boolean>(false);
 
   const clearPlaylistDetail = (options: { resetUi?: boolean } = {}) => {
     setSelectedPlaylist(null);
@@ -62,7 +61,6 @@ export function createPlaylistDetailNavigation(ctx: PlaylistDetailNavigationCont
     if (options.resetUi !== false) {
       setPlaylistDetailTab("songs");
       setPlaylistFilter("");
-      setIsPlaylistDetailScrolled(false);
     }
     ctx.onSelectedPlaylistChange?.(null);
   };
@@ -198,7 +196,6 @@ export function createPlaylistDetailNavigation(ctx: PlaylistDetailNavigationCont
     setSelectedPlaylist(playlist);
     setPlaylistDetailTab("songs");
     setPlaylistFilter("");
-    setIsPlaylistDetailScrolled(false);
     ctx.onSelectedPlaylistChange?.(playlist.id);
 
     if (cached && canUsePlaylistDetailCacheSnapshot(cached, options.limit)) {
@@ -338,11 +335,6 @@ export function createPlaylistDetailNavigation(ctx: PlaylistDetailNavigationCont
     }
   };
 
-  const handlePlaylistTrackScroll = (event: Event) => {
-    const target = event.currentTarget as HTMLElement;
-    setIsPlaylistDetailScrolled(target.scrollTop > 10);
-  };
-
   return {
     selectedPlaylist,
     playlistDetailInfo,
@@ -352,7 +344,6 @@ export function createPlaylistDetailNavigation(ctx: PlaylistDetailNavigationCont
     isTogglingPlaylistSubscribe,
     playlistDetailTab,
     playlistFilter,
-    isPlaylistDetailScrolled,
     setSelectedPlaylist,
     updateSelectedPlaylist,
     setPlaylistTracksState,
@@ -365,7 +356,6 @@ export function createPlaylistDetailNavigation(ctx: PlaylistDetailNavigationCont
     reorderPlaylistTracks,
     handleBackToPlaylists: clearPlaylistDetail,
     clearPlaylistDetail,
-    handlePlaylistTrackScroll,
     filteredPlaylistTracks,
     playlistTrackCount,
     playlistMetaText,

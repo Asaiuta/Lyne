@@ -4,6 +4,7 @@ import { SImage } from "../../components/SImage";
 import type { NcmSongComment } from "../../shared/api/ncm/comment";
 import { useTranslation } from "../../shared/i18n";
 import { NaiveP } from "../../shared/ui/naive";
+import "../../shared/styles/components/ncm-comments-modal.css";
 
 export interface NcmCommentsModalState {
   open: boolean;

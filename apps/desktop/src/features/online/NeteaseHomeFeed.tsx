@@ -16,6 +16,8 @@ import { NaiveSkeleton } from "../../shared/ui/naive";
 import { coverSizeUrl } from "../../shared/ui/coverSize";
 import { playlistSummaryFromFeedCard, type OnlinePlaylistSummary } from "./ncmPlaylistSummary";
 import type { DiscoverTab, FeedCardItem } from "./shared/types";
+import "../../shared/styles/pages/ncm-home.css";
+import "../../shared/styles/pages/online-catalog-cards.css";
 
 const EMPTY_HOME_FEED: NcmHomeFeed = {
   dailyPicks: [],
@@ -354,7 +356,7 @@ export function NeteaseHomeFeed(props: NeteaseHomeFeedProps) {
   };
 
   return (
-    <div class="ncm-home-feed">
+    <div class="ncm-home-feed online-catalog-context">
       <Show when={props.isLoggedIn && (props.onSelectDailySongs || props.onSelectLikedSongs || props.onPlayPersonalFm)}>
         <div class="ncm-home-feed-main-rec">
           <div class="ncm-home-feed-main-rec-list">

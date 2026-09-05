@@ -34,6 +34,17 @@ const resolvedFor = (input: ResolveNcmTrackInput): ResolvedNcmTrack => ({
   durationSecs: input.durationSecs ?? null
 });
 
+function createDeferred<T>() {
+  let resolve: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return {
+    promise,
+    resolve: (value: T) => resolve?.(value)
+  };
+}
+
 interface Harness {
   controller: ReturnType<typeof createPlaybackController>;
   played: number[];
@@ -159,4 +170,86 @@ test("playAll surfaces a play failure through feedback without throwing, then co
   assert.deepEqual(played, []);
   assert.deepEqual(enqueued, [2]);
   assert.equal(tones.includes("error"), true, "expected an error feedback tone");
+});
+
+test("playOnlineTrack applies the state returned by playNcmTrack without polling", async () => {
+  const state = { marker: "direct" } as unknown as NcmTrackPlaybackResult["state"];
+  const applied: NcmTrackPlaybackResult["state"][] = [];
+  let refreshCount = 0;
+  const playNcmTrack: ApiClient["playNcmTrack"] = async (input) => ({
+    track: resolvedFor(input),
+    state
+  });
+  const api = { playNcmTrack } as Pick<ApiClient, "playNcmTrack"> as ApiClient;
+  const controller = createPlaybackController({
+    api,
+    t: ((key: string) => key) as Parameters<typeof createPlaybackController>[0]["t"],
+    onRegisterPlayback: () => {},
+    onApplyPlayerState: (next) => applied.push(next),
+    onStateRefresh: async () => {
+      refreshCount += 1;
+    },
+    setFeedback: () => {}
+  });
+
+  await controller.playOnlineTrack(track(10));
+
+  assert.deepEqual(applied, [state]);
+  assert.equal(refreshCount, 0);
+});
+
+test("playOnlineTrack retains polling as a fallback when direct state apply is unavailable", async () => {
+  const refreshedPaths: Array<string | null | undefined> = [];
+  const playNcmTrack: ApiClient["playNcmTrack"] = async (input) => ({
+    track: resolvedFor(input),
+    state: PLACEHOLDER_STATE
+  });
+  const api = { playNcmTrack } as Pick<ApiClient, "playNcmTrack"> as ApiClient;
+  const controller = createPlaybackController({
+    api,
+    t: ((key: string) => key) as Parameters<typeof createPlaybackController>[0]["t"],
+    onRegisterPlayback: () => {},
+    onStateRefresh: async (expectedPath) => {
+      refreshedPaths.push(expectedPath);
+    },
+    setFeedback: () => {}
+  });
+
+  await controller.playOnlineTrack(track(11));
+
+  assert.deepEqual(refreshedPaths, ["stream://11"]);
+});
+
+test("a slower play request cannot overwrite the state from a newer request", async () => {
+  const first = createDeferred<NcmTrackPlaybackResult>();
+  const second = createDeferred<NcmTrackPlaybackResult>();
+  const firstState = { marker: "first" } as unknown as NcmTrackPlaybackResult["state"];
+  const secondState = { marker: "second" } as unknown as NcmTrackPlaybackResult["state"];
+  const applied: NcmTrackPlaybackResult["state"][] = [];
+  const playNcmTrack: ApiClient["playNcmTrack"] = (input) =>
+    input.songId === 1 ? first.promise : second.promise;
+  const api = { playNcmTrack } as Pick<ApiClient, "playNcmTrack"> as ApiClient;
+  const controller = createPlaybackController({
+    api,
+    t: ((key: string) => key) as Parameters<typeof createPlaybackController>[0]["t"],
+    onRegisterPlayback: () => {},
+    onApplyPlayerState: (next) => applied.push(next),
+    onStateRefresh: async () => {},
+    setFeedback: () => {}
+  });
+
+  const firstRequest = controller.playOnlineTrack(track(1));
+  const secondRequest = controller.playOnlineTrack(track(2));
+  second.resolve({
+    track: resolvedFor({ songId: 2, sourcePageUrl: "https://music.163.com/song?id=2" }),
+    state: secondState
+  });
+  await secondRequest;
+  first.resolve({
+    track: resolvedFor({ songId: 1, sourcePageUrl: "https://music.163.com/song?id=1" }),
+    state: firstState
+  });
+  await firstRequest;
+
+  assert.deepEqual(applied, [secondState]);
 });
