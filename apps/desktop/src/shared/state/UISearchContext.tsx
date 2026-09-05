@@ -1,6 +1,7 @@
 import { createContext, createEffect, createMemo, createSignal, useContext } from "solid-js";
 import type { Accessor, JSX, Setter } from "solid-js";
 import type { ActivePage } from "../ui/navigation";
+import { persistUISettingField, readUISettingField } from "./uiSettingsStorage";
 
 export interface OnlineSearchRequest {
   readonly query: string;
@@ -30,51 +31,10 @@ interface UISearchProviderProps {
   children: JSX.Element;
 }
 
-const SEARCH_HISTORY_KEY = "ui.search.history";
 const MAX_HISTORY_ITEMS = 8;
 
 const toAccessor = <T,>(value: MaybeAccessor<T>): Accessor<T> =>
   typeof value === "function" ? (value as Accessor<T>) : () => value;
-
-const readHistory = (): string[] => {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const raw = window.localStorage.getItem(SEARCH_HISTORY_KEY);
-    if (!raw) {
-      return [];
-    }
-
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => item.trim())
-      .filter((item, index, array) => item.length > 0 && array.indexOf(item) === index)
-      .slice(0, MAX_HISTORY_ITEMS);
-  } catch {
-    return [];
-  }
-};
-
-const persistHistory = (history: readonly string[], serializedHistory = JSON.stringify(history)): boolean => {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    window.localStorage.setItem(SEARCH_HISTORY_KEY, serializedHistory);
-    return true;
-  } catch {
-    // Ignore storage failures.
-    return false;
-  }
-};
 
 /**
  * Lifts the TopNav search query into a small global. Scoped to the Library
@@ -82,7 +42,11 @@ const persistHistory = (history: readonly string[], serializedHistory = JSON.str
  * to consume the query or render a "search disabled" hint.
  */
 export function UISearchProvider(props: UISearchProviderProps) {
-  const initialHistory = readHistory();
+  // Search history lives in the uiSettingsStorage schema (`ui.search.history`,
+  // createStringArrayField): read/write go through the validated, event-notifying
+  // path instead of raw localStorage. The provider keeps its own trim/dedupe
+  // on input (pushHistory) — the schema only normalizes the serialized array.
+  const initialHistory = readUISettingField("searchHistory").slice(0, MAX_HISTORY_ITEMS);
   const [query, setQuery] = createSignal("");
   const [submitNonce, setSubmitNonce] = createSignal(0);
   const [onlineSearchRequest, setOnlineSearchRequest] =
@@ -106,7 +70,7 @@ export function UISearchProvider(props: UISearchProviderProps) {
     if (serializedHistory === lastPersistedHistory) {
       return;
     }
-    if (persistHistory(nextHistory, serializedHistory)) {
+    if (persistUISettingField("searchHistory", [...nextHistory])) {
       lastPersistedHistory = serializedHistory;
     }
   });

@@ -24,6 +24,7 @@ import {
   hasVisibleSettingsFloatingSurface
 } from "./settingsFloatingSurfaces";
 import "../../shared/styles/modals/category-load-settings.css";
+import "../../shared/styles/pages/settings.css";
 
 interface SettingsPageProps {
   isOpen: boolean;

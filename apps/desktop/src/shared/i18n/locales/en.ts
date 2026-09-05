@@ -1108,8 +1108,6 @@ export const en = {
   "settings.appearance.customCode.warningBody": "Unknown CSS or JavaScript can break the interface, expose private data, or make the app unstable. Only run code you trust.",
   "settings.appearance.customCode.save": "Save",
   "settings.appearance.customCode.saveFailed": "Could not save the custom code.",
-  "settings.appearance.themeGlobalColor": "Global Color",
-  "settings.appearance.themeGlobalColor.desc": "Apply the accent color to more interface containers",
   "settings.appearance.themeFollowCover": "Dynamic Cover Color",
   "settings.appearance.themeFollowCover.desc": "Let the accent follow the current cover; manual accent color is temporarily bypassed while enabled",
   "settings.appearance.customAccentColor": "Accent Color",

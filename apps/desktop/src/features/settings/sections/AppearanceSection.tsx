@@ -76,7 +76,6 @@ export function AppearanceSection(props: AppearanceSectionProps) {
       case "themeConfig":
         return (
           highlightedId === "themeConfig" ||
-          highlightedId === "themeGlobalColor" ||
           highlightedId === "themeFollowCover" ||
           highlightedId === "customAccentColor"
         );

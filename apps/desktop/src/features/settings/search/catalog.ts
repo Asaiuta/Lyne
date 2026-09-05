@@ -27,7 +27,6 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   // ── appearance ───────────────────────────────────────
   { category: "appearance", itemId: "themeMode", labelKey: "settings.appearance.themeMode", keywords: ["theme", "dark", "light", "主题"] },
   { category: "appearance", itemId: "themeConfig", labelKey: "settings.appearance.themeConfig", descriptionKey: "settings.appearance.themeConfig.desc", keywords: ["theme", "color", "主题", "配色"] },
-  { category: "appearance", itemId: "themeGlobalColor", labelKey: "settings.appearance.themeGlobalColor", descriptionKey: "settings.appearance.themeGlobalColor.desc", keywords: ["theme", "global", "accent", "全局着色"] },
   { category: "appearance", itemId: "customAccentColor", labelKey: "settings.appearance.customAccentColor", descriptionKey: "settings.appearance.customAccentColor.desc", keywords: ["theme", "color", "accent", "主题色"] },
   { category: "appearance", itemId: "themeFollowCover", labelKey: "settings.appearance.themeFollowCover", descriptionKey: "settings.appearance.themeFollowCover.desc", keywords: ["cover", "accent", "dynamic", "动态取色"] },
   { category: "appearance", itemId: "fontConfig", labelKey: "settings.appearance.fontConfig", descriptionKey: "settings.appearance.fontConfig.desc", keywords: ["font", "字体"] },
@@ -55,6 +54,9 @@ export const SETTINGS_CATALOG: ReadonlyArray<SettingsCatalogEntry> = [
   { category: "appearance", itemId: "sidebarHiddenItems.download", labelKey: "settings.appearance.sidebar.download", keywords: ["sidebar", "download", "下载"] },
   { category: "appearance", itemId: "sidebarHiddenItems.streaming", labelKey: "settings.appearance.sidebar.streaming", keywords: ["sidebar", "streaming", "流媒体"] },
   { category: "appearance", itemId: "sidebarHiddenItems.library", labelKey: "settings.appearance.sidebar.library", keywords: ["sidebar", "library", "本地"] },
+  { category: "appearance", itemId: "sidebarHiddenItems.libraryAlbums", labelKey: "settings.appearance.sidebar.libraryAlbums", keywords: ["sidebar", "library", "albums", "本地", "专辑"] },
+  { category: "appearance", itemId: "sidebarHiddenItems.libraryArtists", labelKey: "settings.appearance.sidebar.libraryArtists", keywords: ["sidebar", "library", "artists", "本地", "歌手"] },
+  { category: "appearance", itemId: "sidebarHiddenItems.libraryFolders", labelKey: "settings.appearance.sidebar.libraryFolders", keywords: ["sidebar", "library", "folders", "本地", "文件夹"] },
   { category: "appearance", itemId: "sidebarHiddenItems.recent", labelKey: "settings.appearance.sidebar.recent", keywords: ["sidebar", "history", "recent", "最近"] },
   { category: "appearance", itemId: "sidebarHiddenItems.createdPlaylists", labelKey: "settings.appearance.sidebar.createdPlaylists", keywords: ["sidebar", "playlist", "created", "创建歌单"] },
   { category: "appearance", itemId: "sidebarHiddenItems.collectedPlaylists", labelKey: "settings.appearance.sidebar.collectedPlaylists", keywords: ["sidebar", "playlist", "collected", "收藏歌单"] },

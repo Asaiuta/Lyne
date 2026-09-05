@@ -10,7 +10,6 @@ export const APPEARANCE_SIGNAL_FIELDS = [
   "themeMode",
   "customAccentColor",
   "themeFollowCover",
-  "themeGlobalColor",
   "globalFont",
   "customFontFamily",
   "customCss",
@@ -91,7 +90,6 @@ export type AppearanceSetters = {
 
 export const APPEARANCE_STYLE_COMMIT_FIELDS = [
   "customAccentColor",
-  "themeGlobalColor",
   "themeFollowCover",
   "globalFont",
   "customFontFamily",

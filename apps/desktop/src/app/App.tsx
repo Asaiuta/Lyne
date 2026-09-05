@@ -465,6 +465,7 @@ function AppContent() {
               onClose={() => ui.setFullPlayerOpen(false)}
               onSelectArtist={handleFullPlayerArtistSelect}
               onSelectAlbum={handleFullPlayerAlbumSelect}
+              onSelectQuality={playback.changeCurrentNcmQuality}
               onOpenLyricSettings={() => openSettings("lyrics")}
             />
           </Show>

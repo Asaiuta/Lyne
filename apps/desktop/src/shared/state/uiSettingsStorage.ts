@@ -60,6 +60,12 @@ export interface UISettingsRuntime {
   reportWriteError?: (key: string, reason: string) => void;
 }
 
+const VALID_PLAYER_BACKGROUND_TYPES = new Set<PlayerBackgroundType>([
+  "animation",
+  "blur",
+  "color"
+]);
+
 const VALID_SONG_LEVELS = new Set<NcmSongLevel>(NCM_SONG_LEVELS);
 
 const VALID_ROUTE_ANIMATIONS = new Set<RouteAnimation>([
@@ -82,12 +88,6 @@ const VALID_COMMENT_MODES = new Set<FullPlayerCommentMode>([
 const VALID_COVER_MODES = new Set<FullPlayerCoverMode>(["normal", "record"]);
 
 const VALID_PLAYER_TYPES = new Set<PlayerType>(["cover", "record", "fullscreen"]);
-
-const VALID_PLAYER_BACKGROUND_TYPES = new Set<PlayerBackgroundType>([
-  "animation",
-  "blur",
-  "color"
-]);
 
 const VALID_PLAYER_EXPAND_ANIMATIONS = new Set<PlayerExpandAnimation>(["up", "flow"]);
 
@@ -335,28 +335,12 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
     "normal",
     VALID_SEARCH_INPUT_BEHAVIORS
   ),
+  searchHistory: createStringArrayField("ui.search.history", []),
   shareUrlFormat: createEnumField("ui.general.shareUrlFormat", "web", VALID_SHARE_URL_FORMATS),
   bgEnabled: createBoolField("ui.bg.enabled", false),
   bgBlur: createNumberField("ui.bg.blur", 32),
   bgMask: createNumberField("ui.bg.mask", 50),
   dynamicBackgroundMaxFps: createClampedNumberField("ui.bg.dynamicMaxFps", 120, 30, 144),
-  customChrome: createBoolField("ui.window.customChrome", true),
-  fullPlayerLayout: createFullPlayerLayoutField("ui.fullPlayer.layout", "balanced"),
-  fullPlayerAutoFocusLyrics: createBoolField("ui.fullPlayer.autoFocusLyrics", true),
-  fullPlayerCommentMode: createEnumField(
-    "ui.fullPlayer.commentMode",
-    "fullscreen",
-    VALID_COMMENT_MODES
-  ),
-  fullPlayerCoverMode: fullPlayerCoverModeField,
-  playerType: createPlayerTypeField("ui.player.type", "cover", fullPlayerCoverModeField),
-  playerStyleRatio: createClampedNumberField("ui.player.styleRatio", 50, 30, 70),
-  playerFullscreenGradient: createClampedNumberField(
-    "ui.player.fullscreenGradient",
-    15,
-    0,
-    100
-  ),
   playerBackgroundType: createEnumField(
     "ui.player.backgroundType",
     "blur",
@@ -377,6 +361,23 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   ),
   playerBackgroundPause: createBoolField("ui.player.backgroundPause", false),
   playerBackgroundLowFreqVolume: createBoolField("ui.player.backgroundLowFreqVolume", false),
+  customChrome: createBoolField("ui.window.customChrome", true),
+  fullPlayerLayout: createFullPlayerLayoutField("ui.fullPlayer.layout", "balanced"),
+  fullPlayerAutoFocusLyrics: createBoolField("ui.fullPlayer.autoFocusLyrics", true),
+  fullPlayerCommentMode: createEnumField(
+    "ui.fullPlayer.commentMode",
+    "fullscreen",
+    VALID_COMMENT_MODES
+  ),
+  fullPlayerCoverMode: fullPlayerCoverModeField,
+  playerType: createPlayerTypeField("ui.player.type", "cover", fullPlayerCoverModeField),
+  playerStyleRatio: createClampedNumberField("ui.player.styleRatio", 50, 30, 70),
+  playerFullscreenGradient: createClampedNumberField(
+    "ui.player.fullscreenGradient",
+    15,
+    0,
+    100
+  ),
   playerExpandAnimation: createEnumField(
     "ui.player.expandAnimation",
     "up",
@@ -385,6 +386,24 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   dynamicCover: createBoolField("ui.player.dynamicCover", false),
   playerFollowCoverColor: createBoolField("ui.player.followCoverColor", true),
   hiddenCovers: createBoolRecordField("ui.cover.hiddenCovers", DEFAULT_HIDDEN_COVERS),
+  // Custom read (not createBoolField): the legacy Sidebar wrote '1'/'0' strings.
+  // A plain createBoolField would silently read those as false and the first
+  // persist effect would then overwrite the user's collapsed layout.
+  sidebarCollapsed: createField(
+    "ui.sidebar.collapsed",
+    false,
+    (runtime) => {
+      try {
+        const raw = runtime.storage.getItem("ui.sidebar.collapsed");
+        if (raw === null) return false;
+        return raw === "true" || raw === "1";
+      } catch {
+        reportReadError(runtime, "ui.sidebar.collapsed", "storage_unavailable");
+        return false;
+      }
+    }
+  ),
+  sidebarCollapsedSections: createStringArrayField("ui.sidebar.collapsedSections", []),
   sidebarHiddenItems: createSidebarHiddenItemsField(
     "ui.sidebar.hiddenItems",
     DEFAULT_SIDEBAR_HIDDEN_ITEMS
@@ -399,7 +418,6 @@ const UI_SETTINGS_SCHEMA: UISettingsSchema = {
   ),
   customAccentColor: createStringField("ui.theme.customAccentColor", DEFAULT_THEME_SEED_HEX),
   themeFollowCover: createBoolField("ui.theme.followCover", false),
-  themeGlobalColor: createBoolField("ui.theme.globalColor", false),
   globalFont: createEnumField("ui.font.global", "default", VALID_GLOBAL_FONTS),
   customFontFamily: createStringField("ui.font.customFamily", ""),
   customCss: createStringField("ui.custom.css", ""),

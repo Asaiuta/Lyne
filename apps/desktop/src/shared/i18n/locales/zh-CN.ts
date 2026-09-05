@@ -1110,8 +1110,6 @@ export const zhCN: TranslationDict = {
   "settings.appearance.customCode.warningBody": "来源不明的 CSS 或 JavaScript 可能导致界面错乱、隐私泄露或应用异常。只运行你信任的代码。",
   "settings.appearance.customCode.save": "保存",
   "settings.appearance.customCode.saveFailed": "自定义代码保存失败。",
-  "settings.appearance.themeGlobalColor": "全局着色",
-  "settings.appearance.themeGlobalColor.desc": "将主题色应用至更多界面容器",
   "settings.appearance.themeFollowCover": "动态取色",
   "settings.appearance.themeFollowCover.desc": "主题色跟随当前歌曲封面；开启后手动主题色会暂时让位",
   "settings.appearance.customAccentColor": "选择主题色",

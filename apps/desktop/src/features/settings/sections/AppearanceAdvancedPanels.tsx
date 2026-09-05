@@ -60,16 +60,6 @@ export function ThemeConfigPanel(props: AppearanceAdvancedPanelProps) {
       </Show>
       <SettingGroup title={t("settings.appearance.themeConfig")}>
         <BooleanSettingItem
-          id="themeGlobalColor"
-          label={t("settings.appearance.themeGlobalColor")}
-          description={t("settings.appearance.themeGlobalColor.desc")}
-          highlighted={isHi("themeGlobalColor")}
-          index={props.nextIndex()}
-          checked={props.settings.themeGlobalColor()}
-          onChange={props.settings.handleThemeGlobalColor}
-        />
-
-        <BooleanSettingItem
           id="themeFollowCover"
           label={t("settings.appearance.themeFollowCover")}
           description={t("settings.appearance.themeFollowCover.desc")}

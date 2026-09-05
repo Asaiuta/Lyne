@@ -481,7 +481,6 @@ test("readUISettingsSnapshot reads custom appearance settings from schema", () =
     runtimeFromValues({
       [STORAGE_KEYS.customAccentColor]: "#57c785",
       [STORAGE_KEYS.themeFollowCover]: "true",
-      [STORAGE_KEYS.themeGlobalColor]: "true",
       [STORAGE_KEYS.globalFont]: "custom",
       [STORAGE_KEYS.customFontFamily]: '"LXGW WenKai", system-ui',
       [STORAGE_KEYS.customCss]: ".app-body { letter-spacing: 0; }",
@@ -491,7 +490,6 @@ test("readUISettingsSnapshot reads custom appearance settings from schema", () =
 
   assert.equal(settings.customAccentColor, "#57c785");
   assert.equal(settings.themeFollowCover, true);
-  assert.equal(settings.themeGlobalColor, true);
   assert.equal(settings.globalFont, "custom");
   assert.equal(settings.customFontFamily, '"LXGW WenKai", system-ui');
   assert.equal(settings.customCss, ".app-body { letter-spacing: 0; }");
@@ -579,4 +577,27 @@ test("persistUISetting reports write failures without throwing", () => {
 
   assert.equal(persistUISetting(STORAGE_KEYS.ncmSongLevel, "hires", throwingRuntime), false);
   assert.equal(reported[1]?.reason, "storage_unavailable");
+});
+
+test("legacy sidebar collapsed '1'/'0' values survive the schema read", () => {
+  assert.equal(
+    readUISettingField("sidebarCollapsed", runtimeFromValues({ [STORAGE_KEYS.sidebarCollapsed]: "1" })),
+    true
+  );
+  assert.equal(
+    readUISettingField("sidebarCollapsed", runtimeFromValues({ [STORAGE_KEYS.sidebarCollapsed]: "0" })),
+    false
+  );
+  assert.equal(
+    readUISettingField("sidebarCollapsed", runtimeFromValues({ [STORAGE_KEYS.sidebarCollapsed]: "true" })),
+    true
+  );
+  assert.equal(
+    readUISettingField("sidebarCollapsed", runtimeFromValues({ [STORAGE_KEYS.sidebarCollapsed]: "false" })),
+    false
+  );
+  assert.equal(
+    readUISettingField("sidebarCollapsed", runtimeFromValues({})),
+    false
+  );
 });

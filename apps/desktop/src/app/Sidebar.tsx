@@ -7,6 +7,10 @@ import type { LocalPlaylist, ShuffleMode } from "../shared/api/types";
 import { useNcmAccount } from "../shared/state/NcmAccountContext";
 import type { SidebarHiddenItemKey } from "../shared/state/uiSettingsModel";
 import { useUISettings } from "../shared/state/useUISettings";
+import {
+  persistUISettingField,
+  readUISettingField
+} from "../shared/state/uiSettingsStorage";
 import { useTranslation } from "../shared/i18n";
 import { resolveArtworkUrl } from "../shared/ui/artwork";
 import { scheduleIdlePreload } from "../shared/ui/idlePreload";
@@ -112,8 +116,6 @@ const NAV_GROUPS: ReadonlyArray<NavGroup> = [
   }
 ];
 
-const STORAGE_KEY = "ui.sidebar.collapsed";
-const SECTIONS_STORAGE_KEY = "ui.sidebar.collapsedSections";
 const COLLAPSE_TRANSITION_PROPERTY = "--sidebar-inline-size";
 const NARROW_BREAKPOINT_PX = 980;
 const LOGIN_REQUIRED_PAGES = new Set<ActivePage>([
@@ -164,40 +166,6 @@ const SIDEBAR_SETTING_KEY_BY_PAGE: Record<SidebarPage, SidebarHiddenItemKey> = {
 
 const hasSidebarSetting = (page: ActivePage): page is SidebarPage =>
   page in SIDEBAR_SETTING_KEY_BY_PAGE;
-
-const readSidebarStorage = (key: string): string | null => {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(key);
-  } catch (error) {
-    console.warn("[Sidebar] failed to read persisted layout", error);
-    return null;
-  }
-};
-
-const writeSidebarStorage = (key: string, value: string): void => {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, value);
-  } catch (error) {
-    console.warn("[Sidebar] failed to persist layout", error);
-  }
-};
-
-const readPersistedCollapse = (): boolean => {
-  return readSidebarStorage(STORAGE_KEY) === "1";
-};
-
-const readPersistedCollapsedSections = (): Set<string> => {
-  try {
-    const raw = readSidebarStorage(SECTIONS_STORAGE_KEY);
-    if (raw) return new Set(JSON.parse(raw) as string[]);
-  } catch {
-    console.warn("[Sidebar] failed to parse persisted sections");
-  }
-  return new Set();
-};
-
 const isNarrowViewport = (): boolean => {
   if (typeof window === "undefined") return false;
   return window.innerWidth < NARROW_BREAKPOINT_PX;
@@ -228,7 +196,7 @@ export function Sidebar(props: SidebarProps) {
   const { t, td } = useTranslation();
   const uiSettings = useUISettings();
   const accountStore = useNcmAccount();
-  const initialCollapsedPersisted = readPersistedCollapse();
+  const initialCollapsedPersisted = readUISettingField("sidebarCollapsed");
   const initialForceCollapsedNarrow = isNarrowViewport();
   const [collapsedPersisted, setCollapsedPersisted] =
     createSignal<boolean>(initialCollapsedPersisted);
@@ -327,7 +295,9 @@ export function Sidebar(props: SidebarProps) {
     }
     return generation;
   };
-  const [collapsedSections, setCollapsedSections] = createSignal(readPersistedCollapsedSections());
+  const [collapsedSections, setCollapsedSections] = createSignal(
+    new Set(readUISettingField("sidebarCollapsedSections"))
+  );
   const [createdPlaylists, setCreatedPlaylists] = createSignal<OnlinePlaylistSummary[]>([]);
   const [collectedPlaylists, setCollectedPlaylists] = createSignal<OnlinePlaylistSummary[]>([]);
   const [localPlaylists, setLocalPlaylists] = createSignal<LocalPlaylist[]>([]);
@@ -354,7 +324,7 @@ export function Sidebar(props: SidebarProps) {
   });
 
   createEffect(() => {
-    writeSidebarStorage(STORAGE_KEY, collapsedPersisted() ? "1" : "0");
+    persistUISettingField("sidebarCollapsed", collapsedPersisted());
   });
 
   onMount(() => {
@@ -369,7 +339,7 @@ export function Sidebar(props: SidebarProps) {
   });
 
   createEffect(() => {
-    writeSidebarStorage(SECTIONS_STORAGE_KEY, JSON.stringify([...collapsedSections()]));
+    persistUISettingField("sidebarCollapsedSections", [...collapsedSections()]);
   });
 
   onMount(() => {
@@ -546,8 +516,7 @@ export function Sidebar(props: SidebarProps) {
   const showCollectedPlaylistGroup = (): boolean =>
     uiSettings.useOnlineService && !isPageHidden("collected-playlists");
   const showPlaylistDivider = (): boolean =>
-    !collapsePresentation().compactContentVisible &&
-    (showCreatedPlaylistGroup() || showCollectedPlaylistGroup());
+    showCreatedPlaylistGroup() || showCollectedPlaylistGroup();
   const playlistItemsForGroup = (groupKey: PlaylistGroupKey): OnlinePlaylistSummary[] =>
     groupKey === "created" ? createdPlaylists() : collectedPlaylists();
   const localPlaylistCover = (playlist: LocalPlaylist): string | null =>
@@ -930,8 +899,8 @@ export function Sidebar(props: SidebarProps) {
       <div
         class="sidebar-playlist-compact-content"
         hidden={!collapsePresentation().compactContentVisible}
-        aria-hidden={!collapsePresentation().compactContentVisible}
-        inert={!collapsePresentation().compactContentVisible}
+        aria-hidden={!collapsed()}
+        inert={!collapsed()}
       >
         {renderCollapsedPlaylistGroup(groupKey)}
       </div>
@@ -1029,11 +998,7 @@ export function Sidebar(props: SidebarProps) {
                 <For each={visibleNavGroups()}>
                   {(group, index) => (
                     <>
-                      <Show
-                        when={
-                          index() > 0 && !collapsePresentation().compactContentVisible
-                        }
-                      >
+                      <Show when={index() > 0}>
                         <div class="sidebar-menu-divider" role="separator" aria-hidden="true" />
                       </Show>
                       {renderNavList(group.items)}

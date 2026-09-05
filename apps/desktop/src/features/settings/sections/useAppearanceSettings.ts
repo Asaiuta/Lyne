@@ -79,10 +79,6 @@ export function useAppearanceSettings() {
     setValue: Setter<UISettings[K]>
   ) => commitUISettingField(field, nextValue, value, setValue);
 
-  const handleThemeGlobalColor = (nextValue: UISettings["themeGlobalColor"]) => {
-    styleCommitters.themeGlobalColor(nextValue);
-  };
-
   const handleThemeFollowCover = (nextValue: UISettings["themeFollowCover"]) => {
     styleCommitters.themeFollowCover(nextValue);
   };
@@ -149,7 +145,6 @@ export function useAppearanceSettings() {
     ...setters,
     handleThemeChange,
     handleCustomAccentColor,
-    handleThemeGlobalColor,
     handleThemeFollowCover,
     handleGlobalFont,
     handleCustomFontFamily,

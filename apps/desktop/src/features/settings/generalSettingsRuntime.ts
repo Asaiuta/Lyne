@@ -1,4 +1,5 @@
 import type { UISettings } from "../../shared/state/uiSettingsModel";
+import { clearCacheFetchMemoryByPrefix } from "../../shared/state/cacheFetch";
 
 export type OnlineServiceModeChangeStatus =
   | "applied"
@@ -89,6 +90,8 @@ export function setUpdateChannelPreference(
 }
 
 export function clearBrowserSessionCacheByPrefix(prefix: string): void {
+  clearCacheFetchMemoryByPrefix(prefix);
+
   if (typeof window === "undefined") {
     return;
   }

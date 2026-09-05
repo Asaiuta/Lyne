@@ -49,15 +49,19 @@ export function sidebarCollapsePresentation(
       return {
         expandedContentMounted: true,
         expandedContentVisible: true,
-        compactContentVisible: false,
+        // Keep the compact icon layer mounted at opacity 0 so collapse can
+        // crossfade from a painted frame instead of display:none -> opacity:1.
+        compactContentVisible: true,
         motionActive: false
       };
     case "collapsing":
     case "expanding":
       return {
         expandedContentMounted: true,
+        // Keep both layers present so CSS can crossfade icons vs expanded
+        // playlist chrome instead of snapping after the width settles.
         expandedContentVisible: true,
-        compactContentVisible: false,
+        compactContentVisible: true,
         motionActive: true
       };
     case "collapsed-retained":

@@ -13,6 +13,7 @@ import { useTranslation } from "../shared/i18n";
 import { isPlaceholderPage } from "../shared/ui/navigation";
 import { paletteEngine } from "../shared/theme/paletteEngine";
 import {
+  applyAccentPalette,
   applyPlayerCoverAccentColor,
   applyThemePaletteForSettings,
   applyUserAppearanceSettings
@@ -225,21 +226,21 @@ export function useAppController(api: ApiClient): AppController {
     const themeFollowCover = uiSettings.themeFollowCover;
     if (!playerFollowCoverColor && !themeFollowCover) {
       applyPlayerCoverAccentColor(null);
-      applyUserAppearanceSettings(uiSettings);
+      applyAccentPalette(uiSettings);
       return;
     }
     const url = ncm.currentNcmCoverUrl() ?? playback.coverUrl();
     let cancelled = false;
     if (!url) {
       applyPlayerCoverAccentColor(null);
-      applyUserAppearanceSettings(uiSettings);
+      applyAccentPalette(uiSettings);
       return;
     }
     void paletteEngine.extractPaletteSource(url).then((paletteSource) => {
       if (cancelled) return;
       if (paletteSource === null) {
         applyPlayerCoverAccentColor(null);
-        applyUserAppearanceSettings(uiSettings);
+        applyAccentPalette(uiSettings);
         return;
       }
       const scheme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
@@ -249,7 +250,6 @@ export function useAppController(api: ApiClient): AppController {
         playerFollowCoverColor ? palette.theme.mainRgb : null
       );
       if (!themeFollowCover) {
-        applyUserAppearanceSettings(uiSettings);
         return;
       }
       applyThemePaletteForSettings(uiSettings, palette);

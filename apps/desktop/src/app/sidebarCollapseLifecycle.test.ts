@@ -66,7 +66,7 @@ test("collapse keeps expanded content through transition and releases it after r
   assert.deepEqual(sidebarCollapsePresentation("collapsing"), {
     expandedContentMounted: true,
     expandedContentVisible: true,
-    compactContentVisible: false,
+    compactContentVisible: true,
     motionActive: true
   });
   assert.equal(harness.pending("delay")[0]?.delayMs, SIDEBAR_COLLAPSE_MOTION_FALLBACK_MS);
@@ -111,7 +111,7 @@ test("re-expanding inside the retention window reuses the mounted tree and cance
   assert.deepEqual(sidebarCollapsePresentation(harness.lifecycle.currentPhase()), {
     expandedContentMounted: true,
     expandedContentVisible: true,
-    compactContentVisible: false,
+    compactContentVisible: true,
     motionActive: true
   });
 
@@ -182,6 +182,15 @@ test("initial collapsed presentation mounts only the compact content", () => {
   assert.deepEqual(sidebarCollapsePresentation(initialSidebarCollapsePhase(true)), {
     expandedContentMounted: false,
     expandedContentVisible: false,
+    compactContentVisible: true,
+    motionActive: false
+  });
+});
+
+test("expanded presentation keeps compact mounted for opacity crossfade", () => {
+  assert.deepEqual(sidebarCollapsePresentation("expanded"), {
+    expandedContentMounted: true,
+    expandedContentVisible: true,
     compactContentVisible: true,
     motionActive: false
   });

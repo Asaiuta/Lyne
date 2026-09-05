@@ -203,31 +203,112 @@ export const createAudioSettingsPreviewSessionId = (scope: string): string => {
   return `${normalizedScope}-${Date.now().toString(36)}-${previewSessionCounter.toString(36)}`;
 };
 
+/**
+ * Audio-engine fields of PersistentSettings that applyEffectiveAudioSettingsToPlayerState
+ * mirrors into PlayerState. `as const satisfies Partial<Record<keyof PlayerState, true>>`
+ * pins every mirror key to a real PlayerState field, and the AudioFieldMirrorContract
+ * assertion below pins coverage against PersistentSettings: adding a PersistentSettings
+ * field without mirroring it here or allowlisting it in AUDIO_FIELD_NOT_MIRRORED fails
+ * typecheck. Runtime shape is identical to the previous hand-written spread.
+ */
+const AUDIO_FIELD_MIRROR = {
+  volume: true,
+  device_id: true,
+  exclusive_mode: true,
+  eq_type: true,
+  dither_enabled: true,
+  loudness_enabled: true,
+  loudness_mode: true,
+  target_lufs: true,
+  preamp_db: true,
+  saturation_enabled: true,
+  saturation_drive: true,
+  saturation_mix: true,
+  crossfeed_enabled: true,
+  crossfeed_mix: true,
+  dynamic_loudness_enabled: true,
+  dynamic_loudness_strength: true,
+  output_bits: true,
+  noise_shaper_curve: true,
+  target_samplerate: true,
+  resample_quality: true,
+  use_cache: true,
+  preemptive_resample: true
+} as const satisfies Partial<Record<keyof PlayerState, true>>;
+
+/**
+ * PersistentSettings fields that intentionally have no PlayerState mirror.
+ * Each entry documents why the field stays settings-domain-only; the contract
+ * below fails typecheck when a new PersistentSettings field is neither
+ * mirrored nor allowlisted here.
+ */
+const AUDIO_FIELD_NOT_MIRRORED = {
+  eq_bands:
+    "EQ band gains are engine-settings-domain only; PlayerState exposes no live band state.",
+  fir_taps:
+    "FIR filter length is engine-settings-domain only; PlayerState exposes no FIR state.",
+  streaming_first_buffer:
+    "Streaming first-buffer policy is engine-settings-domain only; PlayerState carries no streaming flags.",
+  streaming_pcm_window_limit_mib:
+    "Streaming PCM window limit is engine-settings-domain only; PlayerState carries no streaming flags.",
+  use_next_prefetch:
+    "Next-track prefetch policy is engine-settings-domain only; PlayerState carries no prefetch flags."
+} as const satisfies Partial<Record<keyof PersistentSettings, string>>;
+
+type AudioMirrorField = keyof typeof AUDIO_FIELD_MIRROR;
+
+type AudioEnginePersistentField = Exclude<
+  keyof PersistentSettings,
+  keyof typeof AUDIO_FIELD_NOT_MIRRORED
+>;
+
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+    ? true
+    : false;
+
+type Expect<T extends true> = T;
+
+/**
+ * Compile-time contract: every audio-engine PersistentSettings field is either
+ * explicitly mirrored into PlayerState (AUDIO_FIELD_MIRROR) or allowlisted as
+ * intentionally not-mirrored (AUDIO_FIELD_NOT_MIRRORED), and no mirror key
+ * leaks outside PlayerState. Mirrors the Equal/Expect pattern from
+ * shared/api/ws.contract.ts.
+ */
+export type AudioFieldMirrorContract = Expect<
+  Equal<AudioEnginePersistentField, AudioMirrorField>
+>;
+
+type AudioMirrorOverrides = { [K in AudioMirrorField]: PersistentSettings[K] };
+
 export const applyEffectiveAudioSettingsToPlayerState = (
   player: PlayerState,
   settings: PersistentSettings
-): PlayerState => ({
-  ...player,
-  volume: settings.volume,
-  device_id: settings.device_id,
-  exclusive_mode: settings.exclusive_mode,
-  eq_type: settings.eq_type,
-  dither_enabled: settings.dither_enabled,
-  loudness_enabled: settings.loudness_enabled,
-  loudness_mode: settings.loudness_mode,
-  target_lufs: settings.target_lufs,
-  preamp_db: settings.preamp_db,
-  saturation_enabled: settings.saturation_enabled,
-  saturation_drive: settings.saturation_drive,
-  saturation_mix: settings.saturation_mix,
-  crossfeed_enabled: settings.crossfeed_enabled,
-  crossfeed_mix: settings.crossfeed_mix,
-  dynamic_loudness_enabled: settings.dynamic_loudness_enabled,
-  dynamic_loudness_strength: settings.dynamic_loudness_strength,
-  output_bits: settings.output_bits,
-  noise_shaper_curve: settings.noise_shaper_curve,
-  target_samplerate: settings.target_samplerate,
-  resample_quality: settings.resample_quality,
-  use_cache: settings.use_cache,
-  preemptive_resample: settings.preemptive_resample
-});
+): PlayerState => {
+  const overrides: AudioMirrorOverrides = {
+    volume: settings.volume,
+    device_id: settings.device_id,
+    exclusive_mode: settings.exclusive_mode,
+    eq_type: settings.eq_type,
+    dither_enabled: settings.dither_enabled,
+    loudness_enabled: settings.loudness_enabled,
+    loudness_mode: settings.loudness_mode,
+    target_lufs: settings.target_lufs,
+    preamp_db: settings.preamp_db,
+    saturation_enabled: settings.saturation_enabled,
+    saturation_drive: settings.saturation_drive,
+    saturation_mix: settings.saturation_mix,
+    crossfeed_enabled: settings.crossfeed_enabled,
+    crossfeed_mix: settings.crossfeed_mix,
+    dynamic_loudness_enabled: settings.dynamic_loudness_enabled,
+    dynamic_loudness_strength: settings.dynamic_loudness_strength,
+    output_bits: settings.output_bits,
+    noise_shaper_curve: settings.noise_shaper_curve,
+    target_samplerate: settings.target_samplerate,
+    resample_quality: settings.resample_quality,
+    use_cache: settings.use_cache,
+    preemptive_resample: settings.preemptive_resample
+  };
+  return { ...player, ...overrides };
+};
